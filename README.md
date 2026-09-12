@@ -97,6 +97,16 @@ Timeouts, a missing search bar, and network failures throw a `GroceryScraperErro
 
 The scraper function is `scrapeGrocerySearch` in `src/scraper/scrapeGrocerySearch.ts` and accepts a custom `site` config so the same flow can target another storefront.
 
+## Seed mock products
+
+`src/seed.ts` connects to your local MongoDB (`MONGODB_URI` or `mongodb://127.0.0.1:27017/grocery-list-optimizer`) and inserts **10** products: Gallon of Milk, Loaf of Bread, and Dozen Eggs at Walmart, Target, and Kroger (different prices each), plus Bananas at Walmart. Re-running it replaces those rows so the catalog stays at 10.
+
+```bash
+npm run seed
+```
+
+Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.28), eggs at Target ($1.99).
+
 ## Scripts
 
 | Script | Description |
@@ -104,6 +114,7 @@ The scraper function is `scrapeGrocerySearch` in `src/scraper/scrapeGrocerySearc
 | `npm run dev` | TypeScript watch server (`tsx`) |
 | `npm test` | Unit tests for the optimizer and scraper |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
+| `npm run seed` | Insert 10 mock products into local MongoDB |
 | `npm run build` | Compile to `dist/` |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
