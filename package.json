@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src",
+    "test": "tsx --test src/*.test.ts src/scraper/*.test.ts",
     "scrape": "tsx src/scrape-grocery.ts"
   },
   "engines": {

@@ -74,12 +74,13 @@ async function dismissCookies(page: Page, site: GrocerySiteConfig): Promise<void
     }
   }
 
-  await page.evaluate(() => {
-    const button = Array.from(document.querySelectorAll("button")).find((node) =>
-      /accept/i.test(node.textContent ?? "")
-    );
-    button?.click();
-  });
+  await page.evaluate(`(function () {
+    var buttons = Array.from(document.querySelectorAll("button"));
+    var accept = buttons.find(function (node) {
+      return /accept/i.test(node.textContent || "");
+    });
+    if (accept) accept.click();
+  })()`);
 }
 
 async function typeKeyword(
@@ -131,14 +132,14 @@ async function submitSearch(
       await page.keyboard.press("Enter");
     }
   } catch {
-    await page.evaluate((inputSelector) => {
-      const input = document.querySelector(inputSelector);
-      const form = input?.closest("form");
+    await page.evaluate(`(function () {
+      var input = document.querySelector(${JSON.stringify(site.searchInput)});
+      var form = input && input.closest("form");
       if (!form) {
         throw new Error("Search form was missing after typing.");
       }
       form.submit();
-    }, site.searchInput);
+    })()`);
   }
 
   await navigation;
@@ -169,48 +170,42 @@ async function readProductCards(
   page: Page,
   site: GrocerySiteConfig
 ): Promise<ScrapedProduct[]> {
-  const rawCards = await page.$$eval(
-    site.resultItem,
-    (elements, selectors) => {
-      const textOf = (root: Element, selector: string): string | null => {
-        if (!selector) {
-          return null;
-        }
+  const selectors = {
+    resultItem: site.resultItem,
+    title: site.title,
+    price: site.price,
+    brand: site.brand ?? "",
+    link: site.link ?? "a[href]",
+  };
 
-        for (const part of selector.split(",")) {
-          const node = root.querySelector(part.trim());
-          const text = node?.textContent?.replace(/\s+/g, " ").trim();
-          if (text) {
-            return text;
-          }
-        }
-
-        return null;
-      };
-
-      return elements.map((element) => {
-        const link = selectors.link
-          ? (element.querySelector(selectors.link.split(",")[0].trim()) as HTMLAnchorElement | null)
-          : (element.querySelector("a[href]") as HTMLAnchorElement | null);
-
-        return {
-          title:
-            textOf(element, selectors.title) ||
-            element.querySelector("h2, h3")?.textContent?.replace(/\s+/g, " ").trim() ||
-            null,
-          priceText: textOf(element, selectors.price),
-          brand: textOf(element, selectors.brand),
-          href: link?.href ?? null,
-        };
-      });
-    },
-    {
-      title: site.title,
-      price: site.price,
-      brand: site.brand ?? "",
-      link: site.link ?? "a[href]",
+  const rawCards = (await page.evaluate(`(function () {
+    var selectors = ${JSON.stringify(selectors)};
+    function textOf(root, selector) {
+      if (!selector) return null;
+      var parts = selector.split(",");
+      for (var i = 0; i < parts.length; i++) {
+        var node = root.querySelector(parts[i].trim());
+        var text = node && node.textContent ? node.textContent.replace(/\\s+/g, " ").trim() : "";
+        if (text) return text;
+      }
+      return null;
     }
-  );
+    var elements = Array.from(document.querySelectorAll(selectors.resultItem));
+    return elements.map(function (element) {
+      var linkSelector = selectors.link ? selectors.link.split(",")[0].trim() : "a[href]";
+      var link = element.querySelector(linkSelector);
+      var heading = element.querySelector("h2, h3");
+      var headingText = heading && heading.textContent
+        ? heading.textContent.replace(/\\s+/g, " ").trim()
+        : null;
+      return {
+        title: textOf(element, selectors.title) || headingText,
+        priceText: textOf(element, selectors.price),
+        brand: textOf(element, selectors.brand),
+        href: link && link.href ? link.href : null
+      };
+    });
+  })()`)) as RawCard[];
 
   const products: ScrapedProduct[] = [];
 
