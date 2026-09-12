@@ -1,39 +1,80 @@
 import { Router, Request, Response } from "express";
+import mongoose from "mongoose";
+import { fetchMatchingProducts } from "../fetchMatchingProducts";
+import { optimizeGroceryList } from "../optimizeGroceryList";
 
 const router = Router();
 
-function parseGroceryItems(body: unknown): string[] | null {
-  if (Array.isArray(body)) {
-    return body.every((item) => typeof item === "string") ? body : null;
-  }
+type OptimizeListRequest = {
+  groceryList: string[];
+  stores: string[];
+};
 
-  if (
-    body !== null &&
-    typeof body === "object" &&
-    "items" in body &&
-    Array.isArray((body as { items: unknown }).items)
-  ) {
-    const items = (body as { items: unknown[] }).items;
-    return items.every((item) => typeof item === "string") ? items : null;
-  }
-
-  return null;
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-router.post("/optimize-list", (req: Request, res: Response) => {
-  const items = parseGroceryItems(req.body);
+function parseOptimizeListBody(body: unknown): OptimizeListRequest | null {
+  if (isStringArray(body)) {
+    return { groceryList: body, stores: [] };
+  }
 
-  if (items === null) {
+  if (body === null || typeof body !== "object") {
+    return null;
+  }
+
+  const record = body as Record<string, unknown>;
+  const groceryList = record.groceryList ?? record.items;
+
+  if (!isStringArray(groceryList)) {
+    return null;
+  }
+
+  if (record.stores === undefined) {
+    return { groceryList, stores: [] };
+  }
+
+  if (!isStringArray(record.stores)) {
+    return null;
+  }
+
+  return { groceryList, stores: record.stores };
+}
+
+router.post("/optimize-list", async (req: Request, res: Response) => {
+  const parsed = parseOptimizeListBody(req.body);
+
+  if (parsed === null) {
     res.status(400).json({
       error:
-        "Request body must be an array of strings, or an object with an `items` string array.",
+        "Request body must include a groceryList (or items) string array. Optionally include a stores string array.",
     });
     return;
   }
 
-  // Placeholder: later this will match items to Product documents and pick the cheapest store mix.
-  void items;
-  res.json([]);
+  if (mongoose.connection.readyState !== 1) {
+    res.status(503).json({
+      error:
+        "Database is not connected. Set MONGODB_URI or wait for the in-memory MongoDB to start.",
+    });
+    return;
+  }
+
+  try {
+    const products = await fetchMatchingProducts(
+      parsed.groceryList,
+      parsed.stores
+    );
+    const result = optimizeGroceryList(
+      parsed.groceryList,
+      parsed.stores,
+      products
+    );
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: `Failed to optimize list: ${message}` });
+  }
 });
 
 export default router;

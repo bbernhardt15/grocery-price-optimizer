@@ -13,7 +13,7 @@ app.get("/", (_req, res) => {
     status: "ok",
     routes: {
       "POST /api/optimize-list":
-        "Accepts a grocery list (string array) and will return optimized store picks. Currently returns [].",
+        "Accepts groceryList and stores; returns items grouped by the cheapest store for each product.",
     },
   });
 });
