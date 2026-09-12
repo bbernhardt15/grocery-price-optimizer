@@ -84,7 +84,10 @@ void seed()
   })
   .catch(async (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`Seed failed: ${message}`);
+    const hint = message.includes("ECONNREFUSED")
+      ? ` Is MongoDB running at ${MONGODB_URI}?`
+      : "";
+    console.error(`Seed failed: ${message}.${hint}`);
     await mongoose.disconnect().catch(() => undefined);
     process.exit(1);
   });
