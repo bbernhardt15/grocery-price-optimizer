@@ -116,9 +116,44 @@ async function typeKeyword(
 async function submitSearch(
   page: Page,
   site: GrocerySiteConfig,
+  keyword: string,
   navigationTimeoutMs: number
 ): Promise<void> {
-  const navigation = page
+  const waitForResultsPage = page
+    .waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: navigationTimeoutMs,
+    })
+    .catch(() => null);
+
+  await page.evaluate(`(function () {
+    var keyword = ${JSON.stringify(keyword)};
+    var input = document.querySelector(${JSON.stringify(site.searchInput)});
+    if (!input) {
+      throw new Error("Search input was missing after typing.");
+    }
+    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    if (nativeSetter && nativeSetter.set) {
+      nativeSetter.set.call(input, keyword);
+    } else {
+      input.value = keyword;
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    var form = input.closest("form");
+    if (!form) {
+      throw new Error("Search form was missing after typing.");
+    }
+    form.submit();
+  })()`);
+
+  await waitForResultsPage;
+
+  if (urlLooksLikeSearch(page.url(), keyword)) {
+    return;
+  }
+
+  const retryNavigation = page
     .waitForNavigation({
       waitUntil: "domcontentloaded",
       timeout: navigationTimeoutMs,
@@ -127,22 +162,34 @@ async function submitSearch(
 
   try {
     if (site.searchSubmit) {
-      await page.locator(site.searchSubmit).click();
+      await page.click(site.searchSubmit);
     } else {
       await page.keyboard.press("Enter");
     }
-  } catch {
-    await page.evaluate(`(function () {
-      var input = document.querySelector(${JSON.stringify(site.searchInput)});
-      var form = input && input.closest("form");
-      if (!form) {
-        throw new Error("Search form was missing after typing.");
-      }
-      form.submit();
-    })()`);
+  } catch (error) {
+    throw wrapError(error, "Could not submit the grocery search form");
   }
 
-  await navigation;
+  await retryNavigation;
+
+  if (!urlLooksLikeSearch(page.url(), keyword)) {
+    throw new GroceryScraperError(
+      `Search did not navigate to results for "${keyword}". Current URL: ${page.url()}`,
+      "TIMEOUT"
+    );
+  }
+}
+
+function urlLooksLikeSearch(url: string, keyword: string): boolean {
+  const lowered = url.toLowerCase();
+  const compact = keyword.trim().toLowerCase().replace(/\s+/g, "+");
+  const encoded = encodeURIComponent(keyword.trim()).toLowerCase();
+  return (
+    lowered.includes("/search") ||
+    lowered.includes(`q=${compact}`) ||
+    lowered.includes(`q=${encoded}`) ||
+    lowered.includes(`query=${compact}`)
+  );
 }
 
 function toAbsoluteUrl(href: string | null, homepageUrl: string): string | null {
@@ -304,9 +351,21 @@ export async function scrapeGrocerySearch(
     await typeKeyword(page, site, trimmed, selectorTimeoutMs);
 
     try {
-      await submitSearch(page, site, navigationTimeoutMs);
+      await submitSearch(page, site, trimmed, navigationTimeoutMs);
     } catch (error) {
       throw wrapError(error, `Failed to submit the search on ${site.name}`);
+    }
+
+    try {
+      await page.waitForFunction(
+        `document.title.toLowerCase().includes("search") || /\\/search/i.test(location.pathname)`,
+        { timeout: navigationTimeoutMs }
+      );
+    } catch (error) {
+      throw wrapError(
+        error,
+        `Timed out waiting for ${site.name} search results page`
+      );
     }
 
     try {
@@ -320,6 +379,10 @@ export async function scrapeGrocerySearch(
 
       throw wrapError(error, `Failed to read search results on ${site.name}`);
     }
+
+    await page
+      .waitForNetworkIdle({ idleTime: 750, timeout: selectorTimeoutMs })
+      .catch(() => null);
 
     return await readProductCards(page, site);
   } catch (error) {
