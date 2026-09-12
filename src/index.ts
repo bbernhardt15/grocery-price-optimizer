@@ -5,17 +5,15 @@ import { connectDatabase } from "./db";
 const PORT = Number(process.env.PORT) || 43141;
 
 async function start(): Promise<void> {
-  try {
-    await connectDatabase();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to connect to MongoDB: ${message}`);
-    process.exit(1);
-  }
+  await connectDatabase();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Grocery List Optimizer API listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-void start();
+void start().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Failed to start: ${message}`);
+  process.exit(1);
+});
