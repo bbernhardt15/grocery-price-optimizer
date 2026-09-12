@@ -29,6 +29,7 @@ const productSchema = new Schema(
 );
 
 productSchema.index({ name: 1, brand: 1, storeName: 1 });
+productSchema.index({ name: "text" });
 
 export type ProductDocument = InferSchemaType<typeof productSchema> & {
   _id: mongoose.Types.ObjectId;

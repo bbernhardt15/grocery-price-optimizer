@@ -20,7 +20,7 @@ type SeedProduct = {
  * with slightly different shelf prices so the optimizer has a cheapest store
  * to pick per item. Bananas is a single-store extra to reach 10 documents.
  */
-const mockProducts: SeedProduct[] = [
+export const mockProducts: SeedProduct[] = [
   { name: "Gallon of Milk", brand: "Great Value", storeName: "Walmart", price: 3.27, unit: "gal", normalizedUnit: "gal" },
   { name: "Gallon of Milk", brand: "Good & Gather", storeName: "Target", price: 3.49, unit: "gal", normalizedUnit: "gal" },
   { name: "Gallon of Milk", brand: "Kroger", storeName: "Kroger", price: 2.89, unit: "gal", normalizedUnit: "gal" },
@@ -78,16 +78,18 @@ Try the optimizer:
 `);
 }
 
-void seed()
-  .then(async () => {
-    await mongoose.disconnect();
-  })
-  .catch(async (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    const hint = message.includes("ECONNREFUSED")
-      ? ` Is MongoDB running at ${MONGODB_URI}?`
-      : "";
-    console.error(`Seed failed: ${message}.${hint}`);
-    await mongoose.disconnect().catch(() => undefined);
-    process.exit(1);
-  });
+if (require.main === module) {
+  void seed()
+    .then(async () => {
+      await mongoose.disconnect();
+    })
+    .catch(async (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      const hint = message.includes("ECONNREFUSED")
+        ? ` Is MongoDB running at ${MONGODB_URI}?`
+        : "";
+      console.error(`Seed failed: ${message}.${hint}`);
+      await mongoose.disconnect().catch(() => undefined);
+      process.exit(1);
+    });
+}

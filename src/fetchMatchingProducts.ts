@@ -2,18 +2,16 @@ import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
 import type { CatalogProduct } from "./optimizeGroceryList";
 
-function nameFilter(groceryList: string[]): Record<string, unknown> | null {
-  const names = groceryList.map((item) => item.trim()).filter(Boolean);
-  if (names.length === 0) {
-    return null;
-  }
-
-  return {
-    $or: names.map((name) => ({
-      name: { $regex: escapeRegex(name), $options: "i" },
-    })),
-  };
-}
+type LeanProduct = {
+  _id: { toString(): string };
+  name: string;
+  brand: string;
+  storeName: string;
+  price: number;
+  unit: string;
+  normalizedUnit: string;
+  lastUpdated?: Date;
+};
 
 function storeFilter(stores: string[]): Record<string, unknown> | null {
   const names = stores.map((store) => store.trim()).filter(Boolean);
@@ -28,22 +26,8 @@ function storeFilter(stores: string[]): Record<string, unknown> | null {
   };
 }
 
-export async function fetchMatchingProducts(
-  groceryList: string[],
-  stores: string[]
-): Promise<CatalogProduct[]> {
-  const names = nameFilter(groceryList);
-  if (names === null) {
-    return [];
-  }
-
-  const storesClause = storeFilter(stores);
-  const filter =
-    storesClause === null ? names : { $and: [names, storesClause] };
-
-  const docs = await Product.find(filter).lean();
-
-  return docs.map((doc) => ({
+function toCatalogProduct(doc: LeanProduct): CatalogProduct {
+  return {
     name: doc.name,
     brand: doc.brand,
     storeName: doc.storeName,
@@ -51,5 +35,51 @@ export async function fetchMatchingProducts(
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
-  }));
+  };
+}
+
+/**
+ * Runs a case-insensitive regex search against Product.name for each
+ * grocery-list string, then de-duplicates the combined hits.
+ */
+export async function fetchMatchingProducts(
+  groceryList: string[],
+  stores: string[] = []
+): Promise<CatalogProduct[]> {
+  const items = groceryList.map((item) => item.trim()).filter(Boolean);
+  if (items.length === 0) {
+    return [];
+  }
+
+  const storesClause = storeFilter(stores);
+
+  const batches = await Promise.all(
+    items.map(async (item) => {
+      const nameQuery = {
+        name: { $regex: escapeRegex(item), $options: "i" },
+      };
+      const filter =
+        storesClause === null
+          ? nameQuery
+          : { $and: [nameQuery, storesClause] };
+
+      return Product.find(filter).lean<LeanProduct[]>();
+    })
+  );
+
+  const seen = new Set<string>();
+  const products: CatalogProduct[] = [];
+
+  for (const docs of batches) {
+    for (const doc of docs) {
+      const id = doc._id.toString();
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      products.push(toCatalogProduct(doc));
+    }
+  }
+
+  return products;
 }

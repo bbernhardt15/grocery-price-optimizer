@@ -47,7 +47,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   if (parsed === null) {
     res.status(400).json({
       error:
-        "Request body must include a groceryList (or items) string array. Optionally include a stores string array.",
+        "Request body must be an array of grocery strings, or an object with a groceryList (or items) string array.",
     });
     return;
   }
@@ -61,16 +61,13 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   }
 
   try {
-    const products = await fetchMatchingProducts(
-      parsed.groceryList,
-      parsed.stores
-    );
-    const result = optimizeGroceryList(
-      parsed.groceryList,
-      parsed.stores,
-      products
-    );
-    res.json(result);
+    const { groceryList, stores } = parsed;
+
+    // One regex search per grocery string, then feed the catalog into the optimizer.
+    const products = await fetchMatchingProducts(groceryList, stores);
+    const groupedByStore = optimizeGroceryList(groceryList, stores, products);
+
+    res.json(groupedByStore);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: `Failed to optimize list: ${message}` });
