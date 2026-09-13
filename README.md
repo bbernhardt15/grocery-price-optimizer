@@ -5,7 +5,7 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 ## What it includes
 
 - **Dashboard** — paste a list and ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
 - **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, loads matching products from that store, then runs that function
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
@@ -149,3 +149,4 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `unit` | string | Package unit: `oz`, `lbs`, `count`, `g`, `kg`, `ml`, `l`, `gal` |
 | `normalizedUnit` | string | Canonical unit for later price-per-unit work (same enum) |
 | `lastUpdated` | Date | Defaults to now |
+| `updatedAt` | Date | Set automatically by Mongoose on insert and every save. Indexed with `name`. |

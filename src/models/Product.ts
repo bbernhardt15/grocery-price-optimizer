@@ -25,15 +25,17 @@ const productSchema = new Schema(
     lastUpdated: { type: Date, required: true, default: Date.now },
   },
   {
-    timestamps: false,
+    timestamps: { createdAt: false, updatedAt: true },
   }
 );
 
 productSchema.index({ name: 1, brand: 1, storeName: 1, locationId: 1 });
+productSchema.index({ name: 1, updatedAt: -1 });
 productSchema.index({ name: "text" });
 
 export type ProductDocument = InferSchemaType<typeof productSchema> & {
   _id: mongoose.Types.ObjectId;
+  updatedAt: Date;
 };
 
 export const Product = mongoose.model("Product", productSchema);
