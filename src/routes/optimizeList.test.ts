@@ -8,6 +8,7 @@ import app from "../app";
 import { Product } from "../models/Product";
 import { mockProducts } from "../seed";
 import { fetchMatchingProducts } from "../fetchMatchingProducts";
+import { krogerService } from "../krogerService";
 
 describe("POST /api/optimize-list", () => {
   let memory: MongoMemoryServer;
@@ -165,5 +166,57 @@ describe("POST /api/optimize-list", () => {
     assert.equal(byStore.Walmart.items[0].itemTotal, 2.56);
 
     assert.equal(body.total, 8.34);
+  });
+
+  it("looks up the nearest Kroger from zipCode and only prices that store", async () => {
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async (zipCode: string) => {
+      assert.equal(zipCode, "45202");
+      return "01400441";
+    };
+
+    try {
+      await Product.create({
+        name: "Gallon of Milk",
+        brand: "Faraway Farms",
+        storeName: "Kroger",
+        locationId: "99999999",
+        price: 0.01,
+        unit: "gal",
+        normalizedUnit: "gal",
+        lastUpdated: new Date(),
+      });
+
+      const { status, json } = await optimize({
+        groceryList: ["milk"],
+        zipCode: "45202",
+      });
+
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string; items: Array<{ name: string; price: number }> }>;
+        zipCode?: string;
+        locationId?: string;
+      };
+
+      assert.equal(body.zipCode, "45202");
+      assert.equal(body.locationId, "01400441");
+      assert.equal(body.stores.length, 1);
+      assert.equal(body.stores[0].storeName, "Kroger");
+      assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
+      assert.equal(body.stores[0].items[0].price, 2.89);
+    } finally {
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
+  });
+
+  it("rejects an empty zipCode string", async () => {
+    const { status, json } = await optimize({
+      groceryList: ["milk"],
+      zipCode: "  ",
+    });
+    assert.equal(status, 400);
+    const body = json as { error: string };
+    assert.match(body.error, /zipCode/i);
   });
 });

@@ -2,6 +2,9 @@ const KROGER_API_BASE = "https://api.kroger.com/v1";
 const TOKEN_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/token`;
 const LOCATIONS_ENDPOINT = `${KROGER_API_BASE}/locations`;
 
+/** Catalog location used when Kroger API credentials are not configured. */
+export const DEMO_KROGER_LOCATION_ID = "01400441";
+
 type TokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -91,6 +94,12 @@ export class KrogerService {
    */
   async getClosestStoreLocation(zipCode: string): Promise<string> {
     const zip = normalizeZip(zipCode);
+    const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
+    const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
+    if (!clientId || !clientSecret) {
+      return process.env.KROGER_MOCK_LOCATION_ID?.trim() || DEMO_KROGER_LOCATION_ID;
+    }
+
     const token = await this.getAccessToken();
     const query = new URLSearchParams({
       "filter.zipCode.near": zip,

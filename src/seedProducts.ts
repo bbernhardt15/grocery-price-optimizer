@@ -1,3 +1,4 @@
+import { DEMO_KROGER_LOCATION_ID } from "./krogerService";
 import { Product } from "./models/Product";
 import type { CatalogProduct } from "./optimizeGroceryList";
 
@@ -26,17 +27,17 @@ export const seedCatalog: CatalogProduct[] = [
   { name: "Spaghetti Pasta", brand: "Great Value", storeName: "Walmart", price: 0.98, unit: "oz", normalizedUnit: "oz" },
   { name: "Ground Beef 80/20", brand: "Great Value", storeName: "Walmart", price: 4.74, unit: "lbs", normalizedUnit: "lbs" },
 
-  // Kroger
-  { name: "Whole Milk", brand: "Kroger", storeName: "Kroger", price: 2.99, unit: "gal", normalizedUnit: "gal" },
-  { name: "Large Eggs", brand: "Kroger", storeName: "Kroger", price: 2.49, unit: "count", normalizedUnit: "count" },
-  { name: "White Bread", brand: "Kroger", storeName: "Kroger", price: 2.19, unit: "oz", normalizedUnit: "oz" },
-  { name: "Bananas", brand: "Fresh", storeName: "Kroger", price: 0.69, unit: "lbs", normalizedUnit: "lbs" },
-  { name: "Boneless Chicken Breast", brand: "Simple Truth", storeName: "Kroger", price: 3.99, unit: "lbs", normalizedUnit: "lbs" },
-  { name: "Long Grain Rice", brand: "Kroger", storeName: "Kroger", price: 3.19, unit: "lbs", normalizedUnit: "lbs" },
-  { name: "Gala Apples", brand: "Fresh", storeName: "Kroger", price: 1.79, unit: "lbs", normalizedUnit: "lbs" },
-  { name: "Salted Butter", brand: "Kroger", storeName: "Kroger", price: 3.49, unit: "oz", normalizedUnit: "oz" },
-  { name: "Spaghetti Pasta", brand: "Kroger", storeName: "Kroger", price: 1.19, unit: "oz", normalizedUnit: "oz" },
-  { name: "Ground Beef 80/20", brand: "Kroger", storeName: "Kroger", price: 4.99, unit: "lbs", normalizedUnit: "lbs" },
+  // Kroger (tagged with the demo location so ZIP lookups price this store)
+  { name: "Whole Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.99, unit: "gal", normalizedUnit: "gal" },
+  { name: "Large Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.49, unit: "count", normalizedUnit: "count" },
+  { name: "White Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.19, unit: "oz", normalizedUnit: "oz" },
+  { name: "Bananas", brand: "Fresh", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 0.69, unit: "lbs", normalizedUnit: "lbs" },
+  { name: "Boneless Chicken Breast", brand: "Simple Truth", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.99, unit: "lbs", normalizedUnit: "lbs" },
+  { name: "Long Grain Rice", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.19, unit: "lbs", normalizedUnit: "lbs" },
+  { name: "Gala Apples", brand: "Fresh", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 1.79, unit: "lbs", normalizedUnit: "lbs" },
+  { name: "Salted Butter", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.49, unit: "oz", normalizedUnit: "oz" },
+  { name: "Spaghetti Pasta", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 1.19, unit: "oz", normalizedUnit: "oz" },
+  { name: "Ground Beef 80/20", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 4.99, unit: "lbs", normalizedUnit: "lbs" },
 
   // Target
   { name: "Whole Milk", brand: "Good & Gather", storeName: "Target", price: 3.29, unit: "gal", normalizedUnit: "gal" },
@@ -53,16 +54,27 @@ export const seedCatalog: CatalogProduct[] = [
 
 export async function seedProductsIfEmpty(): Promise<void> {
   const count = await Product.estimatedDocumentCount();
-  if (count > 0) {
-    return;
+  if (count === 0) {
+    await Product.insertMany(
+      seedCatalog.map((product) => ({
+        ...product,
+        lastUpdated: new Date(),
+      }))
+    );
+
+    console.log(`Seeded ${seedCatalog.length} products across Aldi, Walmart, Kroger, and Target`);
   }
 
-  await Product.insertMany(
-    seedCatalog.map((product) => ({
-      ...product,
-      lastUpdated: new Date(),
-    }))
+  const backfill = await Product.updateMany(
+    {
+      storeName: /^kroger$/i,
+      $or: [{ locationId: { $exists: false } }, { locationId: "" }, { locationId: null }],
+    },
+    { $set: { locationId: DEMO_KROGER_LOCATION_ID } }
   );
-
-  console.log(`Seeded ${seedCatalog.length} products across Aldi, Walmart, Kroger, and Target`);
+  if (backfill.modifiedCount > 0) {
+    console.log(
+      `Tagged ${backfill.modifiedCount} Kroger product(s) with demo location ${DEMO_KROGER_LOCATION_ID}`
+    );
+  }
 }

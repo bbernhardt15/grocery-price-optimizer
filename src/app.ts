@@ -15,7 +15,7 @@ app.get("/api", (_req, res) => {
     status: "ok",
     routes: {
       "POST /api/optimize-list":
-        "Accepts groceryList and stores; returns items grouped by the cheapest store for each product.",
+        "Accepts groceryList, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product.",
     },
   });
 });

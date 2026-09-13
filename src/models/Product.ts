@@ -7,6 +7,7 @@ const productSchema = new Schema(
     name: { type: String, required: true, trim: true },
     brand: { type: String, required: true, trim: true },
     storeName: { type: String, required: true, trim: true },
+    locationId: { type: String, trim: true, index: true },
     price: { type: Number, required: true, min: 0 },
     unit: {
       type: String,
@@ -28,7 +29,7 @@ const productSchema = new Schema(
   }
 );
 
-productSchema.index({ name: 1, brand: 1, storeName: 1 });
+productSchema.index({ name: 1, brand: 1, storeName: 1, locationId: 1 });
 productSchema.index({ name: "text" });
 
 export type ProductDocument = InferSchemaType<typeof productSchema> & {

@@ -8,6 +8,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env.KROGER_CLIENT_ID;
   delete process.env.KROGER_CLIENT_SECRET;
+  delete process.env.KROGER_MOCK_LOCATION_ID;
 });
 
 function mockFetch(handler: typeof fetch): void {
@@ -48,5 +49,29 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(again, "01400441");
     assert.equal(calls.length, 3);
     assert.equal(calls[2].authorization, "Bearer test-token");
+  });
+
+  it("returns the demo locationId when API credentials are not configured", async () => {
+    delete process.env.KROGER_CLIENT_ID;
+    delete process.env.KROGER_CLIENT_SECRET;
+    delete process.env.KROGER_MOCK_LOCATION_ID;
+    let called = false;
+    mockFetch(async () => {
+      called = true;
+      return Response.json({ data: [] });
+    });
+
+    const service = new KrogerService();
+    const locationId = await service.getClosestStoreLocation("45202");
+    assert.equal(locationId, "01400441");
+    assert.equal(called, false);
+  });
+
+  it("rejects an invalid ZIP before calling the API", async () => {
+    const service = new KrogerService();
+    await assert.rejects(
+      () => service.getClosestStoreLocation("nearby"),
+      /Invalid ZIP code/
+    );
   });
 });

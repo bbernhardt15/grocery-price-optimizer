@@ -18,24 +18,41 @@
         <p class="eyebrow">Grocery trip planner</p>
         <h1>Spend the least. Shop the fewest aisles that actually matter.</h1>
         <p class="lede">
-          Paste your list. We match each item to the store with the lowest shelf
-          price and split the trip by retailer.
+          Paste your list and ZIP. We look up the nearest Kroger and pull shelf
+          prices from that physical store.
         </p>
       </header>
 
       <section class="composer" aria-labelledby="list-label">
-        <label id="list-label" for="grocery-list">Grocery list</label>
-        <p class="hint">
-          One item per line. Add a count with <code>2 Milk</code> or
-          <code>Milk x2</code>. Partial names work — “milk” matches “Whole Milk”.
-        </p>
-        <textarea
-          id="grocery-list"
-          rows="10"
-          spellcheck="true"
-          autocomplete="off"
-          placeholder="e.g. 2 Milk&#10;Eggs&#10;Bread x2"
-        ></textarea>
+        <div class="composer-row">
+          <div class="list-col">
+            <label id="list-label" for="grocery-list">Grocery list</label>
+            <p class="hint">
+              One item per line. Add a count with <code>2 Milk</code> or
+              <code>Milk x2</code>. Partial names work — “milk” matches “Whole Milk”.
+            </p>
+            <textarea
+              id="grocery-list"
+              rows="10"
+              spellcheck="true"
+              autocomplete="off"
+              placeholder="e.g. 2 Milk&#10;Eggs&#10;Bread x2"
+            ></textarea>
+          </div>
+          <div class="zip-col">
+            <label for="zip-code">ZIP code</label>
+            <p class="hint">Nearest Kroger for local shelf prices.</p>
+            <input
+              id="zip-code"
+              name="zipCode"
+              type="text"
+              inputmode="numeric"
+              autocomplete="postal-code"
+              maxlength="10"
+              placeholder="45202"
+            />
+          </div>
+        </div>
         <div class="composer-actions">
           <button id="find-btn" type="button">Find Cheapest Stores</button>
           <button id="sample-btn" class="text-btn" type="button">Load sample list</button>
@@ -43,7 +60,7 @@
         </div>
       </section>
 
-      <p id="loading" class="loading" hidden>Checking prices across stores…</p>
+      <p id="loading" class="loading" hidden>Finding your nearest store and checking prices…</p>
       <p id="api-error" class="api-error" hidden></p>
 
       <section id="empty-state" class="empty-state">

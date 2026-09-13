@@ -4,10 +4,10 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 
 ## What it includes
 
-- **Dashboard** — paste a list, click **Find Cheapest Stores**, see per-store cards and a grand total
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `price`, `unit`, `normalizedUnit`, `lastUpdated`
+- **Dashboard** — paste a list and ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
-- **`POST /api/optimize-list`** — loads matching products from MongoDB, then runs that function
+- **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, loads matching products from that store, then runs that function
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. If nothing is listening on `MONGODB_URI` / localhost:27017, it starts an in-memory MongoDB so product queries still hit a real database.
@@ -16,7 +16,7 @@ On first launch with an empty database the API seeds a sample catalog for Aldi, 
 
 `src/krogerService.ts` talks to Kroger’s official Locations API (`https://api.kroger.com/v1/locations`). `getClosestStoreLocation(zipCode)` sends `filter.zipCode.near` and `filter.limit=1`, then returns that store’s `locationId`.
 
-Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`).
+Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`). Without credentials, the service returns a demo `locationId` (`01400441`) so the dashboard still prices the seeded Kroger catalog.
 
 ## Run locally
 
@@ -47,11 +47,12 @@ curl -s -X POST http://localhost:3000/api/optimize-list \
   -H "Content-Type: application/json" \
   -d '{
     "groceryList": ["milk", "eggs", "bread", "bananas", "chicken", "rice", "apples", "butter"],
+    "zipCode": "45202",
     "stores": ["Aldi", "Walmart", "Kroger", "Target"]
   }'
 ```
 
-`stores` is optional. Omit it (or send `[]`) to consider every store in the catalog. `items` is accepted as an alias for `groceryList`.
+`zipCode` looks up the closest Kroger via `getClosestStoreLocation` and restricts product matches to that store’s `locationId`. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product at the resolved location (or the full catalog if `zipCode` is omitted). `items` is accepted as an alias for `groceryList`.
 
 Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
 
@@ -79,11 +80,13 @@ Response shape:
     }
   ],
   "unavailable": ["saffron"],
-  "total": 4.38
+  "total": 4.38,
+  "zipCode": "45202",
+  "locationId": "01400441"
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching is a case-insensitive substring on product `name` (so `"milk"` matches `"Whole Milk"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`.
+Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching is a case-insensitive substring on product `name` (so `"milk"` matches `"Whole Milk"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
 
 ## Live grocery scrape
 
@@ -141,6 +144,7 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `name` | string | Required |
 | `brand` | string | Required |
 | `storeName` | string | Required |
+| `locationId` | string | Optional. Kroger physical store id used when `zipCode` is sent. |
 | `price` | number | Required, ≥ 0. Used as the comparison price. |
 | `unit` | string | Package unit: `oz`, `lbs`, `count`, `g`, `kg`, `ml`, `l`, `gal` |
 | `normalizedUnit` | string | Canonical unit for later price-per-unit work (same enum) |

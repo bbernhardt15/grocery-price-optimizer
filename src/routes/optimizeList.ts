@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import mongoose from "mongoose";
 import { fetchMatchingProducts } from "../fetchMatchingProducts";
+import { krogerService } from "../krogerService";
 import { optimizeGroceryList } from "../optimizeGroceryList";
 
 const router = Router();
@@ -8,13 +9,32 @@ const router = Router();
 type OptimizeListRequest = {
   groceryList: string[];
   stores: string[];
+  zipCode?: string;
 };
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function parseOptimizeListBody(body: unknown): OptimizeListRequest | null {
+function readZipCode(value: unknown): string | undefined | "invalid" {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const zip = String(Math.trunc(value));
+    return zip.length > 0 ? zip : "invalid";
+  }
+
+  if (typeof value !== "string") {
+    return "invalid";
+  }
+
+  const zip = value.trim();
+  return zip.length > 0 ? zip : "invalid";
+}
+
+function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "invalid-zip" {
   if (isStringArray(body)) {
     return { groceryList: body, stores: [] };
   }
@@ -30,19 +50,31 @@ function parseOptimizeListBody(body: unknown): OptimizeListRequest | null {
     return null;
   }
 
+  const zipCode = readZipCode(record.zipCode);
+  if (zipCode === "invalid") {
+    return "invalid-zip";
+  }
+
   if (record.stores === undefined) {
-    return { groceryList, stores: [] };
+    return { groceryList, stores: [], zipCode };
   }
 
   if (!isStringArray(record.stores)) {
     return null;
   }
 
-  return { groceryList, stores: record.stores };
+  return { groceryList, stores: record.stores, zipCode };
 }
 
 router.post("/optimize-list", async (req: Request, res: Response) => {
   const parsed = parseOptimizeListBody(req.body);
+
+  if (parsed === "invalid-zip") {
+    res.status(400).json({
+      error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension.",
+    });
+    return;
+  }
 
   if (parsed === null) {
     res.status(400).json({
@@ -61,15 +93,27 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   }
 
   try {
-    const { groceryList, stores } = parsed;
+    const { groceryList, stores, zipCode } = parsed;
 
-    // Search by the clean product name (quantities like "2 Milk" are stripped first).
-    const products = await fetchMatchingProducts(groceryList, stores);
+    let locationId: string | undefined;
+    if (zipCode) {
+      locationId = await krogerService.getClosestStoreLocation(zipCode);
+    }
+
+    const products = await fetchMatchingProducts(groceryList, stores, locationId);
     const groupedByStore = optimizeGroceryList(groceryList, stores, products);
 
-    res.json(groupedByStore);
+    res.json({
+      ...groupedByStore,
+      ...(zipCode ? { zipCode, locationId } : {}),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("Invalid ZIP code:")) {
+      res.status(400).json({ error: message });
+      return;
+    }
+
     res.status(500).json({ error: `Failed to optimize list: ${message}` });
   }
 });

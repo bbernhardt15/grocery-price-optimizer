@@ -5,6 +5,7 @@ export type CatalogProduct = {
   name: string;
   brand: string;
   storeName: string;
+  locationId?: string;
   price: number;
   unit: string;
   normalizedUnit: string;

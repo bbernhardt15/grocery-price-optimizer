@@ -1,5 +1,6 @@
 import "dotenv/config";
 import mongoose from "mongoose";
+import { DEMO_KROGER_LOCATION_ID } from "./krogerService";
 import { Product } from "./models/Product";
 
 const MONGODB_URI =
@@ -9,6 +10,7 @@ type SeedProduct = {
   name: string;
   brand: string;
   storeName: "Walmart" | "Target" | "Kroger";
+  locationId?: string;
   price: number;
   unit: "gal" | "count" | "lbs";
   normalizedUnit: "gal" | "count" | "lbs";
@@ -23,15 +25,15 @@ type SeedProduct = {
 export const mockProducts: SeedProduct[] = [
   { name: "Gallon of Milk", brand: "Great Value", storeName: "Walmart", price: 3.27, unit: "gal", normalizedUnit: "gal" },
   { name: "Gallon of Milk", brand: "Good & Gather", storeName: "Target", price: 3.49, unit: "gal", normalizedUnit: "gal" },
-  { name: "Gallon of Milk", brand: "Kroger", storeName: "Kroger", price: 2.89, unit: "gal", normalizedUnit: "gal" },
+  { name: "Gallon of Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.89, unit: "gal", normalizedUnit: "gal" },
 
   { name: "Loaf of Bread", brand: "Great Value", storeName: "Walmart", price: 1.28, unit: "count", normalizedUnit: "count" },
   { name: "Loaf of Bread", brand: "Good & Gather", storeName: "Target", price: 1.89, unit: "count", normalizedUnit: "count" },
-  { name: "Loaf of Bread", brand: "Kroger", storeName: "Kroger", price: 1.59, unit: "count", normalizedUnit: "count" },
+  { name: "Loaf of Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 1.59, unit: "count", normalizedUnit: "count" },
 
   { name: "Dozen Eggs", brand: "Great Value", storeName: "Walmart", price: 2.48, unit: "count", normalizedUnit: "count" },
   { name: "Dozen Eggs", brand: "Good & Gather", storeName: "Target", price: 1.99, unit: "count", normalizedUnit: "count" },
-  { name: "Dozen Eggs", brand: "Kroger", storeName: "Kroger", price: 2.29, unit: "count", normalizedUnit: "count" },
+  { name: "Dozen Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.29, unit: "count", normalizedUnit: "count" },
 
   { name: "Bananas", brand: "Fresh", storeName: "Walmart", price: 0.54, unit: "lbs", normalizedUnit: "lbs" },
 ];
@@ -74,7 +76,7 @@ Try the optimizer:
 
   curl -s -X POST http://localhost:3000/api/optimize-list \\
     -H "Content-Type: application/json" \\
-    -d '{"groceryList":["Gallon of Milk","Loaf of Bread","Dozen Eggs"],"stores":["Walmart","Target","Kroger"]}'
+    -d '{"groceryList":["Gallon of Milk","Loaf of Bread","Dozen Eggs"],"zipCode":"45202"}'
 `);
 }
 

@@ -1,4 +1,5 @@
 const groceryListEl = document.querySelector("#grocery-list");
+const zipCodeEl = document.querySelector("#zip-code");
 const findBtn = document.querySelector("#find-btn");
 const sampleBtn = document.querySelector("#sample-btn");
 const formErrorEl = document.querySelector("#form-error");
@@ -10,6 +11,8 @@ const storeGridEl = document.querySelector("#store-grid");
 const grandTotalEl = document.querySelector("#grand-total");
 const summaryMetaEl = document.querySelector("#summary-meta");
 const unavailableEl = document.querySelector("#unavailable");
+
+const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 function parseGroceryList(raw) {
   return raw
@@ -35,6 +38,7 @@ function escapeHtml(value) {
 
 function setBusy(isBusy) {
   findBtn.disabled = isBusy;
+  zipCodeEl.disabled = isBusy;
   loadingEl.hidden = !isBusy;
 }
 
@@ -117,7 +121,9 @@ function renderResults(payload) {
   resultsEl.hidden = false;
   grandTotalEl.textContent = money(payload.total);
   summaryMetaEl.textContent = storeCount
-    ? `${itemCount} item${itemCount === 1 ? "" : "s"} across ${storeCount} store${storeCount === 1 ? "" : "s"}`
+    ? `${itemCount} item${itemCount === 1 ? "" : "s"} across ${storeCount} store${storeCount === 1 ? "" : "s"}${
+        payload.locationId ? ` · Kroger ${payload.locationId}` : ""
+      }`
     : "Nothing in the catalog matched this list.";
   storeGridEl.innerHTML = payload.stores.map(renderStoreCard).join("");
   renderUnavailable(payload.unavailable ?? []);
@@ -136,12 +142,21 @@ async function findCheapestStores() {
     return;
   }
 
+  const zipCode = zipCodeEl.value.trim();
+  if (!ZIP_PATTERN.test(zipCode)) {
+    showFormError("Enter a 5-digit ZIP code so we can price your nearest store.");
+    hideResults();
+    emptyStateEl.hidden = false;
+    zipCodeEl.focus();
+    return;
+  }
+
   setBusy(true);
   try {
     const response = await fetch("/api/optimize-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, zipCode }),
     });
 
     const payload = await response.json().catch(() => ({}));
