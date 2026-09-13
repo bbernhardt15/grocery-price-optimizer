@@ -87,3 +87,48 @@ describe("KrogerService.getClosestStoreLocation", () => {
     );
   });
 });
+
+describe("KrogerService.searchProducts", () => {
+  it("GETs products with filter.term, locationId, and the bearer token", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+
+    const calls: string[] = [];
+    mockFetch(async (input, init) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({
+        data: [
+          {
+            productId: "0001111041700",
+            brand: "Kroger",
+            description: "Kroger 2% Reduced Fat Milk",
+            items: [{ size: "1 gal", price: { regular: 3.49, promo: 2.99 } }],
+          },
+        ],
+      });
+    });
+
+    const service = new KrogerService();
+    const products = await service.searchProducts("milk", "01400441");
+    assert.equal(products.length, 1);
+    assert.equal(products[0].name, "Kroger 2% Reduced Fat Milk");
+    assert.equal(products[0].brand, "Kroger");
+    assert.equal(products[0].price, 2.99);
+    assert.equal(products[0].unit, "gal");
+    assert.equal(products[0].locationId, "01400441");
+    assert.match(calls[1], /\/v1\/products\?/);
+    assert.match(calls[1], /filter\.term=milk/);
+    assert.match(calls[1], /filter\.locationId=01400441/);
+    assert.match(calls[1], /filter\.limit=10/);
+  });
+
+  it("returns an empty list when credentials are missing", async () => {
+    const service = new KrogerService();
+    const products = await service.searchProducts("milk", "01400441");
+    assert.deepEqual(products, []);
+  });
+});

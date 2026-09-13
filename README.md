@@ -7,7 +7,7 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 - **Dashboard** — paste a list and ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
-- **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, loads matching products from that store, then runs that function
+- **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, serves prices from a 24-hour Mongo cache (live Kroger Products API on miss), then runs that function
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. If nothing is listening on `MONGODB_URI` / localhost:27017, it starts an in-memory MongoDB so product queries still hit a real database.
@@ -17,6 +17,8 @@ On first launch with an empty database the API seeds a sample catalog for Aldi, 
 `src/krogerService.ts` talks to Kroger’s official Locations API (`https://api.kroger.com/v1/locations`). `getClosestStoreLocation(zipCode)` sends `filter.zipCode.near` and `filter.limit=1`, then returns that store’s `locationId`.
 
 Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`). If credentials are missing or the official API rejects them, the service returns a demo `locationId` (`01400441`) so the dashboard still prices the seeded Kroger catalog.
+
+`POST /api/optimize-list` treats MongoDB as a 24-hour price cache. For each grocery item it first queries products whose `updatedAt` is less than a day old. A hit skips the live Products API. A miss (`GET https://api.kroger.com/v1/products?filter.term=…`) upserts the fresh rows with `findOneAndUpdate` (`upsert: true`) before the optimizer splits the trip.
 
 ## Run locally
 

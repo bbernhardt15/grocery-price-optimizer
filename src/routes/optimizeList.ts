@@ -1,8 +1,8 @@
 import { Router, Request, Response } from "express";
 import mongoose from "mongoose";
-import { fetchMatchingProducts } from "../fetchMatchingProducts";
 import { krogerService } from "../krogerService";
 import { optimizeGroceryList } from "../optimizeGroceryList";
+import { resolveCatalogProducts } from "../priceCache";
 
 const router = Router();
 
@@ -100,7 +100,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       locationId = await krogerService.getClosestStoreLocation(zipCode);
     }
 
-    const products = await fetchMatchingProducts(groceryList, stores, locationId);
+    const products = await resolveCatalogProducts(groceryList, stores, locationId);
     const groupedByStore = optimizeGroceryList(groceryList, stores, products);
 
     res.json({

@@ -13,6 +13,11 @@ type LeanProduct = {
   unit: string;
   normalizedUnit: string;
   lastUpdated?: Date;
+  updatedAt?: Date;
+};
+
+export type FetchMatchingOptions = {
+  minUpdatedAt?: Date;
 };
 
 function storeFilter(stores: string[]): Record<string, unknown> | null {
@@ -47,7 +52,71 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
+    updatedAt: doc.updatedAt,
   };
+}
+
+function matchingFilter(
+  item: string,
+  stores: string[],
+  locationId: string | undefined,
+  options: FetchMatchingOptions
+): Record<string, unknown> {
+  const nameQuery = {
+    name: { $regex: escapeRegex(item), $options: "i" },
+  };
+  const extraClauses = [storeFilter(stores), locationFilter(locationId)].filter(
+    (clause): clause is Record<string, unknown> => clause !== null
+  );
+  if (options.minUpdatedAt) {
+    extraClauses.push({ updatedAt: { $gte: options.minUpdatedAt } });
+  }
+
+  return extraClauses.length === 0
+    ? nameQuery
+    : { $and: [nameQuery, ...extraClauses] };
+}
+
+function uniqueCatalog(docs: LeanProduct[]): CatalogProduct[] {
+  const seen = new Set<string>();
+  const products: CatalogProduct[] = [];
+
+  for (const doc of docs) {
+    const id = doc._id.toString();
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    products.push(toCatalogProduct(doc));
+  }
+
+  products.sort((a, b) => a.price - b.price);
+  return products;
+}
+
+/**
+ * Finds Product documents whose name contains `item` (case-insensitive $regex).
+ * Hits are sorted by price ascending. When `locationId` is set, only that
+ * physical store is returned. `minUpdatedAt` keeps only fresh cache rows.
+ */
+export async function fetchMatchingProductsForQuery(
+  item: string,
+  stores: string[] = [],
+  locationId?: string,
+  options: FetchMatchingOptions = {}
+): Promise<CatalogProduct[]> {
+  const query = item.trim();
+  if (!query) {
+    return [];
+  }
+
+  const docs = await Product.find(
+    matchingFilter(query, stores, locationId, options)
+  )
+    .sort({ price: 1 })
+    .lean<LeanProduct[]>();
+
+  return uniqueCatalog(docs);
 }
 
 /**
@@ -59,42 +128,31 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
 export async function fetchMatchingProducts(
   groceryList: string[],
   stores: string[] = [],
-  locationId?: string
+  locationId?: string,
+  options: FetchMatchingOptions = {}
 ): Promise<CatalogProduct[]> {
   const items = parseGroceryList(groceryList).map((line) => line.name);
   if (items.length === 0) {
     return [];
   }
 
-  const extraClauses = [storeFilter(stores), locationFilter(locationId)].filter(
-    (clause): clause is Record<string, unknown> => clause !== null
-  );
-
   const batches = await Promise.all(
-    items.map(async (item) => {
-      const nameQuery = {
-        name: { $regex: escapeRegex(item), $options: "i" },
-      };
-      const filter =
-        extraClauses.length === 0
-          ? nameQuery
-          : { $and: [nameQuery, ...extraClauses] };
-
-      return Product.find(filter).sort({ price: 1 }).lean<LeanProduct[]>();
-    })
+    items.map((item) =>
+      fetchMatchingProductsForQuery(item, stores, locationId, options)
+    )
   );
 
   const seen = new Set<string>();
   const products: CatalogProduct[] = [];
 
-  for (const docs of batches) {
-    for (const doc of docs) {
-      const id = doc._id.toString();
-      if (seen.has(id)) {
+  for (const batch of batches) {
+    for (const product of batch) {
+      const key = `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.price}`;
+      if (seen.has(key)) {
         continue;
       }
-      seen.add(id);
-      products.push(toCatalogProduct(doc));
+      seen.add(key);
+      products.push(product);
     }
   }
 

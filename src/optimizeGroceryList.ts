@@ -10,6 +10,7 @@ export type CatalogProduct = {
   unit: string;
   normalizedUnit: string;
   lastUpdated?: Date;
+  updatedAt?: Date;
 };
 
 export type PickedItem = {

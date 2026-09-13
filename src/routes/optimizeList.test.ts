@@ -22,6 +22,7 @@ describe("POST /api/optimize-list", () => {
       mockProducts.map((product) => ({
         ...product,
         lastUpdated: new Date(),
+        updatedAt: new Date(),
       }))
     );
 
@@ -207,6 +208,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(body.stores[0].items[0].price, 2.89);
     } finally {
       krogerService.getClosestStoreLocation = originalLookup;
+      await Product.deleteMany({ brand: "Faraway Farms" });
     }
   });
 
@@ -218,5 +220,130 @@ describe("POST /api/optimize-list", () => {
     assert.equal(status, 400);
     const body = json as { error: string };
     assert.match(body.error, /zipCode/i);
+  });
+
+  it("skips the live Products API when matching rows are fresher than 24 hours", async () => {
+    let liveCalls = 0;
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    krogerService.searchProducts = async () => {
+      liveCalls += 1;
+      return [];
+    };
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["milk"],
+        stores: ["Kroger"],
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ items: Array<{ name: string; price: number }> }>;
+      };
+      assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
+      assert.equal(body.stores[0].items[0].price, 2.89);
+      assert.equal(liveCalls, 0);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+    }
+  });
+
+  it("on a cache miss, fetches live Kroger prices and upserts them before optimizing", async () => {
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async (term: string, locationId?: string) => {
+      assert.equal(term, "quinoa");
+      assert.equal(locationId, "01400441");
+      return [
+        {
+          name: "Organic Quinoa",
+          brand: "Simple Truth",
+          storeName: "Kroger",
+          locationId,
+          price: 4.5,
+          unit: "oz",
+          normalizedUnit: "oz",
+        },
+      ];
+    };
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["quinoa"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string; items: Array<{ name: string; price: number }> }>;
+        locationId?: string;
+      };
+      assert.equal(body.locationId, "01400441");
+      assert.equal(body.stores[0].storeName, "Kroger");
+      assert.equal(body.stores[0].items[0].name, "Organic Quinoa");
+      assert.equal(body.stores[0].items[0].price, 4.5);
+
+      const saved = await Product.findOne({ name: "Organic Quinoa" }).lean();
+      assert.ok(saved);
+      assert.equal(saved?.price, 4.5);
+      assert.ok(saved?.updatedAt);
+      assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
+  });
+
+  it("treats rows older than 24 hours as a cache miss and refreshes them", async () => {
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async () => [
+      {
+        name: "Smoked Paprika",
+        brand: "Kroger",
+        storeName: "Kroger",
+        locationId: "01400441",
+        price: 1.25,
+        unit: "oz",
+        normalizedUnit: "oz",
+      },
+    ];
+
+    try {
+      const created = await Product.create({
+        name: "Smoked Paprika",
+        brand: "Kroger",
+        storeName: "Kroger",
+        locationId: "01400441",
+        price: 9.99,
+        unit: "oz",
+        normalizedUnit: "oz",
+        lastUpdated: new Date(Date.now() - 25 * 60 * 60 * 1000),
+      });
+      await Product.updateOne(
+        { _id: created._id },
+        { $set: { updatedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) } },
+        { timestamps: false }
+      );
+
+      const { status, json } = await optimize({
+        groceryList: ["paprika"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ items: Array<{ name: string; price: number }> }>;
+      };
+      assert.equal(body.stores[0].items[0].name, "Smoked Paprika");
+      assert.equal(body.stores[0].items[0].price, 1.25);
+
+      const saved = await Product.findOne({ name: "Smoked Paprika", brand: "Kroger" }).lean();
+      assert.equal(saved?.price, 1.25);
+      assert.ok(saved?.updatedAt);
+      assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
   });
 });

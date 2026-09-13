@@ -1,6 +1,9 @@
+import type { CatalogProduct } from "./optimizeGroceryList";
+
 const KROGER_API_BASE = "https://api.kroger.com/v1";
 const TOKEN_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/token`;
 const LOCATIONS_ENDPOINT = `${KROGER_API_BASE}/locations`;
+const PRODUCTS_ENDPOINT = `${KROGER_API_BASE}/products`;
 
 /** Catalog location used when Kroger API credentials are not configured. */
 export const DEMO_KROGER_LOCATION_ID = "01400441";
@@ -19,6 +22,77 @@ type KrogerLocation = {
 type LocationsResponse = {
   data?: KrogerLocation[];
 };
+
+type KrogerPrice = {
+  regular?: number;
+  promo?: number;
+};
+
+type KrogerProductItem = {
+  size?: string;
+  price?: KrogerPrice;
+};
+
+type KrogerProduct = {
+  productId?: string;
+  brand?: string;
+  description?: string;
+  items?: KrogerProductItem[];
+};
+
+type ProductsResponse = {
+  data?: KrogerProduct[];
+};
+
+const groceryUnits = ["oz", "lbs", "count", "g", "kg", "ml", "l", "gal"] as const;
+type GroceryUnit = (typeof groceryUnits)[number];
+
+function parseKrogerUnit(size?: string): GroceryUnit {
+  const value = (size ?? "").toLowerCase();
+  if (/\bgal/.test(value)) return "gal";
+  if (/\bfl\s*oz|\boz\b/.test(value)) return "oz";
+  if (/\blbs?\b|\bpounds?\b/.test(value)) return "lbs";
+  if (/\bkg\b/.test(value)) return "kg";
+  if (/\bml\b/.test(value)) return "ml";
+  if (/\bl\b/.test(value)) return "l";
+  if (/\bg\b/.test(value)) return "g";
+  return "count";
+}
+
+function pickKrogerPrice(item?: KrogerProductItem): number | null {
+  const promo = item?.price?.promo;
+  const regular = item?.price?.regular;
+  if (typeof promo === "number" && promo > 0) {
+    return promo;
+  }
+  if (typeof regular === "number" && regular >= 0) {
+    return regular;
+  }
+  return null;
+}
+
+function toCatalogProduct(
+  product: KrogerProduct,
+  locationId?: string
+): CatalogProduct | null {
+  const name = product.description?.trim();
+  const item = product.items?.[0];
+  const price = pickKrogerPrice(item);
+  if (!name || price === null) {
+    return null;
+  }
+
+  const unit = parseKrogerUnit(item?.size);
+  return {
+    name,
+    brand: product.brand?.trim() || "Kroger",
+    storeName: "Kroger",
+    locationId,
+    price,
+    unit,
+    normalizedUnit: unit,
+  };
+}
 
 function readCredentials(): { clientId: string; clientSecret: string } {
   const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
@@ -141,6 +215,53 @@ export class KrogerService {
         `Kroger Locations API unavailable (${message}); using demo store ${demoLocationId()}`
       );
       return demoLocationId();
+    }
+  }
+
+  /**
+   * GET /v1/products?filter.term={term}&filter.locationId={id}&filter.limit=10
+   * Returns shelf prices for the nearest store when `locationId` is set.
+   */
+  async searchProducts(
+    term: string,
+    locationId?: string
+  ): Promise<CatalogProduct[]> {
+    const query = term.trim();
+    if (!query) {
+      return [];
+    }
+
+    try {
+      const token = await this.getAccessToken();
+      const params = new URLSearchParams({
+        "filter.term": query,
+        "filter.limit": "10",
+      });
+      if (locationId?.trim()) {
+        params.set("filter.locationId", locationId.trim());
+      }
+
+      const response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Kroger products request failed (${response.status})`);
+      }
+
+      const payload = (await response.json()) as ProductsResponse;
+      return (payload.data ?? [])
+        .map((product) => toCatalogProduct(product, locationId?.trim()))
+        .filter((product): product is CatalogProduct => product !== null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Kroger Products API unavailable (${message})`);
+      return [];
     }
   }
 }
