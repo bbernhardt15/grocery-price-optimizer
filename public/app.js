@@ -1,5 +1,6 @@
 const groceryListEl = document.querySelector("#grocery-list");
 const findBtn = document.querySelector("#find-btn");
+const sampleBtn = document.querySelector("#sample-btn");
 const formErrorEl = document.querySelector("#form-error");
 const loadingEl = document.querySelector("#loading");
 const apiErrorEl = document.querySelector("#api-error");
@@ -166,14 +167,15 @@ findBtn.addEventListener("click", () => {
   void findCheapestStores();
 });
 
+sampleBtn.addEventListener("click", () => {
+  groceryListEl.value = "2 Milk\nEggs\nBread x2";
+  showFormError("");
+  groceryListEl.focus();
+});
+
 groceryListEl.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     void findCheapestStores();
   }
 });
-
-groceryListEl.defaultValue = "";
-if (!groceryListEl.value.trim()) {
-  groceryListEl.value = "2 Milk\nEggs\nBread x2";
-}

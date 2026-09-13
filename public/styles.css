@@ -132,6 +132,18 @@ button:disabled {
   cursor: wait;
 }
 
+.text-btn {
+  background: transparent;
+  color: var(--accent);
+  padding: 12px 4px;
+  font-weight: 600;
+}
+
+.text-btn:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
 .form-error,
 .api-error {
   color: var(--danger);
