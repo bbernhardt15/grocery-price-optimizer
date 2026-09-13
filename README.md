@@ -12,6 +12,12 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. If nothing is listening on `MONGODB_URI` / localhost:27017, it starts an in-memory MongoDB so product queries still hit a real database.
 
+## Kroger Locations API
+
+`src/krogerService.ts` talks to Kroger’s official Locations API (`https://api.kroger.com/v1/locations`). `getClosestStoreLocation(zipCode)` sends `filter.zipCode.near` and `filter.limit=1`, then returns that store’s `locationId`.
+
+Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`).
+
 ## Run locally
 
 ```bash
