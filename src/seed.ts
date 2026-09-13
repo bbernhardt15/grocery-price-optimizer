@@ -72,7 +72,7 @@ async function seed(): Promise<void> {
   console.log(`
 Try the optimizer:
 
-  curl -s -X POST http://localhost:43141/api/optimize-list \\
+  curl -s -X POST http://localhost:3000/api/optimize-list \\
     -H "Content-Type: application/json" \\
     -d '{"groceryList":["Gallon of Milk","Loaf of Bread","Dozen Eggs"],"stores":["Walmart","Target","Kroger"]}'
 `);

@@ -1,9 +1,10 @@
 # Grocery List Optimizer API
 
-Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store.
+Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store. A vanilla HTML dashboard is served from `public/`.
 
 ## What it includes
 
+- **Dashboard** — paste a list, click **Find Cheapest Stores**, see per-store cards and a grand total
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `price`, `unit`, `normalizedUnit`, `lastUpdated`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
 - **`POST /api/optimize-list`** — loads matching products from MongoDB, then runs that function
@@ -19,7 +20,7 @@ cp .env.example .env
 npm run dev
 ```
 
-The API listens on **http://localhost:43141** by default.
+Open **http://localhost:3000** for the dashboard. The API is on the same origin (`POST /api/optimize-list`).
 
 To use your own MongoDB, set `MONGODB_URI` in `.env`.
 
@@ -27,12 +28,16 @@ To use your own MongoDB, set `MONGODB_URI` in `.env`.
 
 ### `GET /`
 
+Grocery dashboard (`public/index.html`).
+
+### `GET /api`
+
 Health/info JSON.
 
 ### `POST /api/optimize-list`
 
 ```bash
-curl -s -X POST http://localhost:43141/api/optimize-list \
+curl -s -X POST http://localhost:3000/api/optimize-list \
   -H "Content-Type: application/json" \
   -d '{
     "groceryList": ["milk", "eggs", "bread", "bananas", "chicken", "rice", "apples", "butter"],

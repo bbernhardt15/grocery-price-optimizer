@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cheapest Cart — Grocery trip planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <p class="eyebrow">Grocery trip planner</p>
+        <h1>Spend the least. Shop the fewest aisles that actually matter.</h1>
+        <p class="lede">
+          Paste your list. We match each item to the store with the lowest shelf
+          price and split the trip by retailer.
+        </p>
+      </header>
+
+      <section class="composer" aria-labelledby="list-label">
+        <label id="list-label" for="grocery-list">Grocery list</label>
+        <p class="hint">One item per line. Partial names work — “milk” matches “Gallon of Milk”.</p>
+        <textarea
+          id="grocery-list"
+          rows="10"
+          spellcheck="true"
+          placeholder="Milk&#10;Eggs&#10;Bread"
+        >Milk
+Eggs
+Bread</textarea>
+        <div class="composer-actions">
+          <button id="find-btn" type="button">Find Cheapest Stores</button>
+          <p id="form-error" class="form-error" hidden></p>
+        </div>
+      </section>
+
+      <p id="loading" class="loading" hidden>Checking prices across stores…</p>
+      <p id="api-error" class="api-error" hidden></p>
+
+      <section id="empty-state" class="empty-state">
+        Results show up here as store cards — what to buy, what it costs, and the
+        trip total.
+      </section>
+
+      <section id="results" class="results" hidden>
+        <div class="summary">
+          <div>
+            <p class="summary-label">Grand total</p>
+            <p id="grand-total" class="summary-amount">$0.00</p>
+          </div>
+          <p id="summary-meta" class="summary-meta"></p>
+        </div>
+        <div id="store-grid" class="store-grid"></div>
+        <aside id="unavailable" class="unavailable" hidden></aside>
+      </section>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
