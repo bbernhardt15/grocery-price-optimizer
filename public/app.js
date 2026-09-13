@@ -37,6 +37,14 @@ function setBusy(isBusy) {
   loadingEl.hidden = !isBusy;
 }
 
+function hideResults() {
+  resultsEl.hidden = true;
+  storeGridEl.innerHTML = "";
+  grandTotalEl.textContent = "$0.00";
+  summaryMetaEl.textContent = "";
+  renderUnavailable([]);
+}
+
 function showFormError(message) {
   formErrorEl.hidden = !message;
   formErrorEl.textContent = message;
@@ -111,6 +119,8 @@ async function findCheapestStores() {
   const items = parseGroceryList(groceryListEl.value);
   if (items.length === 0) {
     showFormError("Add at least one grocery item.");
+    hideResults();
+    emptyStateEl.hidden = false;
     groceryListEl.focus();
     return;
   }
@@ -152,3 +162,8 @@ groceryListEl.addEventListener("keydown", (event) => {
     void findCheapestStores();
   }
 });
+
+groceryListEl.defaultValue = "";
+if (!groceryListEl.value.trim()) {
+  groceryListEl.value = "Milk\nEggs\nBread";
+}
