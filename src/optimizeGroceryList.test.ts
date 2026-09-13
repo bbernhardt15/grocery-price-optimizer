@@ -32,6 +32,8 @@ describe("optimizeGroceryList", () => {
 
     assert.equal(byStore.Aldi.items[0].query, "milk");
     assert.equal(byStore.Aldi.items[0].price, 2.19);
+    assert.equal(byStore.Aldi.items[0].quantity, 1);
+    assert.equal(byStore.Aldi.items[0].itemTotal, 2.19);
     assert.equal(byStore.Aldi.items[1].query, "bananas");
     assert.equal(byStore.Aldi.subtotal, 2.68);
 
@@ -77,5 +79,27 @@ describe("optimizeGroceryList", () => {
   it("returns an empty grouping for an empty grocery list", () => {
     const result = optimizeGroceryList([], ["Aldi"], catalog);
     assert.deepEqual(result, { stores: [], unavailable: [], total: 0 });
+  });
+
+  it("multiplies the cheapest unit price by the requested quantity", () => {
+    const result = optimizeGroceryList(
+      ["2 Milk", "Bread x2"],
+      ["Aldi", "Walmart"],
+      catalog
+    );
+    const byStore = Object.fromEntries(
+      result.stores.map((store) => [store.storeName, store])
+    );
+
+    assert.equal(byStore.Aldi.items[0].quantity, 2);
+    assert.equal(byStore.Aldi.items[0].price, 2.19);
+    assert.equal(byStore.Aldi.items[0].itemTotal, 4.38);
+    assert.equal(byStore.Aldi.subtotal, 4.38);
+
+    assert.equal(byStore.Walmart.items[0].quantity, 2);
+    assert.equal(byStore.Walmart.items[0].price, 1.28);
+    assert.equal(byStore.Walmart.items[0].itemTotal, 2.56);
+
+    assert.equal(result.total, 6.94);
   });
 });

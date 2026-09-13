@@ -70,14 +70,20 @@ function renderUnavailable(items) {
 }
 
 function renderStoreCard(store) {
+  const unitCount = store.items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
   const rows = store.items
     .map((item) => {
+      const quantity = item.quantity ?? 1;
+      const itemTotal = item.itemTotal ?? item.price * quantity;
       const detail = [item.brand, item.unit].filter(Boolean).join(" · ");
       return `
         <li>
-          <span class="item-name">${escapeHtml(item.name)}</span>
-          <span class="item-price">${money(item.price)}</span>
-          <span class="item-meta">Matched “${escapeHtml(item.query)}”${detail ? ` · ${escapeHtml(detail)}` : ""}</span>
+          <span class="item-name">
+            <span class="qty">${escapeHtml(String(quantity))}×</span>
+            ${escapeHtml(item.name)}
+          </span>
+          <span class="item-price">${money(itemTotal)}</span>
+          <span class="item-meta">${quantity} × ${money(item.price)}${detail ? ` · ${escapeHtml(detail)}` : ""} · matched “${escapeHtml(item.query)}”</span>
         </li>
       `;
     })
@@ -87,7 +93,7 @@ function renderStoreCard(store) {
     <article class="store-card">
       <header>
         <h2>${escapeHtml(store.storeName)}</h2>
-        <p class="item-count">${store.items.length} item${store.items.length === 1 ? "" : "s"}</p>
+        <p class="item-count">${unitCount} item${unitCount === 1 ? "" : "s"} to pick up</p>
       </header>
       <ul class="item-list">${rows}</ul>
       <div class="subtotal">
@@ -100,7 +106,11 @@ function renderStoreCard(store) {
 
 function renderResults(payload) {
   const storeCount = payload.stores.length;
-  const itemCount = payload.stores.reduce((sum, store) => sum + store.items.length, 0);
+  const itemCount = payload.stores.reduce(
+    (sum, store) =>
+      sum + store.items.reduce((inner, item) => inner + (item.quantity ?? 1), 0),
+    0
+  );
 
   emptyStateEl.hidden = true;
   resultsEl.hidden = false;
@@ -165,5 +175,5 @@ groceryListEl.addEventListener("keydown", (event) => {
 
 groceryListEl.defaultValue = "";
 if (!groceryListEl.value.trim()) {
-  groceryListEl.value = "Milk\nEggs\nBread";
+  groceryListEl.value = "2 Milk\nEggs\nBread x2";
 }

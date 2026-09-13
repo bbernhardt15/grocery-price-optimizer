@@ -1,5 +1,6 @@
 import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
+import { parseGroceryList } from "./parseGroceryLine";
 import type { CatalogProduct } from "./optimizeGroceryList";
 
 type LeanProduct = {
@@ -39,15 +40,15 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
 }
 
 /**
- * For each grocery-list string, finds Product documents whose name contains
- * that string (case-insensitive $regex, so "milk" matches "Whole Milk").
+ * For each grocery-list string, strips any quantity then finds Product
+ * documents whose name contains that string (case-insensitive $regex).
  * Hits are sorted by price ascending so the cheapest variations come first.
  */
 export async function fetchMatchingProducts(
   groceryList: string[],
   stores: string[] = []
 ): Promise<CatalogProduct[]> {
-  const items = groceryList.map((item) => item.trim()).filter(Boolean);
+  const items = parseGroceryList(groceryList).map((line) => line.name);
   if (items.length === 0) {
     return [];
   }

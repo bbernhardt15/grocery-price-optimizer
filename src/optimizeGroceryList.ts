@@ -1,3 +1,6 @@
+import type { GroceryLine } from "./parseGroceryLine";
+import { parseGroceryList } from "./parseGroceryLine";
+
 export type CatalogProduct = {
   name: string;
   brand: string;
@@ -14,6 +17,8 @@ export type PickedItem = {
   brand: string;
   storeName: string;
   price: number;
+  quantity: number;
+  itemTotal: number;
   unit: string;
   normalizedUnit: string;
 };
@@ -32,28 +37,6 @@ export type OptimizeResult = {
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function uniqueGroceryItems(groceryList: string[]): string[] {
-  const seen = new Set<string>();
-  const items: string[] = [];
-
-  for (const raw of groceryList) {
-    const query = raw.trim();
-    if (!query) {
-      continue;
-    }
-
-    const key = query.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    items.push(query);
-  }
-
-  return items;
 }
 
 function allowedStores(stores: string[]): Set<string> | null {
@@ -89,19 +72,44 @@ function compareByLowestPrice(a: CatalogProduct, b: CatalogProduct): number {
   return a.name.localeCompare(b.name);
 }
 
+function pickForLine(
+  line: GroceryLine,
+  catalog: CatalogProduct[]
+): PickedItem | null {
+  const matches = catalog.filter((product) =>
+    productMatchesItem(product, line.name)
+  );
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  matches.sort(compareByLowestPrice);
+  const best = matches[0];
+
+  return {
+    query: line.name,
+    name: best.name,
+    brand: best.brand,
+    storeName: best.storeName,
+    price: best.price,
+    quantity: line.quantity,
+    itemTotal: roundMoney(best.price * line.quantity),
+    unit: best.unit,
+    normalizedUnit: best.normalizedUnit,
+  };
+}
+
 /**
  * Maps each grocery item to the in-scope product with the lowest shelf price,
- * then groups those picks by storeName.
- *
- * `stores` limits which retailers are considered. An empty list means every
- * store in `products` is eligible.
+ * multiplies that price by the requested quantity, then groups by storeName.
  */
 export function optimizeGroceryList(
   groceryList: string[],
   stores: string[],
   products: CatalogProduct[]
 ): OptimizeResult {
-  const items = uniqueGroceryItems(groceryList);
+  const items = parseGroceryList(groceryList);
   const storeFilter = allowedStores(stores);
   const catalog =
     storeFilter === null
@@ -113,28 +121,14 @@ export function optimizeGroceryList(
   const picks: PickedItem[] = [];
   const unavailable: string[] = [];
 
-  for (const query of items) {
-    const matches = catalog.filter((product) =>
-      productMatchesItem(product, query)
-    );
-
-    if (matches.length === 0) {
-      unavailable.push(query);
+  for (const line of items) {
+    const pick = pickForLine(line, catalog);
+    if (!pick) {
+      unavailable.push(line.name);
       continue;
     }
 
-    matches.sort(compareByLowestPrice);
-    const best = matches[0];
-
-    picks.push({
-      query,
-      name: best.name,
-      brand: best.brand,
-      storeName: best.storeName,
-      price: best.price,
-      unit: best.unit,
-      normalizedUnit: best.normalizedUnit,
-    });
+    picks.push(pick);
   }
 
   const grouped = new Map<string, PickedItem[]>();
@@ -153,7 +147,7 @@ export function optimizeGroceryList(
       storeName,
       items: storeItems,
       subtotal: roundMoney(
-        storeItems.reduce((sum, item) => sum + item.price, 0)
+        storeItems.reduce((sum, item) => sum + item.itemTotal, 0)
       ),
     }));
 

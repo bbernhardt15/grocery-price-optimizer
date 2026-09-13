@@ -135,4 +135,35 @@ describe("POST /api/optimize-list", () => {
     assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
     assert.equal(body.stores[0].items[0].price, 2.89);
   });
+
+  it("multiplies matched prices by parsed quantities in the JSON response", async () => {
+    const { status, json } = await optimize({
+      groceryList: ["2 milk", "Bread x2"],
+      stores: ["Walmart", "Target", "Kroger"],
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{
+        storeName: string;
+        items: Array<{ name: string; quantity: number; price: number; itemTotal: number }>;
+        subtotal: number;
+      }>;
+      total: number;
+    };
+    const byStore = Object.fromEntries(
+      body.stores.map((store) => [store.storeName, store])
+    );
+
+    assert.equal(byStore.Kroger.items[0].name, "Gallon of Milk");
+    assert.equal(byStore.Kroger.items[0].quantity, 2);
+    assert.equal(byStore.Kroger.items[0].price, 2.89);
+    assert.equal(byStore.Kroger.items[0].itemTotal, 5.78);
+
+    assert.equal(byStore.Walmart.items[0].name, "Loaf of Bread");
+    assert.equal(byStore.Walmart.items[0].quantity, 2);
+    assert.equal(byStore.Walmart.items[0].itemTotal, 2.56);
+
+    assert.equal(body.total, 8.34);
+  });
 });

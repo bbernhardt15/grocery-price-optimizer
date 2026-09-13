@@ -47,6 +47,8 @@ curl -s -X POST http://localhost:3000/api/optimize-list \
 
 `stores` is optional. Omit it (or send `[]`) to consider every store in the catalog. `items` is accepted as an alias for `groceryList`.
 
+Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
+
 Response shape:
 
 ```json
@@ -61,19 +63,21 @@ Response shape:
           "brand": "Friendly Farms",
           "storeName": "Aldi",
           "price": 2.19,
+          "quantity": 2,
+          "itemTotal": 4.38,
           "unit": "gal",
           "normalizedUnit": "gal"
         }
       ],
-      "subtotal": 4.57
+      "subtotal": 4.38
     }
   ],
   "unavailable": ["saffron"],
-  "total": 16.26
+  "total": 4.38
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching is a case-insensitive substring on product `name` (so `"milk"` matches `"Whole Milk"`). Items with no match appear in `unavailable`.
+Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching is a case-insensitive substring on product `name` (so `"milk"` matches `"Whole Milk"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`.
 
 ## Live grocery scrape
 

@@ -80,6 +80,13 @@ body {
   font-size: 0.92rem;
 }
 
+.hint code {
+  font-size: 0.85em;
+  background: #f3eee4;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
 textarea {
   width: 100%;
   resize: vertical;
@@ -234,6 +241,18 @@ button:disabled {
 
 .item-name {
   font-weight: 600;
+}
+
+.qty {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #e7efe6;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .item-meta {
