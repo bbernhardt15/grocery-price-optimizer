@@ -1,3 +1,4 @@
+const formEl = document.querySelector("#optimize-form");
 const groceryListEl = document.querySelector("#grocery-list");
 const zipCodeEl = document.querySelector("#zip-code");
 const findBtn = document.querySelector("#find-btn");
@@ -38,7 +39,9 @@ function escapeHtml(value) {
 
 function setBusy(isBusy) {
   findBtn.disabled = isBusy;
+  sampleBtn.disabled = isBusy;
   zipCodeEl.disabled = isBusy;
+  groceryListEl.disabled = isBusy;
   loadingEl.hidden = !isBusy;
 }
 
@@ -74,37 +77,28 @@ function renderUnavailable(items) {
   `;
 }
 
+function itemFragment(item) {
+  const quantity = item.quantity ?? 1;
+  const itemTotal = item.itemTotal ?? item.price * quantity;
+  const brand = item.brand ? ` (${item.brand})` : "";
+  return `${quantity}x ${item.name}${brand} — ${money(itemTotal)}`;
+}
+
 function renderStoreCard(store) {
-  const unitCount = store.items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
   const rows = store.items
-    .map((item) => {
-      const quantity = item.quantity ?? 1;
-      const itemTotal = item.itemTotal ?? item.price * quantity;
-      const detail = [item.brand, item.unit].filter(Boolean).join(" · ");
-      return `
-        <li>
-          <span class="item-name">
-            <span class="qty">${escapeHtml(String(quantity))}×</span>
-            ${escapeHtml(item.name)}
-          </span>
-          <span class="item-price">${money(itemTotal)}</span>
-          <span class="item-meta">${quantity} × ${money(item.price)}${detail ? ` · ${escapeHtml(detail)}` : ""} · matched “${escapeHtml(item.query)}”</span>
-        </li>
-      `;
-    })
+    .map(
+      (item) =>
+        `<li class="item-line">${escapeHtml(itemFragment(item))}</li>`
+    )
     .join("");
 
   return `
     <article class="store-card">
       <header>
         <h2>${escapeHtml(store.storeName)}</h2>
-        <p class="item-count">${unitCount} item${unitCount === 1 ? "" : "s"} to pick up</p>
+        <p class="store-subtotal">${money(store.subtotal)}</p>
       </header>
       <ul class="item-list">${rows}</ul>
-      <div class="subtotal">
-        <span>Subtotal</span>
-        <span>${money(store.subtotal)}</span>
-      </div>
     </article>
   `;
 }
@@ -121,9 +115,9 @@ function renderResults(payload) {
   resultsEl.hidden = false;
   grandTotalEl.textContent = money(payload.total);
   summaryMetaEl.textContent = storeCount
-    ? `${itemCount} item${itemCount === 1 ? "" : "s"} across ${storeCount} store${storeCount === 1 ? "" : "s"}${
-        payload.locationId ? ` · Kroger ${payload.locationId}` : ""
-      }`
+    ? `${itemCount} item${itemCount === 1 ? "" : "s"} · ${storeCount} store${
+        storeCount === 1 ? "" : "s"
+      }${payload.locationId ? ` · Kroger ${payload.locationId}` : ""}`
     : "Nothing in the catalog matched this list.";
   storeGridEl.innerHTML = payload.stores.map(renderStoreCard).join("");
   renderUnavailable(payload.unavailable ?? []);
@@ -178,7 +172,8 @@ async function findCheapestStores() {
   }
 }
 
-findBtn.addEventListener("click", () => {
+formEl.addEventListener("submit", (event) => {
+  event.preventDefault();
   void findCheapestStores();
 });
 

@@ -3,45 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>Cheapest Cart — Grocery trip planner</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="page">
-      <header class="hero">
-        <p class="eyebrow">Grocery trip planner</p>
-        <h1>Spend the least. Shop the fewest aisles that actually matter.</h1>
-        <p class="lede">
-          Paste your list and ZIP. We look up the nearest Kroger and pull shelf
-          prices from that physical store.
-        </p>
-      </header>
+    <div class="shell">
+      <aside class="panel" aria-label="Trip controls">
+        <header class="brand">
+          <p class="brand-kicker">Cheapest Cart</p>
+          <h1>Plan the cheapest grocery trip</h1>
+          <p class="brand-copy">
+            Enter a ZIP to lock prices to the nearest Kroger, then paste the list.
+            One item per line — <code>2 Milk</code> or <code>Milk x2</code>.
+          </p>
+        </header>
 
-      <section class="composer" aria-labelledby="list-label">
-        <div class="composer-row">
-          <div class="list-col">
-            <label id="list-label" for="grocery-list">Grocery list</label>
-            <p class="hint">
-              One item per line. Add a count with <code>2 Milk</code> or
-              <code>Milk x2</code>. Partial names work — “milk” matches “Whole Milk”.
-            </p>
-            <textarea
-              id="grocery-list"
-              rows="10"
-              spellcheck="true"
-              autocomplete="off"
-              placeholder="e.g. 2 Milk&#10;Eggs&#10;Bread x2"
-            ></textarea>
-          </div>
-          <div class="zip-col">
+        <form id="optimize-form" class="controls">
+          <div class="field">
             <label for="zip-code">ZIP code</label>
-            <p class="hint">Nearest Kroger for local shelf prices.</p>
             <input
               id="zip-code"
               name="zipCode"
@@ -50,35 +30,57 @@
               autocomplete="postal-code"
               maxlength="10"
               placeholder="45202"
+              spellcheck="false"
             />
           </div>
-        </div>
-        <div class="composer-actions">
-          <button id="find-btn" type="button">Find Cheapest Stores</button>
-          <button id="sample-btn" class="text-btn" type="button">Load sample list</button>
-          <p id="form-error" class="form-error" hidden></p>
-        </div>
-      </section>
 
-      <p id="loading" class="loading" hidden>Finding your nearest store and checking prices…</p>
-      <p id="api-error" class="api-error" hidden></p>
-
-      <section id="empty-state" class="empty-state">
-        Results show up here as store cards — what to buy, what it costs, and the
-        trip total.
-      </section>
-
-      <section id="results" class="results" hidden>
-        <div class="summary">
-          <div>
-            <p class="summary-label">Grand total</p>
-            <p id="grand-total" class="summary-amount">$0.00</p>
+          <div class="field field-list">
+            <label for="grocery-list">Grocery list</label>
+            <textarea
+              id="grocery-list"
+              name="groceryList"
+              rows="14"
+              spellcheck="true"
+              autocomplete="off"
+              placeholder="2 Milk&#10;Eggs&#10;Bread x2"
+            ></textarea>
           </div>
-          <p id="summary-meta" class="summary-meta"></p>
-        </div>
-        <div id="store-grid" class="store-grid"></div>
-        <aside id="unavailable" class="unavailable" hidden></aside>
-      </section>
+
+          <div class="actions">
+            <button id="find-btn" type="submit">Find Cheapest Stores</button>
+            <button id="sample-btn" class="ghost" type="button">Load sample list</button>
+          </div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </aside>
+
+      <main class="workspace">
+        <p id="loading" class="status status-busy" hidden>
+          Finding your nearest store and checking prices…
+        </p>
+        <p id="api-error" class="status status-error" role="alert" hidden></p>
+
+        <section id="empty-state" class="empty-state">
+          <p class="empty-title">No trip yet</p>
+          <p>
+            Results appear here as store cards — what to buy, the store subtotal,
+            and a running grand total.
+          </p>
+        </section>
+
+        <section id="results" class="results" hidden>
+          <article class="banner" aria-live="polite">
+            <div>
+              <p class="banner-label">Grand total</p>
+              <p id="summary-meta" class="banner-meta"></p>
+            </div>
+            <p id="grand-total" class="banner-amount">$0.00</p>
+          </article>
+
+          <div id="store-grid" class="store-grid"></div>
+          <aside id="unavailable" class="unavailable" hidden></aside>
+        </section>
+      </main>
     </div>
     <script src="/app.js"></script>
   </body>
