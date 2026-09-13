@@ -63,7 +63,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   try {
     const { groceryList, stores } = parsed;
 
-    // One regex search per grocery string, then feed the catalog into the optimizer.
+    // Case-insensitive contains match per grocery string, cheapest variations first.
     const products = await fetchMatchingProducts(groceryList, stores);
     const groupedByStore = optimizeGroceryList(groceryList, stores, products);
 

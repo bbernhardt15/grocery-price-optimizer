@@ -39,8 +39,9 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
 }
 
 /**
- * Runs a case-insensitive regex search against Product.name for each
- * grocery-list string, then de-duplicates the combined hits.
+ * For each grocery-list string, finds Product documents whose name contains
+ * that string (case-insensitive $regex, so "milk" matches "Whole Milk").
+ * Hits are sorted by price ascending so the cheapest variations come first.
  */
 export async function fetchMatchingProducts(
   groceryList: string[],
@@ -63,7 +64,7 @@ export async function fetchMatchingProducts(
           ? nameQuery
           : { $and: [nameQuery, storesClause] };
 
-      return Product.find(filter).lean<LeanProduct[]>();
+      return Product.find(filter).sort({ price: 1 }).lean<LeanProduct[]>();
     })
   );
 
@@ -81,5 +82,6 @@ export async function fetchMatchingProducts(
     }
   }
 
+  products.sort((a, b) => a.price - b.price);
   return products;
 }

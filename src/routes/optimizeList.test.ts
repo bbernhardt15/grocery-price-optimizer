@@ -7,6 +7,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import app from "../app";
 import { Product } from "../models/Product";
 import { mockProducts } from "../seed";
+import { fetchMatchingProducts } from "../fetchMatchingProducts";
 
 describe("POST /api/optimize-list", () => {
   let memory: MongoMemoryServer;
@@ -101,5 +102,37 @@ describe("POST /api/optimize-list", () => {
     };
     assert.equal(body.stores[0].storeName, "Target");
     assert.equal(body.stores[0].items[0].price, 1.99);
+  });
+
+  it("returns regex matches sorted by price so cheaper milk is picked first", async () => {
+    await Product.create({
+      name: "Whole Milk",
+      brand: "Expensive Farms",
+      storeName: "Kroger",
+      price: 4.99,
+      unit: "gal",
+      normalizedUnit: "gal",
+      lastUpdated: new Date(),
+    });
+
+    const matches = await fetchMatchingProducts(["milk"], ["Kroger"]);
+    assert.ok(matches.length >= 2);
+    assert.deepEqual(
+      matches.map((product) => product.price),
+      [...matches.map((product) => product.price)].sort((a, b) => a - b)
+    );
+    assert.equal(matches[0].name, "Gallon of Milk");
+    assert.equal(matches[0].price, 2.89);
+
+    const { status, json } = await optimize({
+      groceryList: ["milk"],
+      stores: ["Kroger"],
+    });
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{ items: Array<{ name: string; price: number }> }>;
+    };
+    assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
+    assert.equal(body.stores[0].items[0].price, 2.89);
   });
 });
