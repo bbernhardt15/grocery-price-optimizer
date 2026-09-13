@@ -67,6 +67,18 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(called, false);
   });
 
+  it("falls back to the demo locationId when the token request is rejected", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async () =>
+      Response.json({ error: "invalid_client", error_description: "invalid credentials" }, { status: 401 })
+    );
+
+    const service = new KrogerService();
+    const locationId = await service.getClosestStoreLocation("45202");
+    assert.equal(locationId, "01400441");
+  });
+
   it("rejects an invalid ZIP before calling the API", async () => {
     const service = new KrogerService();
     await assert.rejects(
