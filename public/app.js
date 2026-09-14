@@ -203,7 +203,9 @@ function chooseSuggestion(index) {
   }
   addToCart(product);
   searchEl.value = "";
-  searchStatusEl.hidden = true;
+  searchStatusEl.hidden = false;
+  searchStatusEl.textContent =
+    "Matches appear in a list under this field as you type.";
   hideSuggestions();
   searchEl.focus();
   showFormError("");
@@ -215,7 +217,9 @@ async function fetchSuggestions(query) {
   }
   if (query.trim().length < 2) {
     hideSuggestions();
-    searchStatusEl.hidden = true;
+    searchStatusEl.hidden = false;
+    searchStatusEl.textContent =
+      "Matches appear in a list under this field as you type.";
     return;
   }
 

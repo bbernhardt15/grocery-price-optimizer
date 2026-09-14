@@ -9,6 +9,13 @@ const publicDir = path.join(__dirname, "..", "public");
 
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+  }
+  next();
+});
 
 app.get("/api", (_req, res) => {
   res.json({
@@ -25,7 +32,15 @@ app.get("/api", (_req, res) => {
 
 app.use("/api", catalogRouter);
 app.use("/api", optimizeListRouter);
-app.use(express.static(publicDir));
+app.use(
+  express.static(publicDir, {
+    etag: false,
+    lastModified: false,
+    setHeaders(res) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    },
+  })
+);
 
 app.use((req, res) => {
   if (req.path.startsWith("/api")) {

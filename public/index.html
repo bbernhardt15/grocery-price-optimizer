@@ -4,36 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>Cheapest Cart — Grocery trip planner</title>
-    <link rel="stylesheet" href="/styles.css?v=product-search" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <title>Cheapest Cart — Product search</title>
+    <link rel="stylesheet" href="/styles.css?v=search-first" />
   </head>
   <body>
     <div class="shell">
       <aside class="panel" aria-label="Trip controls">
         <header class="brand">
           <p class="brand-kicker">Cheapest Cart</p>
-          <h1>Plan the cheapest grocery trip</h1>
-          <p class="brand-copy">
-            Search the catalog, pick verified products, set quantities, then
-            price the list at your nearest Kroger.
-          </p>
+          <h1>Search products, then price the trip</h1>
         </header>
 
         <form id="optimize-form" class="controls" autocomplete="off">
-          <div class="field">
-            <label for="zip-code">ZIP code</label>
-            <input
-              id="zip-code"
-              name="zipCode"
-              type="text"
-              inputmode="numeric"
-              autocomplete="off"
-              maxlength="10"
-              placeholder="e.g. 45202"
-              spellcheck="false"
-            />
-          </div>
-
           <div class="field">
             <label for="product-search">Product search</label>
             <div class="product-search" id="product-search-wrap">
@@ -46,7 +29,7 @@
                 name="productSearch"
                 type="text"
                 inputmode="search"
-                placeholder="Type a product or brand name…"
+                placeholder="Type milk, Cheerios, a brand…"
                 maxlength="120"
                 autocomplete="off"
                 autocorrect="off"
@@ -65,7 +48,23 @@
                 hidden
               ></ul>
             </div>
-            <p id="product-search-status" class="hint" hidden></p>
+            <p id="product-search-status" class="hint">
+              Matches appear in a list under this field as you type.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="zip-code">ZIP code</label>
+            <input
+              id="zip-code"
+              name="zipCode"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="10"
+              placeholder="e.g. 45202"
+              spellcheck="false"
+            />
           </div>
 
           <div class="field field-list">
@@ -112,6 +111,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=product-search"></script>
+    <script src="/app.js?v=search-first"></script>
   </body>
 </html>

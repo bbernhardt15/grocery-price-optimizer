@@ -73,14 +73,14 @@ input {
 }
 
 .panel {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  position: relative;
+  height: auto;
+  min-height: 100vh;
   overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 24px 24px 28px;
+  gap: 16px;
+  padding: 20px 20px 28px;
   background: var(--panel);
   border-right: 1px solid var(--line);
 }
@@ -95,11 +95,11 @@ input {
 }
 
 .brand h1 {
-  margin: 0 0 8px;
-  font-size: 1.45rem;
+  margin: 0;
+  font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: -0.03em;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .brand-copy {
@@ -138,28 +138,29 @@ input {
 .product-search-icon {
   position: absolute;
   left: 14px;
-  top: 15px;
+  top: 17px;
   z-index: 1;
   display: block;
   width: 18px;
   height: 18px;
-  color: var(--muted);
+  color: var(--accent);
   pointer-events: none;
 }
 
 #product-search {
   display: block;
   width: 100%;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
   margin: 0;
   padding: 0 14px 0 42px;
-  line-height: 48px;
+  line-height: 52px;
   resize: none;
   overflow: hidden;
   appearance: none;
   -webkit-appearance: none;
+  border: 2px solid var(--accent);
 }
 
 .product-search-menu {
