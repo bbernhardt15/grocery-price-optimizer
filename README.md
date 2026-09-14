@@ -79,8 +79,6 @@ The dashboard sends verified catalog picks as objects:
 }
 ```
 
-`GET /api/search-catalog?query=milk` calls `FatSecretService.searchGlobalCatalog` and returns a JSON array of `{ id, name, brand }`. If FatSecret is unauthenticated or the API fails, the route responds with **500** and `{ error }` instead of crashing the server.
-
 Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
 
 Response shape:
