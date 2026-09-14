@@ -20,6 +20,10 @@ Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with
 
 `POST /api/optimize-list` treats MongoDB as a 24-hour price cache. For each grocery item it first queries products whose `updatedAt` is less than a day old. A hit skips the live Products API. A miss (`GET https://api.kroger.com/v1/products?filter.term=…`) upserts the fresh rows with `findOneAndUpdate` (`upsert: true`) before the optimizer splits the trip.
 
+## FatSecret catalog
+
+`src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `searchGlobalCatalog(query)` requests an OAuth 2.0 client-credentials token from `https://oauth.fatsecret.com/connect/token` (Basic auth plus form body using `FATSECRET_CLIENT_ID` / `FATSECRET_CLIENT_SECRET`), caches it until `expires_in`, then `GET https://platform.fatsecret.com/rest/foods/search/v5` with `Authorization: Bearer`. Results are `{ name, brand, foodId }` (and `barcode` when present).
+
 ## Run locally
 
 ```bash
