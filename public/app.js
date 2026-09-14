@@ -18,6 +18,17 @@ const summaryMetaEl = document.querySelector("#summary-meta");
 const unavailableEl = document.querySelector("#unavailable");
 
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
+
+function normalizeZip(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length >= 9) {
+    return `${digits.slice(0, 5)}-${digits.slice(5, 9)}`;
+  }
+  if (digits.length >= 5) {
+    return digits.slice(0, 5);
+  }
+  return digits;
+}
 const SAMPLE_ITEMS = [
   { name: "Whole Milk", brand: "Kroger", foodId: "demo-whole-milk", quantity: 2 },
   { name: "Large Eggs", brand: "Kroger", foodId: "demo-large-eggs", quantity: 1 },
@@ -300,7 +311,10 @@ async function findCheapestStores() {
     return;
   }
 
-  const zipCode = zipCodeEl.value.trim();
+  const zipCode = normalizeZip(zipCodeEl.value);
+  if (zipCodeEl.value.trim() !== zipCode) {
+    zipCodeEl.value = zipCode;
+  }
   if (!ZIP_PATTERN.test(zipCode)) {
     showFormError("Enter a 5-digit ZIP code so we can price your nearest store.");
     hideResults();
