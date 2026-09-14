@@ -232,7 +232,11 @@ async function fetchSuggestions(query) {
       throw new Error(payload.error || `Search failed (${response.status})`);
     }
 
-    suggestions = Array.isArray(payload.products) ? payload.products : [];
+    suggestions = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload.products)
+        ? payload.products
+        : [];
     activeIndex = suggestions.length ? 0 : -1;
     if (!suggestions.length) {
       hideSuggestions();

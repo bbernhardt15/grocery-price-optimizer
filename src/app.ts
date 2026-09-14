@@ -2,7 +2,7 @@ import path from "node:path";
 import express from "express";
 import cors from "cors";
 import optimizeListRouter from "./routes/optimizeList";
-import searchCatalogRouter from "./routes/searchCatalog";
+import catalogRouter from "./routes/catalog";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -23,7 +23,7 @@ app.get("/api", (_req, res) => {
   });
 });
 
-app.use("/api", searchCatalogRouter);
+app.use("/api", catalogRouter);
 app.use("/api", optimizeListRouter);
 app.use(express.static(publicDir));
 

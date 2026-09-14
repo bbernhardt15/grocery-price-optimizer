@@ -7,7 +7,7 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 - **Dashboard** — search the catalog, pick verified items with quantities, add a ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
-- **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, serves prices from a 24-hour Mongo cache (live Kroger Products API on miss), then runs that function
+- **`GET /api/search-catalog`** — FatSecret catalog autocomplete (`?query=milk`)
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. Set `MONGO_URL` (preferred in cloud) to connect to Atlas or any MongoDB and skip the in-memory server. If `MONGO_URL` is unset and nothing is listening on `MONGODB_URI` / localhost:27017, local dev starts an in-memory MongoDB.
@@ -22,7 +22,7 @@ Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with
 
 ## FatSecret catalog
 
-`src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=basic`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`. The dashboard still receives `foodId` as an alias of `id`.
+`src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=basic`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`.
 
 ## Run locally
 
@@ -45,6 +45,14 @@ Grocery dashboard (`public/index.html`).
 ### `GET /api`
 
 Health/info JSON.
+
+### `GET /api/search-catalog`
+
+```bash
+curl -s "http://localhost:3000/api/search-catalog?query=milk"
+```
+
+`src/routes/catalog.ts` instantiates `FatSecretService` and returns the `{ id, name, brand }` array from `searchGlobalCatalog`. Missing `query` is **400**. FatSecret auth or API failures are **500** `{ "error": "Catalog search failed: …" }` and do not crash the process.
 
 ### `POST /api/optimize-list`
 
@@ -71,7 +79,7 @@ The dashboard sends verified catalog picks as objects:
 }
 ```
 
-`GET /api/search-catalog?query=milk` returns `{ products: [{ id, name, brand, foodId }] }` from FatSecret (or the seeded demo catalog when FatSecret credentials are missing). `foodId` matches `id` so the dashboard can keep posting verified items.
+`GET /api/search-catalog?query=milk` calls `FatSecretService.searchGlobalCatalog` and returns a JSON array of `{ id, name, brand }`. If FatSecret is unauthenticated or the API fails, the route responds with **500** and `{ error }` instead of crashing the server.
 
 Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
 
