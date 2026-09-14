@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Cheapest Cart — Grocery trip planner</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=product-search" />
   </head>
   <body>
     <div class="shell">
@@ -35,39 +35,44 @@
           </div>
 
           <div class="field">
-            <label for="catalog-search">Add item</label>
-            <div class="search-wrap">
-              <svg
-                class="search-icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-              >
+            <label for="product-search">Product search</label>
+            <div class="product-search" id="product-search-wrap">
+              <svg class="product-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
                 <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
               <input
-                id="catalog-search"
+                id="product-search"
+                name="productSearch"
                 type="text"
-                placeholder="Search milk, eggs, bread…"
-                spellcheck="false"
+                inputmode="search"
+                placeholder="Type a product or brand name…"
+                maxlength="120"
                 autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded="false"
-                aria-controls="search-results"
+                aria-controls="product-suggestions"
                 aria-haspopup="listbox"
               />
-              <ul id="search-results" class="suggest" role="listbox" hidden></ul>
+              <ul
+                id="product-suggestions"
+                class="product-search-menu"
+                role="listbox"
+                hidden
+              ></ul>
             </div>
-            <p id="search-status" class="hint" hidden></p>
+            <p id="product-search-status" class="hint" hidden></p>
           </div>
 
           <div class="field field-list">
             <label>Shopping list</label>
-            <ul id="shopping-list" class="cart"></ul>
+            <ul id="shopping-list" class="shopping-list"></ul>
             <p id="cart-empty" class="hint">
-              Search and select a product to add it here.
+              Pick a catalog match to add it here with its own quantity.
             </p>
           </div>
 
@@ -107,6 +112,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=product-search"></script>
   </body>
 </html>

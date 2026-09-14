@@ -65,7 +65,7 @@ describe("GET /api/search-catalog", () => {
     assert.equal(called, false);
   });
 
-  it("returns 500 when FatSecret is unauthenticated without crashing the server", async () => {
+  it("returns demo catalog matches when FatSecret fails without crashing the server", async () => {
     fatSecretService.searchGlobalCatalog = async () => {
       throw new Error(
         "FatSecret API credentials are missing. Set FATSECRET_CLIENT_ID and FATSECRET_CLIENT_SECRET."
@@ -73,9 +73,9 @@ describe("GET /api/search-catalog", () => {
     };
 
     const failed = await fetch(`${origin}/api/search-catalog?query=milk`);
-    assert.equal(failed.status, 500);
-    const failedBody = (await failed.json()) as { error: string };
-    assert.match(failedBody.error, /FATSECRET_CLIENT_ID/);
+    assert.equal(failed.status, 200);
+    const failedBody = (await failed.json()) as Array<{ name: string; brand: string }>;
+    assert.ok(failedBody.some((product) => /milk/i.test(product.name)));
 
     fatSecretService.searchGlobalCatalog = async () => [
       { id: "1", name: "Eggs", brand: "Generic" },
@@ -86,12 +86,12 @@ describe("GET /api/search-catalog", () => {
     assert.equal(recoveredBody[0].name, "Eggs");
   });
 
-  it("returns 500 when the FatSecret API fails", async () => {
+  it("returns 500 when FatSecret fails and no demo matches exist", async () => {
     fatSecretService.searchGlobalCatalog = async () => {
       throw new Error("Invalid IP address detected");
     };
 
-    const response = await fetch(`${origin}/api/search-catalog?query=bread`);
+    const response = await fetch(`${origin}/api/search-catalog?query=zzzz-not-a-product`);
     assert.equal(response.status, 500);
     const body = (await response.json()) as { error: string };
     assert.match(body.error, /Invalid IP address detected/);

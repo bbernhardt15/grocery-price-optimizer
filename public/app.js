@@ -1,8 +1,8 @@
 const formEl = document.querySelector("#optimize-form");
 const zipCodeEl = document.querySelector("#zip-code");
-const searchEl = document.querySelector("#catalog-search");
-const resultsListEl = document.querySelector("#search-results");
-const searchStatusEl = document.querySelector("#search-status");
+const searchEl = document.querySelector("#product-search");
+const resultsListEl = document.querySelector("#product-suggestions");
+const searchStatusEl = document.querySelector("#product-search-status");
 const shoppingListEl = document.querySelector("#shopping-list");
 const cartEmptyEl = document.querySelector("#cart-empty");
 const findBtn = document.querySelector("#find-btn");
@@ -59,7 +59,7 @@ function escapeHtml(value) {
 }
 
 function itemKey(item) {
-  return item.foodId || `${item.name}|${item.brand ?? ""}`;
+  return item.id || item.foodId || `${item.name}|${item.brand ?? ""}`;
 }
 
 function setBusy(isBusy) {
@@ -144,6 +144,7 @@ function addToCart(product) {
       name: product.name,
       brand: product.brand || "Generic",
       foodId: product.foodId || product.id,
+      id: product.id || product.foodId,
       quantity: 1,
     });
   }
@@ -401,7 +402,7 @@ resultsListEl.addEventListener("mousedown", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  if (!event.target.closest(".search-wrap")) {
+  if (!event.target.closest(".product-search")) {
     hideSuggestions();
   }
 });

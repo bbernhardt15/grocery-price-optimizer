@@ -1,8 +1,41 @@
 import { Router, Request, Response } from "express";
-import { FatSecretService } from "../services/fatsecretService";
+import { seedCatalog } from "../seedProducts";
+import {
+  FatSecretService,
+  type FatSecretProduct,
+} from "../services/fatsecretService";
 
 const router = Router();
 const fatSecretService = new FatSecretService();
+
+const DEMO_PRODUCTS: FatSecretProduct[] = uniqueDemoProducts();
+
+function uniqueDemoProducts(): FatSecretProduct[] {
+  const seen = new Set<string>();
+  const products: FatSecretProduct[] = [];
+  for (const product of seedCatalog) {
+    const key = `${product.name}\0${product.brand}`.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    products.push({
+      id: `demo-${key.replace(/[^a-z0-9]+/g, "-")}`,
+      name: product.name,
+      brand: product.brand,
+    });
+  }
+  return products;
+}
+
+function demoSearch(query: string): FatSecretProduct[] {
+  const needle = query.trim().toLowerCase();
+  return DEMO_PRODUCTS.filter(
+    (product) =>
+      product.name.toLowerCase().includes(needle) ||
+      product.brand.toLowerCase().includes(needle)
+  ).slice(0, 12);
+}
 
 function readQuery(value: unknown): string {
   if (Array.isArray(value)) {
@@ -33,6 +66,11 @@ router.get("/search-catalog", async (req: Request, res: Response) => {
   } catch (error) {
     const message = errorMessage(error);
     console.error(`FatSecret catalog search failed: ${message}`);
+    const fallback = demoSearch(query);
+    if (fallback.length > 0) {
+      res.json(fallback);
+      return;
+    }
     res.status(500).json({
       error: `Catalog search failed: ${message}`,
     });
