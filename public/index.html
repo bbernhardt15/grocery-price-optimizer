@@ -37,11 +37,21 @@
           <div class="field">
             <label for="catalog-search">Add item</label>
             <div class="search-wrap">
+              <svg
+                class="search-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
               <input
                 id="catalog-search"
-                type="search"
+                type="text"
                 placeholder="Search milk, eggs, bread…"
                 spellcheck="false"
+                autocomplete="off"
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded="false"

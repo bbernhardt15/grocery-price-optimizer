@@ -4,7 +4,7 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 
 ## What it includes
 
-- **Dashboard** — paste a list and ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
+- **Dashboard** — search the catalog, pick verified items with quantities, add a ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
 - **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, serves prices from a 24-hour Mongo cache (live Kroger Products API on miss), then runs that function
