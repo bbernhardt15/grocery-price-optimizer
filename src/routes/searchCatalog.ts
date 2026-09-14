@@ -55,14 +55,8 @@ router.get("/search-catalog", async (req: Request, res: Response) => {
     res.json({ products });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("FATSECRET_CLIENT")) {
-      res.json({ products: demoSearch(query), source: "demo" });
-      return;
-    }
-
-    res.status(502).json({
-      error: `Catalog search failed: ${message}`,
-    });
+    console.warn(`FatSecret catalog search unavailable (${message}); using demo catalog`);
+    res.json({ products: demoSearch(query), source: "demo" });
   }
 });
 

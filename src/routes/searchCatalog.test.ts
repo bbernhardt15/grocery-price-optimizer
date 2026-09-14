@@ -60,11 +60,9 @@ describe("GET /api/search-catalog", () => {
     assert.equal(called, false);
   });
 
-  it("falls back to the seeded catalog when FatSecret credentials are missing", async () => {
+  it("falls back to the seeded catalog when FatSecret is unavailable", async () => {
     fatSecretService.searchGlobalCatalog = async () => {
-      throw new Error(
-        "FatSecret API credentials are missing. Set FATSECRET_CLIENT_ID and FATSECRET_CLIENT_SECRET."
-      );
+      throw new Error("Invalid IP address detected");
     };
 
     const response = await fetch(`${origin}/api/search-catalog?query=milk`);
