@@ -87,7 +87,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   if (mongoose.connection.readyState !== 1) {
     res.status(503).json({
       error:
-        "Database is not connected. Set MONGODB_URI or wait for the in-memory MongoDB to start.",
+        "Database is not connected. Set MONGO_URL or MONGODB_URI, or wait for the in-memory MongoDB to start.",
     });
     return;
   }

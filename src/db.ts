@@ -1,15 +1,22 @@
 import mongoose from "mongoose";
-import { MongoMemoryServer } from "mongodb-memory-server";
 import { seedProductsIfEmpty } from "./seedProducts";
 
 const DEFAULT_URI = "mongodb://127.0.0.1:27017/grocery-list-optimizer";
 
-let memoryServer: MongoMemoryServer | null = null;
-
 export async function connectDatabase(): Promise<void> {
-  const uri = process.env.MONGODB_URI ?? DEFAULT_URI;
   mongoose.set("strictQuery", true);
 
+  const mongoUrl = process.env.MONGO_URL?.trim();
+  if (mongoUrl) {
+    await mongoose.connect(mongoUrl, {
+      serverSelectionTimeoutMS: 10_000,
+    });
+    console.log(`Connected to MongoDB at ${sanitizeUri(mongoUrl)}`);
+    await seedProductsIfEmpty();
+    return;
+  }
+
+  const uri = process.env.MONGODB_URI?.trim() || DEFAULT_URI;
   try {
     await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 3000,
@@ -25,7 +32,10 @@ export async function connectDatabase(): Promise<void> {
       await mongoose.disconnect();
     }
 
-    memoryServer = await MongoMemoryServer.create();
+    // Loaded only when MONGO_URL is unset so cloud builds never pull in
+    // mongodb-memory-server's native Linux binaries.
+    const { MongoMemoryServer } = await import("mongodb-memory-server");
+    const memoryServer = await MongoMemoryServer.create();
     await mongoose.connect(memoryServer.getUri());
     console.log("Connected to in-memory MongoDB");
   }

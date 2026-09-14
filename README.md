@@ -10,7 +10,7 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 - **`POST /api/optimize-list`** — looks up the nearest Kroger from `zipCode`, serves prices from a 24-hour Mongo cache (live Kroger Products API on miss), then runs that function
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
-On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. If nothing is listening on `MONGODB_URI` / localhost:27017, it starts an in-memory MongoDB so product queries still hit a real database.
+On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. Set `MONGO_URL` (preferred in cloud) to connect to Atlas or any MongoDB and skip the in-memory server. If `MONGO_URL` is unset and nothing is listening on `MONGODB_URI` / localhost:27017, local dev starts an in-memory MongoDB.
 
 ## Kroger Locations API
 
@@ -30,7 +30,7 @@ npm run dev
 
 Open **http://localhost:3000** for the dashboard. The API is on the same origin (`POST /api/optimize-list`).
 
-To use your own MongoDB, set `MONGODB_URI` in `.env`.
+To use your own MongoDB, set `MONGO_URL` (or `MONGODB_URI`) in `.env`. When `MONGO_URL` is set, the in-memory fallback is never loaded.
 
 ## Endpoints
 
