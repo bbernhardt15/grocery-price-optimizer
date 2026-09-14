@@ -2,6 +2,7 @@ import path from "node:path";
 import express from "express";
 import cors from "cors";
 import optimizeListRouter from "./routes/optimizeList";
+import searchCatalogRouter from "./routes/searchCatalog";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -14,12 +15,15 @@ app.get("/api", (_req, res) => {
     name: "Grocery List Optimizer API",
     status: "ok",
     routes: {
+      "GET /api/search-catalog":
+        "Accepts query and returns FatSecret catalog matches (name, brand, foodId).",
       "POST /api/optimize-list":
-        "Accepts groceryList, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product.",
+        "Accepts groceryList or verified product objects, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product.",
     },
   });
 });
 
+app.use("/api", searchCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use(express.static(publicDir));
 

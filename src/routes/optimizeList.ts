@@ -12,8 +12,45 @@ type OptimizeListRequest = {
   zipCode?: string;
 };
 
+type VerifiedProduct = {
+  name: string;
+  quantity: number;
+  brand?: string;
+  foodId?: string;
+};
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function quantityOf(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(1, Math.floor(value));
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return Math.max(1, Number.parseInt(value.trim(), 10));
+  }
+  return 1;
+}
+
+function isVerifiedProduct(value: unknown): value is VerifiedProduct {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.name === "string" && record.name.trim().length > 0;
+}
+
+function isVerifiedProductArray(value: unknown): value is VerifiedProduct[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isVerifiedProduct);
+}
+
+function toGroceryStrings(items: VerifiedProduct[]): string[] {
+  return items.map((item) => {
+    const quantity = quantityOf(item.quantity);
+    const name = item.name.trim();
+    return `${quantity}x ${name}`;
+  });
 }
 
 function readZipCode(value: unknown): string | undefined | "invalid" {
@@ -44,9 +81,14 @@ function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "inv
   }
 
   const record = body as Record<string, unknown>;
-  const groceryList = record.groceryList ?? record.items;
+  const rawList = record.groceryList ?? record.items;
 
-  if (!isStringArray(groceryList)) {
+  let groceryList: string[];
+  if (isStringArray(rawList)) {
+    groceryList = rawList;
+  } else if (isVerifiedProductArray(rawList)) {
+    groceryList = toGroceryStrings(rawList);
+  } else {
     return null;
   }
 
@@ -79,7 +121,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   if (parsed === null) {
     res.status(400).json({
       error:
-        "Request body must be an array of grocery strings, or an object with a groceryList (or items) string array.",
+        "Request body must be an array of grocery strings, or an object with groceryList/items as strings or verified product objects.",
     });
     return;
   }

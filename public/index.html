@@ -14,8 +14,8 @@
           <p class="brand-kicker">Cheapest Cart</p>
           <h1>Plan the cheapest grocery trip</h1>
           <p class="brand-copy">
-            Enter a ZIP to lock prices to the nearest Kroger, then paste the list.
-            One item per line — <code>2 Milk</code> or <code>Milk x2</code>.
+            Search the catalog, pick verified products, set quantities, then
+            price the list at your nearest Kroger.
           </p>
         </header>
 
@@ -34,16 +34,31 @@
             />
           </div>
 
+          <div class="field">
+            <label for="catalog-search">Add item</label>
+            <div class="search-wrap">
+              <input
+                id="catalog-search"
+                type="search"
+                placeholder="Search milk, eggs, bread…"
+                spellcheck="false"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="search-results"
+                aria-haspopup="listbox"
+              />
+              <ul id="search-results" class="suggest" role="listbox" hidden></ul>
+            </div>
+            <p id="search-status" class="hint" hidden></p>
+          </div>
+
           <div class="field field-list">
-            <label for="grocery-list">Grocery list</label>
-            <textarea
-              id="grocery-list"
-              name="groceryList"
-              rows="14"
-              spellcheck="true"
-              autocomplete="off"
-              placeholder="2 Milk&#10;Eggs&#10;Bread x2"
-            ></textarea>
+            <label>Shopping list</label>
+            <ul id="shopping-list" class="cart"></ul>
+            <p id="cart-empty" class="hint">
+              Search and select a product to add it here.
+            </p>
           </div>
 
           <div class="actions">

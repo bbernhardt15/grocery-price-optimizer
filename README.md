@@ -60,6 +60,19 @@ curl -s -X POST http://localhost:3000/api/optimize-list \
 
 `zipCode` looks up the closest Kroger via `getClosestStoreLocation` and restricts product matches to that store’s `locationId`. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product at the resolved location (or the full catalog if `zipCode` is omitted). `items` is accepted as an alias for `groceryList`.
 
+The dashboard sends verified catalog picks as objects:
+
+```json
+{
+  "zipCode": "45202",
+  "items": [
+    { "name": "Whole Milk", "brand": "Kroger", "foodId": "demo-whole-milk", "quantity": 2 }
+  ]
+}
+```
+
+`GET /api/search-catalog?query=milk` returns `{ products: [{ name, brand, foodId }] }` from FatSecret (or the seeded demo catalog when FatSecret credentials are missing).
+
 Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
 
 Response shape:

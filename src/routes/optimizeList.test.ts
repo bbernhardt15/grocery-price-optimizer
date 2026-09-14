@@ -346,4 +346,28 @@ describe("POST /api/optimize-list", () => {
       krogerService.getClosestStoreLocation = originalLookup;
     }
   });
+
+  it("accepts verified product objects with quantities on items", async () => {
+    const { status, json } = await optimize({
+      items: [
+        {
+          name: "Gallon of Milk",
+          brand: "Kroger",
+          foodId: "50953",
+          quantity: 2,
+        },
+      ],
+      stores: ["Kroger"],
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{
+        items: Array<{ name: string; quantity: number; itemTotal: number }>;
+      }>;
+    };
+    assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
+    assert.equal(body.stores[0].items[0].quantity, 2);
+    assert.equal(body.stores[0].items[0].itemTotal, 5.78);
+  });
 });

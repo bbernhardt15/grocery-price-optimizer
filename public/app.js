@@ -1,6 +1,10 @@
 const formEl = document.querySelector("#optimize-form");
-const groceryListEl = document.querySelector("#grocery-list");
 const zipCodeEl = document.querySelector("#zip-code");
+const searchEl = document.querySelector("#catalog-search");
+const resultsListEl = document.querySelector("#search-results");
+const searchStatusEl = document.querySelector("#search-status");
+const shoppingListEl = document.querySelector("#shopping-list");
+const cartEmptyEl = document.querySelector("#cart-empty");
 const findBtn = document.querySelector("#find-btn");
 const sampleBtn = document.querySelector("#sample-btn");
 const formErrorEl = document.querySelector("#form-error");
@@ -14,13 +18,19 @@ const summaryMetaEl = document.querySelector("#summary-meta");
 const unavailableEl = document.querySelector("#unavailable");
 
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
+const SAMPLE_ITEMS = [
+  { name: "Whole Milk", brand: "Kroger", foodId: "demo-whole-milk", quantity: 2 },
+  { name: "Large Eggs", brand: "Kroger", foodId: "demo-large-eggs", quantity: 1 },
+  { name: "White Bread", brand: "Kroger", foodId: "demo-white-bread", quantity: 2 },
+];
 
-function parseGroceryList(raw) {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
-    .filter(Boolean);
-}
+/** @type {Array<{ name: string, brand: string, foodId: string, quantity: number }>} */
+let cart = [];
+/** @type {Array<{ name: string, brand: string, foodId: string }>} */
+let suggestions = [];
+let activeIndex = -1;
+let searchTimer = 0;
+let searchAbort = null;
 
 function money(value) {
   return new Intl.NumberFormat("en-US", {
@@ -37,11 +47,15 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function itemKey(item) {
+  return item.foodId || `${item.name}|${item.brand ?? ""}`;
+}
+
 function setBusy(isBusy) {
   findBtn.disabled = isBusy;
   sampleBtn.disabled = isBusy;
   zipCodeEl.disabled = isBusy;
-  groceryListEl.disabled = isBusy;
+  searchEl.disabled = isBusy;
   loadingEl.hidden = !isBusy;
 }
 
@@ -75,6 +89,157 @@ function renderUnavailable(items) {
     <h3>Not found in the catalog</h3>
     <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
   `;
+}
+
+function renderCart() {
+  cartEmptyEl.hidden = cart.length > 0;
+  shoppingListEl.innerHTML = cart
+    .map((item, index) => {
+      const label = `${escapeHtml(item.name)}${item.brand ? ` (${escapeHtml(item.brand)})` : ""}`;
+      return `
+        <li class="cart-item" data-index="${index}">
+          <div class="cart-copy">
+            <span class="cart-name">${escapeHtml(item.name)}</span>
+            <span class="cart-brand">${escapeHtml(item.brand || "Catalog")}</span>
+          </div>
+          <div class="qty">
+            <button class="qty-btn" type="button" data-action="dec" data-index="${index}" aria-label="Decrease ${label}">−</button>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              value="${item.quantity}"
+              data-action="qty"
+              data-index="${index}"
+              aria-label="Quantity for ${label}"
+            />
+            <button class="qty-btn" type="button" data-action="inc" data-index="${index}" aria-label="Increase ${label}">+</button>
+          </div>
+          <button class="remove-btn" type="button" data-action="remove" data-index="${index}" aria-label="Remove ${label}">✕</button>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function addToCart(product) {
+  const key = itemKey(product);
+  const existing = cart.find((item) => itemKey(item) === key);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    cart.push({
+      name: product.name,
+      brand: product.brand || "Generic",
+      foodId: product.foodId,
+      quantity: 1,
+    });
+  }
+  renderCart();
+}
+
+function setQuantity(index, quantity) {
+  if (!cart[index]) {
+    return;
+  }
+  cart[index].quantity = Math.max(1, Math.floor(quantity) || 1);
+  renderCart();
+}
+
+function hideSuggestions() {
+  suggestions = [];
+  activeIndex = -1;
+  resultsListEl.hidden = true;
+  resultsListEl.innerHTML = "";
+  searchEl.setAttribute("aria-expanded", "false");
+}
+
+function renderSuggestions() {
+  if (!suggestions.length) {
+    hideSuggestions();
+    return;
+  }
+
+  resultsListEl.hidden = false;
+  searchEl.setAttribute("aria-expanded", "true");
+  resultsListEl.innerHTML = suggestions
+    .map((product, index) => {
+      const active = index === activeIndex ? " is-active" : "";
+      return `
+        <li>
+          <button
+            type="button"
+            class="suggest-item${active}"
+            role="option"
+            data-index="${index}"
+            aria-selected="${index === activeIndex ? "true" : "false"}"
+          >
+            <span class="suggest-name">${escapeHtml(product.name)}</span>
+            <span class="suggest-brand">${escapeHtml(product.brand || "Generic")}</span>
+          </button>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function chooseSuggestion(index) {
+  const product = suggestions[index];
+  if (!product) {
+    return;
+  }
+  addToCart(product);
+  searchEl.value = "";
+  searchStatusEl.hidden = true;
+  hideSuggestions();
+  searchEl.focus();
+  showFormError("");
+}
+
+async function fetchSuggestions(query) {
+  if (searchAbort) {
+    searchAbort.abort();
+  }
+  if (query.trim().length < 2) {
+    hideSuggestions();
+    searchStatusEl.hidden = true;
+    return;
+  }
+
+  searchAbort = new AbortController();
+  searchStatusEl.hidden = false;
+  searchStatusEl.textContent = "Searching catalog…";
+
+  try {
+    const response = await fetch(
+      `/api/search-catalog?query=${encodeURIComponent(query.trim())}`,
+      { signal: searchAbort.signal }
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Search failed (${response.status})`);
+    }
+
+    suggestions = Array.isArray(payload.products) ? payload.products : [];
+    activeIndex = suggestions.length ? 0 : -1;
+    if (!suggestions.length) {
+      hideSuggestions();
+      searchStatusEl.hidden = false;
+      searchStatusEl.textContent = "No catalog matches.";
+      return;
+    }
+    searchStatusEl.hidden = true;
+    renderSuggestions();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+    hideSuggestions();
+    searchStatusEl.hidden = false;
+    searchStatusEl.textContent =
+      error instanceof Error ? error.message : "Catalog search failed.";
+  }
 }
 
 function itemFragment(item) {
@@ -127,12 +292,11 @@ async function findCheapestStores() {
   showFormError("");
   showApiError("");
 
-  const items = parseGroceryList(groceryListEl.value);
-  if (items.length === 0) {
-    showFormError("Add at least one grocery item.");
+  if (cart.length === 0) {
+    showFormError("Add at least one grocery item from the catalog.");
     hideResults();
     emptyStateEl.hidden = false;
-    groceryListEl.focus();
+    searchEl.focus();
     return;
   }
 
@@ -144,6 +308,13 @@ async function findCheapestStores() {
     zipCodeEl.focus();
     return;
   }
+
+  const items = cart.map((item) => ({
+    name: item.name,
+    brand: item.brand,
+    foodId: item.foodId,
+    quantity: item.quantity,
+  }));
 
   setBusy(true);
   try {
@@ -172,20 +343,84 @@ async function findCheapestStores() {
   }
 }
 
+searchEl.addEventListener("input", () => {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    void fetchSuggestions(searchEl.value);
+  }, 280);
+});
+
+searchEl.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    if (!suggestions.length) {
+      return;
+    }
+    activeIndex = (activeIndex + 1) % suggestions.length;
+    renderSuggestions();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    if (!suggestions.length) {
+      return;
+    }
+    activeIndex = (activeIndex - 1 + suggestions.length) % suggestions.length;
+    renderSuggestions();
+  } else if (event.key === "Enter" && suggestions.length && activeIndex >= 0) {
+    event.preventDefault();
+    chooseSuggestion(activeIndex);
+  } else if (event.key === "Escape") {
+    hideSuggestions();
+  }
+});
+
+resultsListEl.addEventListener("mousedown", (event) => {
+  const button = event.target.closest("[data-index]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  chooseSuggestion(Number(button.dataset.index));
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".search-wrap")) {
+    hideSuggestions();
+  }
+});
+
+shoppingListEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
+  const index = Number(button.dataset.index);
+  if (button.dataset.action === "inc") {
+    setQuantity(index, (cart[index]?.quantity ?? 1) + 1);
+  } else if (button.dataset.action === "dec") {
+    setQuantity(index, (cart[index]?.quantity ?? 1) - 1);
+  } else if (button.dataset.action === "remove") {
+    cart.splice(index, 1);
+    renderCart();
+  }
+});
+
+shoppingListEl.addEventListener("change", (event) => {
+  const input = event.target.closest("input[data-action='qty']");
+  if (!input) {
+    return;
+  }
+  setQuantity(Number(input.dataset.index), Number(input.value));
+});
+
 formEl.addEventListener("submit", (event) => {
   event.preventDefault();
   void findCheapestStores();
 });
 
 sampleBtn.addEventListener("click", () => {
-  groceryListEl.value = "2 Milk\nEggs\nBread x2";
+  cart = SAMPLE_ITEMS.map((item) => ({ ...item }));
   showFormError("");
-  groceryListEl.focus();
+  renderCart();
 });
 
-groceryListEl.addEventListener("keydown", (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-    event.preventDefault();
-    void findCheapestStores();
-  }
-});
+renderCart();
