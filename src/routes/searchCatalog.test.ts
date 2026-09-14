@@ -31,9 +31,9 @@ describe("GET /api/search-catalog", () => {
       assert.equal(query, "cheerios");
       return [
         {
+          id: "50953",
           name: "Whole Grain Cheerios",
           brand: "General Mills",
-          foodId: "50953",
         },
       ];
     };
@@ -41,9 +41,10 @@ describe("GET /api/search-catalog", () => {
     const response = await fetch(`${origin}/api/search-catalog?query=cheerios`);
     assert.equal(response.status, 200);
     const body = (await response.json()) as {
-      products: Array<{ name: string; brand: string; foodId: string }>;
+      products: Array<{ name: string; brand: string; id: string; foodId: string }>;
     };
     assert.equal(body.products[0].name, "Whole Grain Cheerios");
+    assert.equal(body.products[0].id, "50953");
     assert.equal(body.products[0].foodId, "50953");
   });
 

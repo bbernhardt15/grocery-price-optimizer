@@ -18,13 +18,23 @@ function uniqueDemoProducts(): FatSecretProduct[] {
       continue;
     }
     seen.add(key);
+    const id = `demo-${key.replace(/[^a-z0-9]+/g, "-")}`;
     products.push({
+      id,
       name: product.name,
       brand: product.brand,
-      foodId: `demo-${key.replace(/[^a-z0-9]+/g, "-")}`,
     });
   }
   return products;
+}
+
+function toCatalogProduct(product: FatSecretProduct) {
+  return {
+    id: product.id,
+    name: product.name,
+    brand: product.brand,
+    foodId: product.id,
+  };
 }
 
 function demoSearch(query: string): FatSecretProduct[] {
@@ -52,11 +62,11 @@ router.get("/search-catalog", async (req: Request, res: Response) => {
 
   try {
     const products = await fatSecretService.searchGlobalCatalog(query);
-    res.json({ products });
+    res.json({ products: products.map(toCatalogProduct) });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`FatSecret catalog search unavailable (${message}); using demo catalog`);
-    res.json({ products: demoSearch(query), source: "demo" });
+    res.json({ products: demoSearch(query).map(toCatalogProduct), source: "demo" });
   }
 });
 

@@ -16,7 +16,7 @@ app.get("/api", (_req, res) => {
     status: "ok",
     routes: {
       "GET /api/search-catalog":
-        "Accepts query and returns FatSecret catalog matches (name, brand, foodId).",
+        "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product.",
     },

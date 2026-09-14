@@ -22,7 +22,7 @@ Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with
 
 ## FatSecret catalog
 
-`src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `searchGlobalCatalog(query)` requests an OAuth 2.0 client-credentials token from `https://oauth.fatsecret.com/connect/token` (Basic auth plus form body using `FATSECRET_CLIENT_ID` / `FATSECRET_CLIENT_SECRET`), caches it until `expires_in`, then `GET https://platform.fatsecret.com/rest/foods/search/v5` with `Authorization: Bearer`. Results are `{ name, brand, foodId }` (and `barcode` when present).
+`src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=basic`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`. The dashboard still receives `foodId` as an alias of `id`.
 
 ## Run locally
 
@@ -71,7 +71,7 @@ The dashboard sends verified catalog picks as objects:
 }
 ```
 
-`GET /api/search-catalog?query=milk` returns `{ products: [{ name, brand, foodId }] }` from FatSecret (or the seeded demo catalog when FatSecret credentials are missing).
+`GET /api/search-catalog?query=milk` returns `{ products: [{ id, name, brand, foodId }] }` from FatSecret (or the seeded demo catalog when FatSecret credentials are missing). `foodId` matches `id` so the dashboard can keep posting verified items.
 
 Counts can sit at the start or end of a line: `"2 Milk"`, `"Milk x2"`, `"3 Eggs"`. The clean name is used for the catalog search; `price` is the unit price and `itemTotal` is `price * quantity`.
 

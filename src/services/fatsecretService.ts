@@ -1,14 +1,13 @@
 import axios, { type AxiosRequestConfig } from "axios";
 
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
-/** Catalog search (foods.search.v5). food/v5 is get-by-id; search is foods/search/v5. */
-const FOOD_SEARCH_URL = "https://platform.fatsecret.com/rest/foods/search/v5";
+const FOOD_SEARCH_URL = "https://platform.fatsecret.com/rest/server.api";
+const TOKEN_REFRESH_SKEW_MS = 60_000;
 
 export type FatSecretProduct = {
+  id: string;
   name: string;
   brand: string;
-  foodId: string;
-  barcode?: string;
 };
 
 export type FatSecretHttp = {
@@ -31,9 +30,6 @@ type FatSecretFood = {
   food_id?: string | number;
   food_name?: string;
   brand_name?: string;
-  food_type?: string;
-  food_barcode?: string;
-  barcode?: string;
 };
 
 type FoodSearchResponse = {
@@ -64,25 +60,21 @@ function asFoodArray(food: FatSecretFood | FatSecretFood[] | undefined): FatSecr
 
 function toProduct(food: FatSecretFood): FatSecretProduct | null {
   const name = String(food.food_name ?? "").trim();
-  const foodId = String(food.food_id ?? "").trim();
-  if (!name || !foodId) {
+  const id = String(food.food_id ?? "").trim();
+  if (!name || !id) {
     return null;
   }
 
-  const brand = food.brand_name?.trim() || "Generic";
-  const barcode = (food.food_barcode ?? food.barcode)?.trim();
-
   return {
+    id,
     name,
-    brand,
-    foodId,
-    ...(barcode ? { barcode } : {}),
+    brand: food.brand_name?.trim() || "Generic",
   };
 }
 
 /**
- * FatSecret Platform client (OAuth 2.0 client credentials).
- * Tokens are reused in memory until they expire.
+ * FatSecret Platform client using OAuth 2.0 client credentials.
+ * Access tokens are cached in memory and refreshed shortly before they expire.
  */
 export class FatSecretService {
   private accessToken: string | null = null;
@@ -90,22 +82,24 @@ export class FatSecretService {
 
   constructor(private readonly http: FatSecretHttp = axios) {}
 
+  private hasFreshToken(): boolean {
+    return Boolean(this.accessToken) && Date.now() + TOKEN_REFRESH_SKEW_MS < this.tokenExpiresAtMs;
+  }
+
   private async getAccessToken(): Promise<string> {
-    const now = Date.now();
-    if (this.accessToken && now < this.tokenExpiresAtMs) {
+    if (this.hasFreshToken() && this.accessToken) {
       return this.accessToken;
     }
 
     const { clientId, clientSecret } = readCredentials();
     const body = new URLSearchParams({
       grant_type: "client_credentials",
-      scope: process.env.FATSECRET_SCOPE?.trim() || "basic",
+      scope: "basic",
       client_id: clientId,
       client_secret: clientSecret,
     });
 
     const response = await this.http.post(TOKEN_URL, body.toString(), {
-      auth: { username: clientId, password: clientSecret },
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
@@ -121,15 +115,14 @@ export class FatSecretService {
       );
     }
 
-    const lifetimeMs = Math.max((payload.expires_in ?? 86400) - 60, 30) * 1000;
+    const expiresInSec = payload.expires_in ?? 86400;
     this.accessToken = payload.access_token;
-    this.tokenExpiresAtMs = now + lifetimeMs;
+    this.tokenExpiresAtMs = Date.now() + Math.max(expiresInSec, 0) * 1000;
     return this.accessToken;
   }
 
   /**
-   * Search the global FatSecret food catalog.
-   * GET https://platform.fatsecret.com/rest/foods/search/v5
+   * Search the global FatSecret food catalog (foods.search.v3).
    */
   async searchGlobalCatalog(query: string): Promise<FatSecretProduct[]> {
     const search = query.trim();
@@ -144,10 +137,9 @@ export class FatSecretService {
         Accept: "application/json",
       },
       params: {
+        method: "foods.search.v3",
         search_expression: search,
         format: "json",
-        max_results: 20,
-        page_number: 0,
       },
     });
 

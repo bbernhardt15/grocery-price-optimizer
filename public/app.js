@@ -143,7 +143,7 @@ function addToCart(product) {
     cart.push({
       name: product.name,
       brand: product.brand || "Generic",
-      foodId: product.foodId,
+      foodId: product.foodId || product.id,
       quantity: 1,
     });
   }
