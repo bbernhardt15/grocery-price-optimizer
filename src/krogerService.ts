@@ -31,7 +31,21 @@ type KrogerPrice = {
 type KrogerProductItem = {
   size?: string;
   price?: KrogerPrice;
+  nationalPrice?: KrogerPrice;
 };
+
+export class KrogerPricingError extends Error {
+  readonly code: "missing_credentials" | "http" | "network";
+
+  constructor(
+    message: string,
+    code: "missing_credentials" | "http" | "network" = "http"
+  ) {
+    super(message);
+    this.name = "KrogerPricingError";
+    this.code = code;
+  }
+}
 
 type KrogerProduct = {
   productId?: string;
@@ -59,9 +73,9 @@ function parseKrogerUnit(size?: string): GroceryUnit {
   return "count";
 }
 
-function pickKrogerPrice(item?: KrogerProductItem): number | null {
-  const promo = item?.price?.promo;
-  const regular = item?.price?.regular;
+function priceFrom(price?: KrogerPrice): number | null {
+  const promo = price?.promo;
+  const regular = price?.regular;
   if (typeof promo === "number" && promo > 0) {
     return promo;
   }
@@ -71,12 +85,20 @@ function pickKrogerPrice(item?: KrogerProductItem): number | null {
   return null;
 }
 
+function pickKrogerPrice(item?: KrogerProductItem): number | null {
+  return priceFrom(item?.price) ?? priceFrom(item?.nationalPrice);
+}
+
+function pricedItem(product: KrogerProduct): KrogerProductItem | undefined {
+  return (product.items ?? []).find((item) => pickKrogerPrice(item) !== null);
+}
+
 function toCatalogProduct(
   product: KrogerProduct,
   locationId?: string
 ): CatalogProduct | null {
   const name = product.description?.trim();
-  const item = product.items?.[0];
+  const item = pricedItem(product) ?? product.items?.[0];
   const price = pickKrogerPrice(item);
   if (!name || price === null) {
     return null;
@@ -99,8 +121,9 @@ function readCredentials(): { clientId: string; clientSecret: string } {
   const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
 
   if (!clientId || !clientSecret) {
-    throw new Error(
-      "Kroger API credentials are missing. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET."
+    throw new KrogerPricingError(
+      "Kroger API credentials are missing. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the server.",
+      "missing_credentials"
     );
   }
 
@@ -153,10 +176,11 @@ export class KrogerService {
 
     const payload = (await response.json()) as TokenResponse;
     if (!response.ok || !payload.access_token) {
-      throw new Error(
+      throw new KrogerPricingError(
         payload.error_description ||
           payload.error ||
-          `Kroger token request failed (${response.status})`
+          `Kroger token request failed (${response.status})`,
+        "http"
       );
     }
 
@@ -218,9 +242,53 @@ export class KrogerService {
     }
   }
 
+  private async fetchProductPayload(
+    term: string,
+    locationId?: string
+  ): Promise<KrogerProduct[]> {
+    const token = await this.getAccessToken();
+    const params = new URLSearchParams({
+      "filter.term": term,
+      "filter.limit": "25",
+    });
+    if (locationId?.trim()) {
+      params.set("filter.locationId", locationId.trim());
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new KrogerPricingError(
+        `Kroger Products API unavailable (${message})`,
+        "network"
+      );
+    }
+
+    if (!response.ok) {
+      throw new KrogerPricingError(
+        `Kroger products request failed (${response.status})`,
+        "http"
+      );
+    }
+
+    const payload = (await response.json()) as ProductsResponse;
+    return payload.data ?? [];
+  }
+
   /**
-   * GET /v1/products?filter.term={term}&filter.locationId={id}&filter.limit=10
+   * GET /v1/products?filter.term={term}&filter.locationId={id}&filter.limit=25
    * Returns shelf prices for the nearest store when `locationId` is set.
+   * If that store returns catalog rows without prices, retries without a
+   * location and uses nationalPrice so ordinary items still price.
    */
   async searchProducts(
     term: string,
@@ -232,36 +300,29 @@ export class KrogerService {
     }
 
     try {
-      const token = await this.getAccessToken();
-      const params = new URLSearchParams({
-        "filter.term": query,
-        "filter.limit": "10",
-      });
-      if (locationId?.trim()) {
-        params.set("filter.locationId", locationId.trim());
+      const storeId = locationId?.trim() || undefined;
+      const raw = await this.fetchProductPayload(query, storeId);
+      const priced = raw
+        .map((product) => toCatalogProduct(product, storeId))
+        .filter((product): product is CatalogProduct => product !== null);
+
+      if (priced.length > 0 || !storeId || raw.length === 0) {
+        return priced;
       }
 
-      const response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
-        method: "GET",
-        cache: "no-cache",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Kroger products request failed (${response.status})`);
-      }
-
-      const payload = (await response.json()) as ProductsResponse;
-      return (payload.data ?? [])
-        .map((product) => toCatalogProduct(product, locationId?.trim()))
+      const national = await this.fetchProductPayload(query);
+      return national
+        .map((product) => toCatalogProduct(product, storeId))
         .filter((product): product is CatalogProduct => product !== null);
     } catch (error) {
+      if (error instanceof KrogerPricingError) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Kroger Products API unavailable (${message})`);
-      return [];
+      throw new KrogerPricingError(
+        `Kroger Products API unavailable (${message})`,
+        "network"
+      );
     }
   }
 }

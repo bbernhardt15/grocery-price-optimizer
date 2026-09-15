@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { KrogerService } from "./krogerService";
+import { KrogerPricingError, KrogerService } from "./krogerService";
 
 const originalFetch = globalThis.fetch;
 
@@ -123,12 +123,106 @@ describe("KrogerService.searchProducts", () => {
     assert.match(calls[1], /\/v1\/products\?/);
     assert.match(calls[1], /filter\.term=milk/);
     assert.match(calls[1], /filter\.locationId=01400441/);
-    assert.match(calls[1], /filter\.limit=10/);
+    assert.match(calls[1], /filter\.limit=25/);
   });
 
-  it("returns an empty list when credentials are missing", async () => {
+  it("uses a later item when the first SKU has no price", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({
+        data: [
+          {
+            productId: "cheerios",
+            brand: "General Mills",
+            description: "Honey Nut Cheerios Cereal",
+            items: [
+              { size: "12 oz" },
+              { size: "12 oz", price: { regular: 4.29, promo: 0 } },
+            ],
+          },
+        ],
+      });
+    });
+
     const service = new KrogerService();
-    const products = await service.searchProducts("milk", "01400441");
-    assert.deepEqual(products, []);
+    const products = await service.searchProducts("Cheerios", "01400441");
+    assert.equal(products.length, 1);
+    assert.equal(products[0].name, "Honey Nut Cheerios Cereal");
+    assert.equal(products[0].price, 4.29);
+  });
+
+  it("falls back to nationalPrice when location prices are missing", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      if (url.includes("filter.locationId")) {
+        return Response.json({
+          data: [
+            {
+              productId: "honey",
+              brand: "Sue Bee",
+              description: "Sue Bee Clover Honey",
+              items: [{ size: "12 oz" }],
+            },
+          ],
+        });
+      }
+      return Response.json({
+        data: [
+          {
+            productId: "honey",
+            brand: "Sue Bee",
+            description: "Sue Bee Clover Honey",
+            items: [{ size: "12 oz", nationalPrice: { regular: 5.49 } }],
+          },
+        ],
+      });
+    });
+
+    const service = new KrogerService();
+    const products = await service.searchProducts("Honey", "01400441");
+    assert.equal(products.length, 1);
+    assert.equal(products[0].price, 5.49);
+    assert.equal(products[0].locationId, "01400441");
+  });
+
+  it("throws when credentials are missing instead of pretending the catalog is empty", async () => {
+    const service = new KrogerService();
+    await assert.rejects(
+      () => service.searchProducts("milk", "01400441"),
+      (error: unknown) => {
+        assert.ok(error instanceof KrogerPricingError);
+        assert.equal(error.code, "missing_credentials");
+        assert.match(error.message, /KROGER_CLIENT_ID/);
+        return true;
+      }
+    );
+  });
+
+  it("throws when the products request is rejected", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ error: "access_denied" }, { status: 403 });
+    });
+
+    const service = new KrogerService();
+    await assert.rejects(
+      () => service.searchProducts("Cheerios", "01400441"),
+      /Kroger products request failed \(403\)/
+    );
   });
 });

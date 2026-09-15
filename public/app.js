@@ -353,6 +353,11 @@ async function findCheapestStores() {
     }
 
     renderResults(payload);
+    if (payload.pricingWarning) {
+      showApiError(
+        `Some items could not use live store prices: ${payload.pricingWarning}`
+      );
+    }
   } catch (error) {
     resultsEl.hidden = true;
     emptyStateEl.hidden = true;

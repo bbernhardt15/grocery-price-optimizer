@@ -1,8 +1,8 @@
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
 import {
+  matchTokenSets,
   nameContainsAllTokens,
-  tokenizeProductName,
 } from "./productSearchQuery";
 
 export type CatalogProduct = {
@@ -15,6 +15,8 @@ export type CatalogProduct = {
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
+  /** In-memory: the grocery line that fetched this row for this request. */
+  sourceQuery?: string;
 };
 
 export type PickedItem = {
@@ -57,37 +59,34 @@ export function productMatchesItem(
   product: CatalogProduct,
   item: string
 ): boolean {
-  const tokens = tokenizeProductName(item);
-  if (tokens.length === 0) {
-    return false;
-  }
-
-  if (nameContainsAllTokens(product.name, tokens)) {
+  if (product.sourceQuery && product.sourceQuery === item) {
     return true;
   }
 
-  return tokens.length > 2 && nameContainsAllTokens(product.name, tokens.slice(0, 2));
+  return matchTokenSets(item).some((tokens) =>
+    nameContainsAllTokens(product.name, tokens)
+  );
 }
 
 function productsMatchingQuery(
   catalog: CatalogProduct[],
   item: string
 ): CatalogProduct[] {
-  const tokens = tokenizeProductName(item);
-  if (tokens.length === 0) {
-    return [];
+  for (const tokens of matchTokenSets(item)) {
+    const matches = catalog.filter((product) =>
+      nameContainsAllTokens(product.name, tokens)
+    );
+    if (matches.length > 0) {
+      return matches;
+    }
   }
 
-  const full = catalog.filter((product) =>
-    nameContainsAllTokens(product.name, tokens)
-  );
-  if (full.length > 0 || tokens.length <= 2) {
-    return full;
+  const sourced = catalog.filter((product) => product.sourceQuery === item);
+  if (sourced.length > 0) {
+    return sourced;
   }
 
-  return catalog.filter((product) =>
-    nameContainsAllTokens(product.name, tokens.slice(0, 2))
-  );
+  return [];
 }
 
 function compareByLowestPrice(a: CatalogProduct, b: CatalogProduct): number {
