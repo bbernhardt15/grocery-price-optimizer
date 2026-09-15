@@ -83,7 +83,7 @@ describe("FatSecretService", () => {
 
     const form = parseForm(calls[0].body);
     assert.equal(form.get("grant_type"), "client_credentials");
-    assert.equal(form.get("scope"), "basic");
+    assert.equal(form.get("scope"), "premier");
     assert.equal(form.get("client_id"), "fs-id");
     assert.equal(form.get("client_secret"), "fs-secret");
 

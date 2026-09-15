@@ -94,7 +94,7 @@ export class FatSecretService {
     const { clientId, clientSecret } = readCredentials();
     const body = new URLSearchParams({
       grant_type: "client_credentials",
-      scope: "basic",
+      scope: "premier",
       client_id: clientId,
       client_secret: clientSecret,
     });
