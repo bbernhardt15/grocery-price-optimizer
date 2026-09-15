@@ -142,11 +142,35 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       locationId = await krogerService.getClosestStoreLocation(zipCode);
     }
 
-    const products = await resolveCatalogProducts(groceryList, stores, locationId);
-    const groupedByStore = optimizeGroceryList(groceryList, stores, products);
+    const productsResult = await resolveCatalogProducts(
+      groceryList,
+      stores,
+      locationId
+    );
+    const groupedByStore = optimizeGroceryList(
+      groceryList,
+      stores,
+      productsResult.products
+    );
+
+    if (
+      groupedByStore.stores.length === 0 &&
+      groupedByStore.unavailable.length > 0 &&
+      productsResult.pricingError
+    ) {
+      res.status(503).json({
+        error: `Live store prices are unavailable: ${productsResult.pricingError}`,
+        unavailable: groupedByStore.unavailable,
+        ...(zipCode ? { zipCode, locationId } : {}),
+      });
+      return;
+    }
 
     res.json({
       ...groupedByStore,
+      ...(productsResult.pricingError
+        ? { pricingWarning: productsResult.pricingError }
+        : {}),
       ...(zipCode ? { zipCode, locationId } : {}),
     });
   } catch (error) {

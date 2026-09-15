@@ -1,11 +1,16 @@
 import { fetchMatchingProductsForQuery } from "./fetchMatchingProducts";
-import { krogerService } from "./krogerService";
+import { KrogerPricingError, krogerService } from "./krogerService";
 import { Product } from "./models/Product";
 import type { CatalogProduct } from "./optimizeGroceryList";
 import { parseGroceryList } from "./parseGroceryLine";
 import { productSearchAttempts } from "./productSearchQuery";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export type ResolvedCatalog = {
+  products: CatalogProduct[];
+  pricingError?: string;
+};
 
 function catalogKey(product: CatalogProduct): string {
   return `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.price}`;
@@ -94,20 +99,24 @@ export async function resolveCatalogProducts(
   groceryList: string[],
   stores: string[] = [],
   locationId?: string
-): Promise<CatalogProduct[]> {
+): Promise<ResolvedCatalog> {
   const lines = parseGroceryList(groceryList);
   const minUpdatedAt = new Date(Date.now() - PRICE_CACHE_MAX_AGE_MS);
   const products: CatalogProduct[] = [];
   const seen = new Set<string>();
+  let pricingError: string | undefined;
 
-  const add = (batch: CatalogProduct[]): void => {
+  const add = (batch: CatalogProduct[], sourceQuery?: string): void => {
     for (const product of batch) {
-      const key = catalogKey(product);
+      const tagged = sourceQuery
+        ? { ...product, sourceQuery }
+        : product;
+      const key = catalogKey(tagged);
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      products.push(product);
+      products.push(tagged);
     }
   };
 
@@ -119,26 +128,38 @@ export async function resolveCatalogProducts(
       { minUpdatedAt }
     );
     if (cached.length > 0) {
-      add(cached);
+      add(cached, line.name);
       continue;
     }
 
     let live: CatalogProduct[] = [];
-    for (const term of productSearchAttempts(line.name)) {
-      live = await krogerService.searchProducts(term, locationId);
-      if (live.length > 0) {
-        break;
+    try {
+      for (const term of productSearchAttempts(line.name)) {
+        live = await krogerService.searchProducts(term, locationId);
+        if (live.length > 0) {
+          break;
+        }
       }
+    } catch (error) {
+      const message =
+        error instanceof KrogerPricingError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      pricingError = pricingError ?? message;
+      console.warn(`Live Kroger pricing failed for "${line.name}": ${message}`);
+      live = [];
     }
     if (live.length > 0) {
-      add(await upsertLiveProducts(live));
+      add(await upsertLiveProducts(live), line.name);
       continue;
     }
 
     // Live API empty/unavailable: still optimize from stale local rows.
-    add(await fetchMatchingProductsForQuery(line.name, stores, locationId));
+    add(await fetchMatchingProductsForQuery(line.name, stores, locationId), line.name);
   }
 
   products.sort((a, b) => a.price - b.price);
-  return products;
+  return { products, pricingError };
 }

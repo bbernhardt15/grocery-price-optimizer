@@ -4,7 +4,7 @@ import { parseGroceryList } from "./parseGroceryLine";
 import type { CatalogProduct } from "./optimizeGroceryList";
 import {
   keywordNameFilter,
-  tokenizeProductName,
+  matchTokenSets,
 } from "./productSearchQuery";
 
 type LeanProduct = {
@@ -119,8 +119,9 @@ async function findByTokens(
 
 /**
  * Finds Product documents whose name contains each keyword from `item`
- * (case-insensitive $regex AND). If nothing matches the full name, retries
- * with the first two words (e.g. "Honey Nut Cheerios Cereal" → "Honey Nut").
+ * (case-insensitive $regex AND). Serving-size annotations like "(28g)" are
+ * ignored. If nothing matches the full name, retries without generic trailing
+ * words (Cereal) and then the first two words.
  * Hits are sorted by price ascending. When `locationId` is set, only that
  * physical store is returned. `minUpdatedAt` keeps only fresh cache rows.
  */
@@ -130,17 +131,14 @@ export async function fetchMatchingProductsForQuery(
   locationId?: string,
   options: FetchMatchingOptions = {}
 ): Promise<CatalogProduct[]> {
-  const tokens = tokenizeProductName(item);
-  if (tokens.length === 0) {
-    return [];
+  for (const tokens of matchTokenSets(item)) {
+    const matches = await findByTokens(tokens, stores, locationId, options);
+    if (matches.length > 0) {
+      return matches.map((product) => ({ ...product, sourceQuery: item }));
+    }
   }
 
-  const full = await findByTokens(tokens, stores, locationId, options);
-  if (full.length > 0 || tokens.length <= 2) {
-    return full;
-  }
-
-  return findByTokens(tokens.slice(0, 2), stores, locationId, options);
+  return [];
 }
 
 /**

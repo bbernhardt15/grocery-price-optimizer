@@ -381,6 +381,148 @@ describe("POST /api/optimize-list", () => {
     assert.equal(body.stores[0].items[0].query, "Honey Nut Cheerios Cereal");
     assert.equal(body.stores[0].items[0].name, "Honey Nut Cheerios");
     assert.equal(body.stores[0].items[0].price, 4.29);
+    await Product.deleteMany({ name: "Honey Nut Cheerios" });
+  });
+
+  it("prices Cheerios, honey, and sandwich bread from live Kroger when they are not seeded", async () => {
+    await Product.deleteMany({
+      name: /cheerios|honey|sandwich bread/i,
+    });
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async (term: string, locationId?: string) => {
+      assert.equal(locationId, "01400441");
+      const catalog: Record<string, Array<{ name: string; brand: string; price: number }>> = {
+        Cheerios: [
+          { name: "Cheerios Toasted Whole Grain Oat Cereal", brand: "General Mills", price: 4.29 },
+        ],
+        Honey: [{ name: "Sue Bee Clover Honey", brand: "Sue Bee", price: 5.49 }],
+        "White Sandwich Bread": [
+          { name: "Kroger White Sandwich Bread", brand: "Kroger", price: 1.59 },
+        ],
+      };
+      return (catalog[term] ?? []).map((product) => ({
+        ...product,
+        storeName: "Kroger",
+        locationId,
+        unit: "oz" as const,
+        normalizedUnit: "oz" as const,
+      }));
+    };
+
+    try {
+      const { status, json } = await optimize({
+        items: [
+          { name: "Cheerios", brand: "General Mills", quantity: 1 },
+          { name: "Honey", brand: "Sue Bee", quantity: 1 },
+          { name: "White Sandwich Bread (28g)", brand: "Great Value", quantity: 1 },
+        ],
+        zipCode: "45103",
+      });
+
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ query: string; name: string; price: number }>;
+          subtotal: number;
+        }>;
+        unavailable: string[];
+        total: number;
+      };
+      assert.deepEqual(body.unavailable, []);
+      assert.equal(body.stores.length, 1);
+      assert.equal(body.stores[0].storeName, "Kroger");
+      const byQuery = Object.fromEntries(
+        body.stores[0].items.map((item) => [item.query, item])
+      );
+      assert.equal(byQuery.Cheerios.price, 4.29);
+      assert.equal(byQuery.Cheerios.name, "Cheerios Toasted Whole Grain Oat Cereal");
+      assert.equal(byQuery.Honey.price, 5.49);
+      assert.equal(byQuery["White Sandwich Bread (28g)"].name, "Kroger White Sandwich Bread");
+      assert.equal(byQuery["White Sandwich Bread (28g)"].price, 1.59);
+      assert.equal(body.total, 11.37);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      await Product.deleteMany({
+        name: {
+          $in: [
+            "Cheerios Toasted Whole Grain Oat Cereal",
+            "Sue Bee Clover Honey",
+            "Kroger White Sandwich Bread",
+          ],
+        },
+      });
+    }
+  });
+
+  it("matches a FatSecret (28g) bread name to a local loaf without that serving token", async () => {
+    await Product.create({
+      name: "Great Value White Sandwich Bread",
+      brand: "Great Value",
+      storeName: "Kroger",
+      locationId: "01400441",
+      price: 1.29,
+      unit: "oz",
+      normalizedUnit: "oz",
+      lastUpdated: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const { status, json } = await optimize({
+      items: [
+        {
+          name: "White Sandwich Bread (28g)",
+          brand: "Great Value",
+          quantity: 1,
+        },
+      ],
+      zipCode: "45103",
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{ items: Array<{ name: string; price: number }> }>;
+      unavailable: string[];
+    };
+    assert.deepEqual(body.unavailable, []);
+    assert.equal(body.stores[0].items[0].name, "Great Value White Sandwich Bread");
+    assert.equal(body.stores[0].items[0].price, 1.29);
+  });
+
+  it("returns 503 when live Kroger pricing is down and the items are not in the catalog", async () => {
+    await Product.deleteMany({
+      name: /cheerios|honey/i,
+    });
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async () => {
+      throw new Error(
+        "Kroger API credentials are missing. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the server."
+      );
+    };
+
+    try {
+      const { status, json } = await optimize({
+        items: [
+          { name: "Cheerios", brand: "General Mills", quantity: 1 },
+          { name: "Honey", brand: "Sue Bee", quantity: 1 },
+        ],
+        zipCode: "45103",
+      });
+
+      assert.equal(status, 503);
+      const body = json as { error: string; unavailable: string[] };
+      assert.match(body.error, /Live store prices are unavailable/);
+      assert.match(body.error, /KROGER_CLIENT_ID/);
+      assert.deepEqual(body.unavailable, ["Cheerios", "Honey"]);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
   });
 
   it("accepts verified product objects with quantities on items", async () => {
