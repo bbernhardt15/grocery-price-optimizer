@@ -3,6 +3,7 @@ import { krogerService } from "./krogerService";
 import { Product } from "./models/Product";
 import type { CatalogProduct } from "./optimizeGroceryList";
 import { parseGroceryList } from "./parseGroceryLine";
+import { productSearchAttempts } from "./productSearchQuery";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -122,7 +123,13 @@ export async function resolveCatalogProducts(
       continue;
     }
 
-    const live = await krogerService.searchProducts(line.name, locationId);
+    let live: CatalogProduct[] = [];
+    for (const term of productSearchAttempts(line.name)) {
+      live = await krogerService.searchProducts(term, locationId);
+      if (live.length > 0) {
+        break;
+      }
+    }
     if (live.length > 0) {
       add(await upsertLiveProducts(live));
       continue;

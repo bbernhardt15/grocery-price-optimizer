@@ -111,7 +111,7 @@ Response shape:
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching is a case-insensitive substring on product `name` (so `"milk"` matches `"Whole Milk"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching splits the name into keywords and requires those tokens in product `name` case-insensitively (so `"milk"` matches `"Whole Milk"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries with the first two words (`"Honey Nut"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
 
 ## Live grocery scrape
 

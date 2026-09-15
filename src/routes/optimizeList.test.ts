@@ -347,6 +347,42 @@ describe("POST /api/optimize-list", () => {
     }
   });
 
+  it("matches FatSecret names to local products by keywords, then the first two words", async () => {
+    await Product.create({
+      name: "Honey Nut Cheerios",
+      brand: "General Mills",
+      storeName: "Kroger",
+      locationId: "01400441",
+      price: 4.29,
+      unit: "oz",
+      normalizedUnit: "oz",
+      lastUpdated: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const { status, json } = await optimize({
+      items: [
+        {
+          name: "Honey Nut Cheerios Cereal",
+          brand: "General Mills",
+          foodId: "cheerios-hn",
+          quantity: 1,
+        },
+      ],
+      stores: ["Kroger"],
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{ items: Array<{ name: string; query: string; price: number }> }>;
+      unavailable: string[];
+    };
+    assert.deepEqual(body.unavailable, []);
+    assert.equal(body.stores[0].items[0].query, "Honey Nut Cheerios Cereal");
+    assert.equal(body.stores[0].items[0].name, "Honey Nut Cheerios");
+    assert.equal(body.stores[0].items[0].price, 4.29);
+  });
+
   it("accepts verified product objects with quantities on items", async () => {
     const { status, json } = await optimize({
       items: [

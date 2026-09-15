@@ -1,5 +1,9 @@
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
+import {
+  nameContainsAllTokens,
+  tokenizeProductName,
+} from "./productSearchQuery";
 
 export type CatalogProduct = {
   name: string;
@@ -53,12 +57,37 @@ export function productMatchesItem(
   product: CatalogProduct,
   item: string
 ): boolean {
-  const query = item.trim().toLowerCase();
-  if (!query) {
+  const tokens = tokenizeProductName(item);
+  if (tokens.length === 0) {
     return false;
   }
 
-  return product.name.toLowerCase().includes(query);
+  if (nameContainsAllTokens(product.name, tokens)) {
+    return true;
+  }
+
+  return tokens.length > 2 && nameContainsAllTokens(product.name, tokens.slice(0, 2));
+}
+
+function productsMatchingQuery(
+  catalog: CatalogProduct[],
+  item: string
+): CatalogProduct[] {
+  const tokens = tokenizeProductName(item);
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const full = catalog.filter((product) =>
+    nameContainsAllTokens(product.name, tokens)
+  );
+  if (full.length > 0 || tokens.length <= 2) {
+    return full;
+  }
+
+  return catalog.filter((product) =>
+    nameContainsAllTokens(product.name, tokens.slice(0, 2))
+  );
 }
 
 function compareByLowestPrice(a: CatalogProduct, b: CatalogProduct): number {
@@ -78,9 +107,7 @@ function pickForLine(
   line: GroceryLine,
   catalog: CatalogProduct[]
 ): PickedItem | null {
-  const matches = catalog.filter((product) =>
-    productMatchesItem(product, line.name)
-  );
+  const matches = productsMatchingQuery(catalog, line.name);
 
   if (matches.length === 0) {
     return null;

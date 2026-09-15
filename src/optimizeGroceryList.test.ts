@@ -81,6 +81,68 @@ describe("optimizeGroceryList", () => {
     assert.deepEqual(result, { stores: [], unavailable: [], total: 0 });
   });
 
+  it("falls back to the first two words when the full FatSecret name is not in the catalog", () => {
+    const cereal: CatalogProduct[] = [
+      {
+        name: "Honey Nut Cheerios",
+        brand: "General Mills",
+        storeName: "Kroger",
+        price: 4.29,
+        unit: "oz",
+        normalizedUnit: "oz",
+      },
+      {
+        name: "Honey Nut Granola",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 3.49,
+        unit: "oz",
+        normalizedUnit: "oz",
+      },
+    ];
+
+    const result = optimizeGroceryList(
+      ["Honey Nut Cheerios Cereal"],
+      ["Kroger"],
+      cereal
+    );
+
+    assert.equal(result.unavailable.length, 0);
+    assert.equal(result.stores[0].items[0].name, "Honey Nut Granola");
+    assert.equal(result.stores[0].items[0].query, "Honey Nut Cheerios Cereal");
+    assert.equal(result.stores[0].items[0].price, 3.49);
+  });
+
+  it("prefers products that match every keyword before the two-word fallback", () => {
+    const cereal: CatalogProduct[] = [
+      {
+        name: "Honey Nut Cheerios Cereal",
+        brand: "General Mills",
+        storeName: "Kroger",
+        price: 4.99,
+        unit: "oz",
+        normalizedUnit: "oz",
+      },
+      {
+        name: "Honey Nut Granola",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 3.49,
+        unit: "oz",
+        normalizedUnit: "oz",
+      },
+    ];
+
+    const result = optimizeGroceryList(
+      ["Honey Nut Cheerios Cereal"],
+      ["Kroger"],
+      cereal
+    );
+
+    assert.equal(result.stores[0].items[0].name, "Honey Nut Cheerios Cereal");
+    assert.equal(result.stores[0].items[0].price, 4.99);
+  });
+
   it("multiplies the cheapest unit price by the requested quantity", () => {
     const result = optimizeGroceryList(
       ["2 Milk", "Bread x2"],

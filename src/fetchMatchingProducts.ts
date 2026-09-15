@@ -2,6 +2,10 @@ import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
 import { parseGroceryList } from "./parseGroceryLine";
 import type { CatalogProduct } from "./optimizeGroceryList";
+import {
+  keywordNameFilter,
+  tokenizeProductName,
+} from "./productSearchQuery";
 
 type LeanProduct = {
   _id: { toString(): string };
@@ -57,14 +61,15 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
 }
 
 function matchingFilter(
-  item: string,
+  tokens: string[],
   stores: string[],
   locationId: string | undefined,
   options: FetchMatchingOptions
-): Record<string, unknown> {
-  const nameQuery = {
-    name: { $regex: escapeRegex(item), $options: "i" },
-  };
+): Record<string, unknown> | null {
+  const nameQuery = keywordNameFilter(tokens);
+  if (!nameQuery) {
+    return null;
+  }
   const extraClauses = [storeFilter(stores), locationFilter(locationId)].filter(
     (clause): clause is Record<string, unknown> => clause !== null
   );
@@ -94,8 +99,28 @@ function uniqueCatalog(docs: LeanProduct[]): CatalogProduct[] {
   return products;
 }
 
+async function findByTokens(
+  tokens: string[],
+  stores: string[],
+  locationId: string | undefined,
+  options: FetchMatchingOptions
+): Promise<CatalogProduct[]> {
+  const filter = matchingFilter(tokens, stores, locationId, options);
+  if (!filter) {
+    return [];
+  }
+
+  const docs = await Product.find(filter)
+    .sort({ price: 1 })
+    .lean<LeanProduct[]>();
+
+  return uniqueCatalog(docs);
+}
+
 /**
- * Finds Product documents whose name contains `item` (case-insensitive $regex).
+ * Finds Product documents whose name contains each keyword from `item`
+ * (case-insensitive $regex AND). If nothing matches the full name, retries
+ * with the first two words (e.g. "Honey Nut Cheerios Cereal" → "Honey Nut").
  * Hits are sorted by price ascending. When `locationId` is set, only that
  * physical store is returned. `minUpdatedAt` keeps only fresh cache rows.
  */
@@ -105,23 +130,22 @@ export async function fetchMatchingProductsForQuery(
   locationId?: string,
   options: FetchMatchingOptions = {}
 ): Promise<CatalogProduct[]> {
-  const query = item.trim();
-  if (!query) {
+  const tokens = tokenizeProductName(item);
+  if (tokens.length === 0) {
     return [];
   }
 
-  const docs = await Product.find(
-    matchingFilter(query, stores, locationId, options)
-  )
-    .sort({ price: 1 })
-    .lean<LeanProduct[]>();
+  const full = await findByTokens(tokens, stores, locationId, options);
+  if (full.length > 0 || tokens.length <= 2) {
+    return full;
+  }
 
-  return uniqueCatalog(docs);
+  return findByTokens(tokens.slice(0, 2), stores, locationId, options);
 }
 
 /**
  * For each grocery-list string, strips any quantity then finds Product
- * documents whose name contains that string (case-insensitive $regex).
+ * documents whose name contains those keywords (case-insensitive $regex).
  * Hits are sorted by price ascending so the cheapest variations come first.
  * When `locationId` is set, only products from that physical store are returned.
  */
