@@ -28,9 +28,11 @@ app.get("/api", (_req, res) => {
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects, zipCode, and optional stores; prices Kroger (Products API), Walmart (Affiliate API when configured), Target (licensed partner feed when configured), and Flipp weekly-ad deals when FLIPP_ENABLED or FLIPP_ACCESS_TOKEN is set; returns a tripPlan, per-store checkout handoff, and pricingByStore freshness/source.",
       "GET /api/kroger/auth-status":
-        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI).",
+        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway).",
       "POST /api/kroger/cart/start":
-        "Starts shopper OAuth for PUT /v1/cart/add. Does nothing without KROGER_REDIRECT_URI and a UPC.",
+        "Starts shopper OAuth for PUT /v1/cart/add, or reuses a shopper cookie. Does nothing without KROGER_REDIRECT_URI and a UPC. Success is only claimed after Kroger HTTP 2xx.",
+      "GET /api/kroger/oauth/callback":
+        "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add. Falls back to Open at Kroger search links on cancel or API rejection.",
     },
   });
 });

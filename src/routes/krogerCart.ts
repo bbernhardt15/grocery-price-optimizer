@@ -4,15 +4,23 @@ import {
   buildKrogerAuthorizeUrl,
   exchangeAuthorizationCode,
   krogerCartSessions,
-  newOAuthState,
+  readCartModality,
   readKrogerOAuthConfig,
+  sealShopperToken,
+  shopperTokenForRequest,
+  signCartState,
   toCartLines,
+  verifyCartState,
   KROGER_SHOPPER_COOKIE,
-  DEFAULT_CART_MODALITY,
+  type KrogerCartLine,
+  type KrogerOAuthConfig,
+  type ShopperToken,
 } from "../krogerCartAuth";
 import { krogerSearchUrl } from "../storeHandoff";
 
 const router = Router();
+const PRODUCT_NAME = "Grocery Gitter";
+const KROGER_CART_PAGE = "https://www.kroger.com/cart";
 
 function htmlPage(title: string, body: string): string {
   return `<!DOCTYPE html>
@@ -20,7 +28,7 @@ function htmlPage(title: string, body: string): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)} — Grocery Gitter</title>
+    <title>${escapeHtml(title)} — ${PRODUCT_NAME}</title>
     <style>
       body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 40rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; color: #171717; }
       a { color: #047857; }
@@ -30,7 +38,7 @@ function htmlPage(title: string, body: string): string {
     </style>
   </head>
   <body>
-    <p><a href="/">← Back to Grocery Gitter</a></p>
+    <p><a href="/">← Back to ${PRODUCT_NAME}</a></p>
     <h1>${escapeHtml(title)}</h1>
     ${body}
   </body>
@@ -54,6 +62,7 @@ type StartItem = {
   quantity?: unknown;
   productId?: unknown;
   upc?: unknown;
+  name?: unknown;
 };
 
 function asOptionalString(value: unknown): string | undefined {
@@ -82,7 +91,7 @@ function parseStartBody(body: unknown): {
   const modality =
     typeof record.modality === "string" && record.modality.trim()
       ? record.modality.trim().toUpperCase()
-      : DEFAULT_CART_MODALITY;
+      : readCartModality();
   const locationId =
     typeof record.locationId === "string" && record.locationId.trim()
       ? record.locationId.trim()
@@ -90,11 +99,90 @@ function parseStartBody(body: unknown): {
   return { items: record.items as StartItem[], locationId, modality };
 }
 
+function searchUrlForLine(item: KrogerCartLine): string {
+  return krogerSearchUrl({
+    name: item.name || item.upc,
+    upc: item.upc,
+  });
+}
+
+function searchLinkItems(items: KrogerCartLine[]): Array<{
+  label: string;
+  url: string;
+  quantity: number;
+}> {
+  return items.map((item) => ({
+    label: item.name || item.upc,
+    url: searchUrlForLine(item),
+    quantity: item.quantity,
+  }));
+}
+
+function searchLinkHtml(items: KrogerCartLine[]): string {
+  return searchLinkItems(items)
+    .map(
+      (item) =>
+        `<li><a href="${escapeHtml(item.url)}" rel="noopener" target="_blank">${escapeHtml(
+          item.label
+        )}</a> × ${item.quantity}</li>`
+    )
+    .join("");
+}
+
+function cookieValue(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) {
+    return undefined;
+  }
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) {
+      continue;
+    }
+    if (trimmed.slice(0, eq) === name) {
+      return decodeURIComponent(trimmed.slice(eq + 1));
+    }
+  }
+  return undefined;
+}
+
+function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: ShopperToken): void {
+  const sealed = sealShopperToken(config.clientSecret, token);
+  const maxAge = token.refreshToken ? 7 * 24 * 60 * 60 : 2400;
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.append(
+    "Set-Cookie",
+    `${KROGER_SHOPPER_COOKIE}=${encodeURIComponent(sealed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
+  );
+}
+
+function pendingFromState(
+  config: KrogerOAuthConfig,
+  state: string | undefined
+): { items: KrogerCartLine[]; locationId?: string } | undefined {
+  if (!state) {
+    return undefined;
+  }
+  const signed = verifyCartState(config, state);
+  if (signed) {
+    krogerCartSessions.takePending(state);
+    return { items: signed.items, locationId: signed.locationId };
+  }
+  const memory = krogerCartSessions.takePending(state);
+  if (memory) {
+    return { items: memory.items, locationId: memory.locationId };
+  }
+  return undefined;
+}
+
 router.get("/kroger/auth-status", (_req, res) => {
   const config = readKrogerOAuthConfig();
   res.json({
     oauthConfigured: Boolean(config),
     cartScope: config?.scope ?? null,
+    redirectUri: config?.redirectUri ?? null,
+    modality: readCartModality(),
     /**
      * Client-credentials (product.compact) already used for pricing cannot
      * add to a shopper cart. A registered redirect URI is required.
@@ -103,7 +191,7 @@ router.get("/kroger/auth-status", (_req, res) => {
   });
 });
 
-router.post("/kroger/cart/start", (req: Request, res: Response) => {
+router.post("/kroger/cart/start", async (req: Request, res: Response) => {
   const parsed = parseStartBody(req.body);
   if (!parsed) {
     res.status(400).json({
@@ -116,7 +204,7 @@ router.post("/kroger/cart/start", (req: Request, res: Response) => {
   if (!config) {
     res.status(501).json({
       error:
-        "Kroger cart OAuth is not configured. Set KROGER_REDIRECT_URI (and register it on the Kroger developer app) in addition to KROGER_CLIENT_ID/SECRET. Until then use the Open at Kroger search links.",
+        "Kroger cart OAuth is not configured. Set KROGER_REDIRECT_URI to the exact URL registered on the Kroger developer app (Railway: https://<your-domain>/api/kroger/oauth/callback) in addition to KROGER_CLIENT_ID/SECRET. Until then use the Open at Kroger search links.",
       oauthConfigured: false,
     });
     return;
@@ -127,6 +215,7 @@ router.post("/kroger/cart/start", (req: Request, res: Response) => {
       upc: asOptionalString(item.upc),
       productId: asOptionalString(item.productId),
       quantity: asOptionalQuantity(item.quantity),
+      name: asOptionalString(item.name),
     })),
     parsed.modality
   );
@@ -134,11 +223,45 @@ router.post("/kroger/cart/start", (req: Request, res: Response) => {
     res.status(400).json({
       error:
         "None of these Kroger items have a UPC/productId, so PUT /v1/cart/add cannot run. Use the Open at Kroger search links instead.",
+      searchLinks: [],
     });
     return;
   }
 
-  const state = newOAuthState();
+  const existing = await shopperTokenForRequest(
+    config,
+    cookieValue(req, KROGER_SHOPPER_COOKIE)
+  );
+  if (existing) {
+    const result = await addItemsToKrogerCart(existing.accessToken, lines);
+    if (result.ok) {
+      appendShopperCookie(res, config, existing);
+      res.json({
+        status: "added",
+        added: result.added,
+        krogerCartUrl: KROGER_CART_PAGE,
+        detail:
+          "Kroger accepted the cart write. Finish pickup/delivery on kroger.com while logged into the same shopper account.",
+      });
+      return;
+    }
+    if (result.status !== 401 && result.status !== 403) {
+      res.status(result.status >= 400 ? result.status : 502).json({
+        error: result.error,
+        oauthConfigured: true,
+        searchLinks: searchLinkItems(lines),
+        detail:
+          "Grocery Gitter did not claim a cart fill because Kroger did not return HTTP 2xx. Use Open at Kroger search links, or retry after logging in again.",
+      });
+      return;
+    }
+    // 401/403: shopper token missing cart scopes or expired — fall through to login.
+  }
+
+  const state = signCartState(config, {
+    items: lines,
+    locationId: parsed.locationId,
+  });
   krogerCartSessions.savePending(state, {
     items: lines,
     locationId: parsed.locationId,
@@ -150,8 +273,9 @@ router.post("/kroger/cart/start", (req: Request, res: Response) => {
       authorizeUrl,
       status: "needs_shopper_login",
       itemCount: lines.length,
+      searchLinks: searchLinkItems(lines),
       detail:
-        "Redirect the shopper to authorizeUrl. Kroger must show a login/consent screen; this app will only call Cart API after that callback succeeds.",
+        "Redirect the shopper to authorizeUrl. Kroger must show a login/consent screen; Grocery Gitter will only call Cart API after that callback succeeds with HTTP 2xx.",
     });
     return;
   }
@@ -174,18 +298,24 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     res.status(501).send(
       htmlPage(
         "Kroger OAuth is not configured",
-        `<p class="status error">Set KROGER_REDIRECT_URI on the server and register that exact URL on your Kroger developer app.</p>`
+        `<p class="status error">Set KROGER_REDIRECT_URI on Railway to the exact HTTPS callback URL registered on your Kroger developer app.</p>`
       )
     );
     return;
   }
+
+  const pending = pendingFromState(config, state);
+  const fallbackList = pending
+    ? `<p>Open each item on Kroger instead:</p><ul>${searchLinkHtml(pending.items)}</ul>`
+    : `<p>Use <strong>Open at Kroger</strong> search links from the ${PRODUCT_NAME} trip plan.</p>`;
 
   if (errorParam) {
     res.status(400).send(
       htmlPage(
         "Kroger login was not completed",
         `<p class="status error">${escapeHtml(errorDescription || errorParam)}</p>
-         <p>Cart write did not run. Use <strong>Open at Kroger</strong> search links from the trip plan, or retry after logging in with a Kroger account that can authorize <code>cart.basic:write</code>.</p>`
+         <p>Cart write did not run. ${PRODUCT_NAME} never reports items as added unless Kroger acknowledges <code>PUT /v1/cart/add</code>.</p>
+         ${fallbackList}`
       )
     );
     return;
@@ -195,18 +325,18 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     res.status(400).send(
       htmlPage(
         "Missing OAuth code",
-        `<p class="status error">Kroger did not return an authorization code. Nothing was added to a cart.</p>`
+        `<p class="status error">Kroger did not return an authorization code. Nothing was added to a cart.</p>
+         ${fallbackList}`
       )
     );
     return;
   }
 
-  const pending = krogerCartSessions.takePending(state);
   if (!pending) {
     res.status(400).send(
       htmlPage(
         "Kroger cart session expired",
-        `<p class="status error">Start again from <strong>Add to Kroger cart</strong> on the trip plan. Pending items are kept only ~15 minutes and only in this server process.</p>`
+        `<p class="status error">Start again from <strong>Add to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`
       )
     );
     return;
@@ -221,27 +351,16 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
       htmlPage(
         "Could not complete Kroger login",
         `<p class="status error">${escapeHtml(message)}</p>
-         <p>The Cart API was not called. Confirm the redirect URI matches KROGER_REDIRECT_URI and that the Kroger app is allowed to request <code>cart.basic:write</code>.</p>`
+         <p>The Cart API was not called. Confirm the redirect URI matches KROGER_REDIRECT_URI (including https and hostname) and that the Kroger app is allowed to request <code>cart.basic:write</code>.</p>
+         ${fallbackList}`
       )
     );
     return;
   }
 
-  const sessionId = newOAuthState();
-  krogerCartSessions.saveShopper(sessionId, token);
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  res.append(
-    "Set-Cookie",
-    `${KROGER_SHOPPER_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2400${secure}`
-  );
+  appendShopperCookie(res, config, token);
 
   const result = await addItemsToKrogerCart(token.accessToken, pending.items);
-  const searchLinks = pending.items
-    .map((item) => {
-      const url = krogerSearchUrl({ name: item.upc, upc: item.upc });
-      return `<li><a href="${escapeHtml(url)}" rel="noopener" target="_blank">${escapeHtml(item.upc)}</a> × ${item.quantity}</li>`;
-    })
-    .join("");
 
   if (!result.ok) {
     const status = result.status >= 400 ? result.status : 502;
@@ -249,9 +368,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
       htmlPage(
         "Kroger did not add items to the cart",
         `<p class="status error">${escapeHtml(result.error)}</p>
-         <p>This app will not claim a cart fill unless Kroger acknowledges <code>PUT /v1/cart/add</code>. Common causes: the developer app lacks cart scopes, the shopper cancelled login, or the UPC is not orderable for pickup.</p>
-         <p>Open each item on Kroger instead:</p>
-         <ul>${searchLinks}</ul>`
+         <p>${PRODUCT_NAME} will not claim a cart fill unless Kroger acknowledges <code>PUT /v1/cart/add</code> with HTTP 2xx. Common causes: the developer app lacks cart scopes, the shopper cancelled login, or the UPC is not orderable for pickup.</p>
+         ${fallbackList}`
       )
     );
     return;
@@ -261,7 +379,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     htmlPage(
       "Added to your Kroger cart",
       `<p class="status">Kroger accepted ${result.added} item${result.added === 1 ? "" : "s"} via the Cart API. Finish pickup/delivery on Kroger while logged into the <strong>same</strong> shopper account.</p>
-       <p><a href="https://www.kroger.com/cart" rel="noopener" target="_blank">Open Kroger cart</a></p>`
+       <p><a href="${KROGER_CART_PAGE}" rel="noopener" target="_blank">Open Kroger cart</a></p>`
     )
   );
 });

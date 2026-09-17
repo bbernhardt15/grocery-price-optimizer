@@ -28,9 +28,9 @@ export const seedCatalog: CatalogProduct[] = [
   { name: "Ground Beef 80/20", brand: "Great Value", storeName: "Walmart", price: 4.74, unit: "lbs", normalizedUnit: "lbs" },
 
   // Kroger (tagged with the demo location so ZIP lookups price this store)
-  { name: "Whole Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.99, unit: "gal", normalizedUnit: "gal" },
-  { name: "Large Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.49, unit: "count", normalizedUnit: "count" },
-  { name: "White Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.19, unit: "oz", normalizedUnit: "oz" },
+  { name: "Whole Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111041700", upc: "0001111041700", price: 2.99, unit: "gal", normalizedUnit: "gal" },
+  { name: "Large Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111040101", upc: "0001111040101", price: 2.49, unit: "count", normalizedUnit: "count" },
+  { name: "White Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111087523", upc: "0001111087523", price: 2.19, unit: "oz", normalizedUnit: "oz" },
   { name: "Bananas", brand: "Fresh", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 0.69, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Boneless Chicken Breast", brand: "Simple Truth", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.99, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Long Grain Rice", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.19, unit: "lbs", normalizedUnit: "lbs" },

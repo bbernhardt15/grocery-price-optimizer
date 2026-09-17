@@ -10,7 +10,7 @@
       content="Grocery Gitter — search products, then price the trip across stores."
     />
     <title>Grocery Gitter — Product search</title>
-    <link rel="stylesheet" href="/styles.css?v=weekly-ad" />
+    <link rel="stylesheet" href="/styles.css?v=kroger-cart-oauth" />
   </head>
   <body>
     <div class="shell">
@@ -97,8 +97,10 @@
           <p class="empty-title">No trip yet</p>
           <p>
             Results appear here as a trip plan — how many items go to each store,
-            then an Open / Add to cart / Coming soon action so you can buy the
-            split trip. Each store card shows whether prices are <strong>live</strong>,
+            then an Open / Add to Kroger cart / Coming soon action so you can buy the
+            split trip. Add to Kroger cart appears after you register a shopper
+            redirect URI; Grocery Gitter only reports items added when Kroger
+            returns HTTP 2xx. Each store card shows whether prices are <strong>live</strong>,
             from a <strong>weekly ad</strong> (circular near your ZIP — not a full
             shelf catalog), or from the <strong>demo catalog</strong>.
           </p>
@@ -119,6 +121,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=weekly-ad"></script>
+    <script src="/app.js?v=kroger-cart-oauth"></script>
   </body>
 </html>

@@ -11,6 +11,8 @@ type SeedProduct = {
   brand: string;
   storeName: "Walmart" | "Target" | "Kroger";
   locationId?: string;
+  productId?: string;
+  upc?: string;
   price: number;
   unit: "gal" | "count" | "lbs";
   normalizedUnit: "gal" | "count" | "lbs";
@@ -25,15 +27,15 @@ type SeedProduct = {
 export const mockProducts: SeedProduct[] = [
   { name: "Gallon of Milk", brand: "Great Value", storeName: "Walmart", price: 3.27, unit: "gal", normalizedUnit: "gal" },
   { name: "Gallon of Milk", brand: "Good & Gather", storeName: "Target", price: 3.49, unit: "gal", normalizedUnit: "gal" },
-  { name: "Gallon of Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.89, unit: "gal", normalizedUnit: "gal" },
+  { name: "Gallon of Milk", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111041700", upc: "0001111041700", price: 2.89, unit: "gal", normalizedUnit: "gal" },
 
   { name: "Loaf of Bread", brand: "Great Value", storeName: "Walmart", price: 1.28, unit: "count", normalizedUnit: "count" },
   { name: "Loaf of Bread", brand: "Good & Gather", storeName: "Target", price: 1.89, unit: "count", normalizedUnit: "count" },
-  { name: "Loaf of Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 1.59, unit: "count", normalizedUnit: "count" },
+  { name: "Loaf of Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111087523", upc: "0001111087523", price: 1.59, unit: "count", normalizedUnit: "count" },
 
   { name: "Dozen Eggs", brand: "Great Value", storeName: "Walmart", price: 2.48, unit: "count", normalizedUnit: "count" },
   { name: "Dozen Eggs", brand: "Good & Gather", storeName: "Target", price: 1.99, unit: "count", normalizedUnit: "count" },
-  { name: "Dozen Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 2.29, unit: "count", normalizedUnit: "count" },
+  { name: "Dozen Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111040101", upc: "0001111040101", price: 2.29, unit: "count", normalizedUnit: "count" },
 
   { name: "Bananas", brand: "Fresh", storeName: "Walmart", price: 0.54, unit: "lbs", normalizedUnit: "lbs" },
 ];

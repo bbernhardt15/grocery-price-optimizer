@@ -27,6 +27,8 @@ export type StoreHandoffAction = {
   status: HandoffActionStatus;
   /** Honest explanation of what the button does and what still needs retailer OAuth. */
   detail?: string;
+  /** Search deep link used when cart OAuth is unavailable or Kroger rejects the write. */
+  fallbackUrl?: string;
 };
 
 export type StoreHandoff = {
@@ -181,8 +183,9 @@ function krogerAction(
       label: "Add to Kroger cart",
       url: KROGER_CART_START_PATH,
       status: "needs_shopper_login",
+      ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
       detail:
-        "Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. The client-credentials token used for pricing cannot write a cart. Items without a UPC still use Open at Kroger.",
+        "Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. Grocery Gitter reports success only if Kroger returns HTTP 2xx. The client-credentials token used for pricing cannot write a cart.",
     };
   }
 
@@ -193,7 +196,7 @@ function krogerAction(
     status: firstUrl ? "ready" : "unavailable",
     detail: oauthConfigured
       ? "Kroger Cart API needs a product UPC from the live Products API. This list only has search links until those IDs are present."
-      : "Opens Kroger search. Writing the shopper cart requires authorization-code OAuth, not the client-credentials pricing token.",
+      : "Opens Kroger search. Writing the shopper cart requires authorization-code OAuth (KROGER_REDIRECT_URI), not the client-credentials pricing token.",
   };
 }
 
@@ -205,7 +208,7 @@ function walmartAction(items: HandoffItem[]): StoreHandoffAction {
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
     detail:
-      "Search deep link, not a cart fill. Walmart cart APIs typically need partner or shopper OAuth.",
+      "Search deep link, not a cart fill. Authenticated Walmart cart APIs need partner access; Grocery Gitter does not invent a cart write.",
   };
 }
 
@@ -217,7 +220,7 @@ function targetAction(items: HandoffItem[]): StoreHandoffAction {
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
     detail:
-      "Search deep link, not a cart fill. Target does not expose a public cart-write API for this app.",
+      "Search deep link, not a cart fill. Target authenticated cart fill needs a partner API; Grocery Gitter does not invent one.",
   };
 }
 
@@ -226,7 +229,7 @@ function comingSoonAction(storeName: string): StoreHandoffAction {
     type: "coming_soon",
     label: "Coming soon",
     status: "coming_soon",
-    detail: `${storeName} online checkout is not wired yet. Phase 3 adds authenticated cart fill only where a retailer API allows it.`,
+    detail: `${storeName} online checkout is not wired yet. Authenticated cart fill needs a retailer partner API (see the Phase 3 table in docs/PRODUCT_ROADMAP.md).`,
   };
 }
 

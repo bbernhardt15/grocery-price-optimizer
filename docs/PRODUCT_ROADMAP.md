@@ -13,25 +13,25 @@ This is not a single-store price comparison page. The durable product is a **mul
 - Pluggable store pricing providers: Kroger (live), Walmart Affiliate API (live when keys are set), Target licensed partner feed (live only with a contracted base URL), Flipp weekly-ad deals (Aldi / Target-without-partner-feed / Publix-like banners when enabled)
 - Seed catalog samples for Aldi, Walmart, Kroger, and Target — labeled **Demo catalog** until a live or weekly-ad provider returns rows
 - Dashboard badges + `pricingByStore` so **Live prices**, **Weekly ad**, and **Demo catalog** stay distinct
+- **Kroger shopper cart fill** (Phase 3): authorization-code OAuth + `PUT /v1/cart/add` when `KROGER_REDIRECT_URI` is registered. Success is reported only on HTTP 2xx.
 
 Client-credentials can look up stores and shelf prices. They **cannot** write a shopper’s Kroger, Walmart, or Target cart.
 
 ---
 
-## Phase 1 — Trip plan + Kroger handoff (unmerged on `cursor/trip-plan-kroger-handoff-5b62`, included in this PR)
+## Phase 1 — Trip plan + Kroger handoff (shipped)
 
 Customer-visible slice:
 
 1. After optimize, show a trip plan summary (`15 Kroger + 5 Walmart + 10 Target`) and a primary action on each store card.
 2. Each store group in the API includes a **handoff** object: item identities (name, brand, quantity, price, `productId` / `upc` / `locationId` when known) plus an `action` of `kroger_cart` | `search_deeplink` | `coming_soon`.
-3. **Kroger (working path):** “Open at Kroger” search/product deep links using `productId`/UPC when the Products API returned them, otherwise the item name. Shopper completes add-to-cart on kroger.com.
-4. **Kroger (optional next step in this phase):** authorization-code OAuth (`cart.basic:write`) + `PUT /v1/cart/add` when `KROGER_REDIRECT_URI` is registered. This **requires the shopper to log in** at Kroger. It is not the client-credentials token already used for pricing. If the Cart API rejects the app (missing partner/cart scopes) the UI stays on deep links and does **not** pretend the cart was filled.
-5. **Walmart + Target:** same handoff shape with public search deep links (and honest copy that authenticated cart APIs are closed or partner-only). Live pricing for those retailers is Phase 2.
-6. **Aldi / others:** `coming_soon` — no fake checkout.
+3. **Kroger (always-available path):** “Open at Kroger” search/product deep links using `productId`/UPC when the Products API returned them, otherwise the item name. Shopper completes add-to-cart on kroger.com.
+4. **Walmart + Target:** same handoff shape with public search deep links (and honest copy that authenticated cart APIs are closed or partner-only).
+5. **Aldi / others:** `coming_soon` — no fake checkout.
 
 ---
 
-## Phase 2 — Live multi-store pricing (this PR)
+## Phase 2 — Live multi-store pricing (shipped)
 
 Price the same verified items at more than Kroger so the 15/5/10 split reflects real local shelves **when a documented live source exists**:
 
@@ -69,15 +69,17 @@ Give Aldi, Target-without-partner-feed, Publix-like banners, and other mapped ci
 
 ---
 
-## Phase 3 — Authenticated multi-cart fill
+## Phase 3 — Authenticated multi-cart fill (this PR)
 
 Where a retailer actually allows it, fill the shopper’s cart after they authorize the app:
 
-| Retailer | Likely requirement | Notes |
+| Retailer | Requirement | Status in Grocery Gitter |
 | --- | --- | --- |
-| Kroger | Authorization-code OAuth, `cart.basic:write` (or `cart.basic:rw`), registered redirect URI | `PUT https://api.kroger.com/v1/cart/add` with `{ upc, quantity, modality }`. Client-credentials are not enough. |
-| Walmart | Shopper OAuth / partner cart APIs | Public cart-write is typically closed. Search deep links remain the fallback. |
-| Target | Partner / RedCard / shopper OAuth | Same: do not invent a cart API. |
-| Aldi | Instacart or similar, if ever licensed | Stay `coming_soon` until a real contract exists. |
+| **Kroger** | Authorization-code OAuth, `cart.basic:write` (or `cart.basic:rw`), redirect URI registered on the Kroger developer app **and** set as `KROGER_REDIRECT_URI` (must match the Railway/production HTTPS URL exactly) | **Implemented.** Dashboard shows **Add to Kroger cart** when that env is set and items have UPC/`productId`. Shopper logs in at Kroger, callback exchanges the code, then `PUT https://api.kroger.com/v1/cart/add` with `{ upc, quantity, modality }`. Success HTML/JSON only on HTTP 2xx. Cancelled login, missing scopes, or API rejection fall back to **Open at Kroger** search links — never a fake “added to cart”. Client-credentials tokens used for Products/Locations are **not** used for cart writes. |
+| **Walmart** | Shopper OAuth / partner cart APIs | **Not implemented.** Public cart-write is typically closed. Search deep links remain the fallback. Do not invent a Walmart cart API. |
+| **Target** | Partner / RedCard / shopper OAuth | **Not implemented.** Same: do not invent a cart API. Search deep links only. |
+| **Aldi** | Instacart or similar, if ever licensed | Stay `coming_soon` until a real contract exists. |
 
-Phase 3 success looks like: one tap per store card → shopper login (if needed) → items appear in **that** retailer’s cart → shopper pays on the retailer site. Never report “added to cart” unless the retailer API acknowledged the write.
+Phase 3 success for Kroger looks like: one tap on the Kroger card → shopper login (if needed) → items appear in **that** shopper’s Kroger cart → shopper pays on kroger.com.
+
+Enable it on Railway: see README **Enable Kroger shopper cart fill**.
