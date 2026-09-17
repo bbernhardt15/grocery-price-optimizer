@@ -60,6 +60,7 @@ async function seed(): Promise<void> {
   const inserted = await Product.insertMany(
     mockProducts.map((product) => ({
       ...product,
+      priceSource: "seed" as const,
       lastUpdated: new Date(),
     }))
   );

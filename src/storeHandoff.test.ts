@@ -87,6 +87,17 @@ describe("store handoff URLs", () => {
       "https://www.target.com/s?searchTerm=Dozen+Eggs"
     );
   });
+
+  it("uses retailer product ids for Walmart and Target when live pricing returned them", () => {
+    assert.equal(
+      walmartSearchUrl({ name: "Whole Milk", productId: "554433" }),
+      "https://www.walmart.com/ip/554433"
+    );
+    assert.equal(
+      targetSearchUrl({ name: "Large Eggs", productId: "12345678" }),
+      "https://www.target.com/p/-/A-12345678"
+    );
+  });
 });
 
 describe("formatTripSummary", () => {

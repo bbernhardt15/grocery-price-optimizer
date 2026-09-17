@@ -5,6 +5,8 @@ import {
   nameContainsAllTokens,
 } from "./productSearchQuery";
 
+export type PriceSource = "live" | "cached_live" | "seed";
+
 export type CatalogProduct = {
   name: string;
   brand: string;
@@ -21,6 +23,8 @@ export type CatalogProduct = {
   updatedAt?: Date;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
+  /** live = retailer API this request; cached_live = Mongo row from a live API; seed = demo catalog. */
+  priceSource?: PriceSource;
 };
 
 export type PickedItem = {
@@ -36,6 +40,7 @@ export type PickedItem = {
   locationId?: string;
   productId?: string;
   upc?: string;
+  priceSource?: PriceSource;
 };
 
 export type StoreGroup = {
@@ -135,6 +140,7 @@ function pickForLine(
     ...(best.locationId ? { locationId: best.locationId } : {}),
     ...(best.productId ? { productId: best.productId } : {}),
     ...(best.upc ? { upc: best.upc } : {}),
+    ...(best.priceSource ? { priceSource: best.priceSource } : {}),
   };
 }
 

@@ -16,6 +16,7 @@ const storeGridEl = document.querySelector("#store-grid");
 const grandTotalEl = document.querySelector("#grand-total");
 const summaryMetaEl = document.querySelector("#summary-meta");
 const unavailableEl = document.querySelector("#unavailable");
+const pricingLegendEl = document.querySelector("#pricing-legend");
 
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
@@ -81,6 +82,7 @@ function hideResults() {
   grandTotalEl.textContent = "$0.00";
   summaryMetaEl.textContent = "";
   renderUnavailable([]);
+  renderPricingLegend([]);
 }
 
 function showFormError(message) {
@@ -267,6 +269,66 @@ async function fetchSuggestions(query) {
   }
 }
 
+function renderPricingLegend(reports) {
+  if (!pricingLegendEl) {
+    return;
+  }
+  if (!reports.length) {
+    pricingLegendEl.hidden = true;
+    pricingLegendEl.innerHTML = "";
+    return;
+  }
+
+  pricingLegendEl.hidden = false;
+  pricingLegendEl.innerHTML = `
+    <h3>Price sources</h3>
+    <ul>
+      ${reports
+        .map((report) => {
+          const error = report.error
+            ? ` ${escapeHtml(report.error)}`
+            : "";
+          return `<li><span class="price-badge price-badge-${pricingBadgeKind(
+            report.source
+          )}">${escapeHtml(report.label)}</span> <strong>${escapeHtml(
+            report.storeName
+          )}</strong> — ${escapeHtml(report.detail)}${error}</li>`;
+        })
+        .join("")}
+    </ul>
+  `;
+}
+
+function pricingBadgeKind(source) {
+  if (source === "live") return "live";
+  if (source === "cached_live") return "cached";
+  if (source === "mixed") return "mixed";
+  if (source === "unavailable") return "unavailable";
+  return "seed";
+}
+
+function renderPricingBadge(store) {
+  const pricing = store.pricing;
+  if (!pricing) {
+    return "";
+  }
+  return `<p class="store-count">${escapeHtml(store.itemCount)} item${
+    Number(store.itemCount) === 1 ? "" : "s"
+  } · <span class="price-badge price-badge-${pricingBadgeKind(
+    pricing.source
+  )}" title="${escapeHtml(pricing.detail)}">${escapeHtml(pricing.label)}</span></p>`;
+}
+
+function itemSourceMark(item) {
+  if (item.priceSource === "live" || item.priceSource === "cached_live") {
+    return ` <em class="item-source item-source-live">live</em>`;
+  }
+  if (item.priceSource === "seed") {
+    return ` <em class="item-source">demo</em>`;
+  }
+  return "";
+}
+
 function itemFragment(item) {
   const quantity = item.quantity ?? 1;
   const itemTotal = item.itemTotal ?? item.price * quantity;
@@ -349,7 +411,7 @@ function renderStoreCard(store) {
         : "";
       return `<li class="item-line"><span>${escapeHtml(
         itemFragment(item)
-      )}</span>${openLink}</li>`;
+      )}${itemSourceMark(item)}</span>${openLink}</li>`;
     })
     .join("");
 
@@ -358,7 +420,11 @@ function renderStoreCard(store) {
       <header>
         <div>
           <h2>${escapeHtml(store.storeName)}</h2>
-          <p class="store-count">${itemCount} item${itemCount === 1 ? "" : "s"}</p>
+          ${
+            store.pricing
+              ? renderPricingBadge({ ...store, itemCount })
+              : `<p class="store-count">${itemCount} item${itemCount === 1 ? "" : "s"}</p>`
+          }
         </div>
         <p class="store-subtotal">${money(store.subtotal)}</p>
       </header>
@@ -392,6 +458,7 @@ function renderResults(payload) {
       : "Nothing in the catalog matched this list.";
   storeGridEl.innerHTML = payload.stores.map(renderStoreCard).join("");
   renderUnavailable(payload.unavailable ?? []);
+  renderPricingLegend(payload.pricingByStore ?? []);
 }
 
 async function startKrogerCart(store) {

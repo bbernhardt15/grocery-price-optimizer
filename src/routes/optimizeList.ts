@@ -147,11 +147,15 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
     const productsResult = await resolveCatalogProducts(
       groceryList,
       stores,
-      locationId
+      locationId,
+      zipCode
     );
     const groupedByStore = enrichOptimizeResult(
       optimizeGroceryList(groceryList, stores, productsResult.products),
-      { krogerCartOAuthConfigured: isKrogerCartOAuthConfigured() }
+      {
+        krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(),
+        pricingByStore: productsResult.pricingByStore,
+      }
     );
 
     if (
@@ -163,6 +167,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
         error: `Live store prices are unavailable: ${productsResult.pricingError}`,
         unavailable: groupedByStore.unavailable,
         tripPlan: groupedByStore.tripPlan,
+        pricingByStore: productsResult.pricingByStore,
         ...(zipCode ? { zipCode, locationId } : {}),
       });
       return;
@@ -170,6 +175,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
 
     res.json({
       ...groupedByStore,
+      pricingByStore: productsResult.pricingByStore,
       ...(productsResult.pricingError
         ? { pricingWarning: productsResult.pricingError }
         : {}),

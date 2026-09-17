@@ -1,8 +1,18 @@
 import { fetchMatchingProductsForQuery } from "./fetchMatchingProducts";
-import { KrogerPricingError, krogerService } from "./krogerService";
 import { Product } from "./models/Product";
-import type { CatalogProduct } from "./optimizeGroceryList";
+import type { CatalogProduct, PriceSource } from "./optimizeGroceryList";
 import { parseGroceryList } from "./parseGroceryLine";
+import { competingStoreNames, providerForStore } from "./pricing/providers";
+import {
+  emptyAccumulator,
+  finalizeStoreReport,
+  pricingWarningFromReports,
+} from "./pricing/reports";
+import type {
+  StorePricingAccumulator,
+  StorePricingReport,
+} from "./pricing/types";
+import { StorePricingError } from "./pricing/types";
 import { productSearchAttempts } from "./productSearchQuery";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -10,10 +20,11 @@ export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export type ResolvedCatalog = {
   products: CatalogProduct[];
   pricingError?: string;
+  pricingByStore: StorePricingReport[];
 };
 
 function catalogKey(product: CatalogProduct): string {
-  return `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.price}`;
+  return `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.price}|${product.priceSource ?? ""}`;
 }
 
 function toCatalogProduct(doc: {
@@ -28,7 +39,9 @@ function toCatalogProduct(doc: {
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
+  priceSource?: "live" | "seed" | null;
 }): CatalogProduct {
+  const stored: PriceSource = doc.priceSource === "live" ? "live" : "seed";
   return {
     name: doc.name,
     brand: doc.brand,
@@ -41,7 +54,27 @@ function toCatalogProduct(doc: {
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
     updatedAt: doc.updatedAt,
+    priceSource: stored,
   };
+}
+
+function locationForStore(
+  storeName: string,
+  krogerLocationId?: string
+): string | undefined {
+  return storeName.trim().toLowerCase() === "kroger"
+    ? krogerLocationId
+    : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof StorePricingError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 /**
@@ -79,6 +112,7 @@ export async function upsertLiveProducts(
           normalizedUnit: product.normalizedUnit,
           lastUpdated: now,
           updatedAt: now,
+          priceSource: "live",
         },
       },
       {
@@ -90,33 +124,92 @@ export async function upsertLiveProducts(
     ).lean();
 
     if (doc) {
-      saved.push(toCatalogProduct(doc));
+      saved.push({ ...toCatalogProduct(doc), priceSource: "live" });
     }
   }
 
   return saved;
 }
 
+async function liveSearch(
+  storeName: string,
+  itemName: string,
+  zipCode: string | undefined,
+  krogerLocationId: string | undefined
+): Promise<CatalogProduct[]> {
+  const provider = providerForStore(storeName);
+  if (!provider) {
+    return [];
+  }
+
+  const locationId = locationForStore(storeName, krogerLocationId);
+  for (const term of productSearchAttempts(itemName)) {
+    const live = await provider.searchProducts(term, {
+      zipCode,
+      locationId,
+    });
+    if (live.length > 0) {
+      return live.map((product) => ({
+        ...product,
+        storeName: provider.storeName,
+        priceSource: "live" as const,
+      }));
+    }
+  }
+  return [];
+}
+
 /**
- * Per grocery item: use Mongo rows newer than 24 hours; on a cache miss,
- * pull live Kroger prices and upsert them before returning.
+ * Per grocery item, per competing store: use Mongo live rows newer than 24
+ * hours; on a miss, call that store's pricing provider (Kroger Products,
+ * Walmart Affiliate, Target partner feed) and upsert; otherwise fall back to
+ * seed/stale rows labeled as demo.
  */
 export async function resolveCatalogProducts(
   groceryList: string[],
   stores: string[] = [],
-  locationId?: string
+  locationId?: string,
+  zipCode?: string
 ): Promise<ResolvedCatalog> {
   const lines = parseGroceryList(groceryList);
   const minUpdatedAt = new Date(Date.now() - PRICE_CACHE_MAX_AGE_MS);
+  const competing = competingStoreNames(stores);
   const products: CatalogProduct[] = [];
   const seen = new Set<string>();
-  let pricingError: string | undefined;
+  const accumulators = new Map<string, StorePricingAccumulator>();
 
-  const add = (batch: CatalogProduct[], sourceQuery?: string): void => {
+  for (const storeName of competing) {
+    const acc = emptyAccumulator(storeName);
+    const provider = providerForStore(storeName);
+    acc.configured = provider?.isConfigured() ?? false;
+    if (storeName.trim().toLowerCase() === "kroger" && locationId) {
+      acc.locationId = locationId;
+    }
+    accumulators.set(storeName.toLowerCase(), acc);
+  }
+
+  const accFor = (storeName: string): StorePricingAccumulator => {
+    const key = storeName.trim().toLowerCase();
+    const existing = accumulators.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = emptyAccumulator(storeName);
+    accumulators.set(key, created);
+    return created;
+  };
+
+  const add = (
+    batch: CatalogProduct[],
+    sourceQuery: string,
+    priceSource: PriceSource
+  ): void => {
     for (const product of batch) {
-      const tagged = sourceQuery
-        ? { ...product, sourceQuery }
-        : product;
+      const tagged: CatalogProduct = {
+        ...product,
+        sourceQuery,
+        priceSource,
+      };
       const key = catalogKey(tagged);
       if (seen.has(key)) {
         continue;
@@ -127,45 +220,93 @@ export async function resolveCatalogProducts(
   };
 
   for (const line of lines) {
-    const cached = await fetchMatchingProductsForQuery(
-      line.name,
-      stores,
-      locationId,
-      { minUpdatedAt }
-    );
-    if (cached.length > 0) {
-      add(cached, line.name);
-      continue;
-    }
+    for (const storeName of competing) {
+      const acc = accFor(storeName);
+      const storeLocationId = locationForStore(storeName, locationId);
+      const provider = providerForStore(storeName);
 
-    let live: CatalogProduct[] = [];
-    try {
-      for (const term of productSearchAttempts(line.name)) {
-        live = await krogerService.searchProducts(term, locationId);
-        if (live.length > 0) {
-          break;
+      const liveCached = await fetchMatchingProductsForQuery(
+        line.name,
+        [storeName],
+        storeLocationId,
+        { minUpdatedAt, priceSource: "live" }
+      );
+      if (liveCached.length > 0) {
+        add(liveCached, line.name, "cached_live");
+        acc.cachedHits += 1;
+        continue;
+      }
+
+      if (provider) {
+        if (!provider.isConfigured()) {
+          acc.configured = false;
+          acc.errors.push(provider.setupHint());
+        } else {
+          acc.configured = true;
+          acc.attempted = true;
+          try {
+            const live = await liveSearch(
+              storeName,
+              line.name,
+              zipCode,
+              locationId
+            );
+            if (live.length > 0) {
+              const saved = await upsertLiveProducts(live);
+              add(saved, line.name, "live");
+              acc.liveHits += 1;
+              acc.fetchedAt = new Date();
+              continue;
+            }
+          } catch (error) {
+            const message = errorMessage(error);
+            acc.errors.push(message);
+            console.warn(
+              `Live ${storeName} pricing failed for "${line.name}": ${message}`
+            );
+          }
         }
       }
-    } catch (error) {
-      const message =
-        error instanceof KrogerPricingError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : String(error);
-      pricingError = pricingError ?? message;
-      console.warn(`Live Kroger pricing failed for "${line.name}": ${message}`);
-      live = [];
-    }
-    if (live.length > 0) {
-      add(await upsertLiveProducts(live), line.name);
-      continue;
-    }
 
-    // Live API empty/unavailable: still optimize from stale local rows.
-    add(await fetchMatchingProductsForQuery(line.name, stores, locationId), line.name);
+      const fallback = await fetchMatchingProductsForQuery(
+        line.name,
+        [storeName],
+        storeLocationId
+      );
+      if (fallback.length === 0) {
+        continue;
+      }
+
+      const liveFallback = fallback.filter(
+        (product) => product.priceSource === "live"
+      );
+      const seedFallback = fallback.filter(
+        (product) => product.priceSource !== "live"
+      );
+
+      if (liveFallback.length > 0) {
+        add(liveFallback, line.name, "cached_live");
+        acc.cachedHits += 1;
+      } else if (seedFallback.length > 0) {
+        add(seedFallback, line.name, "seed");
+        acc.seedHits += 1;
+      }
+    }
   }
 
+  const pricingByStore: StorePricingReport[] = competing.map((storeName) => {
+    const acc = accFor(storeName);
+    const provider = providerForStore(storeName);
+    const setupHint = provider
+      ? provider.setupHint()
+      : `${storeName} has no live pricing provider. Demo catalog only.`;
+    return finalizeStoreReport(acc, setupHint);
+  });
+
   products.sort((a, b) => a.price - b.price);
-  return { products, pricingError };
+  return {
+    products,
+    pricingError: pricingWarningFromReports(pricingByStore),
+    pricingByStore,
+  };
 }

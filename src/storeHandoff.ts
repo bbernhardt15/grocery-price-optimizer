@@ -1,4 +1,5 @@
 import type { OptimizeResult, PickedItem, StoreGroup } from "./optimizeGroceryList";
+import type { StorePricingReport } from "./pricing/types";
 
 export type HandoffActionType = "kroger_cart" | "search_deeplink" | "coming_soon";
 
@@ -46,11 +47,13 @@ export type TripPlan = {
 export type EnrichedStoreGroup = StoreGroup & {
   itemCount: number;
   handoff: StoreHandoff;
+  pricing?: StorePricingReport;
 };
 
 export type EnrichedOptimizeResult = OptimizeResult & {
   stores: EnrichedStoreGroup[];
   tripPlan: TripPlan;
+  pricingByStore?: StorePricingReport[];
 };
 
 export type HandoffOptions = {
@@ -60,6 +63,7 @@ export type HandoffOptions = {
    * used for Products/Locations are not sufficient.
    */
   krogerCartOAuthConfigured?: boolean;
+  pricingByStore?: StorePricingReport[];
 };
 
 const KROGER_SEARCH = "https://www.kroger.com/search";
@@ -105,13 +109,27 @@ export function krogerSearchUrl(
   return `${KROGER_SEARCH}?${query.toString()}`;
 }
 
-export function walmartSearchUrl(item: Pick<PickedItem, "name">): string {
-  const query = new URLSearchParams({ q: item.name.trim() });
+export function walmartSearchUrl(
+  item: Pick<PickedItem, "productId" | "upc" | "name">
+): string {
+  const productId = item.productId?.trim();
+  if (productId) {
+    return `https://www.walmart.com/ip/${encodeURIComponent(productId)}`;
+  }
+  const query = new URLSearchParams({ q: (item.upc || item.name).trim() });
   return `${WALMART_SEARCH}?${query.toString()}`;
 }
 
-export function targetSearchUrl(item: Pick<PickedItem, "name">): string {
-  const query = new URLSearchParams({ searchTerm: item.name.trim() });
+export function targetSearchUrl(
+  item: Pick<PickedItem, "productId" | "upc" | "name">
+): string {
+  const productId = item.productId?.trim();
+  if (productId) {
+    return `https://www.target.com/p/-/A-${encodeURIComponent(productId)}`;
+  }
+  const query = new URLSearchParams({
+    searchTerm: (item.upc || item.name).trim(),
+  });
   return `${TARGET_SEARCH}?${query.toString()}`;
 }
 
@@ -140,6 +158,14 @@ function toHandoffItem(storeName: string, item: PickedItem): HandoffItem {
     ...(item.locationId ? { locationId: item.locationId } : {}),
     ...(url ? { url } : {}),
   };
+}
+
+function pricingForStore(
+  storeName: string,
+  reports: StorePricingReport[] | undefined
+): StorePricingReport | undefined {
+  const key = storeName.trim().toLowerCase();
+  return reports?.find((report) => report.storeName.trim().toLowerCase() === key);
 }
 
 function krogerAction(
@@ -236,11 +262,15 @@ export function enrichOptimizeResult(
   result: OptimizeResult,
   options: HandoffOptions = {}
 ): EnrichedOptimizeResult {
-  const stores = result.stores.map((group) => ({
-    ...group,
-    itemCount: itemCountOf(group.items),
-    handoff: buildStoreHandoff(group, options),
-  }));
+  const stores = result.stores.map((group) => {
+    const pricing = pricingForStore(group.storeName, options.pricingByStore);
+    return {
+      ...group,
+      itemCount: itemCountOf(group.items),
+      handoff: buildStoreHandoff(group, options),
+      ...(pricing ? { pricing } : {}),
+    };
+  });
 
   return {
     ...result,
@@ -250,5 +280,6 @@ export function enrichOptimizeResult(
       storeCount: stores.length,
       itemCount: stores.reduce((sum, store) => sum + store.itemCount, 0),
     },
+    ...(options.pricingByStore ? { pricingByStore: options.pricingByStore } : {}),
   };
 }

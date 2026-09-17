@@ -1,7 +1,7 @@
 import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
 import { parseGroceryList } from "./parseGroceryLine";
-import type { CatalogProduct } from "./optimizeGroceryList";
+import type { CatalogProduct, PriceSource } from "./optimizeGroceryList";
 import {
   keywordNameFilter,
   matchTokenSets,
@@ -20,10 +20,13 @@ type LeanProduct = {
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
+  priceSource?: "live" | "seed" | null;
 };
 
 export type FetchMatchingOptions = {
   minUpdatedAt?: Date;
+  /** When set, only rows stored with this source (typically `"live"` cache). */
+  priceSource?: "live" | "seed";
 };
 
 function storeFilter(stores: string[]): Record<string, unknown> | null {
@@ -58,6 +61,10 @@ function locationFilter(locationId?: string): Record<string, unknown> | null {
   };
 }
 
+function storedPriceSource(doc: LeanProduct): PriceSource {
+  return doc.priceSource === "live" ? "live" : "seed";
+}
+
 function toCatalogProduct(doc: LeanProduct): CatalogProduct {
   return {
     name: doc.name,
@@ -71,6 +78,7 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
     updatedAt: doc.updatedAt,
+    priceSource: storedPriceSource(doc),
   };
 }
 
@@ -89,6 +97,9 @@ function matchingFilter(
   );
   if (options.minUpdatedAt) {
     extraClauses.push({ updatedAt: { $gte: options.minUpdatedAt } });
+  }
+  if (options.priceSource) {
+    extraClauses.push({ priceSource: options.priceSource });
   }
 
   return extraClauses.length === 0

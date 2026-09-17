@@ -25,6 +25,13 @@ const productSchema = new Schema(
       enum: groceryUnits,
     },
     lastUpdated: { type: Date, required: true, default: Date.now },
+    /** live = upserted from a retailer API; seed = demo catalog / unknown. */
+    priceSource: {
+      type: String,
+      enum: ["live", "seed"],
+      default: "seed",
+      index: true,
+    },
   },
   {
     timestamps: { createdAt: false, updatedAt: true },
