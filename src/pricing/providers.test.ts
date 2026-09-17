@@ -14,6 +14,14 @@ afterEach(() => {
   delete process.env.KROGER_CLIENT_SECRET;
   delete process.env.FLIPP_ENABLED;
   delete process.env.FLIPP_ACCESS_TOKEN;
+  delete process.env.SHELF_FEED_BASE_URL;
+  delete process.env.SHELF_FEED_API_KEY;
+  delete process.env.SHELF_FEED_STORES;
+  delete process.env.INSTACART_PARTNER_BASE_URL;
+  delete process.env.INSTACART_PARTNER_API_KEY;
+  delete process.env.INSTACART_PARTNER_STORES;
+  delete process.env.PUBLIX_PARTNER_BASE_URL;
+  delete process.env.PUBLIX_PARTNER_API_KEY;
 });
 
 describe("pricing providers registry", () => {
@@ -35,6 +43,28 @@ describe("pricing providers registry", () => {
       "Kroger",
     ]);
     assert.deepEqual(competingStoreNames(["ralphs"]), ["Kroger"]);
+  });
+
+  it("adds licensed partner banners to the default trip only when keys exist", () => {
+    process.env.SHELF_FEED_BASE_URL = "https://shelf.example";
+    process.env.SHELF_FEED_API_KEY = "key";
+    process.env.SHELF_FEED_STORES = "Publix,Meijer";
+    process.env.INSTACART_PARTNER_BASE_URL = "https://ic.example";
+    process.env.INSTACART_PARTNER_API_KEY = "ic";
+    process.env.INSTACART_PARTNER_STORES = "Aldi";
+
+    assert.equal(providerForStore("Publix")?.feedKind, "partner_feed");
+    assert.equal(providerForStore("Meijer")?.storeName, "Meijer");
+    assert.equal(providerForStore("Aldi")?.storeName, "Aldi");
+    assert.equal(providerForStore("Target")?.storeName, "Target");
+    assert.deepEqual(competingStoreNames([]), [
+      "Kroger",
+      "Walmart",
+      "Target",
+      "Aldi",
+      "Publix",
+      "Meijer",
+    ]);
   });
 });
 
@@ -121,5 +151,26 @@ describe("pricing reports", () => {
     const warning = pricingWarningFromReports(reports);
     assert.match(warning ?? "", /Kroger: Set KROGER_CLIENT_ID/);
     assert.doesNotMatch(warning ?? "", /WALMART_CONSUMER_ID/);
+  });
+
+  it("labels licensed partner hits as Partner feed, not a fake retailer API", () => {
+    const publix = emptyAccumulator("Publix");
+    publix.configured = true;
+    publix.attempted = true;
+    publix.liveHits = 1;
+    publix.feedKind = "partner_feed";
+
+    const cached = emptyAccumulator("Meijer");
+    cached.configured = true;
+    cached.cachedHits = 1;
+    cached.feedKind = "partner_feed";
+
+    const reports = [finalizeStoreReport(publix), finalizeStoreReport(cached)];
+    assert.equal(reports[0].source, "partner_feed");
+    assert.equal(reports[0].label, "Partner feed");
+    assert.equal(reports[0].ok, true);
+    assert.match(reports[0].detail, /licensed partner feed/i);
+    assert.equal(reports[1].source, "cached_live");
+    assert.equal(reports[1].label, "Cached partner feed");
   });
 });

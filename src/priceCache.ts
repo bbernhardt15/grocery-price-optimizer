@@ -185,9 +185,9 @@ async function searchWithProvider(
 /**
  * Per grocery item, per competing store: use Mongo live rows newer than 24
  * hours; on a miss, call that store's dedicated retailer API (Kroger
- * Products, Walmart Affiliate, Target partner feed) when configured; then
- * Flipp weekly-ad deals when enabled and a ZIP is set; otherwise fall back
- * to seed/stale rows labeled as demo.
+ * Products, Walmart Affiliate, Target partner feed, licensed partner stubs)
+ * when configured; then Flipp weekly-ad deals when enabled and a ZIP is set;
+ * otherwise fall back to seed/stale rows labeled as demo.
  */
 export async function resolveCatalogProducts(
   groceryList: string[],
@@ -207,6 +207,7 @@ export async function resolveCatalogProducts(
     const acc = emptyAccumulator(storeName);
     const provider = providerForStore(storeName);
     acc.configured = provider?.isConfigured() ?? false;
+    acc.feedKind = provider?.feedKind;
     if (storeName.trim().toLowerCase() === "kroger" && locationId) {
       acc.locationId = locationId;
     }
@@ -220,6 +221,9 @@ export async function resolveCatalogProducts(
       return existing;
     }
     const created = emptyAccumulator(storeName);
+    const provider = providerForStore(storeName);
+    created.configured = provider?.isConfigured() ?? false;
+    created.feedKind = provider?.feedKind;
     accumulators.set(key, created);
     return created;
   };

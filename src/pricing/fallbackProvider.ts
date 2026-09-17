@@ -12,6 +12,10 @@ export class FallbackPricingProvider implements StorePricingProvider {
     private readonly fallback: StorePricingProvider
   ) {}
 
+  get feedKind() {
+    return this.primary.feedKind;
+  }
+
   isConfigured(): boolean {
     return this.primary.isConfigured() || this.fallback.isConfigured();
   }

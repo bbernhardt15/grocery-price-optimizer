@@ -5,9 +5,13 @@ export type StorePricingSource =
   | "cached_live"
   | "weekly_ad"
   | "cached_weekly_ad"
+  | "partner_feed"
   | "seed"
   | "mixed"
   | "unavailable";
+
+/** How the live rows were obtained. Partner feeds are licensed, not public retailer APIs. */
+export type PricingFeedKind = "retailer_api" | "partner_feed";
 
 export type PricingContext = {
   zipCode?: string;
@@ -38,6 +42,8 @@ export class StorePricingError extends Error {
  */
 export type StorePricingProvider = {
   readonly storeName: string;
+  /** Defaults to retailer_api (Kroger, Walmart). Licensed stubs set partner_feed. */
+  readonly feedKind?: PricingFeedKind;
   isConfigured(): boolean;
   /** What to set in `.env` (or why live prices cannot exist). */
   setupHint(): string;
@@ -54,7 +60,7 @@ export type StorePricingReport = {
   attempted: boolean;
   ok: boolean;
   usedFallback: boolean;
-  /** Shopper-facing label: Live prices / Cached live / Weekly ad / Demo catalog. */
+  /** Shopper-facing label: Live prices / Partner feed / Cached live / Weekly ad / Demo catalog. */
   label: string;
   detail: string;
   error?: string;
@@ -74,4 +80,5 @@ export type StorePricingAccumulator = {
   errors: string[];
   locationId?: string;
   fetchedAt?: Date;
+  feedKind?: PricingFeedKind;
 };

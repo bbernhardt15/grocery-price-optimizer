@@ -47,7 +47,7 @@ function sourceOf(acc: StorePricingAccumulator): StorePricingSource {
     return "mixed";
   }
   if (hasLive) {
-    return "live";
+    return acc.feedKind === "partner_feed" ? "partner_feed" : "live";
   }
   if (hasCached) {
     return "cached_live";
@@ -68,8 +68,11 @@ function mixedDetail(acc: StorePricingAccumulator): string {
   const liveLike = acc.liveHits > 0 || acc.cachedHits > 0;
   const weeklyLike = acc.weeklyAdHits > 0 || acc.cachedWeeklyAdHits > 0;
   const hasSeed = acc.seedHits > 0;
+  const partner = acc.feedKind === "partner_feed" && liveLike;
   const parts: string[] = [];
-  if (liveLike) {
+  if (partner) {
+    parts.push("licensed partner-feed rows");
+  } else if (liveLike) {
     parts.push("live (or cached live) retailer API rows");
   }
   if (weeklyLike) {
@@ -85,6 +88,16 @@ function mixedLabel(acc: StorePricingAccumulator): string {
   const liveLike = acc.liveHits > 0 || acc.cachedHits > 0;
   const weeklyLike = acc.weeklyAdHits > 0 || acc.cachedWeeklyAdHits > 0;
   const hasSeed = acc.seedHits > 0;
+  const partner = acc.feedKind === "partner_feed" && liveLike;
+  if (partner && weeklyLike && hasSeed) {
+    return "Mixed partner + weekly ad + demo";
+  }
+  if (partner && weeklyLike) {
+    return "Mixed partner + weekly ad";
+  }
+  if (partner && hasSeed) {
+    return "Mixed partner + demo";
+  }
   if (liveLike && weeklyLike && hasSeed) {
     return "Mixed live + weekly ad + demo";
   }
@@ -104,11 +117,14 @@ function labelOf(
   source: StorePricingSource,
   acc: StorePricingAccumulator
 ): string {
+  const partner = acc.feedKind === "partner_feed";
   switch (source) {
     case "live":
       return "Live prices";
+    case "partner_feed":
+      return "Partner feed";
     case "cached_live":
-      return "Cached live";
+      return partner ? "Cached partner feed" : "Cached live";
     case "weekly_ad":
     case "cached_weekly_ad":
       return "Weekly ad";
@@ -133,16 +149,22 @@ export function finalizeStoreReport(
     source === "cached_live" ||
     source === "weekly_ad" ||
     source === "cached_weekly_ad" ||
-    source === "mixed";
+    source === "mixed" ||
+    source === "partner_feed";
   const isKroger = acc.storeName.trim().toLowerCase() === "kroger";
   const error =
     errors[0] && (acc.attempted || isKroger) ? errors[0] : undefined;
+  const partner = acc.feedKind === "partner_feed";
 
   let detail: string;
   if (source === "live") {
     detail = `Live ${acc.storeName} prices from the retailer API.`;
+  } else if (source === "partner_feed") {
+    detail = `Licensed partner feed prices for ${acc.storeName} (not a public retailer API).`;
   } else if (source === "cached_live") {
-    detail = `Using ${acc.storeName} prices cached from a live API (less than 24 hours old).`;
+    detail = partner
+      ? `Using ${acc.storeName} prices cached from a licensed partner feed (less than 24 hours old).`
+      : `Using ${acc.storeName} prices cached from a live API (less than 24 hours old).`;
   } else if (source === "weekly_ad") {
     detail = `${acc.storeName} prices are from the weekly ad / circular near this ZIP, not a full live shelf catalog.`;
   } else if (source === "cached_weekly_ad") {
