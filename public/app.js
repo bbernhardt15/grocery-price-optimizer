@@ -34,6 +34,7 @@ const SAMPLE_ITEMS = [
   { name: "Large Eggs", brand: "Kroger", foodId: "demo-large-eggs", quantity: 1 },
   { name: "White Bread", brand: "Kroger", foodId: "demo-white-bread", quantity: 2 },
   { name: "Salted Butter", brand: "Kroger", foodId: "demo-salted-butter", quantity: 1 },
+  { name: "Boneless Chicken Breast", brand: "Kroger", foodId: "demo-chicken", quantity: 1 },
 ];
 
 /** @type {Array<{ name: string, brand: string, foodId: string, quantity: number }>} */

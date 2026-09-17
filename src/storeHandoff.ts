@@ -156,7 +156,7 @@ function krogerAction(
       url: KROGER_CART_START_PATH,
       status: "needs_shopper_login",
       detail:
-        "Starts Kroger authorization-code OAuth (cart.basic:write) so the shopper can log in, then PUT /v1/cart/add. Client-credentials used for pricing cannot write a cart. Items without a UPC still use Open at Kroger search links.",
+        "Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. The client-credentials token used for pricing cannot write a cart. Items without a UPC still use Open at Kroger.",
     };
   }
 
@@ -167,7 +167,7 @@ function krogerAction(
     status: firstUrl ? "ready" : "unavailable",
     detail: oauthConfigured
       ? "Kroger Cart API needs a product UPC from the live Products API. This list only has search links until those IDs are present."
-      : "Opens Kroger search for these items. Writing the shopper cart requires authorization-code OAuth (KROGER_REDIRECT_URI + cart.basic:write), not the existing client-credentials token.",
+      : "Opens Kroger search. Writing the shopper cart requires authorization-code OAuth, not the client-credentials pricing token.",
   };
 }
 
@@ -179,7 +179,7 @@ function walmartAction(items: HandoffItem[]): StoreHandoffAction {
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
     detail:
-      "Public Walmart cart-write APIs are typically closed or require shopper/partner OAuth. This is a search deep link, not a cart fill.",
+      "Search deep link, not a cart fill. Walmart cart APIs typically need partner or shopper OAuth.",
   };
 }
 
@@ -191,7 +191,7 @@ function targetAction(items: HandoffItem[]): StoreHandoffAction {
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
     detail:
-      "Target does not expose a public cart-write API for this app. This is a search deep link, not a cart fill.",
+      "Search deep link, not a cart fill. Target does not expose a public cart-write API for this app.",
   };
 }
 
@@ -200,7 +200,7 @@ function comingSoonAction(storeName: string): StoreHandoffAction {
     type: "coming_soon",
     label: "Coming soon",
     status: "coming_soon",
-    detail: `${storeName} online checkout is not wired yet. Phase 3 will add authenticated cart fill only where a retailer API allows it.`,
+    detail: `${storeName} online checkout is not wired yet. Phase 3 adds authenticated cart fill only where a retailer API allows it.`,
   };
 }
 
