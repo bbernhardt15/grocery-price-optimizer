@@ -32,7 +32,7 @@ export const seedCatalog: CatalogProduct[] = [
   { name: "Large Eggs", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111040101", upc: "0001111040101", price: 2.49, unit: "count", normalizedUnit: "count" },
   { name: "White Bread", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111087523", upc: "0001111087523", price: 2.19, unit: "oz", normalizedUnit: "oz" },
   { name: "Bananas", brand: "Fresh", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 0.69, unit: "lbs", normalizedUnit: "lbs" },
-  { name: "Boneless Chicken Breast", brand: "Simple Truth", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.99, unit: "lbs", normalizedUnit: "lbs" },
+  { name: "Boneless Chicken Breast", brand: "Simple Truth", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, productId: "0001111050000", upc: "0001111050000", price: 3.99, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Long Grain Rice", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.19, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Gala Apples", brand: "Fresh", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 1.79, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Salted Butter", brand: "Kroger", storeName: "Kroger", locationId: DEMO_KROGER_LOCATION_ID, price: 3.49, unit: "oz", normalizedUnit: "oz" },
