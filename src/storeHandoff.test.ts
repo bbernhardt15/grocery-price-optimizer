@@ -151,7 +151,9 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.action.label, "Add to Kroger cart");
     assert.equal(handoff.action.status, "needs_shopper_login");
     assert.equal(handoff.action.url, KROGER_CART_START_PATH);
+    assert.equal(handoff.action.fallbackUrl, krogerSearchUrl(krogerMilk));
     assert.match(handoff.action.detail ?? "", /shopper/i);
+    assert.match(handoff.action.detail ?? "", /HTTP 2xx/i);
   });
 
   it("does not advertise kroger_cart when OAuth is configured but no UPC is present", () => {
@@ -178,6 +180,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(walmart.action.label, "Search at Walmart");
     assert.equal(walmart.action.url, walmartSearchUrl(walmartBread));
     assert.match(walmart.action.detail ?? "", /not a cart fill/i);
+    assert.match(walmart.action.detail ?? "", /partner/i);
 
     const target = buildStoreHandoff({
       storeName: "Target",
@@ -187,6 +190,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(target.action.type, "search_deeplink");
     assert.equal(target.action.label, "Search at Target");
     assert.match(target.action.detail ?? "", /not a cart fill/i);
+    assert.match(target.action.detail ?? "", /partner/i);
   });
 
   it("marks Aldi as coming soon", () => {
@@ -200,6 +204,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.action.label, "Coming soon");
     assert.equal(handoff.action.status, "coming_soon");
     assert.equal(handoff.action.url, undefined);
+    assert.match(handoff.action.detail ?? "", /partner API/i);
   });
 });
 

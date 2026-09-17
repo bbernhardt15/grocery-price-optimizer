@@ -409,6 +409,11 @@ button:disabled {
   background: var(--danger-soft);
 }
 
+.status-ok {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 .empty-state {
   max-width: 36rem;
   padding: 28px;
@@ -714,6 +719,17 @@ a.handoff-btn:hover,
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.handoff-fallback {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.handoff-fallback:hover {
+  text-decoration: underline;
 }
 
 .unavailable {

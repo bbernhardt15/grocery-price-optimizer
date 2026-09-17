@@ -20,6 +20,7 @@ describe("POST /api/optimize-list", () => {
   const previousEnv = {
     KROGER_CLIENT_ID: process.env.KROGER_CLIENT_ID,
     KROGER_CLIENT_SECRET: process.env.KROGER_CLIENT_SECRET,
+    KROGER_REDIRECT_URI: process.env.KROGER_REDIRECT_URI,
     WALMART_CONSUMER_ID: process.env.WALMART_CONSUMER_ID,
     WALMART_PRIVATE_KEY: process.env.WALMART_PRIVATE_KEY,
     WALMART_PUBLISHER_ID: process.env.WALMART_PUBLISHER_ID,
@@ -32,6 +33,7 @@ describe("POST /api/optimize-list", () => {
   function clearPricingEnv(): void {
     delete process.env.KROGER_CLIENT_ID;
     delete process.env.KROGER_CLIENT_SECRET;
+    delete process.env.KROGER_REDIRECT_URI;
     delete process.env.WALMART_CONSUMER_ID;
     delete process.env.WALMART_PRIVATE_KEY;
     delete process.env.WALMART_PUBLISHER_ID;
@@ -736,6 +738,53 @@ describe("POST /api/optimize-list", () => {
     }
     const reportNames = bodyWithPricing.pricingByStore.map((row) => row.storeName).sort();
     assert.deepEqual(reportNames, ["Kroger", "Target", "Walmart"]);
+  });
+
+  it("offers Add to Kroger cart when shopper OAuth redirect URI is configured", async () => {
+    await Product.updateOne(
+      { name: "Gallon of Milk", storeName: "Kroger" },
+      { $set: { upc: "0001111041700", productId: "0001111041700" } }
+    );
+    process.env.KROGER_CLIENT_ID = "id";
+    process.env.KROGER_CLIENT_SECRET = "secret";
+    process.env.KROGER_REDIRECT_URI =
+      "https://grocery-gitter.up.railway.app/api/kroger/oauth/callback";
+    const { status, json } = await optimize({
+      groceryList: ["Gallon of Milk"],
+      stores: ["Kroger"],
+    });
+    await Product.updateOne(
+      { name: "Gallon of Milk", storeName: "Kroger" },
+      { $unset: { upc: 1, productId: 1 } }
+    );
+    delete process.env.KROGER_REDIRECT_URI;
+    delete process.env.KROGER_CLIENT_ID;
+    delete process.env.KROGER_CLIENT_SECRET;
+
+    assert.equal(status, 200);
+    const body = json as {
+      stores: Array<{
+        storeName: string;
+        handoff: {
+          action: {
+            type: string;
+            label: string;
+            status: string;
+            url?: string;
+            fallbackUrl?: string;
+          };
+          items: Array<{ upc?: string }>;
+        };
+      }>;
+    };
+    const kroger = body.stores.find((store) => store.storeName === "Kroger");
+    assert.ok(kroger);
+    assert.equal(kroger.handoff.items[0].upc, "0001111041700");
+    assert.equal(kroger.handoff.action.type, "kroger_cart");
+    assert.equal(kroger.handoff.action.label, "Add to Kroger cart");
+    assert.equal(kroger.handoff.action.status, "needs_shopper_login");
+    assert.equal(kroger.handoff.action.url, "/api/kroger/cart/start");
+    assert.match(kroger.handoff.action.fallbackUrl ?? "", /kroger\.com\/search/);
   });
 
   it("splits a ZIP trip across live Kroger, Walmart, and Target when all three providers return prices", async () => {

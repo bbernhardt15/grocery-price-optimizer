@@ -2,7 +2,7 @@
 
 The product is **Grocery Gitter**. This GitHub repository’s slug remains `grocery-price-optimizer` (npm package id: `grocery-list-optimizer`).
 
-Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store. A vanilla HTML dashboard is served from `public/`.
+Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store so you can actually buy the split cart. A vanilla HTML dashboard is served from `public/`.
 
 ## What it includes
 
@@ -29,7 +29,7 @@ Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with
 3. If that store still has no live row and a ZIP is set, calls the Flipp weekly-ad provider when enabled, then upserts with `priceSource: "weekly_ad"`.
 4. Otherwise falls back to the seeded catalog and labels it **Demo catalog**.
 
-Kroger still uses `GET https://api.kroger.com/v1/products?filter.term=…` with the ZIP-resolved `locationId`. Live Kroger rows keep `productId` / `upc` so checkout handoff can deep-link or (later) call Cart API. Weekly-ad prices never pretend to be a full Kroger (or Aldi/Target) shelf catalog.
+Kroger still uses `GET https://api.kroger.com/v1/products?filter.term=…` with the ZIP-resolved `locationId`. Live Kroger rows keep `productId` / `upc` so checkout handoff can deep-link or call the Cart API after shopper login. Weekly-ad prices never pretend to be a full Kroger (or Aldi/Target) shelf catalog.
 
 ## Live multi-store pricing (Phase 2)
 
@@ -61,44 +61,63 @@ Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is mis
 
 This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 
-## Checkout handoff (Phase 1)
+## Checkout handoff (Phases 1 and 3)
 
 See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md) for the 15/5/10 multi-cart vision.
 
-After optimize, each store group includes a `handoff` object: `storeName`, `itemCount`, `subtotal`, items with identity for checkout, and `action: { type, label, url?, status, detail? }`.
+After optimize, each store group includes a `handoff` object: `storeName`, `itemCount`, `subtotal`, items with identity for checkout, and `action: { type, label, url?, status, detail?, fallbackUrl? }`.
 
-| Retailer | Phase 1 action | What it actually does |
+| Retailer | Action | What it actually does |
 | --- | --- | --- |
-| **Kroger** | `search_deeplink` → **Open at Kroger** | Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
-| **Kroger** (optional) | `kroger_cart` → **Add to Kroger cart** | Only when `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
-| **Walmart / Target** | `search_deeplink` | Public search URLs. Not a cart fill — those APIs are typically closed or partner-only. |
+| **Kroger** | `search_deeplink` → **Open at Kroger** | Default when `KROGER_REDIRECT_URI` is unset, or when items have no UPC. Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
+| **Kroger** | `kroger_cart` → **Add to Kroger cart** | When `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC/`productId`. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
+| **Walmart / Target** | `search_deeplink` | Public search URLs. Not a cart fill — authenticated cart APIs need partner access (Phase 3 table). Grocery Gitter does not invent those APIs. |
 | **Aldi / others** | `coming_soon` | No fake checkout. |
 
-The app **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx.
+Grocery Gitter **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx. Cancelled login, missing scopes, or a rejected UPC fall back to Open at Kroger search links.
 
-### Optional Kroger shopper OAuth
+### Enable Kroger shopper cart fill (Railway + Kroger portal)
 
-Production already uses `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` for Locations and Products (`product.compact`, client-credentials). Cart write needs extra setup:
+Production already uses `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` for Locations and Products (`product.compact`, client-credentials). That token **must not** be sent to `PUT /v1/cart/add`. Cart write needs shopper login and a redirect URI that matches production.
 
-1. In the [Kroger developer portal](https://developer.kroger.com/), add a redirect URI such as `http://localhost:3000/api/kroger/oauth/callback` (or your production HTTPS equivalent).
-2. Confirm the app is allowed to request `cart.basic:write` (some public apps are not; if authorize/cart add fails, keep using Open at Kroger).
-3. Set in `.env`:
+**1. Kroger developer portal** ([developer.kroger.com](https://developer.kroger.com/))
+
+1. Open the same app that already has your Client ID / Secret for pricing.
+2. Add a **Redirect URI** that matches the public site **exactly** (scheme, host, path, no trailing slash unless you also put one in env):
+   - Local: `http://localhost:3000/api/kroger/oauth/callback`
+   - Railway default domain: `https://<your-service>.up.railway.app/api/kroger/oauth/callback`
+   - Custom domain: `https://<your-domain>/api/kroger/oauth/callback`
+3. Confirm the app can request **`cart.basic:write`** (some public apps only have Products/Locations; the portal may list **`cart.basic:rw`** instead — set `KROGER_CART_SCOPE` to whatever the app is granted). If authorize or cart add fails with insufficient scope, keep using Open at Kroger; Grocery Gitter will not pretend the cart was filled.
+4. Save. Kroger compares the `redirect_uri` query parameter to this registered value character-for-character.
+
+**2. Railway variables** (service → Variables)
 
 ```bash
-KROGER_REDIRECT_URI=http://localhost:3000/api/kroger/oauth/callback
+KROGER_CLIENT_ID=...
+KROGER_CLIENT_SECRET=...
+KROGER_REDIRECT_URI=https://<your-service>.up.railway.app/api/kroger/oauth/callback
 # optional; default cart.basic:write
 KROGER_CART_SCOPE=cart.basic:write
-# optional; default PICKUP
+# optional; default PICKUP (or DELIVERY)
 KROGER_CART_MODALITY=PICKUP
 ```
 
+Use the **public HTTPS** Railway URL, not `*.railway.internal`. After changing the public domain, update **both** the Kroger portal and `KROGER_REDIRECT_URI` together or login will fail.
+
+**3. What shoppers see**
+
+- Kroger card shows **Add to Kroger cart** (plus **or Open at Kroger**).
+- Tap → Kroger login/consent (or a reuse of the encrypted shopper cookie if still valid).
+- Callback exchanges the code, then `PUT https://api.kroger.com/v1/cart/add` with `{ items: [{ upc, quantity, modality }] }`.
+- Success page only if that write is HTTP 2xx. Then finish checkout on [kroger.com/cart](https://www.kroger.com/cart) while logged into the **same** shopper account.
+
+OAuth `state` is an HMAC of the pending cart so a different Railway instance can finish the callback. Shopper tokens are stored only in an encrypted HttpOnly cookie, not in Mongo.
+
 Routes:
 
-- `GET /api/kroger/auth-status` — whether redirect URI is configured
-- `POST /api/kroger/cart/start` — JSON `{ items, locationId? }` from the Kroger handoff; returns `{ authorizeUrl, status: "needs_shopper_login" }` or **501** if OAuth is not set up
+- `GET /api/kroger/auth-status` — whether redirect URI is configured (`requiresShopperLogin` is always true)
+- `POST /api/kroger/cart/start` — JSON `{ items, locationId? }` from the Kroger handoff; returns `{ authorizeUrl, status: "needs_shopper_login" }`, `{ status: "added" }` when a shopper cookie can write immediately, or **501** if OAuth is not set up
 - `GET /api/kroger/oauth/callback` — exchanges the code, calls Cart API, shows success **only** if Kroger acknowledged the write
-
-Pending cart payloads live in memory on this Node process (~15 minutes). Multi-instance production would need a shared store.
 
 ## FatSecret catalog
 
@@ -203,11 +222,12 @@ Response shape:
           }
         ],
         "action": {
-          "type": "search_deeplink",
-          "label": "Open at Kroger",
-          "url": "https://www.kroger.com/search?query=0001111041700",
-          "status": "ready",
-          "detail": "Opens Kroger search for these items. Writing the shopper cart requires authorization-code OAuth…"
+          "type": "kroger_cart",
+          "label": "Add to Kroger cart",
+          "url": "/api/kroger/cart/start",
+          "status": "needs_shopper_login",
+          "fallbackUrl": "https://www.kroger.com/search?query=0001111041700",
+          "detail": "Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. Grocery Gitter reports success only if Kroger returns HTTP 2xx."
         }
       }
     }
@@ -251,11 +271,11 @@ Whether `KROGER_REDIRECT_URI` is set. Always `requiresShopperLogin: true` — cl
 
 ### `POST /api/kroger/cart/start`
 
-JSON body `{ "items": [{ "upc" or "productId", "quantity" }], "locationId?" }`. Returns `{ authorizeUrl, status: "needs_shopper_login" }` or **501** / **400** with an honest error. Does not add anything to a cart by itself.
+JSON body `{ "items": [{ "upc" or "productId", "quantity", "name?" }], "locationId?" }`. Returns `{ authorizeUrl, status: "needs_shopper_login" }`, `{ status: "added", added }` when a valid shopper cookie can write immediately, or **501** / **400** with an honest error. Does not add anything to a cart by itself unless that cookie write returns HTTP 2xx.
 
 ### `GET /api/kroger/oauth/callback`
 
-Kroger redirect after shopper login. Exchanges the code and calls `PUT /v1/cart/add`. Success HTML is shown only when that write is acknowledged.
+Kroger redirect after shopper login. Exchanges the code and calls `PUT /v1/cart/add`. Success HTML is shown only when that write is acknowledged. Cancelled login and API errors include Open at Kroger search links.
 
 ## Live grocery scrape
 

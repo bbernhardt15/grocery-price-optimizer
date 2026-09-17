@@ -93,6 +93,15 @@ function showFormError(message) {
 function showApiError(message) {
   apiErrorEl.hidden = !message;
   apiErrorEl.textContent = message;
+  apiErrorEl.classList.toggle("status-error", Boolean(message));
+  apiErrorEl.classList.remove("status-ok");
+}
+
+function showApiSuccess(message) {
+  apiErrorEl.hidden = !message;
+  apiErrorEl.textContent = message;
+  apiErrorEl.classList.toggle("status-ok", Boolean(message));
+  apiErrorEl.classList.remove("status-error");
 }
 
 function renderUnavailable(items) {
@@ -379,6 +388,11 @@ function renderHandoffButton(store) {
   }
 
   if (action.type === "kroger_cart") {
+    const fallback = action.fallbackUrl
+      ? `<a class="handoff-fallback" href="${escapeHtml(
+          action.fallbackUrl
+        )}" target="_blank" rel="noopener noreferrer">or Open at Kroger</a>`
+      : "";
     return `
       <footer class="store-handoff">
         <button
@@ -386,6 +400,7 @@ function renderHandoffButton(store) {
           type="button"
           data-handoff-store="${escapeHtml(store.storeName)}"
         >${escapeHtml(action.label)}</button>
+        ${fallback}
         ${detail}
       </footer>
     `;
@@ -477,9 +492,14 @@ function renderResults(payload) {
   renderPricingLegend(payload.pricingByStore ?? []);
 }
 
-async function startKrogerCart(store) {
+async function startKrogerCart(store, button) {
   const handoff = store.handoff;
   showApiError("");
+  if (button) {
+    button.disabled = true;
+    button.dataset.originalLabel = button.textContent;
+    button.textContent = "Talking to Kroger…";
+  }
   try {
     const response = await fetch("/api/kroger/cart/start", {
       method: "POST",
@@ -496,6 +516,18 @@ async function startKrogerCart(store) {
     if (!response.ok) {
       throw new Error(payload.error || `Kroger cart start failed (${response.status})`);
     }
+    if (payload.status === "added") {
+      const added = payload.added ?? 0;
+      showApiSuccess(
+        `Kroger accepted ${added} item${added === 1 ? "" : "s"} in your shopper cart. Finish pickup on kroger.com while logged into the same account.`
+      );
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Added — open Kroger cart";
+        button.dataset.krogerAdded = "1";
+      }
+      return;
+    }
     if (!payload.authorizeUrl) {
       throw new Error("Kroger did not return a shopper login URL.");
     }
@@ -503,15 +535,23 @@ async function startKrogerCart(store) {
   } catch (error) {
     showApiError(
       error instanceof Error
-        ? error.message
+        ? `${error.message} Use Open at Kroger on each line if cart write is unavailable.`
         : "Could not start Kroger cart OAuth."
     );
+    if (button) {
+      button.disabled = false;
+      button.textContent = button.dataset.originalLabel || "Add to Kroger cart";
+    }
   }
 }
 
 storeGridEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-handoff-store]");
   if (!button) {
+    return;
+  }
+  if (button.dataset.krogerAdded === "1") {
+    window.open("https://www.kroger.com/cart", "_blank", "noopener,noreferrer");
     return;
   }
   const storeName = button.dataset.handoffStore;
@@ -521,7 +561,7 @@ storeGridEl.addEventListener("click", (event) => {
   if (!store) {
     return;
   }
-  void startKrogerCart(store);
+  void startKrogerCart(store, button);
 });
 
 async function findCheapestStores() {
