@@ -20,7 +20,7 @@ function htmlPage(title: string, body: string): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)} — Cheapest Cart</title>
+    <title>${escapeHtml(title)} — Grocery Gitter</title>
     <style>
       body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 40rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; color: #171717; }
       a { color: #047857; }
@@ -30,7 +30,7 @@ function htmlPage(title: string, body: string): string {
     </style>
   </head>
   <body>
-    <p><a href="/">← Back to Cheapest Cart</a></p>
+    <p><a href="/">← Back to Grocery Gitter</a></p>
     <h1>${escapeHtml(title)}</h1>
     ${body}
   </body>

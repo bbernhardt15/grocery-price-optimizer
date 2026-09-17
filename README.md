@@ -1,10 +1,12 @@
-# Grocery List Optimizer API
+# Grocery Gitter
+
+The product is **Grocery Gitter**. This GitHub repository’s slug remains `grocery-price-optimizer` (npm package id: `grocery-list-optimizer`).
 
 Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store. A vanilla HTML dashboard is served from `public/`.
 
 ## What it includes
 
-- **Dashboard** — search the catalog, pick verified items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** vs **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
+- **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** vs **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `priceSource` (`live` \| `seed`), `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart/Target search stubs)
@@ -92,7 +94,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Open **http://localhost:3000** for the dashboard. The API is on the same origin (`POST /api/optimize-list`).
+Open **http://localhost:3000** for the Grocery Gitter dashboard. The API is on the same origin (`POST /api/optimize-list`).
 
 To use your own MongoDB, set `MONGO_URL` (or `MONGODB_URI`) in `.env`. When `MONGO_URL` is set, the in-memory fallback is never loaded.
 
@@ -100,11 +102,11 @@ To use your own MongoDB, set `MONGO_URL` (or `MONGODB_URI`) in `.env`. When `MON
 
 ### `GET /`
 
-Grocery dashboard (`public/index.html`).
+Grocery Gitter dashboard (`public/index.html`).
 
 ### `GET /api`
 
-Health/info JSON.
+Health/info JSON (`name`: `"Grocery Gitter API"`).
 
 ### `GET /api/search-catalog`
 

@@ -2,7 +2,7 @@
   "name": "grocery-list-optimizer",
   "version": "1.0.0",
   "private": true,
-  "description": "Express API that will optimize a grocery list against store product data.",
+  "description": "Grocery Gitter: Express API that optimizes a grocery list against store product data.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -20,7 +20,7 @@ app.use((req, res, next) => {
 
 app.get("/api", (_req, res) => {
   res.json({
-    name: "Grocery List Optimizer API",
+    name: "Grocery Gitter API",
     status: "ok",
     routes: {
       "GET /api/search-catalog":

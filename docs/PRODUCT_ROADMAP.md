@@ -1,4 +1,4 @@
-# Cheapest Cart — product roadmap
+# Grocery Gitter — product roadmap
 
 **Goal:** the shopper picks specific grocery items. The app assigns each item to the cheapest retailer that can take an online order (example: **15 Kroger + 5 Walmart + 10 Target**), then helps push those selections toward each retailer’s cart/checkout so the split trip can actually be bought.
 
@@ -6,7 +6,7 @@ This is not a single-store price comparison page. The durable product is a **mul
 
 ## What exists today
 
-- Search-first dashboard: pick catalog items, ZIP, **Find Cheapest Stores**
+- Grocery Gitter search-first dashboard: pick catalog items, ZIP, **Find Cheapest Stores**
 - `POST /api/optimize-list` groups the list by cheapest `storeName` with unit prices and subtotals
 - Trip plan summary + per-store checkout handoff (Phase 1)
 - Live Kroger **Products** and **Locations** APIs via **client-credentials** (`product.compact`)
