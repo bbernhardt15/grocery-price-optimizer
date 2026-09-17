@@ -285,14 +285,15 @@ function renderPricingLegend(reports) {
     <ul>
       ${reports
         .map((report) => {
-          const error = report.error
-            ? ` ${escapeHtml(report.error)}`
-            : "";
+          const extra =
+            report.error && report.error !== report.detail
+              ? ` ${escapeHtml(report.error)}`
+              : "";
           return `<li><span class="price-badge price-badge-${pricingBadgeKind(
             report.source
           )}">${escapeHtml(report.label)}</span> <strong>${escapeHtml(
             report.storeName
-          )}</strong> — ${escapeHtml(report.detail)}${error}</li>`;
+          )}</strong> — ${escapeHtml(report.detail)}${extra}</li>`;
         })
         .join("")}
     </ul>
