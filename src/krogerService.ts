@@ -105,11 +105,13 @@ function toCatalogProduct(
   }
 
   const unit = parseKrogerUnit(item?.size);
+  const productId = product.productId?.trim();
   return {
     name,
     brand: product.brand?.trim() || "Kroger",
     storeName: "Kroger",
     locationId,
+    ...(productId ? { productId, upc: productId } : {}),
     price,
     unit,
     normalizedUnit: unit,

@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import optimizeListRouter from "./routes/optimizeList";
 import catalogRouter from "./routes/catalog";
+import krogerCartRouter from "./routes/krogerCart";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -25,13 +26,18 @@ app.get("/api", (_req, res) => {
       "GET /api/search-catalog":
         "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "POST /api/optimize-list":
-        "Accepts groceryList or verified product objects, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product.",
+        "Accepts groceryList or verified product objects, zipCode, and optional stores; looks up the nearest Kroger and returns items grouped by the cheapest store for each product, plus a tripPlan and per-store checkout handoff.",
+      "GET /api/kroger/auth-status":
+        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI).",
+      "POST /api/kroger/cart/start":
+        "Starts shopper OAuth for PUT /v1/cart/add. Does nothing without KROGER_REDIRECT_URI and a UPC.",
     },
   });
 });
 
 app.use("/api", catalogRouter);
 app.use("/api", optimizeListRouter);
+app.use("/api", krogerCartRouter);
 app.use(
   express.static(publicDir, {
     etag: false,

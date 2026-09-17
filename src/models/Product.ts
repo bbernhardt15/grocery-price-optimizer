@@ -8,6 +8,8 @@ const productSchema = new Schema(
     brand: { type: String, required: true, trim: true },
     storeName: { type: String, required: true, trim: true },
     locationId: { type: String, trim: true, index: true },
+    productId: { type: String, trim: true },
+    upc: { type: String, trim: true },
     price: { type: Number, required: true, min: 0 },
     unit: {
       type: String,

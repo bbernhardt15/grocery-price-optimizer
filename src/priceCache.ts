@@ -21,6 +21,8 @@ function toCatalogProduct(doc: {
   brand: string;
   storeName: string;
   locationId?: string | null;
+  productId?: string | null;
+  upc?: string | null;
   price: number;
   unit: string;
   normalizedUnit: string;
@@ -32,6 +34,8 @@ function toCatalogProduct(doc: {
     brand: doc.brand,
     storeName: doc.storeName,
     locationId: doc.locationId ?? undefined,
+    productId: doc.productId ?? undefined,
+    upc: doc.upc ?? undefined,
     price: doc.price,
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
@@ -68,6 +72,8 @@ export async function upsertLiveProducts(
           brand: product.brand,
           storeName: product.storeName,
           locationId: product.locationId,
+          productId: product.productId,
+          upc: product.upc,
           price: product.price,
           unit: product.unit,
           normalizedUnit: product.normalizedUnit,

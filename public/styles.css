@@ -498,6 +498,13 @@ button:disabled {
   background: color-mix(in srgb, var(--accent-soft) 55%, var(--card));
 }
 
+.store-count {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .store-card h2 {
   margin: 0;
   font-size: 1.05rem;
@@ -531,9 +538,79 @@ button:disabled {
 }
 
 .item-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   white-space: nowrap;
+}
+
+.item-line span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.item-open {
+  flex: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.item-open:hover {
+  text-decoration: underline;
+}
+
+.store-handoff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 88%, var(--accent-soft));
+}
+
+a.handoff-btn,
+.handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+  background: var(--accent);
+  color: #06281c;
+  box-shadow: var(--shadow);
+}
+
+@media (prefers-color-scheme: light) {
+  a.handoff-btn,
+  .handoff-btn {
+    color: #ffffff;
+  }
+}
+
+a.handoff-btn:hover,
+.handoff-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.handoff-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--line);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.handoff-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .unavailable {

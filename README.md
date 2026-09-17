@@ -4,9 +4,10 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 
 ## What it includes
 
-- **Dashboard** — search the catalog, pick verified items with quantities, add a ZIP, click **Find Cheapest Stores**, see per-store cards and a grand total
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
+- **Dashboard** — search the catalog, pick verified items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`) and a primary Open / Add to cart / Coming soon action per store
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
+- **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart/Target search stubs)
 - **`GET /api/search-catalog`** — FatSecret catalog autocomplete (`?query=milk`)
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
@@ -18,7 +19,46 @@ On first launch with an empty database the API seeds a sample catalog for Aldi, 
 
 Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`). If credentials are missing or the official API rejects them, the service returns a demo `locationId` (`01400441`) so the dashboard still prices the seeded Kroger catalog.
 
-`POST /api/optimize-list` treats MongoDB as a 24-hour price cache. For each grocery item it first queries products whose `updatedAt` is less than a day old. A hit skips the live Products API. A miss (`GET https://api.kroger.com/v1/products?filter.term=…`) upserts the fresh rows with `findOneAndUpdate` (`upsert: true`) before the optimizer splits the trip.
+`POST /api/optimize-list` treats MongoDB as a 24-hour price cache. For each grocery item it first queries products whose `updatedAt` is less than a day old. A hit skips the live Products API. A miss (`GET https://api.kroger.com/v1/products?filter.term=…`) upserts the fresh rows with `findOneAndUpdate` (`upsert: true`) before the optimizer splits the trip. Live Kroger rows keep `productId` / `upc` so checkout handoff can deep-link or (later) call Cart API.
+
+## Checkout handoff (Phase 1)
+
+See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md) for the 15/5/10 multi-cart vision.
+
+After optimize, each store group includes a `handoff` object: `storeName`, `itemCount`, `subtotal`, items with identity for checkout, and `action: { type, label, url?, status, detail? }`.
+
+| Retailer | Phase 1 action | What it actually does |
+| --- | --- | --- |
+| **Kroger** | `search_deeplink` → **Open at Kroger** | Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
+| **Kroger** (optional) | `kroger_cart` → **Add to Kroger cart** | Only when `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
+| **Walmart / Target** | `search_deeplink` | Public search URLs. Not a cart fill — those APIs are typically closed or partner-only. |
+| **Aldi / others** | `coming_soon` | No fake checkout. |
+
+The app **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx.
+
+### Optional Kroger shopper OAuth
+
+Production already uses `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` for Locations and Products (`product.compact`, client-credentials). Cart write needs extra setup:
+
+1. In the [Kroger developer portal](https://developer.kroger.com/), add a redirect URI such as `http://localhost:3000/api/kroger/oauth/callback` (or your production HTTPS equivalent).
+2. Confirm the app is allowed to request `cart.basic:write` (some public apps are not; if authorize/cart add fails, keep using Open at Kroger).
+3. Set in `.env`:
+
+```bash
+KROGER_REDIRECT_URI=http://localhost:3000/api/kroger/oauth/callback
+# optional; default cart.basic:write
+KROGER_CART_SCOPE=cart.basic:write
+# optional; default PICKUP
+KROGER_CART_MODALITY=PICKUP
+```
+
+Routes:
+
+- `GET /api/kroger/auth-status` — whether redirect URI is configured
+- `POST /api/kroger/cart/start` — JSON `{ items, locationId? }` from the Kroger handoff; returns `{ authorizeUrl, status: "needs_shopper_login" }` or **501** if OAuth is not set up
+- `GET /api/kroger/oauth/callback` — exchanges the code, calls Cart API, shows success **only** if Kroger acknowledged the write
+
+Pending cart payloads live in memory on this Node process (~15 minutes). Multi-instance production would need a shared store.
 
 ## FatSecret catalog
 
@@ -66,7 +106,7 @@ curl -s -X POST http://localhost:3000/api/optimize-list \
   }'
 ```
 
-`zipCode` looks up the closest Kroger via `getClosestStoreLocation` and restricts product matches to that store’s `locationId`. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product at the resolved location (or the full catalog if `zipCode` is omitted). `items` is accepted as an alias for `groceryList`.
+`zipCode` looks up the closest Kroger via `getClosestStoreLocation` and uses that `locationId` for Kroger shelf prices. Other catalog retailers (Walmart, Target, Aldi) still compete on price so the trip can split. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product (Kroger at the resolved location plus other stores). `items` is accepted as an alias for `groceryList`.
 
 The dashboard sends verified catalog picks as objects:
 
@@ -87,31 +127,76 @@ Response shape:
 {
   "stores": [
     {
-      "storeName": "Aldi",
+      "storeName": "Kroger",
+      "itemCount": 2,
       "items": [
         {
           "query": "milk",
           "name": "Whole Milk",
-          "brand": "Friendly Farms",
-          "storeName": "Aldi",
-          "price": 2.19,
+          "brand": "Kroger",
+          "storeName": "Kroger",
+          "price": 2.89,
           "quantity": 2,
-          "itemTotal": 4.38,
+          "itemTotal": 5.78,
           "unit": "gal",
-          "normalizedUnit": "gal"
+          "normalizedUnit": "gal",
+          "locationId": "01400441",
+          "productId": "0001111041700",
+          "upc": "0001111041700"
         }
       ],
-      "subtotal": 4.38
+      "subtotal": 5.78,
+      "handoff": {
+        "storeName": "Kroger",
+        "itemCount": 2,
+        "subtotal": 5.78,
+        "items": [
+          {
+            "name": "Whole Milk",
+            "brand": "Kroger",
+            "quantity": 2,
+            "price": 2.89,
+            "productId": "0001111041700",
+            "upc": "0001111041700",
+            "locationId": "01400441",
+            "url": "https://www.kroger.com/search?query=0001111041700"
+          }
+        ],
+        "action": {
+          "type": "search_deeplink",
+          "label": "Open at Kroger",
+          "url": "https://www.kroger.com/search?query=0001111041700",
+          "status": "ready",
+          "detail": "Opens Kroger search for these items. Writing the shopper cart requires authorization-code OAuth…"
+        }
+      }
     }
   ],
   "unavailable": ["saffron"],
-  "total": 4.38,
+  "total": 5.78,
+  "tripPlan": {
+    "summary": "2 Kroger",
+    "storeCount": 1,
+    "itemCount": 2
+  },
   "zipCode": "45202",
   "locationId": "01400441"
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching splits the name into keywords (ignoring FatSecret serving annotations like `(28g)`) and requires those tokens in product `name` case-insensitively (so `"milk"` matches `"Whole Milk"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Store `subtotal` and the list `total` use `itemTotal`. Items with no match appear in `unavailable`. When live Kroger pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching splits the name into keywords (ignoring FatSecret serving annotations like `(28g)`) and requires those tokens in product `name` case-insensitively (so `"milk"` matches `"Whole Milk"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Store `subtotal` and the list `total` use `itemTotal`. `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live Kroger pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+
+### `GET /api/kroger/auth-status`
+
+Whether `KROGER_REDIRECT_URI` is set. Always `requiresShopperLogin: true` — client-credentials cannot write a cart.
+
+### `POST /api/kroger/cart/start`
+
+JSON body `{ "items": [{ "upc" or "productId", "quantity" }], "locationId?" }`. Returns `{ authorizeUrl, status: "needs_shopper_login" }` or **501** / **400** with an honest error. Does not add anything to a cart by itself.
+
+### `GET /api/kroger/oauth/callback`
+
+Kroger redirect after shopper login. Exchanges the code and calls `PUT /v1/cart/add`. Success HTML is shown only when that write is acknowledged.
 
 ## Live grocery scrape
 
@@ -170,6 +255,8 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `brand` | string | Required |
 | `storeName` | string | Required |
 | `locationId` | string | Optional. Kroger physical store id used when `zipCode` is sent. |
+| `productId` | string | Optional. Retailer product id (Kroger Products API `productId`). |
+| `upc` | string | Optional. UPC/GTIN used for Kroger search links and Cart API. |
 | `price` | number | Required, ≥ 0. Used as the comparison price. |
 | `unit` | string | Package unit: `oz`, `lbs`, `count`, `g`, `kg`, `ml`, `l`, `gal` |
 | `normalizedUnit` | string | Canonical unit for later price-per-unit work (same enum) |

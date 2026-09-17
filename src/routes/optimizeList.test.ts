@@ -212,6 +212,32 @@ describe("POST /api/optimize-list", () => {
     }
   });
 
+  it("still splits the trip across Walmart and Target when a ZIP selects a Kroger store", async () => {
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string; handoff: { action: { type: string } } }>;
+        tripPlan: { summary: string };
+        locationId?: string;
+      };
+      assert.equal(body.locationId, "01400441");
+      const names = body.stores.map((store) => store.storeName).sort();
+      assert.deepEqual(names, ["Kroger", "Target", "Walmart"]);
+      assert.match(body.tripPlan.summary, /Kroger/);
+      assert.match(body.tripPlan.summary, /Walmart/);
+      assert.match(body.tripPlan.summary, /Target/);
+    } finally {
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
+  });
+
   it("rejects an empty zipCode string", async () => {
     const { status, json } = await optimize({
       groceryList: ["milk"],
@@ -547,5 +573,50 @@ describe("POST /api/optimize-list", () => {
     assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
     assert.equal(body.stores[0].items[0].quantity, 2);
     assert.equal(body.stores[0].items[0].itemTotal, 5.78);
+  });
+
+  it("includes a trip plan and per-store checkout handoff", async () => {
+    const { status, json } = await optimize({
+      groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
+      stores: ["Walmart", "Target", "Kroger"],
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      tripPlan: { summary: string; storeCount: number; itemCount: number };
+      stores: Array<{
+        storeName: string;
+        itemCount: number;
+        handoff: {
+          storeName: string;
+          itemCount: number;
+          action: { type: string; label: string; url?: string; status: string };
+          items: Array<{ name: string; url?: string }>;
+        };
+      }>;
+    };
+
+    assert.equal(body.tripPlan.storeCount, 3);
+    assert.match(body.tripPlan.summary, /Kroger/);
+    assert.match(body.tripPlan.summary, /Walmart/);
+    assert.match(body.tripPlan.summary, /Target/);
+
+    const byStore = Object.fromEntries(
+      body.stores.map((store) => [store.storeName, store])
+    );
+
+    assert.equal(byStore.Kroger.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Kroger.handoff.action.label, "Open at Kroger");
+    assert.equal(byStore.Kroger.handoff.action.status, "ready");
+    assert.match(byStore.Kroger.handoff.action.url ?? "", /kroger\.com\/search/);
+    assert.match(byStore.Kroger.handoff.items[0].url ?? "", /kroger\.com\/search/);
+
+    assert.equal(byStore.Walmart.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Walmart.handoff.action.label, "Search at Walmart");
+    assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/search/);
+
+    assert.equal(byStore.Target.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Target.handoff.action.label, "Search at Target");
+    assert.match(byStore.Target.handoff.action.url ?? "", /target\.com\/s/);
   });
 });

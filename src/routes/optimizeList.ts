@@ -1,8 +1,10 @@
 import { Router, Request, Response } from "express";
 import mongoose from "mongoose";
+import { isKrogerCartOAuthConfigured } from "../krogerCartAuth";
 import { krogerService } from "../krogerService";
 import { optimizeGroceryList } from "../optimizeGroceryList";
 import { resolveCatalogProducts } from "../priceCache";
+import { enrichOptimizeResult } from "../storeHandoff";
 
 const router = Router();
 
@@ -147,10 +149,9 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       stores,
       locationId
     );
-    const groupedByStore = optimizeGroceryList(
-      groceryList,
-      stores,
-      productsResult.products
+    const groupedByStore = enrichOptimizeResult(
+      optimizeGroceryList(groceryList, stores, productsResult.products),
+      { krogerCartOAuthConfigured: isKrogerCartOAuthConfigured() }
     );
 
     if (
@@ -161,6 +162,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       res.status(503).json({
         error: `Live store prices are unavailable: ${productsResult.pricingError}`,
         unavailable: groupedByStore.unavailable,
+        tripPlan: groupedByStore.tripPlan,
         ...(zipCode ? { zipCode, locationId } : {}),
       });
       return;

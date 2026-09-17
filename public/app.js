@@ -33,6 +33,7 @@ const SAMPLE_ITEMS = [
   { name: "Whole Milk", brand: "Kroger", foodId: "demo-whole-milk", quantity: 2 },
   { name: "Large Eggs", brand: "Kroger", foodId: "demo-large-eggs", quantity: 1 },
   { name: "White Bread", brand: "Kroger", foodId: "demo-white-bread", quantity: 2 },
+  { name: "Salted Butter", brand: "Kroger", foodId: "demo-salted-butter", quantity: 1 },
 ];
 
 /** @type {Array<{ name: string, brand: string, foodId: string, quantity: number }>} */
@@ -42,6 +43,8 @@ let suggestions = [];
 let activeIndex = -1;
 let searchTimer = 0;
 let searchAbort = null;
+/** @type {null | { stores: Array<Record<string, unknown>> }} */
+let lastOptimize = null;
 
 function money(value) {
   return new Intl.NumberFormat("en-US", {
@@ -71,6 +74,7 @@ function setBusy(isBusy) {
 }
 
 function hideResults() {
+  lastOptimize = null;
   resultsEl.hidden = true;
   storeGridEl.innerHTML = "";
   grandTotalEl.textContent = "$0.00";
@@ -269,44 +273,172 @@ function itemFragment(item) {
   return `${quantity}x ${item.name}${brand} — ${money(itemTotal)}`;
 }
 
+function itemOpenUrl(store, item, index) {
+  const fromHandoff = store.handoff?.items?.[index]?.url;
+  return fromHandoff || item.url || "";
+}
+
+function renderHandoffButton(store) {
+  const action = store.handoff?.action;
+  if (!action) {
+    return "";
+  }
+
+  const detail = action.detail
+    ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>`
+    : "";
+
+  if (action.type === "coming_soon" || action.status === "coming_soon") {
+    return `
+      <footer class="store-handoff">
+        <button class="handoff-btn" type="button" disabled>${escapeHtml(
+          action.label || "Coming soon"
+        )}</button>
+        ${detail}
+      </footer>
+    `;
+  }
+
+  if (action.type === "kroger_cart") {
+    return `
+      <footer class="store-handoff">
+        <button
+          class="handoff-btn"
+          type="button"
+          data-handoff-store="${escapeHtml(store.storeName)}"
+        >${escapeHtml(action.label)}</button>
+        ${detail}
+      </footer>
+    `;
+  }
+
+  if (action.url) {
+    return `
+      <footer class="store-handoff">
+        <a
+          class="handoff-btn"
+          href="${escapeHtml(action.url)}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >${escapeHtml(action.label)}</a>
+        ${detail}
+      </footer>
+    `;
+  }
+
+  return `
+    <footer class="store-handoff">
+      <button class="handoff-btn" type="button" disabled>${escapeHtml(
+        action.label || "Unavailable"
+      )}</button>
+      ${detail}
+    </footer>
+  `;
+}
+
 function renderStoreCard(store) {
+  const itemCount = store.itemCount
+    ?? store.handoff?.itemCount
+    ?? store.items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
   const rows = store.items
-    .map(
-      (item) =>
-        `<li class="item-line">${escapeHtml(itemFragment(item))}</li>`
-    )
+    .map((item, index) => {
+      const openUrl = itemOpenUrl(store, item, index);
+      const openLink = openUrl
+        ? `<a class="item-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">Open</a>`
+        : "";
+      return `<li class="item-line"><span>${escapeHtml(
+        itemFragment(item)
+      )}</span>${openLink}</li>`;
+    })
     .join("");
 
   return `
     <article class="store-card">
       <header>
-        <h2>${escapeHtml(store.storeName)}</h2>
+        <div>
+          <h2>${escapeHtml(store.storeName)}</h2>
+          <p class="store-count">${itemCount} item${itemCount === 1 ? "" : "s"}</p>
+        </div>
         <p class="store-subtotal">${money(store.subtotal)}</p>
       </header>
       <ul class="item-list">${rows}</ul>
+      ${renderHandoffButton(store)}
     </article>
   `;
 }
 
 function renderResults(payload) {
+  lastOptimize = payload;
   const storeCount = payload.stores.length;
-  const itemCount = payload.stores.reduce(
-    (sum, store) =>
-      sum + store.items.reduce((inner, item) => inner + (item.quantity ?? 1), 0),
-    0
-  );
+  const itemCount =
+    payload.tripPlan?.itemCount ??
+    payload.stores.reduce(
+      (sum, store) =>
+        sum + store.items.reduce((inner, item) => inner + (item.quantity ?? 1), 0),
+      0
+    );
+  const tripSummary = payload.tripPlan?.summary;
 
   emptyStateEl.hidden = true;
   resultsEl.hidden = false;
   grandTotalEl.textContent = money(payload.total);
-  summaryMetaEl.textContent = storeCount
-    ? `${itemCount} item${itemCount === 1 ? "" : "s"} · ${storeCount} store${
-        storeCount === 1 ? "" : "s"
-      }${payload.locationId ? ` · Kroger ${payload.locationId}` : ""}`
-    : "Nothing in the catalog matched this list.";
+  summaryMetaEl.textContent = tripSummary
+    ? `${tripSummary}${payload.locationId ? ` · Kroger ${payload.locationId}` : ""}`
+    : storeCount
+      ? `${itemCount} item${itemCount === 1 ? "" : "s"} · ${storeCount} store${
+          storeCount === 1 ? "" : "s"
+        }${payload.locationId ? ` · Kroger ${payload.locationId}` : ""}`
+      : "Nothing in the catalog matched this list.";
   storeGridEl.innerHTML = payload.stores.map(renderStoreCard).join("");
   renderUnavailable(payload.unavailable ?? []);
 }
+
+async function startKrogerCart(store) {
+  const handoff = store.handoff;
+  showApiError("");
+  try {
+    const response = await fetch("/api/kroger/cart/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        items: handoff?.items ?? store.items,
+        locationId: store.items?.[0]?.locationId,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Kroger cart start failed (${response.status})`);
+    }
+    if (!payload.authorizeUrl) {
+      throw new Error("Kroger did not return a shopper login URL.");
+    }
+    window.location.assign(payload.authorizeUrl);
+  } catch (error) {
+    showApiError(
+      error instanceof Error
+        ? error.message
+        : "Could not start Kroger cart OAuth."
+    );
+  }
+}
+
+storeGridEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-handoff-store]");
+  if (!button) {
+    return;
+  }
+  const storeName = button.dataset.handoffStore;
+  const store = lastOptimize?.stores?.find(
+    (entry) => entry.storeName === storeName
+  );
+  if (!store) {
+    return;
+  }
+  void startKrogerCart(store);
+});
 
 async function findCheapestStores() {
   showFormError("");
