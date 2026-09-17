@@ -279,6 +279,16 @@ function renderPricingLegend(reports) {
     return;
   }
 
+  const hasWeekly = reports.some(
+    (report) =>
+      report.source === "weekly_ad" ||
+      report.source === "cached_weekly_ad" ||
+      String(report.label ?? "").toLowerCase().includes("weekly ad")
+  );
+  const weeklyNote = hasWeekly
+    ? `<p class="pricing-legend-note">Weekly ad prices come from that store’s circular near your ZIP. They are sale prices printed in the flyer, not a full live shelf catalog.</p>`
+    : `<p class="pricing-legend-note">Live prices are retailer APIs. Weekly ad (when enabled) is flyer/circular pricing only — not aisle-wide. Demo catalog is seed data.</p>`;
+
   pricingLegendEl.hidden = false;
   pricingLegendEl.innerHTML = `
     <h3>Price sources</h3>
@@ -297,12 +307,14 @@ function renderPricingLegend(reports) {
         })
         .join("")}
     </ul>
+    ${weeklyNote}
   `;
 }
 
 function pricingBadgeKind(source) {
   if (source === "live") return "live";
   if (source === "cached_live") return "cached";
+  if (source === "weekly_ad" || source === "cached_weekly_ad") return "weekly";
   if (source === "mixed") return "mixed";
   if (source === "unavailable") return "unavailable";
   return "seed";
@@ -323,6 +335,9 @@ function renderPricingBadge(store) {
 function itemSourceMark(item) {
   if (item.priceSource === "live" || item.priceSource === "cached_live") {
     return ` <em class="item-source item-source-live">live</em>`;
+  }
+  if (item.priceSource === "weekly_ad") {
+    return ` <em class="item-source item-source-weekly">weekly ad</em>`;
   }
   if (item.priceSource === "seed") {
     return ` <em class="item-source">demo</em>`;

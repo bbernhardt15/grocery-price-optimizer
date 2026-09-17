@@ -6,11 +6,11 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 
 ## What it includes
 
-- **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** vs **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `priceSource` (`live` \| `seed`), `lastUpdated`, `updatedAt`
+- **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** / **Weekly ad** / **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart/Target search stubs)
-- **`src/pricing/`** — pluggable live price providers (Kroger Products API, Walmart Affiliate API, Target partner feed)
+- **`src/pricing/`** — pluggable price providers (Kroger Products API, Walmart Affiliate API, Target partner feed, Flipp weekly-ad deals)
 - **`GET /api/search-catalog`** — FatSecret catalog autocomplete (`?query=milk`)
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
@@ -22,13 +22,14 @@ On first launch with an empty database the API seeds a sample catalog for Aldi, 
 
 Auth is client-credentials: the service POSTs to `/v1/connect/oauth2/token` with `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` and reuses the bearer token until it expires. Set those values in `.env` (see `.env.example`). If credentials are missing or the official API rejects them, the service returns a demo `locationId` (`01400441`) so the dashboard still prices the seeded Kroger catalog.
 
-`POST /api/optimize-list` treats MongoDB as a 24-hour **live** price cache (`priceSource: "live"`). Seed/demo rows are not treated as live. For each grocery item and each competing store (Kroger, Walmart, Target, Aldi by default) it:
+`POST /api/optimize-list` treats MongoDB as a 24-hour price cache for **live** retailer rows (`priceSource: "live"`) and **weekly-ad** rows (`priceSource: "weekly_ad"`). Seed/demo rows are not treated as live. For each grocery item and each competing store (Kroger, Walmart, Target, Aldi by default) it:
 
 1. Uses live rows whose `updatedAt` is less than a day old (`Cached live`).
-2. On a miss, calls that store’s pricing provider when credentials are configured, then upserts with `priceSource: "live"`.
-3. Otherwise falls back to the seeded catalog and labels it **Demo catalog**.
+2. On a miss, calls that store’s dedicated retailer API when credentials are configured (Kroger Products, Walmart Affiliate, Target partner feed), then upserts with `priceSource: "live"`.
+3. If that store still has no live row and a ZIP is set, calls the Flipp weekly-ad provider when enabled, then upserts with `priceSource: "weekly_ad"`.
+4. Otherwise falls back to the seeded catalog and labels it **Demo catalog**.
 
-Kroger still uses `GET https://api.kroger.com/v1/products?filter.term=…` with the ZIP-resolved `locationId`. Live Kroger rows keep `productId` / `upc` so checkout handoff can deep-link or (later) call Cart API.
+Kroger still uses `GET https://api.kroger.com/v1/products?filter.term=…` with the ZIP-resolved `locationId`. Live Kroger rows keep `productId` / `upc` so checkout handoff can deep-link or (later) call Cart API. Weekly-ad prices never pretend to be a full Kroger (or Aldi/Target) shelf catalog.
 
 ## Live multi-store pricing (Phase 2)
 
@@ -38,10 +39,27 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
 | **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). Optional `GET /stores?zip=` for a nearby store id only. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). | **walmart.com catalog** prices (the Affiliate search API has no in-aisle store filter). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines), `WALMART_PUBLISHER_ID`. |
-| **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars are set. | Partner-feed prices tagged live. |
-| **Aldi** | No provider | Demo catalog; handoff stays Coming soon | — |
+| **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. |
+| **Aldi** (and Publix-like banners) | No retailer product API. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. | Demo catalog | Weekly-ad / circular prices near the ZIP when Flipp is enabled |
 
-Each optimize response includes `pricingByStore` and each store group includes `pricing: { source, label, detail, error? }`. `source` is `live`, `cached_live`, `seed`, `mixed`, or `unavailable`. A configured provider that fails sets `pricingWarning` (partial success still returns 200). If **no** item can be priced at all, the route still returns **503**.
+Each optimize response includes `pricingByStore` and each store group includes `pricing: { source, label, detail, error? }`. `source` is `live`, `cached_live`, `weekly_ad`, `cached_weekly_ad`, `seed`, `mixed`, or `unavailable`. Labels are **Live prices**, **Weekly ad**, or **Demo catalog**. A configured provider that fails sets `pricingWarning` (partial success still returns 200). If **no** item can be priced at all, the route still returns **503**.
+
+## Weekly-ad / multi-store deals (Flipp)
+
+Banners without a public grocery API (Aldi, Target when the partner feed is absent, Publix, Meijer, and other mapped circulars) can leave the seed catalog during testing by opting into Flipp flyer data.
+
+**Weekly ad ≠ live shelf.** Flipp returns items printed in the current circular near a ZIP. Items not on the flyer are not priced from this source. Grocery Gitter labels those rows **Weekly ad** and never reports “added to cart.”
+
+| Path | When | What it calls | Honesty / risk |
+| --- | --- | --- | --- |
+| **FlyerKit v4.0** (preferred) | `FLIPP_ACCESS_TOKEN` is set | Documented `GET https://api.flipp.com/flyerkit/v4.0/publications/{merchant_identifier}/products?access_token=&locale=en-US&postal_code=&keywords=` ([FlyerKit docs](https://api.flipp.com/flyerkit/v4.0/documentation)). Tokens are issued by a Flipp technical contact (typically merchant-scoped). | Legitimate partner API. |
+| **Consumer flyer search** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com: `GET https://backflipp.wishabi.com/flipp/items/search?locale=en-us&postal_code={ZIP}&q={merchant AND term}`. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
+
+Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. Request extra banners via `stores` on optimize-list; the default trip still considers Kroger, Walmart, Target, and Aldi.
+
+Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric `current_price` (BOGO / “% off” only) are skipped so we do not invent a price.
+
+This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 
 ## Checkout handoff (Phase 1)
 
@@ -128,7 +146,7 @@ curl -s -X POST http://localhost:3000/api/optimize-list \
   }'
 ```
 
-`zipCode` looks up the closest Kroger via `getClosestStoreLocation` and uses that `locationId` for Kroger shelf prices. The same request also asks the Walmart and Target providers for that ZIP when those keys are configured, so the trip can split on live (or cached live) prices. Seed/demo rows still compete when a live source is missing, and they are labeled as demo. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product. `items` is accepted as an alias for `groceryList`.
+`zipCode` looks up the closest Kroger via `getClosestStoreLocation` and uses that `locationId` for Kroger shelf prices. The same request also asks the Walmart and Target providers for that ZIP when those keys are configured, and (when `FLIPP_ENABLED` or `FLIPP_ACCESS_TOKEN` is set) Flipp weekly-ad prices for mapped banners such as Aldi and Target. Seed/demo rows still compete when a live or weekly-ad source is missing, and they are labeled as demo. `stores` is optional and further limits retailers. Omit `stores` (or send `[]`) to consider every matching product. `items` is accepted as an alias for `groceryList`.
 
 The dashboard sends verified catalog picks as objects:
 
@@ -299,7 +317,7 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `productId` | string | Optional. Retailer product id (Kroger Products API `productId`). |
 | `upc` | string | Optional. UPC/GTIN used for Kroger search links and Cart API. |
 | `price` | number | Required, ≥ 0. Used as the comparison price. |
-| `priceSource` | string | `live` (upserted from a retailer API) or `seed` (demo catalog). The API also reports `cached_live` when a live row is served from the 24-hour cache. |
+| `priceSource` | string | `live` (upserted from a retailer API), `weekly_ad` (Flipp circular), or `seed` (demo catalog). The API also reports `cached_live` when a live row is served from the 24-hour cache. Weekly-ad cache hits stay labeled **Weekly ad**. |
 | `unit` | string | Package unit: `oz`, `lbs`, `count`, `g`, `kg`, `ml`, `l`, `gal` |
 | `normalizedUnit` | string | Canonical unit for later price-per-unit work (same enum) |
 | `lastUpdated` | Date | Defaults to now |

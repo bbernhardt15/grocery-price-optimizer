@@ -25,10 +25,10 @@ const productSchema = new Schema(
       enum: groceryUnits,
     },
     lastUpdated: { type: Date, required: true, default: Date.now },
-    /** live = upserted from a retailer API; seed = demo catalog / unknown. */
+    /** live = upserted from a retailer API; weekly_ad = flyer/circular; seed = demo catalog / unknown. */
     priceSource: {
       type: String,
-      enum: ["live", "seed"],
+      enum: ["live", "weekly_ad", "seed"],
       default: "seed",
       index: true,
     },

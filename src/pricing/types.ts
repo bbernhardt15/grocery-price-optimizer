@@ -3,6 +3,8 @@ import type { CatalogProduct } from "../optimizeGroceryList";
 export type StorePricingSource =
   | "live"
   | "cached_live"
+  | "weekly_ad"
+  | "cached_weekly_ad"
   | "seed"
   | "mixed"
   | "unavailable";
@@ -52,7 +54,7 @@ export type StorePricingReport = {
   attempted: boolean;
   ok: boolean;
   usedFallback: boolean;
-  /** Shopper-facing label: Live prices / Cached live / Demo catalog. */
+  /** Shopper-facing label: Live prices / Cached live / Weekly ad / Demo catalog. */
   label: string;
   detail: string;
   error?: string;
@@ -66,6 +68,8 @@ export type StorePricingAccumulator = {
   attempted: boolean;
   liveHits: number;
   cachedHits: number;
+  weeklyAdHits: number;
+  cachedWeeklyAdHits: number;
   seedHits: number;
   errors: string[];
   locationId?: string;

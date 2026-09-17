@@ -11,6 +11,7 @@ import { fetchMatchingProducts } from "../fetchMatchingProducts";
 import { krogerService } from "../krogerService";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { targetPricingProvider } from "../pricing/targetProvider";
+import { flippProviderForStore, type FlippDealsProvider } from "../pricing/flipp/flippProvider";
 
 describe("POST /api/optimize-list", () => {
   let memory: MongoMemoryServer;
@@ -24,6 +25,8 @@ describe("POST /api/optimize-list", () => {
     WALMART_PUBLISHER_ID: process.env.WALMART_PUBLISHER_ID,
     TARGET_PARTNER_BASE_URL: process.env.TARGET_PARTNER_BASE_URL,
     TARGET_PARTNER_API_KEY: process.env.TARGET_PARTNER_API_KEY,
+    FLIPP_ENABLED: process.env.FLIPP_ENABLED,
+    FLIPP_ACCESS_TOKEN: process.env.FLIPP_ACCESS_TOKEN,
   };
 
   function clearPricingEnv(): void {
@@ -34,6 +37,8 @@ describe("POST /api/optimize-list", () => {
     delete process.env.WALMART_PUBLISHER_ID;
     delete process.env.TARGET_PARTNER_BASE_URL;
     delete process.env.TARGET_PARTNER_API_KEY;
+    delete process.env.FLIPP_ENABLED;
+    delete process.env.FLIPP_ACCESS_TOKEN;
   }
 
   function setKrogerCreds(): void {
@@ -921,6 +926,203 @@ describe("POST /api/optimize-list", () => {
       krogerService.searchProducts = originalKrogerSearch;
       krogerService.getClosestStoreLocation = originalLookup;
       targetPricingProvider.searchProducts = originalTarget;
+      clearPricingEnv();
+    }
+  });
+
+  it("lets Flipp weekly-ad prices for Aldi and Target compete with live Kroger when FLIPP_ENABLED", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    setKrogerCreds();
+
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const stubs: Array<{
+      store: string;
+      original: FlippDealsProvider["searchProducts"];
+    }> = [];
+
+    function stubFlipp(
+      storeName: string,
+      search: FlippDealsProvider["searchProducts"]
+    ): void {
+      const provider = flippProviderForStore(storeName);
+      assert.ok(provider, `expected Flipp mapping for ${storeName}`);
+      stubs.push({
+        store: storeName,
+        original: provider.searchProducts.bind(provider),
+      });
+      provider.searchProducts = search;
+    }
+
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async (term: string) => {
+      if (term !== "FlippAmaranth") {
+        return [];
+      }
+      return [
+        {
+          name: "Simple Truth FlippAmaranth",
+          brand: "Kroger",
+          storeName: "Kroger",
+          locationId: "01400441",
+          price: 3.1,
+          unit: "count",
+          normalizedUnit: "count",
+          productId: "k-amaranth",
+        },
+      ];
+    };
+
+    stubFlipp("Aldi", async (term, context) => {
+      assert.equal(context?.zipCode, "45202");
+      if (term !== "FlippAmaranth") {
+        return [];
+      }
+      return [
+        {
+          name: "Friendly Farms FlippAmaranth",
+          brand: "Friendly Farms",
+          storeName: "Aldi",
+          locationId: "45202",
+          price: 1.79,
+          unit: "count",
+          normalizedUnit: "count",
+          priceSource: "weekly_ad",
+        },
+      ];
+    });
+    stubFlipp("Target", async (term, context) => {
+      assert.equal(context?.zipCode, "45202");
+      if (term !== "FlippBokChoy") {
+        return [];
+      }
+      return [
+        {
+          name: "Good & Gather FlippBokChoy",
+          brand: "Good & Gather",
+          storeName: "Target",
+          locationId: "45202",
+          price: 1.45,
+          unit: "count",
+          normalizedUnit: "count",
+          priceSource: "weekly_ad",
+        },
+      ];
+    });
+    for (const store of ["Walmart", "Kroger", "Publix", "Meijer"] as const) {
+      stubFlipp(store, async () => []);
+    }
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["FlippAmaranth", "FlippBokChoy"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ query: string; price: number; priceSource?: string }>;
+          pricing?: { source: string; label: string; detail: string };
+        }>;
+        pricingByStore: Array<{
+          storeName: string;
+          source: string;
+          label: string;
+        }>;
+        pricingWarning?: string;
+      };
+
+      const byStore = Object.fromEntries(
+        body.stores.map((store) => [store.storeName, store])
+      );
+      assert.equal(byStore.Aldi.items[0].query, "FlippAmaranth");
+      assert.equal(byStore.Aldi.items[0].price, 1.79);
+      assert.equal(byStore.Aldi.items[0].priceSource, "weekly_ad");
+      assert.equal(byStore.Aldi.pricing?.label, "Weekly ad");
+      assert.match(byStore.Aldi.pricing?.detail ?? "", /not a full live shelf/i);
+
+      assert.equal(byStore.Target.items[0].query, "FlippBokChoy");
+      assert.equal(byStore.Target.items[0].priceSource, "weekly_ad");
+      assert.equal(byStore.Target.pricing?.label, "Weekly ad");
+
+      assert.equal(byStore.Kroger, undefined);
+
+      const reports = Object.fromEntries(
+        body.pricingByStore.map((row) => [row.storeName, row])
+      );
+      assert.equal(reports.Aldi.source, "weekly_ad");
+      assert.equal(reports.Target.source, "weekly_ad");
+      assert.equal(reports.Kroger.source, "live");
+      assert.doesNotMatch(body.pricingWarning ?? "", /WALMART_CONSUMER_ID/);
+      assert.doesNotMatch(body.pricingWarning ?? "", /TARGET_PARTNER/);
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      for (const stub of stubs) {
+        const provider = flippProviderForStore(stub.store);
+        if (provider) {
+          provider.searchProducts = stub.original;
+        }
+      }
+      clearPricingEnv();
+    }
+  });
+
+  it("keeps live Kroger prices when Flipp is also enabled", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    setKrogerCreds();
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const krogerFlipp = flippProviderForStore("Kroger");
+    const originalFlipp = krogerFlipp?.searchProducts.bind(krogerFlipp);
+    let flippCalls = 0;
+
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async () => [
+      {
+        name: "Kroger FlippGuard Teff",
+        brand: "Simple Truth",
+        storeName: "Kroger",
+        locationId: "01400441",
+        price: 4.5,
+        unit: "oz",
+        normalizedUnit: "oz",
+        productId: "k-teff",
+      },
+    ];
+    if (krogerFlipp) {
+      krogerFlipp.searchProducts = async () => {
+        flippCalls += 1;
+        return [];
+      };
+    }
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["FlippGuard Teff"],
+        zipCode: "45202",
+        stores: ["Kroger"],
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ name: string; priceSource?: string }>;
+          pricing?: { label: string; source: string };
+        }>;
+      };
+      assert.equal(body.stores[0].storeName, "Kroger");
+      assert.equal(body.stores[0].items[0].name, "Kroger FlippGuard Teff");
+      assert.equal(body.stores[0].items[0].priceSource, "live");
+      assert.equal(body.stores[0].pricing?.label, "Live prices");
+      assert.equal(flippCalls, 0);
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      if (krogerFlipp && originalFlipp) {
+        krogerFlipp.searchProducts = originalFlipp;
+      }
       clearPricingEnv();
     }
   });
