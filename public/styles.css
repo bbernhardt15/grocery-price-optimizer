@@ -523,7 +523,8 @@ button:disabled {
 }
 
 .price-badge-live,
-.price-badge-cached {
+.price-badge-cached,
+.price-badge-partner {
   background: var(--accent-soft);
   color: var(--accent-ink);
 }

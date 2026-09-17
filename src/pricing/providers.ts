@@ -1,4 +1,5 @@
 import { krogerPricingProvider } from "./krogerProvider";
+import { partnerProvidersFromEnv, partnerStoreNamesFromEnv } from "./partnerProviders";
 import { targetPricingProvider } from "./targetProvider";
 import type { StorePricingProvider } from "./types";
 import { walmartPricingProvider } from "./walmartProvider";
@@ -19,23 +20,42 @@ const dedicatedProviders: StorePricingProvider[] = [
   targetPricingProvider,
 ];
 
+function partnerProviderForStore(
+  storeName: string
+): StorePricingProvider | undefined {
+  const key = canonicalGroceryStoreName(storeName).toLowerCase();
+  return partnerProvidersFromEnv().find((provider) => {
+    const partnerKey = canonicalGroceryStoreName(provider.storeName).toLowerCase();
+    return partnerKey === key;
+  });
+}
+
+/**
+ * First-party or licensed shelf/catalog adapter (not Flipp weekly ads).
+ * Partner stubs run here so they beat circular prices for the same banner.
+ */
 export function dedicatedProviderForStore(
   storeName: string
 ): StorePricingProvider | undefined {
   const key = storeName.trim().toLowerCase();
-  return dedicatedProviders.find(
+  const builtin = dedicatedProviders.find(
     (provider) => provider.storeName.toLowerCase() === key
   );
+  if (builtin) {
+    return builtin;
+  }
+  return partnerProviderForStore(storeName);
 }
 
 export function allPricingProviders(): StorePricingProvider[] {
   const names = new Set<string>([
     ...dedicatedProviders.map((provider) => provider.storeName),
     ...DEFAULT_COMPETING_STORES,
+    ...partnerStoreNamesFromEnv().map((name) => canonicalGroceryStoreName(name)),
   ]);
-  return [...names].map((name) => providerForStore(name)).filter(
-    (provider): provider is StorePricingProvider => Boolean(provider)
-  );
+  return [...names]
+    .map((name) => providerForStore(name))
+    .filter((provider): provider is StorePricingProvider => Boolean(provider));
 }
 
 export function providerForStore(
@@ -52,7 +72,10 @@ export function providerForStore(
 
 export function competingStoreNames(stores: string[] = []): string[] {
   const requested = stores.map((store) => store.trim()).filter(Boolean);
-  const source = requested.length === 0 ? [...DEFAULT_COMPETING_STORES] : requested;
+  const source =
+    requested.length === 0
+      ? [...DEFAULT_COMPETING_STORES, ...partnerStoreNamesFromEnv()]
+      : requested;
 
   const seen = new Set<string>();
   const names: string[] = [];

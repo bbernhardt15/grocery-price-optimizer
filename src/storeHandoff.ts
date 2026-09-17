@@ -73,6 +73,63 @@ const WALMART_SEARCH = "https://www.walmart.com/search";
 const TARGET_SEARCH = "https://www.target.com/s";
 export const KROGER_CART_START_PATH = "/api/kroger/cart/start";
 
+type RetailerKey =
+  | "kroger"
+  | "walmart"
+  | "target"
+  | "aldi"
+  | "publix"
+  | "heb"
+  | "meijer"
+  | "safeway"
+  | "albertsons"
+  | "food_lion"
+  | "giant"
+  | "stop_and_shop"
+  | "costco"
+  | "sams_club"
+  | "whole_foods"
+  | "amazon_fresh"
+  | "other";
+
+function retailerKey(storeName: string): RetailerKey {
+  const name = storeName
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  if (name === "kroger") return "kroger";
+  if (name === "walmart") return "walmart";
+  if (name === "target") return "target";
+  if (name === "aldi") return "aldi";
+  if (name === "publix") return "publix";
+  if (name === "h e b" || name === "heb") return "heb";
+  if (name === "meijer") return "meijer";
+  if (name === "safeway") return "safeway";
+  if (name === "albertsons") return "albertsons";
+  if (name === "food lion") return "food_lion";
+  if (name === "giant" || name === "giant food") return "giant";
+  if (name === "stop and shop") return "stop_and_shop";
+  if (name === "costco") return "costco";
+  if (name === "sams club") return "sams_club";
+  if (name === "whole foods" || name === "whole foods market") return "whole_foods";
+  if (name === "amazon fresh") return "amazon_fresh";
+  return "other";
+}
+
+function canonicalRetailer(
+  storeName: string
+): "kroger" | "walmart" | "target" | "aldi" | "other" {
+  const key = retailerKey(storeName);
+  if (key === "kroger" || key === "walmart" || key === "target" || key === "aldi") {
+    return key;
+  }
+  return "other";
+}
+
 export function itemCountOf(items: Array<{ quantity: number }>): number {
   return items.reduce((sum, item) => sum + item.quantity, 0);
 }
@@ -87,17 +144,6 @@ export function formatTripSummary(
   return stores
     .map((store) => `${store.itemCount} ${store.storeName}`)
     .join(" + ");
-}
-
-function canonicalRetailer(
-  storeName: string
-): "kroger" | "walmart" | "target" | "aldi" | "other" {
-  const name = storeName.trim().toLowerCase();
-  if (name === "kroger") return "kroger";
-  if (name === "walmart") return "walmart";
-  if (name === "target") return "target";
-  if (name === "aldi") return "aldi";
-  return "other";
 }
 
 function identifierOf(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
@@ -135,6 +181,46 @@ export function targetSearchUrl(
   return `${TARGET_SEARCH}?${query.toString()}`;
 }
 
+function searchQuery(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
+  return (item.upc || item.productId || item.name).trim();
+}
+
+/** Public storefront search — not a cart fill. */
+export function partnerSearchUrl(
+  storeName: string,
+  item: Pick<PickedItem, "productId" | "upc" | "name">
+): string | undefined {
+  const q = encodeURIComponent(searchQuery(item));
+  switch (retailerKey(storeName)) {
+    case "publix":
+      return `https://www.publix.com/search?searchTerm=${q}`;
+    case "heb":
+      return `https://www.heb.com/search/?q=${q}`;
+    case "meijer":
+      return `https://www.meijer.com/shopping/search.html?query=${q}`;
+    case "safeway":
+      return `https://www.safeway.com/shop/search-results.html?q=${q}`;
+    case "albertsons":
+      return `https://www.albertsons.com/shop/search-results.html?q=${q}`;
+    case "food_lion":
+      return `https://www.foodlion.com/shop/search-results.html?q=${q}`;
+    case "giant":
+      return `https://giantfood.com/shop/search-results.html?q=${q}`;
+    case "stop_and_shop":
+      return `https://stopandshop.com/shop/search-results.html?q=${q}`;
+    case "costco":
+      return `https://www.costco.com/CatalogSearch?keyword=${q}`;
+    case "sams_club":
+      return `https://www.samsclub.com/s/${q}`;
+    case "whole_foods":
+      return `https://www.wholefoodsmarket.com/search?text=${q}`;
+    case "amazon_fresh":
+      return `https://www.amazon.com/s?k=${q}`;
+    default:
+      return undefined;
+  }
+}
+
 function itemSearchUrl(storeName: string, item: PickedItem): string | undefined {
   switch (canonicalRetailer(storeName)) {
     case "kroger":
@@ -144,7 +230,7 @@ function itemSearchUrl(storeName: string, item: PickedItem): string | undefined 
     case "target":
       return targetSearchUrl(item);
     default:
-      return undefined;
+      return partnerSearchUrl(storeName, item);
   }
 }
 
@@ -233,6 +319,28 @@ function comingSoonAction(storeName: string): StoreHandoffAction {
   };
 }
 
+function partnerSearchAction(
+  storeName: string,
+  items: HandoffItem[]
+): StoreHandoffAction {
+  const firstUrl = items.find((item) => item.url)?.url;
+  const key = retailerKey(storeName);
+  const club =
+    key === "costco" || key === "sams_club"
+      ? " Club prices often need a membership; third-party cart-write is not available."
+      : key === "whole_foods" || key === "amazon_fresh"
+        ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
+        : " There is no public cart-write API for this banner.";
+
+  return {
+    type: "search_deeplink",
+    label: `Search at ${storeName}`,
+    url: firstUrl,
+    status: firstUrl ? "ready" : "unavailable",
+    detail: `Search deep link, not a cart fill.${club}`,
+  };
+}
+
 export function buildStoreHandoff(
   group: StoreGroup,
   options: HandoffOptions = {}
@@ -248,6 +356,10 @@ export function buildStoreHandoff(
     action = walmartAction(items);
   } else if (retailer === "target") {
     action = targetAction(items);
+  } else if (retailer === "aldi") {
+    action = comingSoonAction(group.storeName);
+  } else if (items.some((item) => item.url)) {
+    action = partnerSearchAction(group.storeName, items);
   } else {
     action = comingSoonAction(group.storeName);
   }

@@ -8,6 +8,7 @@ import {
   krogerSearchUrl,
   targetSearchUrl,
   walmartSearchUrl,
+  partnerSearchUrl,
   KROGER_CART_START_PATH,
 } from "./storeHandoff";
 
@@ -205,6 +206,46 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.action.status, "coming_soon");
     assert.equal(handoff.action.url, undefined);
     assert.match(handoff.action.detail ?? "", /partner API/i);
+  });
+
+  it("uses public search deeplinks for partner banners and never fakes a cart fill", () => {
+    const milk = {
+      query: "milk",
+      name: "Whole Milk",
+      brand: "Publix",
+      storeName: "Publix",
+      price: 3.19,
+      quantity: 1,
+      itemTotal: 3.19,
+      unit: "gal",
+      normalizedUnit: "gal",
+      upc: "041415000001",
+    };
+
+    const publix = buildStoreHandoff({
+      storeName: "Publix",
+      items: [milk],
+      subtotal: 3.19,
+    });
+    assert.equal(publix.action.type, "search_deeplink");
+    assert.equal(publix.action.label, "Search at Publix");
+    assert.equal(publix.action.status, "ready");
+    assert.equal(
+      partnerSearchUrl("Publix", milk),
+      "https://www.publix.com/search?searchTerm=041415000001"
+    );
+    assert.equal(publix.action.url, partnerSearchUrl("Publix", milk));
+    assert.match(publix.action.detail ?? "", /not a cart fill/i);
+
+    const costco = buildStoreHandoff({
+      storeName: "Costco",
+      items: [{ ...milk, storeName: "Costco", brand: "Kirkland" }],
+      subtotal: 3.19,
+    });
+    assert.equal(costco.action.type, "search_deeplink");
+    assert.match(costco.action.detail ?? "", /membership/i);
+    assert.match(costco.action.detail ?? "", /cart-write is not available/i);
+    assert.equal(costco.action.type, "search_deeplink");
   });
 });
 

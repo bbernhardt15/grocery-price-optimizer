@@ -26,7 +26,7 @@ app.get("/api", (_req, res) => {
       "GET /api/search-catalog":
         "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "POST /api/optimize-list":
-        "Accepts groceryList or verified product objects, zipCode, and optional stores; prices Kroger (Products API), Walmart (Affiliate API when configured), Target (licensed partner feed when configured), and Flipp weekly-ad deals when FLIPP_ENABLED or FLIPP_ACCESS_TOKEN is set; returns a tripPlan, per-store checkout handoff, and pricingByStore freshness/source.",
+        "Accepts groceryList or verified product objects, zipCode, and optional stores; prices Kroger (Products API), Walmart (Affiliate API when configured), Target (licensed partner feed when configured), env-gated partner feeds (SHELF_FEED / INSTACART_PARTNER / PUBLIX_PARTNER / HEB_PARTNER / MEIJER_PARTNER), and Flipp weekly-ad deals when FLIPP_ENABLED or FLIPP_ACCESS_TOKEN is set; returns a tripPlan, per-store checkout handoff, and pricingByStore freshness/source.",
       "GET /api/kroger/auth-status":
         "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway).",
       "POST /api/kroger/cart/start":
