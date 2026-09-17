@@ -45,6 +45,16 @@ describe("pricing providers registry", () => {
     assert.deepEqual(competingStoreNames(["ralphs"]), ["Kroger"]);
   });
 
+  it("treats Walmart/Target/Aldi as configured when FLIPP_ENABLED is true without a FlyerKit token", () => {
+    process.env.FLIPP_ENABLED = "true";
+    delete process.env.FLIPP_ACCESS_TOKEN;
+    assert.equal(providerForStore("Aldi")?.isConfigured(), true);
+    assert.equal(providerForStore("Walmart")?.isConfigured(), true);
+    assert.equal(providerForStore("Target")?.isConfigured(), true);
+    assert.doesNotMatch(providerForStore("Walmart")?.setupHint() ?? "", /FLIPP_ENABLED=true/);
+    assert.doesNotMatch(providerForStore("Aldi")?.setupHint() ?? "", /FLIPP_ACCESS_TOKEN/);
+  });
+
   it("adds licensed partner banners to the default trip only when keys exist", () => {
     process.env.SHELF_FEED_BASE_URL = "https://shelf.example";
     process.env.SHELF_FEED_API_KEY = "key";
@@ -172,5 +182,40 @@ describe("pricing reports", () => {
     assert.match(reports[0].detail, /licensed partner feed/i);
     assert.equal(reports[1].source, "cached_live");
     assert.equal(reports[1].label, "Cached partner feed");
+  });
+
+  it("does not treat a Flipp miss as missing FLIPP_ENABLED", () => {
+    const walmart = emptyAccumulator("Walmart");
+    walmart.configured = true;
+    walmart.attempted = true;
+    const report = finalizeStoreReport(
+      walmart,
+      "Weekly-ad prices use Flipp. production must opt in with FLIPP_ENABLED=true."
+    );
+    assert.equal(report.source, "unavailable");
+    assert.equal(report.label, "Unavailable");
+    assert.equal(report.configured, true);
+    assert.doesNotMatch(report.detail, /FLIPP_ENABLED=true/);
+    assert.match(report.detail, /not a full shelf catalog/i);
+    assert.match(report.detail, /Walmart/);
+  });
+
+  it("still shows Flipp setup instructions when weekly ads are off", () => {
+    const aldi = emptyAccumulator("Aldi");
+    const hint =
+      "Aldi has no public product API. Weekly-ad prices use Flipp. production must opt in with FLIPP_ENABLED=true.";
+    const report = finalizeStoreReport(aldi, hint);
+    assert.equal(report.source, "unavailable");
+    assert.equal(report.configured, false);
+    assert.match(report.detail, /FLIPP_ENABLED=true/);
+  });
+
+  it("asks for a ZIP when Flipp is on but was not attempted", () => {
+    const target = emptyAccumulator("Target");
+    target.configured = true;
+    const report = finalizeStoreReport(target, "FLIPP_ENABLED=true");
+    assert.equal(report.source, "unavailable");
+    assert.match(report.detail, /5-digit ZIP/i);
+    assert.doesNotMatch(report.detail, /FLIPP_ENABLED=true/);
   });
 });

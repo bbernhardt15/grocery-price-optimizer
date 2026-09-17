@@ -5,7 +5,11 @@ import {
   FLIPP_FLYERKIT_BASE,
   clearFlippSearchCache,
 } from "./flipp/client";
-import { FlippDealsProvider, FLIPP_SETUP_HINT } from "./flipp/flippProvider";
+import {
+  FlippDealsProvider,
+  FLIPP_ENABLED_HINT,
+  FLIPP_SETUP_HINT,
+} from "./flipp/flippProvider";
 
 const originalFetch = globalThis.fetch;
 
@@ -38,6 +42,16 @@ describe("FlippDealsProvider", () => {
     assert.match(FLIPP_SETUP_HINT, /not a full shelf catalog/i);
     assert.match(FLIPP_SETUP_HINT, /unofficial/i);
     assert.match(FLIPP_SETUP_HINT, /Do not scrape/i);
+  });
+
+  it("is configured from FLIPP_ENABLED alone and does not ask to set env vars", () => {
+    process.env.FLIPP_ENABLED = "true";
+    delete process.env.FLIPP_ACCESS_TOKEN;
+    const provider = new FlippDealsProvider("Aldi");
+    assert.equal(provider.isConfigured(), true);
+    assert.equal(provider.setupHint(), FLIPP_ENABLED_HINT);
+    assert.doesNotMatch(provider.setupHint(), /FLIPP_ENABLED=true/);
+    assert.doesNotMatch(provider.setupHint(), /FLIPP_ACCESS_TOKEN/);
   });
 
   it("does not call Flipp when a ZIP is missing", async () => {

@@ -113,6 +113,30 @@ function mixedLabel(acc: StorePricingAccumulator): string {
   return "Mixed sources";
 }
 
+function unavailableDetail(
+  acc: StorePricingAccumulator,
+  setupHint: string | undefined,
+  error: string | undefined
+): string {
+  if (acc.configured && acc.attempted) {
+    return (
+      error ||
+      `No ${acc.storeName} weekly-ad (or live shelf) prices matched these items near this ZIP. Weekly ads are sale prices from the circular, not a full shelf catalog.`
+    );
+  }
+  if (acc.configured) {
+    return (
+      error ||
+      `${acc.storeName} weekly-ad prices need a 5-digit ZIP. Flyer prices are not a full shelf catalog.`
+    );
+  }
+  return (
+    error ||
+    setupHint ||
+    `No ${acc.storeName} prices were available from a live API or the demo catalog.`
+  );
+}
+
 function labelOf(
   source: StorePricingSource,
   acc: StorePricingAccumulator
@@ -173,14 +197,11 @@ export function finalizeStoreReport(
     detail = mixedDetail(acc);
   } else if (source === "seed") {
     detail = acc.configured
-      ? `Live ${acc.storeName} lookup returned nothing or failed; demo catalog prices are shown instead.`
+      ? `No live shelf or weekly-ad ${acc.storeName} prices matched these items; demo catalog prices are shown instead. Weekly ads are not a full shelf catalog.`
       : setupHint ||
         `${acc.storeName} prices are from the seeded demo catalog, not a live shelf feed.`;
   } else {
-    detail =
-      error ||
-      setupHint ||
-      `No ${acc.storeName} prices were available from a live API or the demo catalog.`;
+    detail = unavailableDetail(acc, setupHint, error);
   }
 
   return {

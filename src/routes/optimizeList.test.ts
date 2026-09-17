@@ -1175,4 +1175,87 @@ describe("POST /api/optimize-list", () => {
       clearPricingEnv();
     }
   });
+
+  it("keeps FLIPP_ENABLED flyer search on a miss and does not look unconfigured", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    delete process.env.FLIPP_ACCESS_TOKEN;
+    setKrogerCreds();
+
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const stubs: Array<{
+      store: string;
+      original: FlippDealsProvider["searchProducts"];
+    }> = [];
+
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async (term: string) => {
+      if (term !== "FlippMissDurian") {
+        return [];
+      }
+      return [
+        {
+          name: "Simple Truth FlippMissDurian",
+          brand: "Kroger",
+          storeName: "Kroger",
+          locationId: "01400441",
+          price: 4.2,
+          unit: "count",
+          normalizedUnit: "count",
+          productId: "k-durian",
+        },
+      ];
+    };
+
+    for (const storeName of ["Aldi", "Target", "Walmart", "Kroger"] as const) {
+      const provider = flippProviderForStore(storeName);
+      assert.ok(provider, `expected Flipp mapping for ${storeName}`);
+      stubs.push({
+        store: storeName,
+        original: provider.searchProducts.bind(provider),
+      });
+      provider.searchProducts = async () => [];
+    }
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["FlippMissDurian"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        pricingByStore: Array<{
+          storeName: string;
+          source: string;
+          configured: boolean;
+          attempted: boolean;
+          label: string;
+          detail: string;
+        }>;
+      };
+      const reports = Object.fromEntries(
+        body.pricingByStore.map((row) => [row.storeName, row])
+      );
+      assert.equal(reports.Kroger.source, "live");
+      for (const storeName of ["Walmart", "Target", "Aldi"]) {
+        assert.equal(reports[storeName].configured, true, storeName);
+        assert.equal(reports[storeName].attempted, true, storeName);
+        assert.equal(reports[storeName].source, "unavailable", storeName);
+        assert.equal(reports[storeName].label, "Unavailable", storeName);
+        assert.doesNotMatch(reports[storeName].detail, /FLIPP_ENABLED=true/);
+        assert.doesNotMatch(reports[storeName].detail, /FLIPP_ACCESS_TOKEN/);
+        assert.match(reports[storeName].detail, /not a full shelf catalog/i);
+      }
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      for (const stub of stubs) {
+        const provider = flippProviderForStore(stub.store);
+        if (provider) {
+          provider.searchProducts = stub.original;
+        }
+      }
+      clearPricingEnv();
+    }
+  });
 });
