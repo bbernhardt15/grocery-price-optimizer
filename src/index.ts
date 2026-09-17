@@ -8,7 +8,7 @@ async function start(): Promise<void> {
   await connectDatabase();
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Grocery List Optimizer API listening on http://0.0.0.0:${PORT}`);
+    console.log(`Grocery Gitter API listening on http://0.0.0.0:${PORT}`);
   });
 }
 
