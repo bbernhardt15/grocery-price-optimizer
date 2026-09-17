@@ -2,15 +2,15 @@ import type { CatalogProduct } from "../../optimizeGroceryList";
 import { parseGroceryUnit } from "../parseGroceryUnit";
 import type { PricingContext, StorePricingProvider } from "../types";
 import { StorePricingError } from "../types";
-import {
-  flippConfigured,
-  flippConsumerEnabled,
-  searchFlippDealsForStore,
-} from "./client";
+import { flippConfigured, searchFlippDealsForStore } from "./client";
 import { mappingForStore } from "./merchants";
 
 export const FLIPP_SETUP_HINT =
   "Weekly-ad prices (not a full shelf catalog) use Flipp. Official FlyerKit: set FLIPP_ACCESS_TOKEN from a Flipp technical contact (https://api.flipp.com/flyerkit/v4.0/documentation). The consumer flyer search is unofficial and ToS-sensitive — production must opt in with FLIPP_ENABLED=true. Requires a ZIP. Do not scrape authenticated retailer storefronts.";
+
+/** Shown when Flipp is already on. Do not reuse FLIPP_SETUP_HINT — that reads as “unset env vars”. */
+export const FLIPP_ENABLED_HINT =
+  "Weekly-ad / circular prices from Flipp are enabled. They are sale prices printed in the flyer, not a full live shelf catalog. Requires a ZIP.";
 
 export class FlippDealsProvider implements StorePricingProvider {
   constructor(readonly storeName: string) {}
@@ -23,8 +23,8 @@ export class FlippDealsProvider implements StorePricingProvider {
     if (!mappingForStore(this.storeName)) {
       return `${this.storeName} is not mapped to a Flipp weekly-ad merchant.`;
     }
-    if (flippConsumerEnabled() || flippConfigured()) {
-      return FLIPP_SETUP_HINT;
+    if (flippConfigured()) {
+      return FLIPP_ENABLED_HINT;
     }
     return `${this.storeName} has no public product API. ${FLIPP_SETUP_HINT}`;
   }
