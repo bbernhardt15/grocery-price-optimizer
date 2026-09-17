@@ -1,7 +1,7 @@
 import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
 import { parseGroceryList } from "./parseGroceryLine";
-import type { CatalogProduct } from "./optimizeGroceryList";
+import type { CatalogProduct, PriceSource } from "./optimizeGroceryList";
 import {
   keywordNameFilter,
   matchTokenSets,
@@ -13,15 +13,20 @@ type LeanProduct = {
   brand: string;
   storeName: string;
   locationId?: string;
+  productId?: string;
+  upc?: string;
   price: number;
   unit: string;
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
+  priceSource?: "live" | "seed" | null;
 };
 
 export type FetchMatchingOptions = {
   minUpdatedAt?: Date;
+  /** When set, only rows stored with this source (typically `"live"` cache). */
+  priceSource?: "live" | "seed";
 };
 
 function storeFilter(stores: string[]): Record<string, unknown> | null {
@@ -43,7 +48,21 @@ function locationFilter(locationId?: string): Record<string, unknown> | null {
     return null;
   }
 
-  return { locationId: id };
+  // ZIP resolves a Kroger store id. Seeded Walmart/Target/Aldi rows are not
+  // tagged with that id, so they must still compete on price. Kroger rows
+  // with a different locationId are excluded.
+  return {
+    $or: [
+      { locationId: id },
+      { locationId: { $exists: false } },
+      { locationId: null },
+      { locationId: "" },
+    ],
+  };
+}
+
+function storedPriceSource(doc: LeanProduct): PriceSource {
+  return doc.priceSource === "live" ? "live" : "seed";
 }
 
 function toCatalogProduct(doc: LeanProduct): CatalogProduct {
@@ -52,11 +71,14 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
     brand: doc.brand,
     storeName: doc.storeName,
     locationId: doc.locationId,
+    productId: doc.productId,
+    upc: doc.upc,
     price: doc.price,
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
     updatedAt: doc.updatedAt,
+    priceSource: storedPriceSource(doc),
   };
 }
 
@@ -75,6 +97,9 @@ function matchingFilter(
   );
   if (options.minUpdatedAt) {
     extraClauses.push({ updatedAt: { $gte: options.minUpdatedAt } });
+  }
+  if (options.priceSource) {
+    extraClauses.push({ priceSource: options.priceSource });
   }
 
   return extraClauses.length === 0
@@ -122,8 +147,9 @@ async function findByTokens(
  * (case-insensitive $regex AND). Serving-size annotations like "(28g)" are
  * ignored. If nothing matches the full name, retries without generic trailing
  * words (Cereal) and then the first two words.
- * Hits are sorted by price ascending. When `locationId` is set, only that
- * physical store is returned. `minUpdatedAt` keeps only fresh cache rows.
+ * Hits are sorted by price ascending. When `locationId` is set, Kroger rows
+ * must match that store; catalog rows without a locationId (Walmart/Target)
+ * still compete. `minUpdatedAt` keeps only fresh cache rows.
  */
 export async function fetchMatchingProductsForQuery(
   item: string,
@@ -145,7 +171,8 @@ export async function fetchMatchingProductsForQuery(
  * For each grocery-list string, strips any quantity then finds Product
  * documents whose name contains those keywords (case-insensitive $regex).
  * Hits are sorted by price ascending so the cheapest variations come first.
- * When `locationId` is set, only products from that physical store are returned.
+ * When `locationId` is set, Kroger documents must match that store; other
+ * retailers without a locationId still compete on price.
  */
 export async function fetchMatchingProducts(
   groceryList: string[],

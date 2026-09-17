@@ -498,6 +498,92 @@ button:disabled {
   background: color-mix(in srgb, var(--accent-soft) 55%, var(--card));
 }
 
+.store-count {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.price-badge {
+  display: inline-block;
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.price-badge-live,
+.price-badge-cached {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.price-badge-mixed {
+  background: color-mix(in srgb, #f59e0b 18%, var(--card));
+  color: #92400e;
+}
+
+.price-badge-seed,
+.price-badge-unavailable {
+  background: color-mix(in srgb, #f59e0b 22%, var(--card));
+  color: #78350f;
+}
+
+@media (prefers-color-scheme: dark) {
+  .price-badge-mixed,
+  .price-badge-seed,
+  .price-badge-unavailable {
+    color: #fde68a;
+    background: color-mix(in srgb, #f59e0b 22%, var(--card));
+  }
+}
+
+.item-source {
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.item-source-live {
+  color: var(--accent);
+}
+
+.pricing-legend {
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.pricing-legend h3 {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.pricing-legend ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pricing-legend li {
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
 .store-card h2 {
   margin: 0;
   font-size: 1.05rem;
@@ -531,9 +617,79 @@ button:disabled {
 }
 
 .item-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   white-space: nowrap;
+}
+
+.item-line span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.item-open {
+  flex: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.item-open:hover {
+  text-decoration: underline;
+}
+
+.store-handoff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 88%, var(--accent-soft));
+}
+
+a.handoff-btn,
+.handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+  background: var(--accent);
+  color: #06281c;
+  box-shadow: var(--shadow);
+}
+
+@media (prefers-color-scheme: light) {
+  a.handoff-btn,
+  .handoff-btn {
+    color: #ffffff;
+  }
+}
+
+a.handoff-btn:hover,
+.handoff-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.handoff-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--line);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.handoff-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .unavailable {

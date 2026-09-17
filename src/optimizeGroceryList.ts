@@ -5,11 +5,17 @@ import {
   nameContainsAllTokens,
 } from "./productSearchQuery";
 
+export type PriceSource = "live" | "cached_live" | "seed";
+
 export type CatalogProduct = {
   name: string;
   brand: string;
   storeName: string;
   locationId?: string;
+  /** Retailer product id when known (Kroger Products API `productId`, typically the UPC). */
+  productId?: string;
+  /** UPC / GTIN when known. For Kroger this is usually the same as `productId`. */
+  upc?: string;
   price: number;
   unit: string;
   normalizedUnit: string;
@@ -17,6 +23,8 @@ export type CatalogProduct = {
   updatedAt?: Date;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
+  /** live = retailer API this request; cached_live = Mongo row from a live API; seed = demo catalog. */
+  priceSource?: PriceSource;
 };
 
 export type PickedItem = {
@@ -29,6 +37,10 @@ export type PickedItem = {
   itemTotal: number;
   unit: string;
   normalizedUnit: string;
+  locationId?: string;
+  productId?: string;
+  upc?: string;
+  priceSource?: PriceSource;
 };
 
 export type StoreGroup = {
@@ -125,6 +137,10 @@ function pickForLine(
     itemTotal: roundMoney(best.price * line.quantity),
     unit: best.unit,
     normalizedUnit: best.normalizedUnit,
+    ...(best.locationId ? { locationId: best.locationId } : {}),
+    ...(best.productId ? { productId: best.productId } : {}),
+    ...(best.upc ? { upc: best.upc } : {}),
+    ...(best.priceSource ? { priceSource: best.priceSource } : {}),
   };
 }
 

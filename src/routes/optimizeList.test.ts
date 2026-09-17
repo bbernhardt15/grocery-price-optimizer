@@ -9,13 +9,40 @@ import { Product } from "../models/Product";
 import { mockProducts } from "../seed";
 import { fetchMatchingProducts } from "../fetchMatchingProducts";
 import { krogerService } from "../krogerService";
+import { walmartPricingProvider } from "../pricing/walmartProvider";
+import { targetPricingProvider } from "../pricing/targetProvider";
 
 describe("POST /api/optimize-list", () => {
   let memory: MongoMemoryServer;
   let server: http.Server;
   let origin: string;
+  const previousEnv = {
+    KROGER_CLIENT_ID: process.env.KROGER_CLIENT_ID,
+    KROGER_CLIENT_SECRET: process.env.KROGER_CLIENT_SECRET,
+    WALMART_CONSUMER_ID: process.env.WALMART_CONSUMER_ID,
+    WALMART_PRIVATE_KEY: process.env.WALMART_PRIVATE_KEY,
+    WALMART_PUBLISHER_ID: process.env.WALMART_PUBLISHER_ID,
+    TARGET_PARTNER_BASE_URL: process.env.TARGET_PARTNER_BASE_URL,
+    TARGET_PARTNER_API_KEY: process.env.TARGET_PARTNER_API_KEY,
+  };
+
+  function clearPricingEnv(): void {
+    delete process.env.KROGER_CLIENT_ID;
+    delete process.env.KROGER_CLIENT_SECRET;
+    delete process.env.WALMART_CONSUMER_ID;
+    delete process.env.WALMART_PRIVATE_KEY;
+    delete process.env.WALMART_PUBLISHER_ID;
+    delete process.env.TARGET_PARTNER_BASE_URL;
+    delete process.env.TARGET_PARTNER_API_KEY;
+  }
+
+  function setKrogerCreds(): void {
+    process.env.KROGER_CLIENT_ID = "test-client";
+    process.env.KROGER_CLIENT_SECRET = "test-secret";
+  }
 
   before(async () => {
+    clearPricingEnv();
     memory = await MongoMemoryServer.create();
     await mongoose.connect(memory.getUri());
     await Product.insertMany(
@@ -40,6 +67,14 @@ describe("POST /api/optimize-list", () => {
     });
     await mongoose.disconnect();
     await memory.stop();
+    clearPricingEnv();
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   });
 
   async function optimize(body: unknown): Promise<{ status: number; json: unknown }> {
@@ -212,6 +247,32 @@ describe("POST /api/optimize-list", () => {
     }
   });
 
+  it("still splits the trip across Walmart and Target when a ZIP selects a Kroger store", async () => {
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    krogerService.getClosestStoreLocation = async () => "01400441";
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string; handoff: { action: { type: string } } }>;
+        tripPlan: { summary: string };
+        locationId?: string;
+      };
+      assert.equal(body.locationId, "01400441");
+      const names = body.stores.map((store) => store.storeName).sort();
+      assert.deepEqual(names, ["Kroger", "Target", "Walmart"]);
+      assert.match(body.tripPlan.summary, /Kroger/);
+      assert.match(body.tripPlan.summary, /Walmart/);
+      assert.match(body.tripPlan.summary, /Target/);
+    } finally {
+      krogerService.getClosestStoreLocation = originalLookup;
+    }
+  });
+
   it("rejects an empty zipCode string", async () => {
     const { status, json } = await optimize({
       groceryList: ["milk"],
@@ -222,7 +283,53 @@ describe("POST /api/optimize-list", () => {
     assert.match(body.error, /zipCode/i);
   });
 
-  it("skips the live Products API when matching rows are fresher than 24 hours", async () => {
+  it("skips the live Products API when matching live rows are fresher than 24 hours", async () => {
+    setKrogerCreds();
+    let liveCalls = 0;
+    const originalSearch = krogerService.searchProducts.bind(krogerService);
+    krogerService.searchProducts = async () => {
+      liveCalls += 1;
+      return [];
+    };
+
+    try {
+      await Product.create({
+        name: "Cached Live Milk",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 2.51,
+        unit: "gal",
+        normalizedUnit: "gal",
+        priceSource: "live",
+        lastUpdated: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const { status, json } = await optimize({
+        groceryList: ["Cached Live Milk"],
+        stores: ["Kroger"],
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{
+          items: Array<{ name: string; price: number; priceSource?: string }>;
+          pricing?: { source: string; label: string };
+        }>;
+      };
+      assert.equal(body.stores[0].items[0].name, "Cached Live Milk");
+      assert.equal(body.stores[0].items[0].price, 2.51);
+      assert.equal(body.stores[0].items[0].priceSource, "cached_live");
+      assert.equal(body.stores[0].pricing?.source, "cached_live");
+      assert.equal(liveCalls, 0);
+    } finally {
+      krogerService.searchProducts = originalSearch;
+      delete process.env.KROGER_CLIENT_ID;
+      delete process.env.KROGER_CLIENT_SECRET;
+      await Product.deleteMany({ name: "Cached Live Milk" });
+    }
+  });
+
+  it("uses the seed catalog for Kroger when client-credentials are missing", async () => {
     let liveCalls = 0;
     const originalSearch = krogerService.searchProducts.bind(krogerService);
     krogerService.searchProducts = async () => {
@@ -237,10 +344,16 @@ describe("POST /api/optimize-list", () => {
       });
       assert.equal(status, 200);
       const body = json as {
-        stores: Array<{ items: Array<{ name: string; price: number }> }>;
+        stores: Array<{
+          items: Array<{ name: string; price: number; priceSource?: string }>;
+          pricing?: { source: string; label: string };
+        }>;
+        pricingByStore: Array<{ storeName: string; source: string; label: string }>;
       };
       assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
       assert.equal(body.stores[0].items[0].price, 2.89);
+      assert.equal(body.stores[0].items[0].priceSource, "seed");
+      assert.equal(body.stores[0].pricing?.label, "Demo catalog");
       assert.equal(liveCalls, 0);
     } finally {
       krogerService.searchProducts = originalSearch;
@@ -248,6 +361,7 @@ describe("POST /api/optimize-list", () => {
   });
 
   it("on a cache miss, fetches live Kroger prices and upserts them before optimizing", async () => {
+    setKrogerCreds();
     const originalSearch = krogerService.searchProducts.bind(krogerService);
     const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
     krogerService.getClosestStoreLocation = async () => "01400441";
@@ -285,15 +399,19 @@ describe("POST /api/optimize-list", () => {
       const saved = await Product.findOne({ name: "Organic Quinoa" }).lean();
       assert.ok(saved);
       assert.equal(saved?.price, 4.5);
+      assert.equal(saved?.priceSource, "live");
       assert.ok(saved?.updatedAt);
       assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
     } finally {
       krogerService.searchProducts = originalSearch;
       krogerService.getClosestStoreLocation = originalLookup;
+      delete process.env.KROGER_CLIENT_ID;
+      delete process.env.KROGER_CLIENT_SECRET;
     }
   });
 
   it("treats rows older than 24 hours as a cache miss and refreshes them", async () => {
+    setKrogerCreds();
     const originalSearch = krogerService.searchProducts.bind(krogerService);
     const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
     krogerService.getClosestStoreLocation = async () => "01400441";
@@ -319,6 +437,7 @@ describe("POST /api/optimize-list", () => {
         unit: "oz",
         normalizedUnit: "oz",
         lastUpdated: new Date(Date.now() - 25 * 60 * 60 * 1000),
+        priceSource: "live",
       });
       await Product.updateOne(
         { _id: created._id },
@@ -339,11 +458,14 @@ describe("POST /api/optimize-list", () => {
 
       const saved = await Product.findOne({ name: "Smoked Paprika", brand: "Kroger" }).lean();
       assert.equal(saved?.price, 1.25);
+      assert.equal(saved?.priceSource, "live");
       assert.ok(saved?.updatedAt);
       assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
     } finally {
       krogerService.searchProducts = originalSearch;
       krogerService.getClosestStoreLocation = originalLookup;
+      delete process.env.KROGER_CLIENT_ID;
+      delete process.env.KROGER_CLIENT_SECRET;
     }
   });
 
@@ -385,6 +507,7 @@ describe("POST /api/optimize-list", () => {
   });
 
   it("prices Cheerios, honey, and sandwich bread from live Kroger when they are not seeded", async () => {
+    setKrogerCreds();
     await Product.deleteMany({
       name: /cheerios|honey|sandwich bread/i,
     });
@@ -446,6 +569,8 @@ describe("POST /api/optimize-list", () => {
     } finally {
       krogerService.searchProducts = originalSearch;
       krogerService.getClosestStoreLocation = originalLookup;
+      delete process.env.KROGER_CLIENT_ID;
+      delete process.env.KROGER_CLIENT_SECRET;
       await Product.deleteMany({
         name: {
           $in: [
@@ -493,6 +618,7 @@ describe("POST /api/optimize-list", () => {
   });
 
   it("returns 503 when live Kroger pricing is down and the items are not in the catalog", async () => {
+    setKrogerCreds();
     await Product.deleteMany({
       name: /cheerios|honey/i,
     });
@@ -522,6 +648,8 @@ describe("POST /api/optimize-list", () => {
     } finally {
       krogerService.searchProducts = originalSearch;
       krogerService.getClosestStoreLocation = originalLookup;
+      delete process.env.KROGER_CLIENT_ID;
+      delete process.env.KROGER_CLIENT_SECRET;
     }
   });
 
@@ -547,5 +675,253 @@ describe("POST /api/optimize-list", () => {
     assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
     assert.equal(body.stores[0].items[0].quantity, 2);
     assert.equal(body.stores[0].items[0].itemTotal, 5.78);
+  });
+
+  it("includes a trip plan and per-store checkout handoff", async () => {
+    const { status, json } = await optimize({
+      groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
+      stores: ["Walmart", "Target", "Kroger"],
+    });
+
+    assert.equal(status, 200);
+    const body = json as {
+      tripPlan: { summary: string; storeCount: number; itemCount: number };
+      stores: Array<{
+        storeName: string;
+        itemCount: number;
+        handoff: {
+          storeName: string;
+          itemCount: number;
+          action: { type: string; label: string; url?: string; status: string };
+          items: Array<{ name: string; url?: string }>;
+        };
+      }>;
+    };
+
+    assert.equal(body.tripPlan.storeCount, 3);
+    assert.match(body.tripPlan.summary, /Kroger/);
+    assert.match(body.tripPlan.summary, /Walmart/);
+    assert.match(body.tripPlan.summary, /Target/);
+
+    const byStore = Object.fromEntries(
+      body.stores.map((store) => [store.storeName, store])
+    );
+
+    assert.equal(byStore.Kroger.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Kroger.handoff.action.label, "Open at Kroger");
+    assert.equal(byStore.Kroger.handoff.action.status, "ready");
+    assert.match(byStore.Kroger.handoff.action.url ?? "", /kroger\.com\/search/);
+    assert.match(byStore.Kroger.handoff.items[0].url ?? "", /kroger\.com\/search/);
+
+    assert.equal(byStore.Walmart.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Walmart.handoff.action.label, "Search at Walmart");
+    assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/search/);
+
+    assert.equal(byStore.Target.handoff.action.type, "search_deeplink");
+    assert.equal(byStore.Target.handoff.action.label, "Search at Target");
+    assert.match(byStore.Target.handoff.action.url ?? "", /target\.com\/s/);
+
+    const bodyWithPricing = json as {
+      pricingByStore: Array<{ storeName: string; source: string; label: string }>;
+      stores: Array<{ storeName: string; pricing?: { label: string; source: string } }>;
+    };
+    for (const store of bodyWithPricing.stores) {
+      assert.equal(store.pricing?.source, "seed");
+      assert.equal(store.pricing?.label, "Demo catalog");
+    }
+    const reportNames = bodyWithPricing.pricingByStore.map((row) => row.storeName).sort();
+    assert.deepEqual(reportNames, ["Kroger", "Target", "Walmart"]);
+  });
+
+  it("splits a ZIP trip across live Kroger, Walmart, and Target when all three providers return prices", async () => {
+    setKrogerCreds();
+    process.env.WALMART_CONSUMER_ID = "walmart-consumer";
+    process.env.WALMART_PRIVATE_KEY =
+      "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----";
+    process.env.WALMART_PUBLISHER_ID = "impact-1";
+    process.env.TARGET_PARTNER_BASE_URL = "https://partner.example.test";
+    process.env.TARGET_PARTNER_API_KEY = "partner-key";
+
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalWalmart = walmartPricingProvider.searchProducts.bind(
+      walmartPricingProvider
+    );
+    const originalTarget = targetPricingProvider.searchProducts.bind(
+      targetPricingProvider
+    );
+
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async (term: string) => {
+      const catalog: Record<string, { name: string; price: number }> = {
+        "Oat Milk": { name: "Simple Truth Oat Milk", price: 2.1 },
+        "Sourdough Loaf": { name: "Kroger Sourdough Loaf", price: 3.8 },
+        "Pasture Eggs": { name: "Kroger Pasture Eggs", price: 4.2 },
+      };
+      const hit = catalog[term];
+      return hit
+        ? [
+            {
+              name: hit.name,
+              brand: "Kroger",
+              storeName: "Kroger",
+              locationId: "01400441",
+              price: hit.price,
+              unit: "count",
+              normalizedUnit: "count",
+              productId: "k-" + term.replace(/\s+/g, "").toLowerCase(),
+            },
+          ]
+        : [];
+    };
+    walmartPricingProvider.searchProducts = async (term: string) => {
+      const catalog: Record<string, { name: string; price: number; id: string }> = {
+        "Oat Milk": { name: "Great Value Oat Milk", price: 3.2, id: "w-oat" },
+        "Sourdough Loaf": { name: "Marketside Sourdough Loaf", price: 1.15, id: "w-bread" },
+        "Pasture Eggs": { name: "Great Value Pasture Eggs", price: 3.4, id: "w-eggs" },
+      };
+      const hit = catalog[term];
+      return hit
+        ? [
+            {
+              name: hit.name,
+              brand: "Great Value",
+              storeName: "Walmart",
+              price: hit.price,
+              unit: "count",
+              normalizedUnit: "count",
+              productId: hit.id,
+              priceSource: "live",
+            },
+          ]
+        : [];
+    };
+    targetPricingProvider.searchProducts = async (term: string) => {
+      const catalog: Record<string, { name: string; price: number; id: string }> = {
+        "Oat Milk": { name: "Good & Gather Oat Milk", price: 3.5, id: "t-oat" },
+        "Sourdough Loaf": { name: "Good & Gather Sourdough Loaf", price: 2.4, id: "t-bread" },
+        "Pasture Eggs": { name: "Good & Gather Pasture Eggs", price: 1.45, id: "t-eggs" },
+      };
+      const hit = catalog[term];
+      return hit
+        ? [
+            {
+              name: hit.name,
+              brand: "Good & Gather",
+              storeName: "Target",
+              price: hit.price,
+              unit: "count",
+              normalizedUnit: "count",
+              productId: hit.id,
+              priceSource: "live",
+            },
+          ]
+        : [];
+    };
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["Oat Milk", "Sourdough Loaf", "Pasture Eggs"],
+        zipCode: "45202",
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        tripPlan: { summary: string };
+        stores: Array<{
+          storeName: string;
+          items: Array<{ query: string; price: number; priceSource?: string }>;
+          pricing?: { source: string; label: string };
+          handoff: { action: { url?: string } };
+        }>;
+        pricingByStore: Array<{ storeName: string; source: string; label: string }>;
+        pricingWarning?: string;
+      };
+
+      assert.equal(body.pricingWarning, undefined);
+      assert.match(body.tripPlan.summary, /Kroger/);
+      assert.match(body.tripPlan.summary, /Walmart/);
+      assert.match(body.tripPlan.summary, /Target/);
+
+      const byStore = Object.fromEntries(
+        body.stores.map((store) => [store.storeName, store])
+      );
+      assert.equal(byStore.Kroger.items[0].query, "Oat Milk");
+      assert.equal(byStore.Kroger.items[0].price, 2.1);
+      assert.equal(byStore.Kroger.items[0].priceSource, "live");
+      assert.equal(byStore.Kroger.pricing?.label, "Live prices");
+
+      assert.equal(byStore.Walmart.items[0].query, "Sourdough Loaf");
+      assert.equal(byStore.Walmart.items[0].price, 1.15);
+      assert.equal(byStore.Walmart.pricing?.source, "live");
+      assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/ip\/w-bread/);
+
+      assert.equal(byStore.Target.items[0].query, "Pasture Eggs");
+      assert.equal(byStore.Target.items[0].price, 1.45);
+      assert.equal(byStore.Target.pricing?.source, "live");
+      assert.match(byStore.Target.handoff.action.url ?? "", /target\.com\/p\/-\/A-t-eggs/);
+
+      const liveReports = Object.fromEntries(
+        body.pricingByStore.map((row) => [row.storeName, row])
+      );
+      assert.equal(liveReports.Kroger.source, "live");
+      assert.equal(liveReports.Walmart.source, "live");
+      assert.equal(liveReports.Target.source, "live");
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      walmartPricingProvider.searchProducts = originalWalmart;
+      targetPricingProvider.searchProducts = originalTarget;
+      clearPricingEnv();
+    }
+  });
+
+  it("keeps a Kroger/Walmart seed split when Target live fails and labels the failure", async () => {
+    setKrogerCreds();
+    process.env.TARGET_PARTNER_BASE_URL = "https://partner.example.test";
+    process.env.TARGET_PARTNER_API_KEY = "partner-key";
+
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalTarget = targetPricingProvider.searchProducts.bind(
+      targetPricingProvider
+    );
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async () => [];
+    targetPricingProvider.searchProducts = async () => {
+      throw new Error("Target partner feed failed (503)");
+    };
+
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
+        zipCode: "45202",
+        stores: ["Kroger", "Walmart", "Target"],
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string }>;
+        pricingWarning?: string;
+        pricingByStore: Array<{
+          storeName: string;
+          source: string;
+          error?: string;
+          usedFallback: boolean;
+        }>;
+      };
+      const names = body.stores.map((store) => store.storeName).sort();
+      assert.deepEqual(names, ["Kroger", "Target", "Walmart"]);
+      assert.match(body.pricingWarning ?? "", /Target partner feed failed/);
+      const targetReport = body.pricingByStore.find(
+        (row) => row.storeName === "Target"
+      );
+      assert.equal(targetReport?.source, "seed");
+      assert.equal(targetReport?.usedFallback, true);
+      assert.match(targetReport?.error ?? "", /503/);
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      targetPricingProvider.searchProducts = originalTarget;
+      clearPricingEnv();
+    }
   });
 });

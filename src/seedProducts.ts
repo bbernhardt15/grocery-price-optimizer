@@ -4,7 +4,7 @@ import type { CatalogProduct } from "./optimizeGroceryList";
 
 export const seedCatalog: CatalogProduct[] = [
   // Aldi
-  { name: "Whole Milk", brand: "Friendly Farms", storeName: "Aldi", price: 2.19, unit: "gal", normalizedUnit: "gal" },
+  { name: "Whole Milk", brand: "Friendly Farms", storeName: "Aldi", price: 2.19, unit: "gal", normalizedUnit: "gal", priceSource: "seed" },
   { name: "Large Eggs", brand: "Goldhen", storeName: "Aldi", price: 1.89, unit: "count", normalizedUnit: "count" },
   { name: "White Bread", brand: "L'oven Fresh", storeName: "Aldi", price: 1.79, unit: "oz", normalizedUnit: "oz" },
   { name: "Bananas", brand: "Fresh", storeName: "Aldi", price: 0.49, unit: "lbs", normalizedUnit: "lbs" },
@@ -58,6 +58,7 @@ export async function seedProductsIfEmpty(): Promise<void> {
     await Product.insertMany(
       seedCatalog.map((product) => ({
         ...product,
+        priceSource: "seed" as const,
         lastUpdated: new Date(),
       }))
     );

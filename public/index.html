@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta http-equiv="Cache-Control" content="no-store" />
     <title>Cheapest Cart — Product search</title>
-    <link rel="stylesheet" href="/styles.css?v=search-first" />
+    <link rel="stylesheet" href="/styles.css?v=live-pricing" />
   </head>
   <body>
     <div class="shell">
@@ -92,8 +92,10 @@
         <section id="empty-state" class="empty-state">
           <p class="empty-title">No trip yet</p>
           <p>
-            Results appear here as store cards — what to buy, the store subtotal,
-            and a running grand total.
+            Results appear here as a trip plan — how many items go to each store,
+            then an Open / Add to cart / Coming soon action so you can buy the
+            split trip. Each store card shows whether prices are <strong>live</strong>
+            or from the <strong>demo catalog</strong>.
           </p>
         </section>
 
@@ -107,10 +109,11 @@
           </article>
 
           <div id="store-grid" class="store-grid"></div>
+          <aside id="pricing-legend" class="pricing-legend" hidden></aside>
           <aside id="unavailable" class="unavailable" hidden></aside>
         </section>
       </main>
     </div>
-    <script src="/app.js?v=live-pricing"></script>
+    <script src="/app.js?v=live-pricing-2"></script>
   </body>
 </html>

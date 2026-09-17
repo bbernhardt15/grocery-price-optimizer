@@ -120,6 +120,8 @@ describe("KrogerService.searchProducts", () => {
     assert.equal(products[0].price, 2.99);
     assert.equal(products[0].unit, "gal");
     assert.equal(products[0].locationId, "01400441");
+    assert.equal(products[0].productId, "0001111041700");
+    assert.equal(products[0].upc, "0001111041700");
     assert.match(calls[1], /\/v1\/products\?/);
     assert.match(calls[1], /filter\.term=milk/);
     assert.match(calls[1], /filter\.locationId=01400441/);
