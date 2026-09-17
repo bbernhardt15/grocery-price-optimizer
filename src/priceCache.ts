@@ -289,7 +289,10 @@ export async function resolveCatalogProducts(
           );
         }
       } else if (dedicated) {
-        dedicatedError = dedicated.setupHint();
+        const isKroger = storeName.trim().toLowerCase() === "kroger";
+        if (isKroger) {
+          dedicatedError = dedicated.setupHint();
+        }
       }
 
       if (flipp?.isConfigured() && zip) {

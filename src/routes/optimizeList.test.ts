@@ -1054,6 +1054,8 @@ describe("POST /api/optimize-list", () => {
       assert.equal(reports.Aldi.source, "weekly_ad");
       assert.equal(reports.Target.source, "weekly_ad");
       assert.equal(reports.Kroger.source, "live");
+      assert.doesNotMatch(body.pricingWarning ?? "", /WALMART_CONSUMER_ID/);
+      assert.doesNotMatch(body.pricingWarning ?? "", /TARGET_PARTNER/);
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
       krogerService.getClosestStoreLocation = originalLookup;
