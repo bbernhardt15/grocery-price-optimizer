@@ -20,13 +20,13 @@ type LeanProduct = {
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
-  priceSource?: "live" | "seed" | null;
+  priceSource?: "live" | "weekly_ad" | "seed" | null;
 };
 
 export type FetchMatchingOptions = {
   minUpdatedAt?: Date;
-  /** When set, only rows stored with this source (typically `"live"` cache). */
-  priceSource?: "live" | "seed";
+  /** When set, only rows stored with this source (typically `"live"` or `"weekly_ad"` cache). */
+  priceSource?: "live" | "weekly_ad" | "seed";
 };
 
 function storeFilter(stores: string[]): Record<string, unknown> | null {
@@ -62,7 +62,13 @@ function locationFilter(locationId?: string): Record<string, unknown> | null {
 }
 
 function storedPriceSource(doc: LeanProduct): PriceSource {
-  return doc.priceSource === "live" ? "live" : "seed";
+  if (doc.priceSource === "live") {
+    return "live";
+  }
+  if (doc.priceSource === "weekly_ad") {
+    return "weekly_ad";
+  }
+  return "seed";
 }
 
 function toCatalogProduct(doc: LeanProduct): CatalogProduct {

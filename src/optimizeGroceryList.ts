@@ -5,7 +5,7 @@ import {
   nameContainsAllTokens,
 } from "./productSearchQuery";
 
-export type PriceSource = "live" | "cached_live" | "seed";
+export type PriceSource = "live" | "cached_live" | "weekly_ad" | "seed";
 
 export type CatalogProduct = {
   name: string;
@@ -23,7 +23,7 @@ export type CatalogProduct = {
   updatedAt?: Date;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
-  /** live = retailer API this request; cached_live = Mongo row from a live API; seed = demo catalog. */
+  /** live = retailer API this request; cached_live = Mongo row from a live API; weekly_ad = flyer/circular; seed = demo catalog. */
   priceSource?: PriceSource;
 };
 

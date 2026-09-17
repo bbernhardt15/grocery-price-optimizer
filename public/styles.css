@@ -523,6 +523,11 @@ button:disabled {
   color: var(--accent-ink);
 }
 
+.price-badge-weekly {
+  background: color-mix(in srgb, #2563eb 16%, var(--card));
+  color: #1e3a8a;
+}
+
 .price-badge-mixed {
   background: color-mix(in srgb, #f59e0b 18%, var(--card));
   color: #92400e;
@@ -535,6 +540,15 @@ button:disabled {
 }
 
 @media (prefers-color-scheme: dark) {
+  .price-badge-weekly {
+    color: #bfdbfe;
+    background: color-mix(in srgb, #2563eb 28%, var(--card));
+  }
+
+  .item-source-weekly {
+    color: #93c5fd;
+  }
+
   .price-badge-mixed,
   .price-badge-seed,
   .price-badge-unavailable {
@@ -554,6 +568,10 @@ button:disabled {
 
 .item-source-live {
   color: var(--accent);
+}
+
+.item-source-weekly {
+  color: #2563eb;
 }
 
 .pricing-legend {
@@ -581,6 +599,12 @@ button:disabled {
 
 .pricing-legend li {
   font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.pricing-legend-note {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
   line-height: 1.4;
 }
 

@@ -19,11 +19,11 @@ describe("Product schema", () => {
     assert.ok(cacheIndex, "expected a compound index on { name: 1, updatedAt: -1 }");
   });
 
-  it("stores live vs seed priceSource so demo rows are not treated as live cache", () => {
+  it("stores live vs weekly-ad vs seed priceSource so demo rows are not treated as live cache", () => {
     const path = Product.schema.path("priceSource");
     assert.ok(path);
     const options = (path as { options?: { enum?: string[]; default?: string } }).options;
-    assert.deepEqual(options?.enum, ["live", "seed"]);
+    assert.deepEqual(options?.enum, ["live", "weekly_ad", "seed"]);
     assert.equal(options?.default, "seed");
   });
 });
