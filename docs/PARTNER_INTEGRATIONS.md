@@ -48,6 +48,7 @@ Goal: shopper can actually buy the split trip.
 | --- | --- |
 | **Kroger Cart API** | Only path with a documented write (`PUT /v1/cart/add`) after **shopper** OAuth. Redirect URI must be unlocked. |
 | **Instacart Connect / Platform** | Best multi-banner **fulfillment** bet (Aldi, many regionals). Sales-led. Prices often include **markup**. Cart create only if the contract says so. |
+| **Instacart Developer Platform shopping list** | **Not a price feed.** Self-serve (when applications are open) `POST /idp/v1/products/products_link` link. Shopper picks a retailer and checks out on Instacart. See the section below. Env: `INSTACART_API_KEY`, `INSTACART_API_BASE_URL`. |
 | **Retailer site search deep links** | Default handoff for Walmart, Target, Publix, H-E-B, Meijer, Albertsons family, Ahold banners, club stores. **Not** a cart fill. |
 | **Amazon / club apps** | Cart-write for third parties is effectively **unavailable**. Membership and app-only prices. |
 
@@ -103,6 +104,34 @@ Update the **Status** line under each partner when you send mail. This repo does
 | **Do not** | Scrape instacart.com while logged in; treat Instacart price as in-store; report cart filled without Connect 2xx |
 
 Ask on the first call: *in-store vs delivery price*, *which banners are in-contract for this app*, *whether cart write is in scope or only storefront links*.
+
+#### Developer Platform shopping list (separate env vars)
+
+This is the handoff already wired in `src/instacartHandoff.ts`. It does **not** use `INSTACART_PARTNER_*` and it does **not** return prices.
+
+| | |
+| --- | --- |
+| **Type** | Checkout handoff only. Shopper leaves Grocery Gitter for an Instacart-hosted list. |
+| **Endpoint** | `POST {INSTACART_API_BASE_URL}/idp/v1/products/products_link` — [Create shopping list page](https://docs.instacart.com/developer_platform_api/api/products/create_shopping_list_page) |
+| **Bases** | Development `https://connect.dev.instacart.tools`. Production `https://connect.instacart.com`. |
+| **Auth** | `Authorization: Bearer` the Developer Platform API key. Server-side only. |
+| **Retailer** | The POST body has no retailer field. [FAQ](https://docs.instacart.com/developer_platform_api/faq): directing users to a specific merchant is not supported. For one store section, Grocery Gitter may append `retailer_key` when [`GET /idp/v1/retailers`](https://docs.instacart.com/developer_platform_api/api/retailers/get_nearby_retailers) returns a **name** match. That query param is documented for [recipe URLs](https://docs.instacart.com/developer_platform_api/get_started/recipe) and can require a separate key. If lookup fails, the shopper still gets the list and picks the store. |
+| **UI** | **Shop on Instacart** on trip-plan sections that are not a Kroger cart write (Target, Aldi, regional/Flipp/partner banners, Walmart search). Plus “or shop the whole list on Instacart” on the trip total. Hidden when the env vars are unset. |
+| **Code** | `INSTACART_API_KEY`, `INSTACART_API_BASE_URL` |
+| **Do not** | Point these at the partner price proxy. Do not treat the returned URL as an in-store cart fill. |
+
+**How to get a key**
+
+1. Start at [Get started](https://docs.instacart.com/developer_platform_api/get_started/overview) and use **Apply today**, which goes to [instacart.com/company/business/developers](https://www.instacart.com/company/business/developers).
+2. As of 24 Sep 2026 that page says Instacart is **not accepting new applications** and there is **no waitlist**.
+3. Once an account exists: Developer Dashboard → API Keys → Create New API Key → Development or Production → copy the `keys.…` value once. [Get an API key](https://docs.instacart.com/developer_platform_api/get_started/api-keys).
+4. Pair a development key with the development base. Production keys come after a demo review ([pre-launch checklist](https://docs.instacart.com/developer_platform_api/guide/concepts/launch_activities/pre-launch_checklist)).
+
+**Whether it is free**
+
+Instacart does not list a price for the API key or for Create shopping list page. Access is approval-gated. [Terms](https://docs.instacart.com/developer_platform_api/guide/terms_and_policies/developer_terms) allow a charge only if you request use beyond their limits. A live integration can optionally join the affiliate program and receive commissions. Shoppers pay Instacart at checkout.
+
+**Railway:** set `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` on the service. Leave them empty to hide the buttons.
 
 ---
 
@@ -230,7 +259,7 @@ HTTP contract the stub already implements (put a proxy in front of the vendor if
 ## What NOT to do
 
 1. **Do not scrape authenticated storefronts** (Kroger, Target RedSky, Instacart, Walmart, Publix, H-E-B, club sites) as the production price or cart-fill strategy. Puppeteer against a public marketing page is not a partner integration.
-2. **Do not invent Instacart/Datasembly clients** from blog posts. Use the stub HTTP contract + proxy, or wait for official docs with the contract.
+2. **Do not invent Instacart Connect / Datasembly price clients** from blog posts. Use the stub HTTP contract + proxy, or wait for official docs with the contract. The Developer Platform shopping-list client (`POST /idp/v1/products/products_link`) is the documented handoff and is separate from `INSTACART_PARTNER_*`.
 3. **Do not report cart success** without a 2xx from a documented cart API. Deep link ≠ filled cart.
 4. **Do not treat weekly ads / Flipp as shelf prices.** Featured “2 for $5” is not the unit price optimize should pick. Grocery Gitter already labels Flipp rows **Weekly ad**.
 5. **Do not mix Instacart delivery prices with in-store prices** in one column. Label the source (`Partner feed`, `Live prices`, `Weekly ad`, `Demo catalog`).
@@ -249,10 +278,14 @@ SHELF_FEED_BASE_URL=
 SHELF_FEED_API_KEY=
 SHELF_FEED_STORES=Publix,Meijer,H-E-B,Safeway,Food Lion
 
-# Instacart Connect-style adapter (same HTTP contract; map vendor JSON in a proxy)
+# Instacart Connect-style price adapter (same HTTP contract; map vendor JSON in a proxy)
 INSTACART_PARTNER_BASE_URL=
 INSTACART_PARTNER_API_KEY=
 INSTACART_PARTNER_STORES=Aldi,Publix
+
+# Developer Platform shopping-list handoff (not the price adapter)
+INSTACART_API_KEY=
+INSTACART_API_BASE_URL=https://connect.dev.instacart.tools
 
 # Optional single-banner licensed feeds
 PUBLIX_PARTNER_BASE_URL=

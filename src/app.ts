@@ -4,6 +4,7 @@ import cors from "cors";
 import optimizeListRouter from "./routes/optimizeList";
 import catalogRouter from "./routes/catalog";
 import krogerCartRouter from "./routes/krogerCart";
+import instacartShoppingListRouter from "./routes/instacartShoppingList";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -33,6 +34,10 @@ app.get("/api", (_req, res) => {
         "Starts shopper OAuth for PUT /v1/cart/add, or reuses a shopper cookie. Does nothing without KROGER_REDIRECT_URI and a UPC. Success is only claimed after Kroger HTTP 2xx.",
       "GET /api/kroger/oauth/callback":
         "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add. Falls back to Open at Kroger search links on cancel or API rejection.",
+      "GET /api/instacart/status":
+        "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
+      "POST /api/instacart/shopping-list":
+        "Creates an Instacart Developer Platform shopping list (POST /idp/v1/products/products_link) and returns productsLinkUrl. Hidden in the UI when the key or base URL is unset.",
     },
   });
 });
@@ -40,6 +45,7 @@ app.get("/api", (_req, res) => {
 app.use("/api", catalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
+app.use("/api", instacartShoppingListRouter);
 app.use(
   express.static(publicDir, {
     etag: false,
