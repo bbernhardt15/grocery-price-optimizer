@@ -661,8 +661,13 @@ async function openInstacartList(button) {
     if (!payload.productsLinkUrl) {
       throw new Error("Instacart did not return a shopping list link.");
     }
-    const opened = window.open(payload.productsLinkUrl, "_blank", "noopener,noreferrer");
     const note = payload.retailerNote ? ` ${payload.retailerNote}` : "";
+    // "noopener" in window.open features makes Chrome return null even when the
+    // tab opened. Drop opener after a normal open so a real popup block is detectable.
+    const opened = window.open(payload.productsLinkUrl, "_blank");
+    if (opened) {
+      opened.opener = null;
+    }
     if (!opened) {
       showApiError(
         `Instacart created the list, but the browser blocked the new tab.${note} Copy this link: ${payload.productsLinkUrl}`
