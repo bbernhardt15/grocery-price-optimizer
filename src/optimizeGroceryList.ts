@@ -1,5 +1,6 @@
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
+import { compareProductOffers, unitPriceForProduct } from "./productMatch";
 import {
   matchTokenSets,
   nameContainsAllTokens,
@@ -21,6 +22,8 @@ export type CatalogProduct = {
   normalizedUnit: string;
   lastUpdated?: Date;
   updatedAt?: Date;
+  /** Retailer size text ("12 oz", "1 gal", "18 ct") when the API sent one. */
+  size?: string;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
   /** live = retailer API this request; cached_live = Mongo row from a live API; weekly_ad = flyer/circular; seed = demo catalog. */
@@ -37,6 +40,10 @@ export type PickedItem = {
   itemTotal: number;
   unit: string;
   normalizedUnit: string;
+  /** Package unit price rounded to cents, in the same units as `unitPriceText`. */
+  unitPrice?: number;
+  /** For example "$3.29/gal" or "$0.20/ct" when the package size was parsed. */
+  unitPriceText?: string;
   locationId?: string;
   productId?: string;
   upc?: string;
@@ -101,19 +108,6 @@ function productsMatchingQuery(
   return [];
 }
 
-function compareByLowestPrice(a: CatalogProduct, b: CatalogProduct): number {
-  if (a.price !== b.price) {
-    return a.price - b.price;
-  }
-
-  const storeCmp = a.storeName.localeCompare(b.storeName);
-  if (storeCmp !== 0) {
-    return storeCmp;
-  }
-
-  return a.name.localeCompare(b.name);
-}
-
 function pickForLine(
   line: GroceryLine,
   catalog: CatalogProduct[]
@@ -124,8 +118,9 @@ function pickForLine(
     return null;
   }
 
-  matches.sort(compareByLowestPrice);
+  matches.sort((a, b) => compareProductOffers(line.name, a, b));
   const best = matches[0];
+  const unitPrice = unitPriceForProduct(best.price, best.name, best.size);
 
   return {
     query: line.name,
@@ -137,6 +132,7 @@ function pickForLine(
     itemTotal: roundMoney(best.price * line.quantity),
     unit: best.unit,
     normalizedUnit: best.normalizedUnit,
+    ...(unitPrice ?? {}),
     ...(best.locationId ? { locationId: best.locationId } : {}),
     ...(best.productId ? { productId: best.productId } : {}),
     ...(best.upc ? { upc: best.upc } : {}),
@@ -145,8 +141,14 @@ function pickForLine(
 }
 
 /**
- * Maps each grocery item to the in-scope product with the lowest shelf price,
- * multiplies that price by the requested quantity, then groups by storeName.
+ * Maps each grocery item to one in-scope product, multiplies that shelf price
+ * by the requested quantity, then groups by storeName.
+ *
+ * Candidates are the strongest keyword set that hits (full name, then without
+ * a generic trailing word, then the first two words). Inside that set the
+ * product itself beats a flavor/ingredient use of the same words, then either
+ * the closest requested package size or the lower unit price. See
+ * `productMatch.ts` for the full rule.
  */
 export function optimizeGroceryList(
   groceryList: string[],

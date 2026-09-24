@@ -944,6 +944,20 @@ describe("POST /api/optimize-list", () => {
     targetPricingProvider.searchProducts = async () => {
       throw new Error("Target partner feed failed (503)");
     };
+    // "Gallon of Milk" / "Dozen Eggs" match on milk and eggs. Drop live rows
+    // from earlier cases so this request actually falls back to the seed catalog.
+    await Product.deleteMany({
+      name: {
+        $in: [
+          "Simple Truth Oat Milk",
+          "Great Value Oat Milk",
+          "Good & Gather Oat Milk",
+          "Kroger Pasture Eggs",
+          "Great Value Pasture Eggs",
+          "Good & Gather Pasture Eggs",
+        ],
+      },
+    });
 
     try {
       const { status, json } = await optimize({

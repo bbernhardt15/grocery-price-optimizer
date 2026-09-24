@@ -7,14 +7,35 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 ## What it includes
 
 - **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** / **Partner feed** / **Weekly ad** / **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
-- **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `size` (optional retailer package text), `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
+- **`optimizeGroceryList`** — pure function that picks one product per item (the product itself, then the fair package price) and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart/Target search stubs)
 - **`src/pricing/`** — pluggable price providers (Kroger Products API, Walmart Affiliate API, Target partner feed, licensed partner-feed stubs, Flipp weekly-ad deals)
 - **`GET /api/search-catalog`** — FatSecret catalog autocomplete (`?query=milk`)
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. Set `MONGO_URL` (preferred in cloud) to connect to Atlas or any MongoDB and skip the in-memory server. If `MONGO_URL` is unset and nothing is listening on `MONGODB_URI` / localhost:27017, local dev starts an in-memory MongoDB.
+
+## Matching and unit price
+
+For each grocery line, each store search still returns every catalog hit. The optimizer keeps the strongest keyword set that hits (full name, then without a generic trailing word such as Cereal, then the first two words) and ranks inside that set.
+
+**The product itself beats a flavor or ingredient.** A row counts as the product when the name ends with the search words ("Clover Honey", "Whole Milk", "Large Eggs"), or the only words after them are a cut or form (breast, sliced, organic, roasted, …). A trailing jar, bottle, bag, or box is ignored. The row is only a modifier when a different food follows ("Honey Nut Cheerios", "Honey Roasted Peanuts", "chicken broth", "egg noodles", "milk chocolate") or when flavored / flavor / style / scented / infused follows the query. Modifier rows are used only if nothing in the product-itself group matched. Words match as whole tokens with a light plural stem, so "honey" does not hit "Honeycrisp" and "egg" does hit "eggs".
+
+**Size decides the price comparison.** Package size is read from the retailer size field and the title: oz, fl oz, lb, g, kg, ml, L, gallon, half gallon, quart, pint, count/ct, pack, dozen, and simple multipacks such as "6 x 12 fl oz". Volume is compared in fluid ounces, weight in ounces, and counts per item.
+
+- If the list item names a size ("gallon of milk", "12 ct eggs"), pick the closest package in that dimension. The same size breaks ties on shelf price, because that is what the shopper pays for the package they asked for. A better unit price on the wrong size does not win.
+- If the list item does not name a size, and the packages share a dimension, pick the lower unit price. A half gallon must not beat a gallon just because the sticker is lower. Eggs use price per each.
+- If size cannot be parsed, or the dimensions differ, fall back to shelf price.
+
+When a size is parsed, the trip card shows that unit price next to the line total (`$3.50 ($3.50/gal)`, `$3.60 ($0.20/ct)`). Milk-sized volumes (a quart and up) are shown per gallon; smaller volumes per fl oz; weights of a pound and up per lb.
+
+| List item | Before | After |
+| --- | --- | --- |
+| Honey | Cheapest name that contained "honey", often Honey Nut Cheerios or honey-roasted peanuts | A product whose name ends in honey (Clover Honey), even when the sticker is higher |
+| milk | Half gallon at $2.00 beats a gallon at $3.50 | Gallon wins: $3.50/gal vs $4.00/gal |
+| gallon of milk | Same sticker sort | The gallon, even if a half gallon is $1.50 ($3.00/gal) |
+| eggs | 12 ct at $3.00 beats 18 ct at $3.60 | 18 ct wins at $0.20/ct vs $0.25/ct. "12 ct eggs" still picks the dozen |
 
 ## Kroger Locations API
 
@@ -266,7 +287,7 @@ Response shape:
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching splits the name into keywords (ignoring FatSecret serving annotations like `(28g)`) and requires those tokens in product `name` case-insensitively (so `"milk"` matches `"Whole Milk"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Store `subtotal` and the list `total` use `itemTotal`. `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When some stores fail but others (or the demo catalog) still price the list, the response is **200** with `pricingWarning` and per-store `pricing` badges. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+Each grocery item is assigned to **one** store using the [matching and unit-price rules](#matching-and-unit-price): the product itself beats a flavor or ingredient, then the closest requested size or the lower unit price. Matching still splits the name into keywords (ignoring FatSecret serving annotations like `(28g)` and package sizes) and requires those whole words in product `name` (so `"milk"` matches `"Whole Milk"` and `"egg"` matches `"Eggs"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Picked items include `unitPriceText` (for example `"$3.50/gal"`) when a package size was parsed. Store `subtotal` and the list `total` use `itemTotal` (shelf price × quantity). `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When some stores fail but others (or the demo catalog) still price the list, the response is **200** with `pricingWarning` and per-store `pricing` badges. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
 
 ### `GET /api/kroger/auth-status`
 

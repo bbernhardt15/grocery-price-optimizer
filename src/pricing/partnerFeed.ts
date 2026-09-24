@@ -130,6 +130,7 @@ export function toPartnerCatalogProduct(
   const productId = (item.productId || item.tcin || item.sku)?.trim();
   const upc = (item.upc || item.gtin)?.trim();
   const banner = item.storeName?.trim() || storeName;
+  const size = item.size?.trim();
   return {
     name,
     brand: item.brand?.trim() || banner,
@@ -137,6 +138,7 @@ export function toPartnerCatalogProduct(
     ...(productId ? { productId } : {}),
     ...(upc ? { upc } : {}),
     ...(zipCode ? { locationId: zipCode } : {}),
+    ...(size ? { size } : {}),
     price,
     unit,
     normalizedUnit: unit,

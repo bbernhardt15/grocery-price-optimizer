@@ -1,4 +1,85 @@
 import { escapeRegex } from "./escapeRegex";
+import { stripPackageSizePhrases } from "./packageSize";
+
+const STOP_WORDS = new Set(["of", "a", "an", "the"]);
+
+const UNIT_WORDS = new Set([
+  "oz",
+  "floz",
+  "fl",
+  "lb",
+  "lbs",
+  "g",
+  "kg",
+  "ml",
+  "l",
+  "gal",
+  "gallon",
+  "quart",
+  "qt",
+  "pint",
+  "pt",
+  "count",
+  "ct",
+  "pk",
+  "pack",
+  "dozen",
+  "liter",
+  "litre",
+  "gram",
+  "pound",
+  "ounce",
+  "kilogram",
+  "milliliter",
+  "millilitre",
+  "piece",
+  "pc",
+  "pcs",
+  "ea",
+  "each",
+  "fluid",
+]);
+
+/**
+ * Light plural stem so "eggs" matches "egg" and "Cheerios" matches itself.
+ * Short tokens and words ending in "ss" are left alone.
+ */
+export function stemGroceryToken(token: string): string {
+  const value = token.toLowerCase();
+  if (value.length <= 3) {
+    return value;
+  }
+  if (/(?:ches|shes|xes|zes|oes)$/.test(value)) {
+    return value.slice(0, -2);
+  }
+  if (value.endsWith("ies")) {
+    return `${value.slice(0, -3)}y`;
+  }
+  if (value.endsWith("s") && !value.endsWith("ss")) {
+    return value.slice(0, -1);
+  }
+  return value;
+}
+
+function isSkippableToken(token: string): boolean {
+  if (/^\d+(?:\.\d+)?$/.test(token)) {
+    return true;
+  }
+  const lower = token.toLowerCase();
+  const stem = stemGroceryToken(token);
+  return STOP_WORDS.has(lower) || STOP_WORDS.has(stem) || UNIT_WORDS.has(lower) || UNIT_WORDS.has(stem);
+}
+
+/**
+ * Words used to search and score a grocery line. Size phrases ("12 oz",
+ * "half gallon", "18 ct", "dozen") and filler words ("of", "a") are removed
+ * so "gallon of milk" matches a jug titled "Whole Milk".
+ */
+export function groceryWordTokens(text: string): string[] {
+  return tokenizeProductName(stripPackageSizePhrases(text)).filter(
+    (token) => !isSkippableToken(token)
+  );
+}
 
 const GENERIC_TRAILING_WORDS = new Set([
   "breakfast",
@@ -52,7 +133,7 @@ function dropGenericTrailing(tokens: string[]): string[] | null {
  * first two words.
  */
 export function matchTokenSets(name: string): string[][] {
-  const tokens = tokenizeProductName(name);
+  const tokens = groceryWordTokens(name);
   if (tokens.length === 0) {
     return [];
   }
@@ -95,8 +176,10 @@ export function nameContainsAllTokens(productName: string, tokens: string[]): bo
   if (tokens.length === 0) {
     return false;
   }
-  const haystack = productName.toLowerCase();
-  return tokens.every((token) => haystack.includes(token.toLowerCase()));
+  const haystack = new Set(
+    tokenizeProductName(productName).map((token) => stemGroceryToken(token))
+  );
+  return tokens.every((token) => haystack.has(stemGroceryToken(token)));
 }
 
 /**
