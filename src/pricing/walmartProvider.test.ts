@@ -68,6 +68,7 @@ describe("WalmartPricingProvider", () => {
     assert.equal(products[0].upc, "078742000012");
     assert.equal(products[0].priceSource, "live");
     assert.equal(products[0].unit, "gal");
+    assert.equal(products[0].size, "1 gal");
     assert.ok(calls[0].startsWith(`${WALMART_AFFILIATE_BASE}/search?`));
     assert.match(calls[0], /query=milk/);
     assert.match(calls[0], /publisherId=impact-123/);
@@ -92,5 +93,79 @@ describe("WalmartPricingProvider", () => {
   it("setup hint stays honest about walmart.com catalog vs local shelves", () => {
     assert.match(WALMART_SETUP_HINT, /walmart\.com catalog/i);
     assert.match(WALMART_SETUP_HINT, /not in-aisle/i);
+    assert.match(WALMART_SETUP_HINT, /no store-price filter/i);
+    assert.match(WALMART_SETUP_HINT, /WALMART_PUBLISHER_ID/);
+  });
+
+  it("looks up the nearest store by ZIP, caches it, and does not scope search prices to that store", async () => {
+    installWalmartKeys();
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/stores")) {
+        return Response.json([
+          {
+            no: 2066,
+            name: "WM Supercenter",
+            streetAddress: "2727 DUNVALE RD",
+            city: "HOUSTON",
+            stateProvCode: "TX",
+            zip: "77063",
+          },
+        ]);
+      }
+      return Response.json({
+        items: [
+          {
+            itemId: 554433,
+            name: "Great Value Whole Milk",
+            salePrice: 2.44,
+          },
+        ],
+      });
+    };
+
+    const provider = new WalmartPricingProvider();
+    const first = await provider.getNearestStore("77063-1234");
+    const second = await provider.getNearestStore("77063");
+    const products = await provider.searchProducts("milk", { zipCode: "77063" });
+
+    assert.equal(first?.storeId, "2066");
+    assert.equal(first?.name, "WM Supercenter");
+    assert.equal(first?.streetAddress, "2727 DUNVALE RD");
+    assert.equal(first?.city, "HOUSTON");
+    assert.equal(first?.state, "TX");
+    assert.equal(first?.zip, "77063");
+    assert.equal(second, first);
+    assert.equal(products[0].productId, "554433");
+    assert.equal(products[0].locationId, "2066");
+
+    const storeCalls = calls.filter((url) => url.includes("/stores"));
+    const searchCalls = calls.filter((url) => url.includes("/search"));
+    assert.equal(storeCalls.length, 1);
+    assert.match(storeCalls[0], /\/stores\?zip=77063$/);
+    assert.equal(searchCalls.length, 1);
+    assert.doesNotMatch(searchCalls[0], /store/i);
+  });
+
+  it("skips the store locator for a bad ZIP and does not cache a failed HTTP response", async () => {
+    installWalmartKeys();
+    let storeCalls = 0;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/stores")) {
+        storeCalls += 1;
+        return Response.json({ message: "no" }, { status: 500 });
+      }
+      return Response.json({ items: [] });
+    };
+
+    const provider = new WalmartPricingProvider();
+    assert.equal(await provider.getNearestStore("abc"), undefined);
+    assert.equal(storeCalls, 0);
+    assert.equal(await provider.getNearestStore("45202"), undefined);
+    assert.equal(await provider.getNearestStore("45202"), undefined);
+    assert.equal(storeCalls, 2);
   });
 });

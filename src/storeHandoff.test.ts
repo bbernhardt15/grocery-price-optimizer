@@ -194,6 +194,106 @@ describe("buildStoreHandoff", () => {
     assert.match(target.action.detail ?? "", /partner/i);
   });
 
+  it("builds one Walmart add-to-cart link when every line has an affiliate item id", () => {
+    const previous = process.env.WALMART_PUBLISHER_ID;
+    delete process.env.WALMART_PUBLISHER_ID;
+    const milk = {
+      ...walmartBread,
+      name: "Whole Milk",
+      quantity: 2,
+      itemTotal: 4.88,
+      productId: "554433",
+      priceSource: "live" as const,
+    };
+    const eggs = {
+      ...walmartBread,
+      name: "Large Eggs",
+      quantity: 1,
+      itemTotal: 2.14,
+      productId: "998877",
+      priceSource: "cached_live" as const,
+    };
+    const handoff = buildStoreHandoff({
+      storeName: "Walmart",
+      items: [milk, eggs],
+      subtotal: 7.02,
+    });
+    if (previous === undefined) {
+      delete process.env.WALMART_PUBLISHER_ID;
+    } else {
+      process.env.WALMART_PUBLISHER_ID = previous;
+    }
+
+    assert.equal(handoff.action.type, "walmart_cart");
+    assert.equal(handoff.action.label, "Add 3 items to Walmart cart");
+    assert.equal(handoff.action.status, "ready");
+    const url = new URL(handoff.action.url ?? "");
+    assert.equal(url.origin + url.pathname, "https://affil.walmart.com/cart/addToCart");
+    assert.equal(url.searchParams.get("items"), "554433|2,998877|1");
+    assert.match(handoff.action.fallbackUrl ?? "", /walmart\.com\/ip\/554433/);
+    assert.match(handoff.action.detail ?? "", /WALMART_PUBLISHER_ID is unset/);
+    assert.match(handoff.action.detail ?? "", /does not report the cart as filled/);
+  });
+
+  it("attributes the Walmart cart link when WALMART_PUBLISHER_ID is set", () => {
+    const previous = process.env.WALMART_PUBLISHER_ID;
+    process.env.WALMART_PUBLISHER_ID = "impact-42";
+    const handoff = buildStoreHandoff({
+      storeName: "Walmart",
+      items: [
+        {
+          ...walmartBread,
+          quantity: 1,
+          productId: "554433",
+          priceSource: "live",
+        },
+      ],
+      subtotal: 1.28,
+    });
+    if (previous === undefined) {
+      delete process.env.WALMART_PUBLISHER_ID;
+    } else {
+      process.env.WALMART_PUBLISHER_ID = previous;
+    }
+
+    assert.equal(handoff.action.label, "Add 1 item to Walmart cart");
+    const url = new URL(handoff.action.url ?? "");
+    assert.equal(url.origin, "https://goto.walmart.com");
+    assert.match(url.pathname, /^\/c\/impact-42\/568844\/9383$/);
+    const destination = new URL(url.searchParams.get("u") ?? "");
+    assert.equal(destination.searchParams.get("items"), "554433|1");
+  });
+
+  it("keeps the search handoff when any Walmart line lacks an affiliate item id", () => {
+    const handoff = buildStoreHandoff({
+      storeName: "Walmart",
+      items: [
+        { ...walmartBread, productId: "554433", priceSource: "live" },
+        { ...walmartBread, name: "Bananas", priceSource: "seed" },
+      ],
+      subtotal: 2,
+    });
+    assert.equal(handoff.action.type, "search_deeplink");
+    assert.equal(handoff.action.label, "Search at Walmart");
+    assert.match(handoff.action.detail ?? "", /not a cart fill/i);
+  });
+
+  it("does not treat a Flipp flyer id as a Walmart item id", () => {
+    const handoff = buildStoreHandoff({
+      storeName: "Walmart",
+      items: [
+        {
+          ...walmartBread,
+          productId: "883311",
+          priceSource: "weekly_ad",
+        },
+      ],
+      subtotal: 1.28,
+    });
+    assert.equal(handoff.action.type, "search_deeplink");
+    assert.equal(handoff.action.label, "Search at Walmart");
+  });
+
   it("marks Aldi as coming soon", () => {
     const handoff = buildStoreHandoff({
       storeName: "Aldi",
@@ -270,5 +370,32 @@ describe("enrichOptimizeResult", () => {
     assert.equal(enriched.stores[0].handoff.action.type, "search_deeplink");
     assert.equal(enriched.stores[1].handoff.action.label, "Search at Target");
     assert.equal(enriched.stores[2].handoff.action.label, "Search at Walmart");
+    assert.equal(enriched.stores[2].nearbyStore, undefined);
+  });
+
+  it("attaches the nearest Walmart store only on the Walmart card", () => {
+    const enriched = enrichOptimizeResult(
+      {
+        stores: [
+          { storeName: "Kroger", items: [krogerMilk], subtotal: 5.78 },
+          { storeName: "Walmart", items: [walmartBread], subtotal: 1.28 },
+        ],
+        unavailable: [],
+        total: 7.06,
+      },
+      {
+        walmartStore: {
+          storeId: "2066",
+          name: "WM Supercenter",
+          streetAddress: "2727 DUNVALE RD",
+          city: "HOUSTON",
+          state: "TX",
+          zip: "77063",
+        },
+      }
+    );
+    assert.equal(enriched.stores[0].nearbyStore, undefined);
+    assert.equal(enriched.stores[1].nearbyStore?.name, "WM Supercenter");
+    assert.equal(enriched.stores[1].nearbyStore?.storeId, "2066");
   });
 });

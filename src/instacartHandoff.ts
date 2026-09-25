@@ -10,6 +10,8 @@
  * This is not the INSTACART_PARTNER_* price-feed stub.
  */
 
+import { parsePackageSize } from "./packageSize";
+
 export const INSTACART_DEV_BASE_URL = "https://connect.dev.instacart.tools";
 export const INSTACART_PROD_BASE_URL = "https://connect.instacart.com";
 export const INSTACART_PRODUCTS_LINK_PATH = "/idp/v1/products/products_link";
@@ -25,8 +27,10 @@ const MAX_LINE_ITEMS = 80;
 export type InstacartLineInput = {
   name: string;
   quantity?: number;
-  /** Grocery Gitter unit or package size (`gal`, `lbs`, `oz`, `count`, …). */
+  /** Grocery Gitter unit (`gal`, `lbs`, `oz`, `count`, …) when no package size is set. */
   unit?: string;
+  /** Retailer package text from Product.size, such as "1 gal", "16 oz", or "12 ct". */
+  size?: string;
   brand?: string;
   upc?: string;
 };
@@ -164,17 +168,23 @@ export function toInstacartLineItem(
     return null;
   }
 
-  const quantity = normalizeQuantity(item.quantity);
-  const mapped = mapUnit(item.unit);
-  const display = displayText(name, item.brand, quantity, item.unit);
+  const packages = normalizeQuantity(item.quantity);
+  const measured = measurementFor(item, packages);
+  const display = displayText(
+    name,
+    item.brand,
+    packages,
+    item.unit,
+    item.size?.trim() || measured.sizeLabel
+  );
   const upc = normalizeUpc(item.upc);
 
   return {
     name: name.slice(0, 200),
-    quantity,
-    unit: mapped.unit,
+    quantity: measured.quantity,
+    unit: measured.unit,
     display_text: display.slice(0, 240),
-    line_item_measurements: [{ quantity, unit: mapped.unit }],
+    line_item_measurements: [{ quantity: measured.quantity, unit: measured.unit }],
     ...(upc ? { upcs: [upc] } : {}),
   };
 }
@@ -391,19 +401,127 @@ function displayText(
   name: string,
   brand: string | undefined,
   quantity: number,
-  rawUnit: string | undefined
+  rawUnit: string | undefined,
+  sizeLabel: string | undefined
 ): string {
   const trimmedBrand = brand?.trim() ?? "";
   const titled =
     trimmedBrand && !name.toLowerCase().includes(trimmedBrand.toLowerCase())
       ? `${trimmedBrand} ${name}`
       : name;
-  const size = rawUnit?.trim() ?? "";
+  const size = sizeLabel?.trim() || rawUnit?.trim() || "";
   if (!size || /^(count|each|ea|ct)$/i.test(size)) {
     return titled;
   }
-  const qty = Number.isInteger(quantity) ? String(quantity) : String(quantity);
-  return `${titled} (${qty} ${size})`;
+  if (sizeLabel) {
+    return quantity === 1 ? `${titled} (${sizeLabel})` : `${titled} (${formatQty(quantity)} × ${sizeLabel})`;
+  }
+  return `${titled} (${formatQty(quantity)} ${size})`;
+}
+
+const SIZE_LABEL_UNITS: Record<string, string> = {
+  "fl oz": "fl oz ounce",
+  gal: "gallon",
+  qt: "quart",
+  pt: "pint",
+  ml: "milliliter",
+  l: "liter",
+  lb: "pound",
+  oz: "ounce",
+  kg: "kilogram",
+  g: "gram",
+};
+
+function measurementFor(
+  item: InstacartLineInput,
+  packages: number
+): { quantity: number; unit: string; sizeLabel?: string } {
+  const fromSize = measurementFromSize(item.size, packages);
+  if (fromSize) {
+    return fromSize;
+  }
+  return { quantity: packages, unit: mapUnit(item.unit).unit };
+}
+
+/**
+ * Volume and weight package sizes become the Instacart measurement
+ * (package amount × how many the shopper asked for). Count sizes such as
+ * "12 ct" stay one `each` per package so Instacart does not add twelve cartons.
+ */
+function measurementFromSize(
+  size: string | undefined,
+  packages: number
+): { quantity: number; unit: string; sizeLabel: string } | null {
+  const parsed = parsePackageSize(size);
+  if (!parsed) {
+    return null;
+  }
+  if (parsed.dimension === "count") {
+    return { quantity: packages, unit: "each", sizeLabel: parsed.label };
+  }
+
+  const simple = parsed.label.match(/^(\d+(?:\.\d+)?) (fl oz|gal|qt|pt|ml|L|lb|oz|kg|g)$/i);
+  if (simple?.[1] && simple[2]) {
+    const unit = SIZE_LABEL_UNITS[simple[2].toLowerCase()];
+    if (unit) {
+      return {
+        quantity: roundQty(Number(simple[1]) * packages),
+        unit,
+        sizeLabel: parsed.label,
+      };
+    }
+  }
+
+  const total = parsed.amount * packages;
+  const converted =
+    parsed.dimension === "volume" ? volumeFromFlOz(total) : weightFromOz(total);
+  return { ...converted, sizeLabel: parsed.label };
+}
+
+function volumeFromFlOz(flOz: number): { quantity: number; unit: string } {
+  const gallons = flOz / 128;
+  if (isCleanAmount(gallons)) {
+    return { quantity: roundQty(gallons), unit: "gallon" };
+  }
+  const quarts = flOz / 32;
+  if (isCleanAmount(quarts)) {
+    return { quantity: roundQty(quarts), unit: "quart" };
+  }
+  const pints = flOz / 16;
+  if (isCleanAmount(pints)) {
+    return { quantity: roundQty(pints), unit: "pint" };
+  }
+  const liters = flOz / 33.8140227018;
+  if (liters >= 1 && isCleanAmount(liters)) {
+    return { quantity: roundQty(liters), unit: "liter" };
+  }
+  return { quantity: roundQty(flOz), unit: "fl oz ounce" };
+}
+
+function weightFromOz(ounces: number): { quantity: number; unit: string } {
+  const pounds = ounces / 16;
+  if (pounds >= 1 && isCleanAmount(pounds)) {
+    return { quantity: roundQty(pounds), unit: "pound" };
+  }
+  const grams = ounces * (1000 / 35.27396195);
+  if (grams >= 1 && isCleanAmount(grams) && grams < 1000) {
+    return { quantity: roundQty(grams), unit: "gram" };
+  }
+  return { quantity: roundQty(ounces), unit: "ounce" };
+}
+
+function isCleanAmount(value: number): boolean {
+  const nearest = Math.round(value * 4) / 4;
+  return Math.abs(value - nearest) < 0.02;
+}
+
+function roundQty(value: number): number {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Math.min(Math.max(rounded, 0.001), 9999);
+}
+
+function formatQty(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value);
 }
 
 function normalizeUpc(value: string | undefined): string | undefined {

@@ -7,14 +7,35 @@ Node.js Express backend (TypeScript) that maps each grocery item to the store se
 ## What it includes
 
 - **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** / **Partner feed** / **Weekly ad** / **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
-- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
-- **`optimizeGroceryList`** — pure function that picks the cheapest matching product per item and groups by `storeName`
-- **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart/Target search stubs)
+- **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `size` (optional retailer package text), `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
+- **`optimizeGroceryList`** — pure function that picks one product per item (the product itself, then the fair package price) and groups by `storeName`
+- **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart add-to-cart deep link or search, Target search)
 - **`src/pricing/`** — pluggable price providers (Kroger Products API, Walmart Affiliate API, Target partner feed, licensed partner-feed stubs, Flipp weekly-ad deals)
 - **`GET /api/search-catalog`** — FatSecret catalog autocomplete (`?query=milk`)
 - **`npm run scrape -- "milk"`** — Puppeteer script that searches Vitacost and returns title/price JSON
 
 On first launch with an empty database the API seeds a sample catalog for Aldi, Walmart, Kroger, and Target. Set `MONGO_URL` (preferred in cloud) to connect to Atlas or any MongoDB and skip the in-memory server. If `MONGO_URL` is unset and nothing is listening on `MONGODB_URI` / localhost:27017, local dev starts an in-memory MongoDB.
+
+## Matching and unit price
+
+For each grocery line, each store search still returns every catalog hit. The optimizer keeps the strongest keyword set that hits (full name, then without a generic trailing word such as Cereal, then the first two words) and ranks inside that set.
+
+**The product itself beats a flavor or ingredient.** A row counts as the product when the name ends with the search words ("Clover Honey", "Whole Milk", "Large Eggs"), or the only words after them are a cut or form (breast, sliced, organic, roasted, …). A trailing jar, bottle, bag, or box is ignored. The row is only a modifier when a different food follows ("Honey Nut Cheerios", "Honey Roasted Peanuts", "chicken broth", "egg noodles", "milk chocolate") or when flavored / flavor / style / scented / infused follows the query. Modifier rows are used only if nothing in the product-itself group matched. Words match as whole tokens with a light plural stem, so "honey" does not hit "Honeycrisp" and "egg" does hit "eggs".
+
+**Size decides the price comparison.** Package size is read from the retailer size field and the title: oz, fl oz, lb, g, kg, ml, L, gallon, half gallon, quart, pint, count/ct, pack, dozen, and simple multipacks such as "6 x 12 fl oz". Volume is compared in fluid ounces, weight in ounces, and counts per item.
+
+- If the list item names a size ("gallon of milk", "12 ct eggs"), pick the closest package in that dimension. The same size breaks ties on shelf price, because that is what the shopper pays for the package they asked for. A better unit price on the wrong size does not win.
+- If the list item does not name a size, and the packages share a dimension, pick the lower unit price. A half gallon must not beat a gallon just because the sticker is lower. Eggs use price per each.
+- If size cannot be parsed, or the dimensions differ, fall back to shelf price.
+
+When a size is parsed, the trip card shows that unit price next to the line total (`$3.50 ($3.50/gal)`, `$3.60 ($0.20/ct)`). Milk-sized volumes (a quart and up) are shown per gallon; smaller volumes per fl oz; weights of a pound and up per lb.
+
+| List item | Before | After |
+| --- | --- | --- |
+| Honey | Cheapest name that contained "honey", often Honey Nut Cheerios or honey-roasted peanuts | A product whose name ends in honey (Clover Honey), even when the sticker is higher |
+| milk | Half gallon at $2.00 beats a gallon at $3.50 | Gallon wins: $3.50/gal vs $4.00/gal |
+| gallon of milk | Same sticker sort | The gallon, even if a half gallon is $1.50 ($3.00/gal) |
+| eggs | 12 ct at $3.00 beats 18 ct at $3.60 | 18 ct wins at $0.20/ct vs $0.25/ct. "12 ct eggs" still picks the dozen |
 
 ## Kroger Locations API
 
@@ -38,7 +59,7 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | Store | What actually runs | Offline / no keys | Live keys |
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
-| **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). Optional `GET /stores?zip=` for a nearby store id only. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). | **walmart.com catalog** prices (the Affiliate search API has no in-aisle store filter). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines), `WALMART_PUBLISHER_ID`. |
+| **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store is a label only. Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
 | **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. |
 | **Aldi** (and Publix-like banners) | No retailer product API. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. | Demo catalog | Weekly-ad / circular prices near the ZIP when Flipp is enabled |
 
@@ -73,7 +94,8 @@ After optimize, each store group includes a `handoff` object: `storeName`, `item
 | --- | --- | --- |
 | **Kroger** | `search_deeplink` → **Open at Kroger** | Default when `KROGER_REDIRECT_URI` is unset, or when items have no UPC. Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
 | **Kroger** | `kroger_cart` → **Add to Kroger cart** | When `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC/`productId`. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
-| **Walmart / Target** | `search_deeplink` | Public search URLs. Not a cart fill — authenticated cart APIs need partner access (Phase 3 table). Grocery Gitter does not invent those APIs. |
+| **Walmart** | `walmart_cart` → **Add N items to Walmart cart** | When every Walmart line has a numeric Affiliate `itemId` (live or cached live). One link: `https://affil.walmart.com/cart/addToCart?items=ITEMID\|QTY,ITEMID\|QTY` ([GM add to cart](https://walmart.io/docs/affiliates/v1/gm-add-to-cart), item field `addToCartUrl`). If `WALMART_PUBLISHER_ID` is set, that URL is wrapped with the Impact template from [`productTrackingUrl`](https://walmart.io/apidocs/affiliates/reviews): `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u=…`. If it is unset, the unwrapped link still opens the cart. This is a shopper handoff, not an API cart write — Grocery Gitter does not report the cart as filled. Any line without a Walmart item id (demo catalog, or a Flipp flyer id) falls back to **Search at Walmart**. |
+| **Target** | `search_deeplink` | Public search URL. Not a cart fill — authenticated cart APIs need partner access. Grocery Gitter does not invent that API. |
 | **Publix / H-E-B / Meijer / Albertsons family / Ahold / club / Amazon** | `search_deeplink` | Public search URLs with honest copy (club membership; no third-party cart-write). |
 | **Aldi / unknown banners** | `coming_soon` | No fake checkout. |
 | **Instacart Developer Platform** | `POST /api/instacart/shopping-list` | Shown only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set. Not a native cart. See below. |
@@ -95,14 +117,14 @@ The key stays on the server. The browser calls `POST /api/instacart/shopping-lis
 
 **What the shopper sees**
 
-- On each trip-plan store that does **not** have a native cart write (Target search, Aldi “Coming soon”, Publix/H-E-B/regional search, and any other non-`kroger_cart` section): a **Shop on Instacart** button for that section’s items.
+- On each trip-plan store that does **not** have a native cart handoff (Target search, Aldi “Coming soon”, Publix/H-E-B/regional search, Walmart **Search at Walmart** fallback, and Kroger when it is only “Open at Kroger”): a **Shop on Instacart** button for that section’s items.
 - On the trip total: “or shop the whole list on Instacart”, which sends every store’s items as one list.
-- Kroger’s **Add to Kroger cart** section does not get a second per-store Instacart button. Those items are still included in the whole-list option.
+- Kroger’s **Add to Kroger cart** section and Walmart’s **Add N items to Walmart cart** section do not get a second per-store Instacart button. Those items are still included in the whole-list option. The nearest Walmart store line and unit prices stay on the card.
 - Instacart opens a hosted list. The shopper picks a retailer, reviews matches, and checks out on Instacart (login if needed). Grocery Gitter does not claim the in-store cart was filled, and Instacart prices can differ.
 
 **Retailer hint:** the create-shopping-list body has **no retailer field**. [Instacart’s FAQ](https://docs.instacart.com/developer_platform_api/faq) says directing a shopper to a specific merchant is not supported on that page. The only documented hint is appending `?retailer_key=` after [`GET /idp/v1/retailers`](https://docs.instacart.com/developer_platform_api/api/retailers/get_nearby_retailers), and that query parameter is documented for [recipe page URLs](https://docs.instacart.com/developer_platform_api/get_started/recipe), which may need a separate API key. For a single store section with a ZIP, Grocery Gitter tries that lookup and appends `retailer_key` when the retailer **name** matches the trip-plan store. If lookup fails or nothing matches, the link still opens and the shopper chooses the store. The whole-list option never preselects a retailer.
 
-Line items send `name`, `quantity`, `line_item_measurements` (Grocery Gitter units mapped onto [Instacart’s units](https://docs.instacart.com/developer_platform_api/api/units_of_measurement); unknown units are sent as `each` and kept in `display_text`), and `upcs` when we have an 8–14 digit code. Retailer product ids are not sent as Instacart `product_ids`.
+Line items send `name`, `quantity`, `line_item_measurements` (package `size` when we have it, otherwise Grocery Gitter units, mapped onto [Instacart’s units](https://docs.instacart.com/developer_platform_api/api/units_of_measurement); unknown units are sent as `each` and kept in `display_text`), and `upcs` when we have an 8–14 digit code. A measured size such as `16 oz` is the amount Instacart should match, times how many packages the shopper asked for. Count sizes such as `12 ct` stay one package per line (`each`) with the count in the display text, so Instacart does not add twelve cartons. Retailer product ids are not sent as Instacart `product_ids`.
 
 **Get a key** (as documented; checked 24 Sep 2026)
 
@@ -313,7 +335,7 @@ Response shape:
 }
 ```
 
-Each grocery item is assigned to **one** store: the retailer in `stores` whose matching product has the lowest shelf `price`. Matching splits the name into keywords (ignoring FatSecret serving annotations like `(28g)`) and requires those tokens in product `name` case-insensitively (so `"milk"` matches `"Whole Milk"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Store `subtotal` and the list `total` use `itemTotal`. `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When some stores fail but others (or the demo catalog) still price the list, the response is **200** with `pricingWarning` and per-store `pricing` badges. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+Each grocery item is assigned to **one** store using the [matching and unit-price rules](#matching-and-unit-price): the product itself beats a flavor or ingredient, then the closest requested size or the lower unit price. Matching still splits the name into keywords (ignoring FatSecret serving annotations like `(28g)` and package sizes) and requires those whole words in product `name` (so `"milk"` matches `"Whole Milk"` and `"egg"` matches `"Eggs"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Picked items include `unitPriceText` (for example `"$3.50/gal"`) when a package size was parsed. Store `subtotal` and the list `total` use `itemTotal` (shelf price × quantity). `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When some stores fail but others (or the demo catalog) still price the list, the response is **200** with `pricingWarning` and per-store `pricing` badges. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
 
 ### `GET /api/kroger/auth-status`
 

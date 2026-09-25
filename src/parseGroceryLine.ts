@@ -4,6 +4,15 @@ export type GroceryLine = {
   quantity: number;
 };
 
+/** A leading "12 ct" / "1 gallon" is a package size, not a purchase quantity. */
+const PACKAGE_SIZE_WORD =
+  /^(?:oz|ounce|ounces|fl|floz|fluid|lb|lbs|pound|pounds|g|gram|grams|kg|kilogram|kilograms|ml|milliliter|milliliters|millilitre|millilitres|l|liter|liters|litre|litres|gal|gallon|gallons|qt|quart|quarts|pt|pint|pints|ct|count|counts|pk|pack|packs|dozen|dozens|ea|each|pc|pcs|piece|pieces)$/i;
+
+function startsWithPackageSize(rest: string): boolean {
+  const first = rest.split(/\s+/)[0]?.replace(/[.,]+$/g, "") ?? "";
+  return PACKAGE_SIZE_WORD.test(first);
+}
+
 function toQuantity(value: string): number {
   const quantity = Number.parseInt(value, 10);
   if (!Number.isFinite(quantity) || quantity < 1) {
@@ -34,7 +43,11 @@ export function parseGroceryLine(raw: string): GroceryLine | null {
   }
 
   const leadingCount = trimmed.match(/^(\d+)\s+(.+)$/);
-  if (leadingCount?.[2]?.trim() && !leadingCount[2].startsWith("%")) {
+  if (
+    leadingCount?.[2]?.trim() &&
+    !leadingCount[2].startsWith("%") &&
+    !startsWithPackageSize(leadingCount[2].trim())
+  ) {
     return {
       raw: trimmed,
       quantity: toQuantity(leadingCount[1]),

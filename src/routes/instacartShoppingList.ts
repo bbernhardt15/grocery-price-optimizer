@@ -75,12 +75,14 @@ function parseShoppingListBody(body: unknown):
     }
     const quantity = readQuantity(item.quantity);
     const unit = typeof item.unit === "string" ? item.unit.trim().slice(0, 40) : "";
+    const size = typeof item.size === "string" ? item.size.trim().slice(0, 80) : "";
     const brand = typeof item.brand === "string" ? item.brand.trim().slice(0, 80) : "";
     const upc = typeof item.upc === "string" ? item.upc.trim().slice(0, 20) : "";
     items.push({
       name: name.slice(0, 200),
       quantity,
       ...(unit ? { unit } : {}),
+      ...(size ? { size } : {}),
       ...(brand ? { brand } : {}),
       ...(upc ? { upc } : {}),
     });

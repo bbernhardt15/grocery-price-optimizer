@@ -34,7 +34,7 @@ Goal: local prices so optimize can split the list.
 | Partner | Role today / target |
 | --- | --- |
 | **Kroger Products + Locations** | Live (client-credentials). Keep. |
-| **Walmart Affiliate Marketing API** | Optional. **walmart.com catalog**, not in-aisle shelf. |
+| **Walmart Affiliate Marketing API** | Optional. **walmart.com catalog**, not in-aisle shelf. `GET /stores` labels the nearest store; search has no store-price filter. |
 | **Target licensed feed** | Stub (`TARGET_PARTNER_*`). No public API. |
 | **Datasembly-class shelf feed** | Fastest path to many banners’ **in-store** prices. Stub: `SHELF_FEED_*`. |
 | **Flipp / weekly ads** | Circulars and featured prices, **not** a full shelf file. **Wired** as `FlippDealsProvider` (`FLIPP_ACCESS_TOKEN` / `FLIPP_ENABLED`). Dashboard label: **Weekly ad**. Do not treat flyer rows as aisle-wide unit prices. |
@@ -49,7 +49,8 @@ Goal: shopper can actually buy the split trip.
 | **Kroger Cart API** | Only path with a documented write (`PUT /v1/cart/add`) after **shopper** OAuth. Redirect URI must be unlocked. |
 | **Instacart Connect / Platform** | Best multi-banner **fulfillment** bet (Aldi, many regionals). Sales-led. Prices often include **markup**. Cart create only if the contract says so. |
 | **Instacart Developer Platform shopping list** | **Not a price feed.** Self-serve (when applications are open) `POST /idp/v1/products/products_link` link. Shopper picks a retailer and checks out on Instacart. See the section below. Env: `INSTACART_API_KEY`, `INSTACART_API_BASE_URL`. |
-| **Retailer site search deep links** | Default handoff for Walmart, Target, Publix, H-E-B, Meijer, Albertsons family, Ahold banners, club stores. **Not** a cart fill. |
+| **Walmart add-to-cart URL** | Shopper handoff when every Walmart line has an Affiliate item id. Opens walmart.com with those items in the cart. Impact-wrapped only when `WALMART_PUBLISHER_ID` is set. Not an API cart-write, and not reported as filled. |
+| **Retailer site search deep links** | Default handoff for Target, Publix, H-E-B, Meijer, Albertsons family, Ahold banners, club stores, and Walmart lines that lack an item id. **Not** a cart fill. |
 | **Amazon / club apps** | Cart-write for third parties is effectively **unavailable**. Membership and app-only prices. |
 
 If a vendor sells “add to cart,” ask: *whose* cart (retailer vs Instacart), pickup vs delivery, and whether the write is acknowledged with an order/cart id. Until that is in writing, Grocery Gitter keeps `coming_soon` or `search_deeplink`.
@@ -116,7 +117,7 @@ This is the handoff already wired in `src/instacartHandoff.ts`. It does **not** 
 | **Bases** | Development `https://connect.dev.instacart.tools`. Production `https://connect.instacart.com`. |
 | **Auth** | `Authorization: Bearer` the Developer Platform API key. Server-side only. |
 | **Retailer** | The POST body has no retailer field. [FAQ](https://docs.instacart.com/developer_platform_api/faq): directing users to a specific merchant is not supported. For one store section, Grocery Gitter may append `retailer_key` when [`GET /idp/v1/retailers`](https://docs.instacart.com/developer_platform_api/api/retailers/get_nearby_retailers) returns a **name** match. That query param is documented for [recipe URLs](https://docs.instacart.com/developer_platform_api/get_started/recipe) and can require a separate key. If lookup fails, the shopper still gets the list and picks the store. |
-| **UI** | **Shop on Instacart** on trip-plan sections that are not a Kroger cart write (Target, Aldi, regional/Flipp/partner banners, Walmart search). Plus “or shop the whole list on Instacart” on the trip total. Hidden when the env vars are unset. |
+| **UI** | **Shop on Instacart** on trip-plan sections that are not a Kroger cart write or a Walmart add-to-cart link (Target, Aldi, regional/Flipp/partner banners, and Walmart search fallback). Plus “or shop the whole list on Instacart” on the trip total. Hidden when the env vars are unset. |
 | **Code** | `INSTACART_API_KEY`, `INSTACART_API_BASE_URL` |
 | **Do not** | Point these at the partner price proxy. Do not treat the returned URL as an in-store cart fill. |
 
@@ -250,7 +251,7 @@ HTTP contract the stub already implements (put a proxy in front of the vendor if
 | Partner | Status | Notes |
 | --- | --- | --- |
 | **Kroger** Products/Locations | live | Client-credentials. Cart = separate shopper OAuth. |
-| **Walmart Affiliate** | optional keys | Catalog, not aisle. Search handoff. |
+| **Walmart Affiliate** | optional keys | Catalog, not aisle. Add-to-cart deep link when item ids exist; otherwise search. Nearest store is a label only. |
 | **Target partner feed** | stub `TARGET_PARTNER_*` | Same idea as `PartnerFeedProvider`; keep RedSky unused. |
 | **Flipp weekly ads** | **live** (optional) | FlyerKit (`FLIPP_ACCESS_TOKEN`) or opt-in consumer search (`FLIPP_ENABLED=true`). Labeled **Weekly ad**, not a shelf catalog. Licensed partner feeds beat Flipp for the same banner. |
 

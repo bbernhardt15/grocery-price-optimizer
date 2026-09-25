@@ -51,8 +51,12 @@ export class FlippDealsProvider implements StorePricingProvider {
       const zip5 = zip.replace(/\D/g, "").slice(0, 5);
 
       return deals.map((deal) => {
+        const sizeText = [deal.postPriceText, deal.saleStory]
+          .map((part) => part?.trim())
+          .filter((part): part is string => Boolean(part))
+          .join(" ");
         const unit = parseGroceryUnit(
-          `${deal.name} ${deal.postPriceText ?? ""} ${deal.saleStory ?? ""}`
+          `${deal.name} ${sizeText}`
         );
         return {
           name: deal.name,
@@ -60,6 +64,7 @@ export class FlippDealsProvider implements StorePricingProvider {
           storeName: this.storeName,
           locationId: zip5,
           ...(deal.flyerItemId ? { productId: deal.flyerItemId } : {}),
+          ...(sizeText ? { size: sizeText } : {}),
           price: deal.price,
           unit,
           normalizedUnit: unit,

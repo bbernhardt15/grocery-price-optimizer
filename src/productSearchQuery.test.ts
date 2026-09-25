@@ -52,6 +52,21 @@ describe("productSearchQuery", () => {
     ]);
   });
 
+  it("drops a requested package size so the product word can still match", () => {
+    assert.deepEqual(productSearchAttempts("1 gallon of milk"), ["milk"]);
+    assert.deepEqual(productSearchAttempts("half gallon of milk"), ["milk"]);
+    assert.deepEqual(productSearchAttempts("12 oz honey"), ["honey"]);
+    assert.deepEqual(productSearchAttempts("18 ct eggs"), ["eggs"]);
+    assert.deepEqual(productSearchAttempts("Dozen Eggs"), ["Eggs"]);
+  });
+
+  it("matches whole words, including simple plurals, and not prefixes", () => {
+    assert.equal(nameContainsAllTokens("Large Eggs", ["egg"]), true);
+    assert.equal(nameContainsAllTokens("Large Eggs", ["eggs"]), true);
+    assert.equal(nameContainsAllTokens("Honeycrisp Apples", ["honey"]), false);
+    assert.equal(nameContainsAllTokens("Buttermilk", ["milk"]), false);
+  });
+
   it("matches store names that contain every keyword, ignoring case", () => {
     assert.equal(
       nameContainsAllTokens("Honey Nut Cheerios", ["Honey", "Nut", "Cheerios", "Cereal"]),

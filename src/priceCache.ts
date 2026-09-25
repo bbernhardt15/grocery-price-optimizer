@@ -31,7 +31,7 @@ export type ResolvedCatalog = {
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
 
 function catalogKey(product: CatalogProduct): string {
-  return `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.price}|${product.priceSource ?? ""}`;
+  return `${product.storeName}|${product.locationId ?? ""}|${product.brand}|${product.name}|${product.size ?? ""}|${product.price}|${product.priceSource ?? ""}`;
 }
 
 function storedPriceSource(value: string | null | undefined): StoredPriceSource {
@@ -52,6 +52,7 @@ function toCatalogProduct(doc: {
   productId?: string | null;
   upc?: string | null;
   price: number;
+  size?: string | null;
   unit: string;
   normalizedUnit: string;
   lastUpdated?: Date;
@@ -67,6 +68,7 @@ function toCatalogProduct(doc: {
     productId: doc.productId ?? undefined,
     upc: doc.upc ?? undefined,
     price: doc.price,
+    ...(doc.size ? { size: doc.size } : {}),
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,
@@ -134,6 +136,7 @@ export async function upsertLiveProducts(
           productId: product.productId,
           upc: product.upc,
           price: product.price,
+          ...(product.size ? { size: product.size } : {}),
           unit: product.unit,
           normalizedUnit: product.normalizedUnit,
           lastUpdated: now,

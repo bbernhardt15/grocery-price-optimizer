@@ -86,6 +86,50 @@ describe("Instacart line items", () => {
     assert.equal(toInstacartLineItem({ name: "Chicken", unit: "kg" })?.unit, "kilogram");
   });
 
+  it("uses package size for the Instacart measurement", () => {
+    const butter = toInstacartLineItem({
+      name: "Salted Butter",
+      quantity: 2,
+      unit: "oz",
+      size: "16 oz",
+    });
+    assert.equal(butter?.quantity, 32);
+    assert.equal(butter?.unit, "ounce");
+    assert.equal(butter?.display_text, "Salted Butter (2 × 16 oz)");
+    assert.deepEqual(butter?.line_item_measurements, [{ quantity: 32, unit: "ounce" }]);
+
+    const milk = toInstacartLineItem({
+      name: "Whole Milk",
+      quantity: 2,
+      unit: "gal",
+      size: "1 gal",
+    });
+    assert.equal(milk?.unit, "gallon");
+    assert.equal(milk?.quantity, 2);
+
+    const soda = toInstacartLineItem({
+      name: "Sparkling Water",
+      quantity: 1,
+      size: "6 x 12 fl oz",
+    });
+    assert.equal(soda?.unit, "fl oz ounce");
+    assert.equal(soda?.quantity, 72);
+    assert.match(soda?.display_text ?? "", /6 x 12 fl oz/);
+  });
+
+  it("keeps count sizes as one package per line", () => {
+    const eggs = toInstacartLineItem({
+      name: "Large Eggs",
+      quantity: 2,
+      unit: "count",
+      size: "12 ct",
+    });
+    assert.equal(eggs?.unit, "each");
+    assert.equal(eggs?.quantity, 2);
+    assert.equal(eggs?.display_text, "Large Eggs (2 × 12 ct)");
+    assert.deepEqual(eggs?.line_item_measurements, [{ quantity: 2, unit: "each" }]);
+  });
+
   it("does not send an unsupported unit as the measurement", () => {
     const line = toInstacartLineItem({ name: "Rolls", unit: "dozen", quantity: 1 });
     assert.equal(line?.unit, "each");

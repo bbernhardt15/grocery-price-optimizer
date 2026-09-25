@@ -359,11 +359,19 @@ function itemSourceMark(item) {
   return "";
 }
 
-function itemFragment(item) {
+function itemLabel(item) {
+  const quantity = item.quantity ?? 1;
+  const brand = item.brand ? ` (${item.brand})` : "";
+  return `${quantity}x ${item.name}${brand}`;
+}
+
+function itemPriceHtml(item) {
   const quantity = item.quantity ?? 1;
   const itemTotal = item.itemTotal ?? item.price * quantity;
-  const brand = item.brand ? ` (${item.brand})` : "";
-  return `${quantity}x ${item.name}${brand} — ${money(itemTotal)}`;
+  const unit = item.unitPriceText
+    ? ` <span class="unit-price">(${escapeHtml(item.unitPriceText)})</span>`
+    : "";
+  return `${money(itemTotal)}${unit}`;
 }
 
 function itemOpenUrl(store, item, index) {
@@ -379,7 +387,8 @@ function instacartStoreExtras(store) {
   if (!instacartEnabled) {
     return "";
   }
-  if (store?.handoff?.action?.type === "kroger_cart") {
+  const handoffType = store?.handoff?.action?.type;
+  if (handoffType === "kroger_cart" || handoffType === "walmart_cart") {
     return "";
   }
   if (!Array.isArray(store?.items) || store.items.length === 0) {
@@ -414,6 +423,26 @@ function renderHandoffButton(store) {
         )}</button>
         ${detail}
         ${instacart}
+      </footer>
+    `;
+  }
+
+  if (action.type === "walmart_cart" && action.url) {
+    const fallback = action.fallbackUrl
+      ? `<a class="handoff-fallback" href="${escapeHtml(
+          action.fallbackUrl
+        )}" target="_blank" rel="noopener noreferrer">or Search at Walmart</a>`
+      : "";
+    return `
+      <footer class="store-handoff">
+        <a
+          class="handoff-btn"
+          href="${escapeHtml(action.url)}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >${escapeHtml(action.label)}</a>
+        ${fallback}
+        ${detail}
       </footer>
     `;
   }
@@ -464,6 +493,18 @@ function renderHandoffButton(store) {
   `;
 }
 
+function renderNearbyStore(store) {
+  const nearby = store.nearbyStore;
+  if (!nearby || !nearby.name) {
+    return "";
+  }
+  const locality = [nearby.city, nearby.state].filter(Boolean).join(", ");
+  const tail = [locality, nearby.zip].filter(Boolean).join(" ");
+  const address = [nearby.streetAddress, tail].filter(Boolean).join(", ");
+  const line = address ? `${nearby.name} · ${address}` : nearby.name;
+  return `<p class="store-nearby">Nearest store: ${escapeHtml(line)}</p>`;
+}
+
 function renderStoreCard(store) {
   const itemCount = store.itemCount
     ?? store.handoff?.itemCount
@@ -474,9 +515,11 @@ function renderStoreCard(store) {
       const openLink = openUrl
         ? `<a class="item-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">Open</a>`
         : "";
-      return `<li class="item-line"><span>${escapeHtml(
-        itemFragment(item)
-      )}${itemSourceMark(item)}</span>${openLink}</li>`;
+      return `<li class="item-line"><span class="item-copy">${escapeHtml(
+        itemLabel(item)
+      )}${itemSourceMark(item)}</span><span class="item-price">${itemPriceHtml(
+        item
+      )}</span>${openLink}</li>`;
     })
     .join("");
 
@@ -485,6 +528,7 @@ function renderStoreCard(store) {
       <header>
         <div>
           <h2>${escapeHtml(store.storeName)}</h2>
+          ${renderNearbyStore(store)}
           ${
             store.pricing
               ? renderPricingBadge({ ...store, itemCount })
@@ -611,6 +655,9 @@ function instacartItemsFrom(stores) {
       };
       if (item.unit) {
         line.unit = item.unit;
+      }
+      if (item.size) {
+        line.size = item.size;
       }
       if (item.brand) {
         line.brand = item.brand;

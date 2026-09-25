@@ -10,7 +10,22 @@ import {
 } from "./walmartAuth";
 
 export const WALMART_SETUP_HINT =
-  "Walmart live prices use the official Affiliate Marketing API (walmart.io). Set WALMART_CONSUMER_ID, WALMART_PRIVATE_KEY (PEM; newlines as \\n), and WALMART_PUBLISHER_ID (Impact publisher id). Optional WALMART_KEY_VERSION (default 1). Prices are walmart.com catalog, not in-aisle local shelf.";
+  "Walmart live prices use the official Affiliate Marketing API (walmart.io). Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY (PEM; newlines as \\n). Optional WALMART_KEY_VERSION (default 1). Optional WALMART_PUBLISHER_ID (Impact publisher id) attributes search and the add-to-cart link after Impact approval; catalog search and the cart link still work without it. Prices are walmart.com catalog, not in-aisle local shelf. GET /stores?zip= only labels the nearest store — the search API has no store-price filter.";
+
+/** Nearest store from the Affiliate Store Locator. Display only. */
+export type WalmartNearbyStore = {
+  storeId: string;
+  name: string;
+  streetAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+};
+
+/** Store locations change rarely; one lookup per ZIP is enough for a day. */
+const WALMART_STORE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Cache an empty locator response for an hour so a blip is not sticky all day. */
+const WALMART_STORE_MISS_TTL_MS = 60 * 60 * 1000;
 
 type WalmartItem = {
   itemId?: number | string;
@@ -34,11 +49,16 @@ type WalmartSearchResponse = {
 type WalmartStore = {
   storeId?: number | string;
   no?: number | string;
+  name?: string;
+  streetAddress?: string;
+  city?: string;
+  stateProvCode?: string;
+  zip?: string | number;
 };
 
-type WalmartStoresResponse = {
-  stores?: WalmartStore[];
-  data?: WalmartStore[];
+type StoreCacheEntry = {
+  expiresAt: number;
+  store: WalmartNearbyStore | null;
 };
 
 function priceOf(item: WalmartItem): number | null {
@@ -61,12 +81,14 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
   const unit = parseGroceryUnit(item.size);
   const productId = item.itemId != null ? String(item.itemId).trim() : "";
   const upc = item.upc?.trim();
+  const size = item.size?.trim();
   return {
     name,
     brand: (item.brandName || item.brand || "Walmart").trim() || "Walmart",
     storeName: "Walmart",
     ...(productId ? { productId } : {}),
     ...(upc ? { upc } : {}),
+    ...(size ? { size } : {}),
     price,
     unit,
     normalizedUnit: unit,
@@ -87,9 +109,49 @@ function errorMessage(payload: WalmartSearchResponse, status: number): string {
   );
 }
 
+function storesFromPayload(payload: unknown): WalmartStore[] {
+  if (Array.isArray(payload)) {
+    return payload as WalmartStore[];
+  }
+  if (payload && typeof payload === "object") {
+    const record = payload as { stores?: unknown; data?: unknown };
+    if (Array.isArray(record.stores)) {
+      return record.stores as WalmartStore[];
+    }
+    if (Array.isArray(record.data)) {
+      return record.data as WalmartStore[];
+    }
+  }
+  return [];
+}
+
+function toNearbyStore(store: WalmartStore): WalmartNearbyStore | undefined {
+  const id = store.no ?? store.storeId;
+  const storeId = id != null ? String(id).trim() : "";
+  if (!storeId) {
+    return undefined;
+  }
+  const name = store.name?.trim() || `Walmart #${storeId}`;
+  const zip = store.zip != null ? String(store.zip).trim() : "";
+  return {
+    storeId,
+    name,
+    streetAddress: store.streetAddress?.trim() ?? "",
+    city: store.city?.trim() ?? "",
+    state: store.stateProvCode?.trim() ?? "",
+    zip,
+  };
+}
+
+function zip5(zipCode: string): string | undefined {
+  const zip = zipCode.trim().slice(0, 5);
+  return /^\d{5}$/.test(zip) ? zip : undefined;
+}
+
 export class WalmartPricingProvider implements StorePricingProvider {
   readonly storeName = "Walmart";
-  private nearestStoreId: string | undefined;
+  private storeCache = new Map<string, StoreCacheEntry>();
+  private storeInflight = new Map<string, Promise<WalmartNearbyStore | undefined>>();
 
   isConfigured(): boolean {
     return readWalmartCredentials() !== null;
@@ -133,19 +195,47 @@ export class WalmartPricingProvider implements StorePricingProvider {
   }
 
   /**
-   * GET /stores?zip= — nearest store id for display only. Search prices are
-   * still walmart.com catalog (the Affiliate search API has no store filter).
+   * GET /stores?zip= — Store Locator.
+   * Docs: https://walmart.io/apidocs/affiliates/stores
+   * (`lat`, `lon`, or `zip`). The first result is the nearest store.
+   *
+   * Store-scoped pricing is not supported. Affiliate `/search` and `/items`
+   * accept publisherId, query, category, and response group — not a store id
+   * — so salePrice stays the walmart.com catalog price. This lookup is only
+   * used to label the nearest store on the trip plan.
    */
-  async getNearestStoreId(zipCode: string): Promise<string | undefined> {
-    if (this.nearestStoreId) {
-      return this.nearestStoreId;
-    }
-
-    const zip = zipCode.trim().slice(0, 5);
-    if (!/^\d{5}$/.test(zip)) {
+  async getNearestStore(zipCode: string): Promise<WalmartNearbyStore | undefined> {
+    const zip = zip5(zipCode);
+    if (!zip) {
       return undefined;
     }
 
+    const cached = this.storeCache.get(zip);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.store ?? undefined;
+    }
+
+    const inflight = this.storeInflight.get(zip);
+    if (inflight) {
+      return inflight;
+    }
+
+    const request = this.fetchNearestStore(zip).finally(() => {
+      this.storeInflight.delete(zip);
+    });
+    this.storeInflight.set(zip, request);
+    return request;
+  }
+
+  /** @deprecated Prefer getNearestStore. Kept so callers can read the id alone. */
+  async getNearestStoreId(zipCode: string): Promise<string | undefined> {
+    const store = await this.getNearestStore(zipCode);
+    return store?.storeId;
+  }
+
+  private async fetchNearestStore(
+    zip: string
+  ): Promise<WalmartNearbyStore | undefined> {
     const credentials = this.credentialsOrThrow();
     const response = await this.affiliateGet(
       `/stores?zip=${encodeURIComponent(zip)}`,
@@ -155,11 +245,15 @@ export class WalmartPricingProvider implements StorePricingProvider {
       return undefined;
     }
 
-    const payload = (await response.json()) as WalmartStoresResponse;
-    const stores = payload.stores ?? payload.data ?? [];
-    const id = stores[0]?.storeId ?? stores[0]?.no;
-    this.nearestStoreId = id != null ? String(id) : undefined;
-    return this.nearestStoreId;
+    const payload = (await response.json().catch(() => null)) as unknown;
+    const store = storesFromPayload(payload)
+      .map(toNearbyStore)
+      .find((entry): entry is WalmartNearbyStore => Boolean(entry));
+    this.storeCache.set(zip, {
+      expiresAt: Date.now() + (store ? WALMART_STORE_CACHE_TTL_MS : WALMART_STORE_MISS_TTL_MS),
+      store: store ?? null,
+    });
+    return store;
   }
 
   async searchProducts(
@@ -172,6 +266,7 @@ export class WalmartPricingProvider implements StorePricingProvider {
     }
 
     const credentials = this.credentialsOrThrow();
+    // No store id: Affiliate /search has no store-price or availability filter.
     const params = new URLSearchParams({
       query,
       numItems: "25",
@@ -201,11 +296,14 @@ export class WalmartPricingProvider implements StorePricingProvider {
       .filter((product): product is CatalogProduct => product !== null);
 
     if (context.zipCode) {
-      const storeId = await this.getNearestStoreId(context.zipCode).catch(
+      const store = await this.getNearestStore(context.zipCode).catch(
         () => undefined
       );
-      if (storeId) {
-        return products.map((product) => ({ ...product, locationId: storeId }));
+      if (store) {
+        return products.map((product) => ({
+          ...product,
+          locationId: store.storeId,
+        }));
       }
     }
 
