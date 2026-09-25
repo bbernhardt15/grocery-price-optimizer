@@ -62,12 +62,8 @@ export function krogerProductsClient(): KrogerCatalogClient {
       if (!krogerApiConfigured()) {
         return null;
       }
-      try {
-        const locationId = await krogerService.getClosestStoreLocation(zip);
-        return locationId?.trim() || null;
-      } catch {
-        return null;
-      }
+      const locationId = await krogerService.getClosestStoreLocationStrict(zip);
+      return locationId?.trim() || null;
     },
   };
 }

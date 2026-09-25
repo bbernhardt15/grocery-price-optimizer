@@ -79,6 +79,21 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(locationId, "01400441");
   });
 
+  it("returns null from the strict lookup when the locations call fails", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ error: "bad zip" }, { status: 400 });
+    });
+    const service = new KrogerService();
+    assert.equal(await service.getClosestStoreLocationStrict("45202"), null);
+    assert.equal(await service.getClosestStoreLocation("45202"), "01400441");
+  });
+
   it("rejects an invalid ZIP before calling the API", async () => {
     const service = new KrogerService();
     await assert.rejects(
@@ -205,6 +220,31 @@ describe("KrogerService.searchProducts", () => {
         assert.ok(error instanceof KrogerPricingError);
         assert.equal(error.code, "missing_credentials");
         assert.match(error.message, /KROGER_CLIENT_ID/);
+        return true;
+      }
+    );
+  });
+
+  it("attaches the response body when Products returns 400", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return new Response(JSON.stringify({ errors: [{ reason: "filter.start out of range" }] }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const service = new KrogerService();
+    await assert.rejects(
+      () => service.searchProductsPage({ term: "milk", locationId: "01400902", start: 250, limit: 50 }),
+      (error: unknown) => {
+        assert.ok(error instanceof KrogerPricingError);
+        assert.equal(error.status, 400);
+        assert.match(error.body ?? "", /filter\.start/);
         return true;
       }
     );

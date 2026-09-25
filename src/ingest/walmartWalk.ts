@@ -71,11 +71,33 @@ export function flattenTaxonomy(value: unknown, parentPath = ""): Taxon[] {
     if (!id || !name) {
       continue;
     }
-    const path = String(record.path ?? "").trim() || (parentPath ? `${parentPath}/${name}` : name);
+    const path = taxonomyPath(String(record.path ?? "").trim(), parentPath, name);
     const children = flattenTaxonomy(record.children ?? record.categories ?? [], path);
     nodes.push({ id, name, path, children });
   }
   return nodes;
+}
+
+/**
+ * Walmart often sets `path` to the root ("Food") on every child. Prefer the
+ * ancestry we walked so "Breakfast Foods/Cereal" is not collapsed to "Food".
+ */
+function taxonomyPath(reported: string, parentPath: string, name: string): string {
+  const built = parentPath ? `${parentPath}/${name}` : name;
+  if (!reported) {
+    return built;
+  }
+  if (!parentPath) {
+    return reported.includes(name) ? reported : `${reported}/${name}`;
+  }
+  const root = parentPath.split("/")[0] ?? reported;
+  if (!reported.includes("/") || reported === root || reported === parentPath) {
+    return built;
+  }
+  if (!reported.endsWith(`/${name}`) && reported !== name) {
+    return `${reported}/${name}`;
+  }
+  return reported;
 }
 
 function isGrocery(node: Taxon): boolean {
@@ -112,7 +134,7 @@ export function groceryLeaves(taxonomy: unknown): WalmartCategory[] {
       id: node.id,
       name: node.name,
       path: node.path,
-      departmentId: mapped.departmentId === "other" ? "pantry" : mapped.departmentId,
+      departmentId: mapped.departmentId,
     });
   }
   return categories;
@@ -151,6 +173,24 @@ export function walmartNextCursor(payload: unknown): string | null {
   return next.trim();
 }
 
+/**
+ * Paginated items sometimes send `upc` as a number, or the code on `gtin`
+ * instead of `upc`. A missing code stays unset so the row is keyed
+ * `local:walmart:{itemId}` and does not merge with a Kroger UPC.
+ */
+export function readWalmartUpc(item: Record<string, unknown>): string {
+  for (const key of ["upc", "UPC", "gtin", "gtin14", "gtin13", "gtin12"]) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(Math.trunc(value));
+    }
+  }
+  return "";
+}
+
 function itemList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) {
     return payload;
@@ -181,7 +221,7 @@ export function recordsFromWalmartPage(payload: unknown, category?: WalmartCateg
       .filter(Boolean);
     const stock = typeof item.stock === "string" ? item.stock.toLowerCase() : "";
     const itemId = item.itemId != null ? String(item.itemId).trim() : "";
-    const upc = typeof item.upc === "string" ? item.upc.trim() : "";
+    const upc = readWalmartUpc(item);
     const productUrl = typeof item.productUrl === "string" ? item.productUrl.trim() : "";
     records.push({
       name,

@@ -84,6 +84,23 @@ export type KrogerQuery = {
   brandIndex: number;
 };
 
+/**
+ * Kroger returns 400 for a filter value it will not parse. Keep letters,
+ * digits, and the few punctuation marks that show up in real brand names.
+ */
+export function sanitizeKrogerParam(value: string | undefined, maxLength: number): string | null {
+  if (!value) {
+    return null;
+  }
+  const cleaned = value
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}\s'&./+-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 /** One unbranded query, then each configured brand, per term. */
 export function krogerQueries(): KrogerQuery[] {
   const queries: KrogerQuery[] = [];

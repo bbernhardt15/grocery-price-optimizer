@@ -8,12 +8,24 @@ import { IngestBudget } from "./models";
 
 export type RetryClass = "rate" | "server" | "fatal";
 
+export function httpStatusOf(error: unknown): number | null {
+  if (typeof error === "object" && error && "status" in error) {
+    const status = Number((error as { status?: number }).status);
+    if (Number.isFinite(status)) {
+      return status;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/\((\d{3})\)/);
+  return match ? Number(match[1]) : null;
+}
+
 export function retryClass(error: unknown): RetryClass {
-  const status = typeof error === "object" && error && "status" in error ? Number((error as { status?: number }).status) : NaN;
+  const status = httpStatusOf(error);
   if (status === 429) {
     return "rate";
   }
-  if (Number.isFinite(status) && status >= 500 && status <= 599) {
+  if (status !== null && status >= 500 && status <= 599) {
     return "server";
   }
   const message = error instanceof Error ? error.message : String(error);
@@ -24,6 +36,92 @@ export function retryClass(error: unknown): RetryClass {
     return "server";
   }
   return "fatal";
+}
+
+export type IngestErrorDetail = {
+  provider: string;
+  status: number | null;
+  message: string;
+  params: Record<string, string | number | boolean | null>;
+  /** Kroger's response body on a 4xx/5xx, trimmed and with credentials removed. */
+  body?: string;
+  at: string;
+};
+
+const SECRET_PARAM = /secret|token|authorization|password|private.?key|consumer/i;
+
+/** Safe to store and show on the admin status route. Drops anything that looks like a credential. */
+export function ingestErrorDetail(
+  provider: string,
+  error: unknown,
+  params: Record<string, string | number | boolean | null | undefined>,
+  now: Date
+): IngestErrorDetail {
+  const clean: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || SECRET_PARAM.test(key)) {
+      continue;
+    }
+    clean[key] = value;
+  }
+  const body = responseBodyOf(error);
+  return {
+    provider,
+    status: httpStatusOf(error),
+    message: error instanceof Error ? error.message : String(error),
+    params: clean,
+    ...(body ? { body } : {}),
+    at: now.toISOString(),
+  };
+}
+
+function responseBodyOf(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("body" in error)) {
+    return undefined;
+  }
+  const raw = (error as { body?: unknown }).body;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return undefined;
+  }
+  return raw
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/(client_secret|access_token|refresh_token|private_key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 500);
+}
+
+/** Thrown by {@link chargeCall} when the daily ledger is already at the cap. No HTTP call was made. */
+export class CallBudgetExceeded extends Error {
+  constructor() {
+    super("Ingest daily budget reached");
+    this.name = "CallBudgetExceeded";
+  }
+}
+
+/**
+ * The only way an ingest request is allowed to start. Taxonomy, the first
+ * page, every nextPage, location lookup, and a retry all come through here:
+ * the ledger is consumed, `count` runs once, then the HTTP call starts.
+ */
+export async function chargeCall<T>(gate: RateGate, run: () => Promise<T>, count: () => void): Promise<T> {
+  const slot = await gate.take();
+  if (slot === "budget") {
+    throw new CallBudgetExceeded();
+  }
+  count();
+  return run();
+}
+
+/**
+ * 429 cooldown. Fifteen minutes, doubling each strike, never longer than six
+ * hours and never past the next UTC midnight (when the daily ledger resets).
+ */
+export function walmartCooldownUntil(now: Date, strikes: number): string {
+  const baseMs = 15 * 60_000;
+  const capMs = 6 * 60 * 60_000;
+  const delay = Math.min(capMs, baseMs * 2 ** Math.max(0, strikes - 1));
+  const resume = now.getTime() + delay;
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return new Date(Math.min(resume, midnight)).toISOString();
 }
 
 /** Exponential backoff with optional jitter. `rand` is 0..1; tests pass 0. */
@@ -70,7 +168,7 @@ export class MemoryBudgetStore implements BudgetStore {
  * `now` and `sleep` are injectable so tests do not wait on a real clock.
  */
 export class RateGate {
-  private nextAt = 0;
+  private nextAt: number;
 
   constructor(
     private readonly options: {
@@ -80,8 +178,17 @@ export class RateGate {
       store: BudgetStore;
       now: () => number;
       sleep: (ms: number) => Promise<void>;
+      /** Epoch ms. Carried across ticks so a fresh gate still waits out the last call. */
+      initialNextAt?: number;
     }
-  ) {}
+  ) {
+    this.nextAt = options.initialNextAt && Number.isFinite(options.initialNextAt) ? options.initialNextAt : 0;
+  }
+
+  /** When the next call is allowed. Persist this on the checkpoint. */
+  nextAllowedAt(): number {
+    return this.nextAt;
+  }
 
   async take(): Promise<"ok" | "budget"> {
     const used = await this.options.store.used(this.options.provider, new Date(this.options.now()));
@@ -107,19 +214,35 @@ export class RateGate {
 }
 
 export class MongoBudgetStore implements BudgetStore {
+  /**
+   * Hard cap. The increment only matches a row still under the limit, so two
+   * replicas cannot both slip past it and then try to subtract. Creating the
+   * day's row is the one race; a duplicate-key loser retries the same guard.
+   */
   async tryConsume(provider: string, limit: number, now: Date): Promise<boolean> {
-    const day = utcDay(now);
-    const doc = await IngestBudget.findOneAndUpdate(
-      { provider, day },
-      { $inc: { calls: 1 } },
-      { upsert: true, new: true }
-    ).lean<{ calls?: number } | null>();
-    const calls = doc?.calls ?? 1;
-    if (calls > limit) {
-      await IngestBudget.updateOne({ provider, day }, { $inc: { calls: -1 } });
+    if (limit < 1) {
       return false;
     }
-    return true;
+    const day = utcDay(now);
+    const updated = await IngestBudget.findOneAndUpdate(
+      { provider, day, calls: { $lt: limit } },
+      { $inc: { calls: 1 } },
+      { new: true }
+    ).lean<{ calls?: number } | null>();
+    if (updated) {
+      return true;
+    }
+    try {
+      await IngestBudget.create({ provider, day, calls: 1 });
+      return true;
+    } catch {
+      const again = await IngestBudget.findOneAndUpdate(
+        { provider, day, calls: { $lt: limit } },
+        { $inc: { calls: 1 } },
+        { new: true }
+      ).lean<{ calls?: number } | null>();
+      return Boolean(again);
+    }
   }
 
   async used(provider: string, now: Date): Promise<number> {

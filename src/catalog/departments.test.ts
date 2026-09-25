@@ -50,6 +50,19 @@ describe("mapToDepartment", () => {
     assert.equal(departmentName("nope"), "Other");
   });
 
+  it("uses the deepest segment of a real retailer path, not the top-level Food bucket", () => {
+    assert.equal(
+      mapToDepartment(["Food/Breakfast Foods/Cereal"], "Great Value Corn Flakes").departmentId,
+      "breakfast"
+    );
+    assert.equal(mapToDepartment(["Food/Frozen Foods/Frozen Meals"], "Pepperoni Pizza").departmentId, "frozen");
+    assert.equal(mapToDepartment(["Food/Snacks, Cookies & Chips/Chips"], "Party Size Chips").departmentId, "snacks");
+    assert.equal(mapToDepartment(["Food/Bakery & Bread/Bread"], "Sandwich Bread").departmentId, "bakery");
+    assert.equal(mapToDepartment(["Home Page/Food/Deli/Sliced Meat"], "Oven Roasted Turkey").departmentId, "deli");
+    assert.equal(mapToDepartment(["Food"], "Cheerios").departmentId, "breakfast");
+    assert.equal(mapToDepartment(["Food/Pantry/Canned Goods"], "Diced Tomatoes").departmentId, "pantry");
+  });
+
   it("falls back to Other when nothing matches", () => {
     assert.equal(mapToDepartment(["Miscellaneous"], "Widget").departmentId, "other");
   });

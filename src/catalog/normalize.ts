@@ -48,16 +48,44 @@ export function isStoreBrand(brand: string | undefined): boolean {
 }
 
 /**
- * Digits-only UPC/GTIN key. Leading zeros are stripped so UPC-A and EAN-13
- * forms of the same code group together. Too-short codes are ignored.
+ * GS1 check digit. Weights alternate 3, 1 from the right of the body
+ * (the digits that sit to the left of the check digit).
+ */
+export function gtinCheckDigit(body: string): number {
+  let sum = 0;
+  for (let index = 0; index < body.length; index += 1) {
+    const digit = Number(body[body.length - 1 - index]);
+    sum += digit * (index % 2 === 0 ? 3 : 1);
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
+function hasGtinCheckDigit(digits: string): boolean {
+  if (digits.length < 2) {
+    return false;
+  }
+  return gtinCheckDigit(digits.slice(0, -1)) === Number(digits[digits.length - 1]);
+}
+
+/**
+ * Digits-only key shared by Walmart and Kroger.
+ *
+ * Walmart UPC-A is 12 digits and includes the check digit. EAN-13 and GTIN-14
+ * of that same code also include it. Kroger's product code is 13 digits and
+ * does not: it is the UPC body padded with leading zeros, and the last digit
+ * fails the GTIN check. A valid check digit is dropped, then leading zeros
+ * are stripped, so both forms land on the same key. Too-short codes are ignored.
  */
 export function upcKey(upc: string | undefined | null): string | null {
   if (!upc) {
     return null;
   }
-  const digits = upc.replace(/\D/g, "");
+  let digits = upc.replace(/\D/g, "");
   if (digits.length < 8 || digits.length > 14) {
     return null;
+  }
+  if ((digits.length === 8 || digits.length === 12 || digits.length === 13 || digits.length === 14) && hasGtinCheckDigit(digits)) {
+    digits = digits.slice(0, -1);
   }
   const stripped = digits.replace(/^0+/, "");
   return stripped.length > 0 ? stripped : null;

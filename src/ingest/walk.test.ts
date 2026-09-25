@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { nextKrogerStart } from "./krogerTerms";
+import { nextKrogerStart, sanitizeKrogerParam } from "./krogerTerms";
 import { groceryLeaves, recordsFromWalmartPage, walmartNextCursor, walmartPagePath } from "./walmartWalk";
 
 describe("walmart catalog walk", () => {
@@ -33,6 +33,28 @@ describe("walmart catalog walk", () => {
       ["milk"]
     );
     assert.equal(leaves[0]?.departmentId, "dairy-eggs");
+  });
+
+  it("keeps the walked ancestry when Walmart repeats the root path on every node", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "food",
+          name: "Food",
+          path: "Food",
+          children: [
+            {
+              id: "breakfast",
+              name: "Breakfast Foods",
+              path: "Food",
+              children: [{ id: "cereal", name: "Cereal", path: "Food", children: [] }],
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(leaves[0]?.path, "Food/Breakfast Foods/Cereal");
+    assert.equal(leaves[0]?.departmentId, "breakfast");
   });
 
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
@@ -77,9 +99,31 @@ describe("walmart catalog walk", () => {
     assert.equal(record?.productUrl, "https://walmart.com/ip/12345");
     assert.equal(record?.departmentId, "dairy-eggs");
   });
+
+  it("reads a numeric upc or a gtin so Walmart can share a Kroger master", () => {
+    const [fromNumber] = recordsFromWalmartPage({
+      items: [{ itemId: 1, name: "Whole Milk", salePrice: 3, upc: 123456789012 }],
+    });
+    assert.equal(fromNumber?.upc, "123456789012");
+    const [fromGtin] = recordsFromWalmartPage({
+      items: [{ itemId: 2, name: "Whole Milk", salePrice: 3, gtin: "00012345678905" }],
+    });
+    assert.equal(fromGtin?.upc, "00012345678905");
+    const [missing] = recordsFromWalmartPage({
+      items: [{ itemId: 3, name: "Whole Milk", salePrice: 3 }],
+    });
+    assert.equal(missing?.upc, undefined);
+  });
 });
 
 describe("kroger page advance", () => {
+  it("keeps ordinary terms and drops characters Kroger rejects", () => {
+    assert.equal(sanitizeKrogerParam("cheddar cheese", 80), "cheddar cheese");
+    assert.equal(sanitizeKrogerParam("Simple Truth", 40), "Simple Truth");
+    assert.equal(sanitizeKrogerParam("milk <script>", 80), "milk script");
+    assert.equal(sanitizeKrogerParam("   ", 80), null);
+  });
+
   it("advances filter.start while the page is full and under the page cap", () => {
     assert.equal(nextKrogerStart(0, 50, 50, 0, 3), 50);
     assert.equal(nextKrogerStart(50, 50, 12, 1, 3), null);
