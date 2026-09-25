@@ -26,8 +26,20 @@ export type CatalogProduct = {
   size?: string;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
+  /**
+   * Browse checkout pins the shopper's chosen offers so a cheaper lookalike
+   * in the seed catalog cannot replace the product they selected.
+   */
+  pinned?: boolean;
+  /** Substitute rows compete only when the shopper allows them. */
+  offerRole?: "exact" | "substitute";
+  substitutedFor?: string;
   /** live = retailer API this request; cached_live = Mongo row from a live API; weekly_ad = flyer/circular; seed = demo catalog. */
   priceSource?: PriceSource;
+  imageUrls?: string[];
+  categories?: string[];
+  onSale?: boolean;
+  availability?: "in_stock" | "out_of_stock" | "unknown";
 };
 
 export type PickedItem = {
@@ -50,6 +62,9 @@ export type PickedItem = {
   productId?: string;
   upc?: string;
   priceSource?: PriceSource;
+  /** Set when the winning offer is a labeled substitute, not the exact UPC. */
+  matchKind?: "exact" | "substitute";
+  substitutedFor?: string;
 };
 
 export type StoreGroup = {
@@ -89,25 +104,58 @@ export function productMatchesItem(
   );
 }
 
+function offerKey(product: CatalogProduct): string {
+  return [
+    product.storeName.trim().toLowerCase(),
+    product.upc ?? "",
+    product.name.trim().toLowerCase(),
+    product.price,
+    product.size ?? "",
+  ].join("|");
+}
+
+function dedupeCandidates(products: CatalogProduct[]): CatalogProduct[] {
+  const map = new Map<string, CatalogProduct>();
+  for (const product of products) {
+    const key = offerKey(product);
+    const existing = map.get(key);
+    if (!existing || (existing.offerRole === "substitute" && product.offerRole !== "substitute")) {
+      map.set(key, product);
+    }
+  }
+  return [...map.values()];
+}
+
 function productsMatchingQuery(
   catalog: CatalogProduct[],
   item: string
 ): CatalogProduct[] {
+  const substitutes = catalog.filter(
+    (product) => product.offerRole === "substitute" && product.sourceQuery === item
+  );
+  const pinned = catalog.filter(
+    (product) => product.pinned && product.sourceQuery === item && product.offerRole !== "substitute"
+  );
+  if (pinned.length > 0) {
+    return dedupeCandidates([...pinned, ...substitutes]);
+  }
+
+  let matches: CatalogProduct[] = [];
   for (const tokens of matchTokenSets(item)) {
-    const matches = catalog.filter((product) =>
-      nameContainsAllTokens(product.name, tokens)
-    );
-    if (matches.length > 0) {
-      return matches;
+    const found = catalog.filter((product) => nameContainsAllTokens(product.name, tokens));
+    if (found.length > 0) {
+      matches = found;
+      break;
     }
   }
 
-  const sourced = catalog.filter((product) => product.sourceQuery === item);
-  if (sourced.length > 0) {
-    return sourced;
+  if (matches.length === 0) {
+    matches = catalog.filter(
+      (product) => product.sourceQuery === item && product.offerRole !== "substitute"
+    );
   }
 
-  return [];
+  return dedupeCandidates([...matches, ...substitutes]);
 }
 
 function pickForLine(
@@ -120,7 +168,13 @@ function pickForLine(
     return null;
   }
 
-  matches.sort((a, b) => compareProductOffers(line.name, a, b));
+  matches.sort((a, b) =>
+    compareProductOffers(
+      line.name,
+      a.offerRole === "substitute" ? { ...a, name: line.name } : a,
+      b.offerRole === "substitute" ? { ...b, name: line.name } : b
+    )
+  );
   const best = matches[0];
   const unitPrice = unitPriceForProduct(best.price, best.name, best.size);
 
@@ -140,6 +194,12 @@ function pickForLine(
     ...(best.productId ? { productId: best.productId } : {}),
     ...(best.upc ? { upc: best.upc } : {}),
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
+    ...(best.offerRole === "substitute"
+      ? {
+          matchKind: "substitute" as const,
+          substitutedFor: best.substitutedFor || line.name,
+        }
+      : {}),
   };
 }
 

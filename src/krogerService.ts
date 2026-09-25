@@ -28,10 +28,16 @@ type KrogerPrice = {
   promo?: number;
 };
 
+type KrogerImageSize = { size?: string; url?: string };
+type KrogerImage = { perspective?: string; sizes?: KrogerImageSize[] };
+type KrogerInventory = { stockLevel?: string };
+
 type KrogerProductItem = {
+  itemId?: string;
   size?: string;
   price?: KrogerPrice;
   nationalPrice?: KrogerPrice;
+  inventory?: KrogerInventory;
 };
 
 export class KrogerPricingError extends Error {
@@ -49,8 +55,11 @@ export class KrogerPricingError extends Error {
 
 type KrogerProduct = {
   productId?: string;
+  upc?: string;
   brand?: string;
   description?: string;
+  categories?: unknown;
+  images?: KrogerImage[];
   items?: KrogerProductItem[];
 };
 
@@ -93,6 +102,51 @@ function pricedItem(product: KrogerProduct): KrogerProductItem | undefined {
   return (product.items ?? []).find((item) => pickKrogerPrice(item) !== null);
 }
 
+function categoryNames(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && entry.trim()) {
+      names.push(entry.trim());
+    } else if (entry && typeof entry === "object" && "name" in entry) {
+      const name = (entry as { name?: unknown }).name;
+      if (typeof name === "string" && name.trim()) {
+        names.push(name.trim());
+      }
+    }
+  }
+  return names;
+}
+
+function krogerImageUrls(images: KrogerImage[] | undefined): string[] {
+  const urls: string[] = [];
+  for (const image of images ?? []) {
+    const sizes = [...(image.sizes ?? [])].sort((a, b) => {
+      const rank = (size?: string) =>
+        size === "xlarge" ? 4 : size === "large" ? 3 : size === "medium" ? 2 : size === "small" ? 1 : 0;
+      return rank(b.size) - rank(a.size);
+    });
+    const url = sizes.find((size) => size.url?.trim())?.url?.trim();
+    if (url) {
+      urls.push(url);
+    }
+  }
+  return urls.slice(0, 4);
+}
+
+function krogerAvailability(item?: KrogerProductItem): "in_stock" | "out_of_stock" | "unknown" {
+  const level = item?.inventory?.stockLevel?.trim().toUpperCase();
+  if (!level) {
+    return "unknown";
+  }
+  if (level.includes("OUT")) {
+    return "out_of_stock";
+  }
+  return "in_stock";
+}
+
 function toCatalogProduct(
   product: KrogerProduct,
   locationId?: string
@@ -106,14 +160,25 @@ function toCatalogProduct(
 
   const unit = parseKrogerUnit(item?.size);
   const productId = product.productId?.trim();
+  const upc = product.upc?.trim() || productId;
   const size = item?.size?.trim();
+  const categories = categoryNames(product.categories);
+  const imageUrls = krogerImageUrls(product.images);
+  const regular = item?.price?.regular ?? item?.nationalPrice?.regular;
+  const promo = item?.price?.promo ?? item?.nationalPrice?.promo;
+  const onSale = typeof promo === "number" && promo > 0 && (typeof regular !== "number" || promo < regular);
   return {
     name,
     brand: product.brand?.trim() || "Kroger",
     storeName: "Kroger",
     locationId,
-    ...(productId ? { productId, upc: productId } : {}),
+    ...(productId ? { productId } : {}),
+    ...(upc ? { upc } : {}),
     ...(size ? { size } : {}),
+    ...(categories.length > 0 ? { categories } : {}),
+    ...(imageUrls.length > 0 ? { imageUrls } : {}),
+    ...(onSale ? { onSale: true } : {}),
+    availability: krogerAvailability(item),
     price,
     unit,
     normalizedUnit: unit,

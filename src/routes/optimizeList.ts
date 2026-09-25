@@ -7,6 +7,8 @@ import { resolveCatalogProducts } from "../priceCache";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import type { WalmartNearbyStore } from "../pricing/walmartProvider";
 import { enrichOptimizeResult } from "../storeHandoff";
+import { loadKnownProducts } from "../catalog/service";
+import { pinnedRowsForSelections, type BrowseSelection } from "../catalog/pinSelections";
 
 const router = Router();
 
@@ -14,6 +16,8 @@ type OptimizeListRequest = {
   groceryList: string[];
   stores: string[];
   zipCode?: string;
+  allowSubstitutes?: boolean;
+  selections?: BrowseSelection[];
 };
 
 type VerifiedProduct = {
@@ -43,6 +47,25 @@ function isVerifiedProduct(value: unknown): value is VerifiedProduct {
   }
   const record = value as Record<string, unknown>;
   return typeof record.name === "string" && record.name.trim().length > 0;
+}
+
+function readSelections(value: unknown): BrowseSelection[] | undefined {
+  if (!isVerifiedProductArray(value)) {
+    return undefined;
+  }
+  return value.map((item) => {
+    const record = item as VerifiedProduct & { catalogId?: unknown; upc?: unknown; brand?: unknown };
+    const brand = typeof record.brand === "string" ? record.brand.trim() : undefined;
+    const catalogId = typeof record.catalogId === "string" ? record.catalogId.trim() : undefined;
+    const upc = typeof record.upc === "string" ? record.upc.trim() : undefined;
+    return {
+      name: item.name.trim(),
+      quantity: quantityOf(item.quantity),
+      ...(brand ? { brand } : {}),
+      ...(catalogId ? { catalogId } : {}),
+      ...(upc ? { upc } : {}),
+    };
+  });
 }
 
 function isVerifiedProductArray(value: unknown): value is VerifiedProduct[] {
@@ -101,15 +124,22 @@ function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "inv
     return "invalid-zip";
   }
 
+  const selections = readSelections(rawList);
+  const allowSubstitutes = record.allowSubstitutes === true;
+  const extras = {
+    ...(allowSubstitutes ? { allowSubstitutes: true } : {}),
+    ...(selections?.some((item) => item.catalogId || item.upc) ? { selections } : {}),
+  };
+
   if (record.stores === undefined) {
-    return { groceryList, stores: [], zipCode };
+    return { groceryList, stores: [], zipCode, ...extras };
   }
 
   if (!isStringArray(record.stores)) {
     return null;
   }
 
-  return { groceryList, stores: record.stores, zipCode };
+  return { groceryList, stores: record.stores, zipCode, ...extras };
 }
 
 function tripIncludesWalmart(stores: string[]): boolean {
@@ -175,6 +205,13 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       locationId,
       zipCode
     );
+    if (parsed.selections && parsed.selections.length > 0) {
+      const pool = await loadKnownProducts();
+      const pinned = pinnedRowsForSelections(pool.length ? parsed.selections : [], pool, {
+        allowSubstitutes: parsed.allowSubstitutes === true,
+      });
+      productsResult.products.push(...pinned);
+    }
     const walmartStore = await lookupWalmartStore(zipCode, stores);
     const groupedByStore = enrichOptimizeResult(
       optimizeGroceryList(groceryList, stores, productsResult.products),
