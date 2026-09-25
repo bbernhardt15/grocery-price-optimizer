@@ -685,6 +685,13 @@ button:disabled {
   text-decoration: underline;
 }
 
+.store-nearby {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
 .store-handoff {
   display: flex;
   flex-direction: column;

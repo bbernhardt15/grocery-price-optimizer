@@ -396,6 +396,26 @@ function renderHandoffButton(store) {
     `;
   }
 
+  if (action.type === "walmart_cart" && action.url) {
+    const fallback = action.fallbackUrl
+      ? `<a class="handoff-fallback" href="${escapeHtml(
+          action.fallbackUrl
+        )}" target="_blank" rel="noopener noreferrer">or Search at Walmart</a>`
+      : "";
+    return `
+      <footer class="store-handoff">
+        <a
+          class="handoff-btn"
+          href="${escapeHtml(action.url)}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >${escapeHtml(action.label)}</a>
+        ${fallback}
+        ${detail}
+      </footer>
+    `;
+  }
+
   if (action.type === "kroger_cart") {
     const fallback = action.fallbackUrl
       ? `<a class="handoff-fallback" href="${escapeHtml(
@@ -439,6 +459,18 @@ function renderHandoffButton(store) {
   `;
 }
 
+function renderNearbyStore(store) {
+  const nearby = store.nearbyStore;
+  if (!nearby || !nearby.name) {
+    return "";
+  }
+  const locality = [nearby.city, nearby.state].filter(Boolean).join(", ");
+  const tail = [locality, nearby.zip].filter(Boolean).join(" ");
+  const address = [nearby.streetAddress, tail].filter(Boolean).join(", ");
+  const line = address ? `${nearby.name} · ${address}` : nearby.name;
+  return `<p class="store-nearby">Nearest store: ${escapeHtml(line)}</p>`;
+}
+
 function renderStoreCard(store) {
   const itemCount = store.itemCount
     ?? store.handoff?.itemCount
@@ -462,6 +494,7 @@ function renderStoreCard(store) {
       <header>
         <div>
           <h2>${escapeHtml(store.storeName)}</h2>
+          ${renderNearbyStore(store)}
           ${
             store.pricing
               ? renderPricingBadge({ ...store, itemCount })

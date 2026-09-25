@@ -801,6 +801,9 @@ describe("POST /api/optimize-list", () => {
     const originalWalmart = walmartPricingProvider.searchProducts.bind(
       walmartPricingProvider
     );
+    const originalNearest = walmartPricingProvider.getNearestStore.bind(
+      walmartPricingProvider
+    );
     const originalTarget = targetPricingProvider.searchProducts.bind(
       targetPricingProvider
     );
@@ -828,11 +831,19 @@ describe("POST /api/optimize-list", () => {
           ]
         : [];
     };
+    walmartPricingProvider.getNearestStore = async () => ({
+      storeId: "2066",
+      name: "WM Supercenter",
+      streetAddress: "2727 DUNVALE RD",
+      city: "HOUSTON",
+      state: "TX",
+      zip: "77063",
+    });
     walmartPricingProvider.searchProducts = async (term: string) => {
       const catalog: Record<string, { name: string; price: number; id: string }> = {
-        "Oat Milk": { name: "Great Value Oat Milk", price: 3.2, id: "w-oat" },
-        "Sourdough Loaf": { name: "Marketside Sourdough Loaf", price: 1.15, id: "w-bread" },
-        "Pasture Eggs": { name: "Great Value Pasture Eggs", price: 3.4, id: "w-eggs" },
+        "Oat Milk": { name: "Great Value Oat Milk", price: 3.2, id: "1001" },
+        "Sourdough Loaf": { name: "Marketside Sourdough Loaf", price: 1.15, id: "554433" },
+        "Pasture Eggs": { name: "Great Value Pasture Eggs", price: 3.4, id: "1002" },
       };
       const hit = catalog[term];
       return hit
@@ -885,7 +896,8 @@ describe("POST /api/optimize-list", () => {
           storeName: string;
           items: Array<{ query: string; price: number; priceSource?: string }>;
           pricing?: { source: string; label: string };
-          handoff: { action: { url?: string } };
+          nearbyStore?: { name: string; storeId: string };
+          handoff: { action: { type?: string; label?: string; url?: string } };
         }>;
         pricingByStore: Array<{ storeName: string; source: string; label: string }>;
         pricingWarning?: string;
@@ -907,7 +919,13 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Walmart.items[0].query, "Sourdough Loaf");
       assert.equal(byStore.Walmart.items[0].price, 1.15);
       assert.equal(byStore.Walmart.pricing?.source, "live");
-      assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/ip\/w-bread/);
+      assert.equal(byStore.Walmart.nearbyStore?.name, "WM Supercenter");
+      assert.equal(byStore.Walmart.nearbyStore?.storeId, "2066");
+      assert.equal(byStore.Walmart.handoff.action.type, "walmart_cart");
+      assert.equal(byStore.Walmart.handoff.action.label, "Add 1 item to Walmart cart");
+      const walmartCart = new URL(byStore.Walmart.handoff.action.url ?? "");
+      assert.match(walmartCart.pathname, /\/c\/impact-1\/568844\/9383$/);
+      assert.match(walmartCart.searchParams.get("u") ?? "", /items=554433%7C1|items=554433\|1/);
 
       assert.equal(byStore.Target.items[0].query, "Pasture Eggs");
       assert.equal(byStore.Target.items[0].price, 1.45);
@@ -924,6 +942,7 @@ describe("POST /api/optimize-list", () => {
       krogerService.searchProducts = originalKrogerSearch;
       krogerService.getClosestStoreLocation = originalLookup;
       walmartPricingProvider.searchProducts = originalWalmart;
+      walmartPricingProvider.getNearestStore = originalNearest;
       targetPricingProvider.searchProducts = originalTarget;
       clearPricingEnv();
     }
