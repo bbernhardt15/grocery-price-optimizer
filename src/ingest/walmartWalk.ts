@@ -151,6 +151,24 @@ export function walmartNextCursor(payload: unknown): string | null {
   return next.trim();
 }
 
+/**
+ * Paginated items sometimes send `upc` as a number, or the code on `gtin`
+ * instead of `upc`. A missing code stays unset so the row is keyed
+ * `local:walmart:{itemId}` and does not merge with a Kroger UPC.
+ */
+export function readWalmartUpc(item: Record<string, unknown>): string {
+  for (const key of ["upc", "UPC", "gtin", "gtin14", "gtin13", "gtin12"]) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(Math.trunc(value));
+    }
+  }
+  return "";
+}
+
 function itemList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) {
     return payload;
@@ -181,7 +199,7 @@ export function recordsFromWalmartPage(payload: unknown, category?: WalmartCateg
       .filter(Boolean);
     const stock = typeof item.stock === "string" ? item.stock.toLowerCase() : "";
     const itemId = item.itemId != null ? String(item.itemId).trim() : "";
-    const upc = typeof item.upc === "string" ? item.upc.trim() : "";
+    const upc = readWalmartUpc(item);
     const productUrl = typeof item.productUrl === "string" ? item.productUrl.trim() : "";
     records.push({
       name,

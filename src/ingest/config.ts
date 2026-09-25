@@ -80,7 +80,8 @@ export function ingestConfig(): IngestConfig {
     walmartEnabled: boolEnv("WALMART_INGEST_ENABLED", true),
     krogerEnabled: boolEnv("KROGER_INGEST_ENABLED", true),
     walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 1500, 1, 100_000),
-    walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 2000, 0, 120_000),
+    // 5s: production 429'd on a ~2s burst well under the daily cap (2026-09-25).
+    walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 5000, 0, 120_000),
     krogerDailyBudget: intEnv("KROGER_INGEST_DAILY_BUDGET", 4000, 1, 100_000),
     krogerMinIntervalMs: intEnv("KROGER_INGEST_MIN_INTERVAL_MS", 500, 0, 120_000),
     krogerPageLimit: intEnv("KROGER_PAGE_LIMIT", 50, 1, 200),

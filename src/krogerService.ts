@@ -265,53 +265,84 @@ export class KrogerService {
 
   /**
    * GET /v1/locations?filter.zipCode.near={zip}&filter.limit=1
-   * Returns the locationId of the closest store to `zipCode`.
-   * Falls back to the seeded demo location when credentials are missing
-   * or the official API rejects the request, so local pricing still works.
+   * Throws when credentials are missing or the API rejects the ZIP.
+   * Shopper pricing catches that and uses the demo location. Ingest does not.
    */
-  async getClosestStoreLocation(zipCode: string): Promise<string> {
+  private async lookupClosestStoreLocation(zipCode: string): Promise<string> {
     const zip = normalizeZip(zipCode);
     const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
     const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
     if (!clientId || !clientSecret) {
-      return demoLocationId();
+      throw new KrogerPricingError(
+        "Kroger API credentials are missing. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the server.",
+        "missing_credentials"
+      );
     }
 
+    const token = await this.getAccessToken();
+    const query = new URLSearchParams({
+      "filter.zipCode.near": zip,
+      "filter.limit": "1",
+    });
+
+    const response = await fetch(`${LOCATIONS_ENDPOINT}?${query.toString()}`, {
+      method: "GET",
+      cache: "no-cache",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new KrogerPricingError(
+        `Kroger locations request failed (${response.status}) for ZIP ${zip}`,
+        "http",
+        response.status
+      );
+    }
+
+    const payload = (await response.json()) as LocationsResponse;
+    const locationId = payload.data?.[0]?.locationId?.trim();
+    if (!locationId) {
+      throw new Error(`No Kroger store found near ZIP ${zip}`);
+    }
+    return locationId;
+  }
+
+  /**
+   * Closest store for shopper pricing. Falls back to the seeded demo location
+   * when credentials are missing or the official API rejects the request, so
+   * local pricing still works.
+   */
+  async getClosestStoreLocation(zipCode: string): Promise<string> {
     try {
-      const token = await this.getAccessToken();
-      const query = new URLSearchParams({
-        "filter.zipCode.near": zip,
-        "filter.limit": "1",
-      });
-
-      const response = await fetch(`${LOCATIONS_ENDPOINT}?${query.toString()}`, {
-        method: "GET",
-        cache: "no-cache",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Kroger locations request failed (${response.status}) for ZIP ${zip}`
-        );
-      }
-
-      const payload = (await response.json()) as LocationsResponse;
-      const locationId = payload.data?.[0]?.locationId?.trim();
-      if (!locationId) {
-        throw new Error(`No Kroger store found near ZIP ${zip}`);
-      }
-
-      return locationId;
+      return await this.lookupClosestStoreLocation(zipCode);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (/Invalid ZIP code/.test(message)) {
+        throw error;
+      }
       console.warn(
         `Kroger Locations API unavailable (${message}); using demo store ${demoLocationId()}`
       );
       return demoLocationId();
+    }
+  }
+
+  /**
+   * Closest store for catalog ingest. Returns null when the lookup fails.
+   * Never substitutes the demo location id, which the Products API rejects.
+   */
+  async getClosestStoreLocationStrict(zipCode: string): Promise<string | null> {
+    try {
+      return await this.lookupClosestStoreLocation(zipCode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Invalid ZIP code/.test(message)) {
+        throw error;
+      }
+      return null;
     }
   }
 

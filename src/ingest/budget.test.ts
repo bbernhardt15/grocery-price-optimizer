@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay } from "./budget";
+import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
 
 describe("ingest throttle", () => {
   it("classifies 429 and 5xx as retryable and other failures as fatal", () => {
@@ -34,6 +34,15 @@ describe("ingest throttle", () => {
     assert.equal(await gate.take(), "ok");
     assert.equal(await gate.take(), "budget");
     assert.deepEqual(sleeps, [2000]);
+  });
+
+  it("cools a Walmart 429 down until the next slot, and not past UTC midnight", () => {
+    const afternoon = walmartCooldownUntil(new Date("2026-09-25T18:40:00.000Z"), 1);
+    assert.equal(afternoon, "2026-09-25T18:55:00.000Z");
+    const doubled = walmartCooldownUntil(new Date("2026-09-25T18:40:00.000Z"), 2);
+    assert.equal(doubled, "2026-09-25T19:10:00.000Z");
+    const late = walmartCooldownUntil(new Date("2026-09-25T23:50:00.000Z"), 3);
+    assert.equal(late, "2026-09-26T00:00:00.000Z");
   });
 
   it("resets the budget on the next UTC day", async () => {

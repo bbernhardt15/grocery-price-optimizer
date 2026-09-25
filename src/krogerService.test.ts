@@ -79,6 +79,21 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(locationId, "01400441");
   });
 
+  it("returns null from the strict lookup when the locations call fails", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ error: "bad zip" }, { status: 400 });
+    });
+    const service = new KrogerService();
+    assert.equal(await service.getClosestStoreLocationStrict("45202"), null);
+    assert.equal(await service.getClosestStoreLocation("45202"), "01400441");
+  });
+
   it("rejects an invalid ZIP before calling the API", async () => {
     const service = new KrogerService();
     await assert.rejects(

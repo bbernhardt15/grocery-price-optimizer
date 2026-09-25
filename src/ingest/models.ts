@@ -73,7 +73,7 @@ const checkpointSchema = new Schema(
     lastStartedAt: { type: Date },
     lastFinishedAt: { type: Date },
     lastError: { type: String },
-    recentErrors: { type: [String], default: [] },
+    recentErrors: { type: [Schema.Types.Mixed], default: [] },
     calls: { type: Number, default: 0 },
     upserted: { type: Number, default: 0 },
     cycles: { type: Number, default: 0 },

@@ -4,14 +4,18 @@ import { krogerApiConfigured } from "../pricing/krogerProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import {
   backoffDelayMs,
+  httpStatusOf,
+  ingestErrorDetail,
   MongoBudgetStore,
   RateGate,
   retryClass,
+  walmartCooldownUntil,
   type BudgetStore,
+  type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
 import { ingestConfig, type IngestConfig } from "./config";
-import { KROGER_TERMS_VERSION, krogerQueries, nextKrogerStart } from "./krogerTerms";
+import { KROGER_TERMS_VERSION, krogerQueries, nextKrogerStart, sanitizeKrogerParam } from "./krogerTerms";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import {
@@ -23,8 +27,9 @@ import {
 } from "./walmartWalk";
 
 const LOCK_ID = "catalog-ingest";
-const LOCK_MS = 90_000;
+const LOCK_MS = 180_000;
 const MAX_ATTEMPTS = 5;
+const KROGER_LOCATION_ERROR_LIMIT = 3;
 
 export type WalmartCheckpoint = {
   phase: "taxonomy" | "categories" | "done";
@@ -32,6 +37,9 @@ export type WalmartCheckpoint = {
   index: number;
   nextPage: string | null;
   attempts: number;
+  rateStrikes: number;
+  cooldownUntil?: string;
+  nextAllowedAt?: string;
   cycleStartedAt: string;
 };
 
@@ -49,6 +57,9 @@ export type KrogerCheckpoint = {
   pageIndex: number;
   attempts: number;
   pendingZips: string[];
+  clientErrorStreak: number;
+  clientErrorLocationId?: string;
+  nextAllowedAt?: string;
   cycleStartedAt: string;
 };
 
@@ -56,10 +67,18 @@ type CheckpointDoc = {
   provider: string;
   status?: string;
   checkpoint?: unknown;
-  recentErrors?: string[];
+  recentErrors?: unknown[];
   calls?: number;
   upserted?: number;
   cycles?: number;
+};
+
+type PersistExtra = {
+  error?: IngestErrorDetail;
+  lastError?: string;
+  clearError?: boolean;
+  finished?: boolean;
+  cycle?: boolean;
 };
 
 export type SliceResult = {
@@ -76,6 +95,7 @@ function emptyWalmart(now: Date): WalmartCheckpoint {
     index: 0,
     nextPage: null,
     attempts: 0,
+    rateStrikes: 0,
     cycleStartedAt: now.toISOString(),
   };
 }
@@ -93,6 +113,7 @@ function emptyKroger(now: Date): KrogerCheckpoint {
     pageIndex: 0,
     attempts: 0,
     pendingZips: [],
+    clientErrorStreak: 0,
     cycleStartedAt: now.toISOString(),
   };
 }
@@ -103,6 +124,7 @@ function asWalmart(value: unknown, now: Date): WalmartCheckpoint {
     ...emptyWalmart(now),
     ...record,
     categories: Array.isArray(record.categories) ? record.categories : [],
+    rateStrikes: typeof record.rateStrikes === "number" ? record.rateStrikes : 0,
   };
 }
 
@@ -114,6 +136,7 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     locations: Array.isArray(record.locations) ? record.locations : [],
     plannedZips: Array.isArray(record.plannedZips) ? record.plannedZips : [],
     pendingZips: Array.isArray(record.pendingZips) ? record.pendingZips.filter((zip) => /^\d{5}$/.test(zip)) : [],
+    clientErrorStreak: typeof record.clientErrorStreak === "number" ? record.clientErrorStreak : 0,
   };
 }
 
@@ -125,9 +148,20 @@ async function loadCheckpoint(provider: string): Promise<CheckpointDoc> {
 async function saveCheckpoint(
   provider: string,
   checkpoint: unknown,
-  patch: { status: string; lastError?: string; error?: string; calls?: number; upserted?: number; finished?: boolean; cycle?: boolean }
+  patch: {
+    status: string;
+    lastError?: string;
+    error?: IngestErrorDetail;
+    calls?: number;
+    upserted?: number;
+    finished?: boolean;
+    cycle?: boolean;
+  }
 ): Promise<void> {
+  const callDelta = patch.calls && patch.calls > 0 ? patch.calls : 0;
+  const upsertDelta = patch.upserted && patch.upserted > 0 ? patch.upserted : 0;
   const errors = patch.error ? [patch.error] : [];
+  const lastError = patch.error ? patch.error.message : patch.lastError;
   await IngestCheckpoint.findOneAndUpdate(
     { provider },
     {
@@ -135,12 +169,12 @@ async function saveCheckpoint(
         provider,
         checkpoint,
         status: patch.status,
-        ...(patch.lastError !== undefined ? { lastError: patch.lastError } : {}),
+        ...(lastError !== undefined ? { lastError } : {}),
         ...(patch.finished ? { lastFinishedAt: new Date() } : {}),
       },
       $inc: {
-        ...(patch.calls ? { calls: patch.calls } : {}),
-        ...(patch.upserted ? { upserted: patch.upserted } : {}),
+        ...(callDelta ? { calls: callDelta } : {}),
+        ...(upsertDelta ? { upserted: upsertDelta } : {}),
         ...(patch.cycle ? { cycles: 1 } : {}),
       },
       ...(errors.length > 0 ? { $push: { recentErrors: { $each: errors, $slice: -20 } } } : {}),
@@ -158,15 +192,24 @@ function refreshDue(cycleStartedAt: string, refreshHours: number, now: Date): bo
   return now.getTime() - started >= refreshHours * 3_600_000;
 }
 
-async function gateFor(
+function gateFor(
   provider: string,
   budget: number,
   minIntervalMs: number,
   store: BudgetStore,
   now: () => number,
-  sleep: (ms: number) => Promise<void>
-): Promise<RateGate> {
-  return new RateGate({ provider, dailyBudget: budget, minIntervalMs, store, now, sleep });
+  sleep: (ms: number) => Promise<void>,
+  initialNextAt?: number
+): RateGate {
+  return new RateGate({ provider, dailyBudget: budget, minIntervalMs, store, now, sleep, initialNextAt });
+}
+
+function epochMs(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function stepWalmart(options: {
@@ -181,34 +224,65 @@ export async function stepWalmart(options: {
   const nowFn = options.now ?? (() => new Date());
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const store = options.store ?? new MongoBudgetStore();
-  const gate = await gateFor("walmart", config.walmartDailyBudget, config.walmartMinIntervalMs, store, () => nowFn().getTime(), sleep);
   const doc = await loadCheckpoint("walmart");
   let cp = asWalmart(doc.checkpoint, nowFn());
+  const gate = gateFor(
+    "walmart",
+    config.walmartDailyBudget,
+    config.walmartMinIntervalMs,
+    store,
+    () => nowFn().getTime(),
+    sleep,
+    epochMs(cp.nextAllowedAt)
+  );
   let calls = 0;
   let upserted = 0;
   let paused: string | null = null;
+  let countedCalls = 0;
+  let countedUpserts = 0;
 
-  const persist = async (status: string, extra?: { error?: string; finished?: boolean; cycle?: boolean }) => {
+  const stampPace = () => {
+    const nextAt = gate.nextAllowedAt();
+    if (nextAt > 0) {
+      cp.nextAllowedAt = new Date(nextAt).toISOString();
+    }
+  };
+
+  const persist = async (status: string, extra?: PersistExtra) => {
+    const callDelta = calls - countedCalls;
+    const upsertDelta = upserted - countedUpserts;
+    countedCalls = calls;
+    countedUpserts = upserted;
     await saveCheckpoint("walmart", cp, {
       status,
-      calls,
-      upserted,
-      ...(extra?.error ? { error: extra.error, lastError: extra.error } : { lastError: "" }),
+      calls: callDelta,
+      upserted: upsertDelta,
+      ...(extra?.error ? { error: extra.error } : {}),
+      ...(extra?.clearError ? { lastError: "" } : {}),
+      ...(extra?.lastError !== undefined ? { lastError: extra.lastError } : {}),
       ...(extra?.finished ? { finished: true } : {}),
       ...(extra?.cycle ? { cycle: true } : {}),
     });
   };
 
   while (calls < options.maxCalls) {
+    const cooldownAt = epochMs(cp.cooldownUntil);
+    if (cooldownAt > nowFn().getTime()) {
+      paused = "cooldown";
+      await persist("paused");
+      break;
+    }
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
-      cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories };
+      cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories, nextAllowedAt: cp.nextAllowedAt };
     }
     if (cp.phase === "taxonomy" || (cp.phase === "categories" && cp.categories.length === 0 && cp.index === 0)) {
       const slot = await gate.take();
       if (slot === "budget") {
         paused = "budget";
+        await persist("paused", { lastError: "Walmart daily budget reached" });
         break;
       }
+      stampPace();
       calls += 1;
       try {
         const taxonomy = await options.client.taxonomy();
@@ -217,13 +291,15 @@ export async function stepWalmart(options: {
         cp.index = 0;
         cp.nextPage = null;
         cp.attempts = 0;
+        cp.rateStrikes = 0;
+        delete cp.cooldownUntil;
         if (cp.phase === "done") {
-          await persist("completed", { finished: true, cycle: true });
+          await persist("completed", { finished: true, cycle: true, clearError: true });
           break;
         }
-        await persist("running", { cycle: true });
+        await persist("running", { cycle: true, clearError: true });
       } catch (error) {
-        const outcome = await failWalmart(cp, error, sleep);
+        const outcome = await failWalmart(cp, error, sleep, nowFn(), { request: "taxonomy" });
         cp = outcome.checkpoint;
         paused = outcome.paused;
         await persist(outcome.status, { error: outcome.error });
@@ -245,8 +321,10 @@ export async function stepWalmart(options: {
     const slot = await gate.take();
     if (slot === "budget") {
       paused = "budget";
+      await persist("paused", { lastError: "Walmart daily budget reached" });
       break;
     }
+    stampPace();
     calls += 1;
     try {
       const payload = await options.client.page(path);
@@ -255,6 +333,8 @@ export async function stepWalmart(options: {
       upserted += saved.offers;
       const next = walmartNextCursor(payload);
       cp.attempts = 0;
+      cp.rateStrikes = 0;
+      delete cp.cooldownUntil;
       if (next && next !== cp.nextPage) {
         cp.nextPage = next;
       } else {
@@ -263,12 +343,16 @@ export async function stepWalmart(options: {
       }
       if (cp.index >= cp.categories.length) {
         cp.phase = "done";
-        await persist("completed", { finished: true });
+        await persist("completed", { finished: true, clearError: true });
         break;
       }
-      await persist("running");
+      await persist("running", { clearError: true });
     } catch (error) {
-      const outcome = await failWalmart(cp, error, sleep);
+      const outcome = await failWalmart(cp, error, sleep, nowFn(), {
+        request: "paginated/items",
+        categoryId: category?.id ?? null,
+        nextPage: cp.nextPage,
+      });
       cp = outcome.checkpoint;
       paused = outcome.paused;
       await persist(outcome.status, { error: outcome.error });
@@ -287,25 +371,33 @@ export async function stepWalmart(options: {
 async function failWalmart(
   cp: WalmartCheckpoint,
   error: unknown,
-  sleep: (ms: number) => Promise<void>
-): Promise<{ checkpoint: WalmartCheckpoint; paused: string | null; status: string; error: string; stop: boolean }> {
-  const message = error instanceof Error ? error.message : String(error);
+  sleep: (ms: number) => Promise<void>,
+  now: Date,
+  params: Record<string, string | number | boolean | null | undefined>
+): Promise<{ checkpoint: WalmartCheckpoint; paused: string | null; status: string; error: IngestErrorDetail; stop: boolean }> {
+  const detail = ingestErrorDetail("walmart", error, params, now);
   const kind = retryClass(error);
+  if (kind === "rate") {
+    cp.rateStrikes += 1;
+    cp.attempts = cp.rateStrikes;
+    cp.cooldownUntil = walmartCooldownUntil(now, cp.rateStrikes);
+    return { checkpoint: cp, paused: "rate", status: "paused", error: detail, stop: true };
+  }
   if (kind === "fatal") {
     cp.index += 1;
     cp.nextPage = null;
     cp.attempts = 0;
-    return { checkpoint: cp, paused: null, status: "running", error: message, stop: false };
+    return { checkpoint: cp, paused: null, status: "running", error: detail, stop: false };
   }
   cp.attempts += 1;
   if (cp.attempts >= MAX_ATTEMPTS) {
     cp.index += 1;
     cp.nextPage = null;
     cp.attempts = 0;
-    return { checkpoint: cp, paused: kind, status: "running", error: message, stop: false };
+    return { checkpoint: cp, paused: kind, status: "running", error: detail, stop: false };
   }
   await sleep(backoffDelayMs(cp.attempts));
-  return { checkpoint: cp, paused: kind, status: "paused", error: message, stop: true };
+  return { checkpoint: cp, paused: kind, status: "paused", error: detail, stop: true };
 }
 
 export async function noteShopperZip(zip: string | undefined): Promise<void> {
@@ -326,7 +418,7 @@ export async function noteShopperZip(zip: string | undefined): Promise<void> {
 }
 
 async function trackedZips(config: IngestConfig): Promise<string[]> {
-  const recent = await ShopperZip.find()
+  const recent = await ShopperZip.find({ hits: { $gt: 0 } })
     .sort({ lastSeenAt: -1 })
     .limit(config.shopperZipLimit)
     .lean<Array<{ zip: string }>>();
@@ -351,15 +443,18 @@ export async function stepKroger(options: {
   const nowFn = options.now ?? (() => new Date());
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const store = options.store ?? new MongoBudgetStore();
-  const productGate = await gateFor(
+  const doc = await loadCheckpoint("kroger");
+  let cp = asKroger(doc.checkpoint, nowFn());
+  const productGate = gateFor(
     "kroger",
     config.krogerDailyBudget,
     config.krogerMinIntervalMs,
     store,
     () => nowFn().getTime(),
-    sleep
+    sleep,
+    epochMs(cp.nextAllowedAt)
   );
-  const locationGate = await gateFor(
+  const locationGate = gateFor(
     "kroger-locations",
     config.locationDailyBudget,
     config.krogerMinIntervalMs,
@@ -367,8 +462,6 @@ export async function stepKroger(options: {
     () => nowFn().getTime(),
     sleep
   );
-  const doc = await loadCheckpoint("kroger");
-  let cp = asKroger(doc.checkpoint, nowFn());
   if (cp.termsVersion !== KROGER_TERMS_VERSION) {
     cp.termsVersion = KROGER_TERMS_VERSION;
     cp.queryIndex = 0;
@@ -379,13 +472,21 @@ export async function stepKroger(options: {
   let calls = 0;
   let upserted = 0;
   let paused: string | null = null;
+  let countedCalls = 0;
+  let countedUpserts = 0;
 
-  const persist = async (status: string, extra?: { error?: string; finished?: boolean; cycle?: boolean }) => {
+  const persist = async (status: string, extra?: PersistExtra) => {
+    const callDelta = calls - countedCalls;
+    const upsertDelta = upserted - countedUpserts;
+    countedCalls = calls;
+    countedUpserts = upserted;
     await saveCheckpoint("kroger", cp, {
       status,
-      calls,
-      upserted,
-      ...(extra?.error ? { error: extra.error, lastError: extra.error } : {}),
+      calls: callDelta,
+      upserted: upsertDelta,
+      ...(extra?.error ? { error: extra.error } : {}),
+      ...(extra?.clearError ? { lastError: "" } : {}),
+      ...(extra?.lastError !== undefined ? { lastError: extra.lastError } : {}),
       ...(extra?.finished ? { finished: true } : {}),
       ...(extra?.cycle ? { cycle: true } : {}),
     });
@@ -403,6 +504,7 @@ export async function stepKroger(options: {
         const slot = await locationGate.take();
         if (slot === "budget") {
           paused = "budget";
+          await persist("paused", { lastError: "Kroger location budget reached" });
           break;
         }
         calls += 1;
@@ -416,9 +518,9 @@ export async function stepKroger(options: {
             cp.pageIndex = 0;
             await ShopperZip.updateOne({ zip }, { $set: { locationId } });
           }
-          await persist("running");
+          await persist("running", { clearError: true });
         } catch (error) {
-          const outcome = await failKroger(cp, error, sleep);
+          const outcome = await failKroger(cp, error, sleep, nowFn(), { request: "locations", zip });
           cp = outcome.checkpoint;
           paused = outcome.paused;
           await persist(outcome.status, { error: outcome.error });
@@ -457,6 +559,7 @@ export async function stepKroger(options: {
       const slot = await locationGate.take();
       if (slot === "budget") {
         paused = "budget";
+        await persist("paused", { lastError: "Kroger location budget reached" });
         break;
       }
       calls += 1;
@@ -465,27 +568,22 @@ export async function stepKroger(options: {
         if (locationId && !cp.locations.some((location) => location.locationId === locationId)) {
           cp.locations.push({ zip, locationId });
         }
-        await ShopperZip.updateOne(
-          { zip },
-          { $set: { ...(locationId ? { locationId } : {}), lastSeenAt: nowFn() }, $setOnInsert: { hits: 0, zip } },
-          { upsert: true }
-        );
         cp.zipCursor += 1;
         cp.attempts = 0;
-        await persist("running");
+        await persist("running", { clearError: true });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const detail = ingestErrorDetail("kroger", error, { request: "locations", zip }, nowFn());
         const kind = retryClass(error);
         if (kind === "fatal" || cp.attempts + 1 >= MAX_ATTEMPTS) {
           cp.zipCursor += 1;
           cp.attempts = 0;
-          await persist("running", { error: message });
+          await persist("running", { error: detail });
           continue;
         }
         cp.attempts += 1;
         await sleep(backoffDelayMs(cp.attempts));
         paused = kind;
-        await persist("paused", { error: message });
+        await persist("paused", { error: detail });
         break;
       }
       continue;
@@ -513,19 +611,53 @@ export async function stepKroger(options: {
       continue;
     }
 
+    const term = sanitizeKrogerParam(query.term.term, 80);
+    const brand = query.brand ? sanitizeKrogerParam(query.brand, 40) : null;
+    if (!term || (query.brand && !brand)) {
+      const detail = ingestErrorDetail(
+        "kroger",
+        new Error("Kroger filter skipped (empty or invalid term or brand)"),
+        {
+          term: query.term.term,
+          brand: query.brand ?? null,
+          start: cp.start,
+          limit: config.krogerPageLimit,
+          locationId: location.locationId,
+          zip: location.zip,
+        },
+        nowFn()
+      );
+      skipKrogerQuery(cp);
+      await persist("running", { error: detail });
+      continue;
+    }
+
     const slot = await productGate.take();
     if (slot === "budget") {
       paused = "budget";
+      await persist("paused", { lastError: "Kroger daily budget reached" });
       break;
     }
+    const nextAt = productGate.nextAllowedAt();
+    if (nextAt > 0) {
+      cp.nextAllowedAt = new Date(nextAt).toISOString();
+    }
     calls += 1;
+    const requestParams = {
+      term,
+      brand,
+      start: cp.start,
+      limit: config.krogerPageLimit,
+      locationId: location.locationId,
+      zip: location.zip,
+    };
     try {
       const page = await options.client.page({
-        term: query.term.term,
+        term,
         locationId: location.locationId,
         start: cp.start,
         limit: config.krogerPageLimit,
-        brand: query.brand,
+        ...(brand ? { brand } : {}),
         departmentId: query.term.departmentId,
         subcategory: query.term.subcategory,
         zip: location.zip,
@@ -534,6 +666,7 @@ export async function stepKroger(options: {
       upserted += saved.offers;
       const next = nextKrogerStart(cp.start, config.krogerPageLimit, page.returned, cp.pageIndex, config.krogerMaxPagesPerTerm);
       cp.attempts = 0;
+      cp.clientErrorStreak = 0;
       if (next === null) {
         cp.queryIndex += 1;
         cp.start = 0;
@@ -542,9 +675,23 @@ export async function stepKroger(options: {
         cp.start = next;
         cp.pageIndex += 1;
       }
-      await persist("running");
+      await persist("running", { clearError: true });
     } catch (error) {
-      const outcome = await failKroger(cp, error, sleep);
+      const status = httpStatusOf(error);
+      if (status !== null && status >= 400 && status < 500 && status !== 429) {
+        const detail = ingestErrorDetail("kroger", error, requestParams, nowFn());
+        const skipped = noteKrogerClientError(cp, location.locationId);
+        if (skipped === "location" && cp.locationIndex >= cp.locations.length) {
+          cp.phase = "done";
+        }
+        detail.params.action = skipped === "location" ? "skipped-location" : "skipped-term";
+        await persist(cp.phase === "done" ? "completed" : "running", {
+          error: detail,
+          ...(cp.phase === "done" ? { finished: true } : {}),
+        });
+        continue;
+      }
+      const outcome = await failKroger(cp, error, sleep, nowFn(), requestParams);
       cp = outcome.checkpoint;
       paused = outcome.paused;
       await persist(outcome.status, { error: outcome.error });
@@ -557,23 +704,53 @@ export async function stepKroger(options: {
   return { provider: "kroger", calls, upserted, paused };
 }
 
-async function failKroger(
-  cp: KrogerCheckpoint,
-  error: unknown,
-  sleep: (ms: number) => Promise<void>
-): Promise<{ checkpoint: KrogerCheckpoint; paused: string | null; status: string; error: string; stop: boolean }> {
-  const message = error instanceof Error ? error.message : String(error);
-  const kind = retryClass(error);
-  if (kind === "fatal" || cp.attempts + 1 >= MAX_ATTEMPTS) {
-    cp.queryIndex += 1;
+function skipKrogerQuery(cp: KrogerCheckpoint): void {
+  cp.queryIndex += 1;
+  cp.start = 0;
+  cp.pageIndex = 0;
+  cp.attempts = 0;
+  if (cp.queryIndex < 0) {
+    cp.queryIndex = 0;
+  }
+}
+
+/** A 400 does not retry the same page. Three in a row on one location skip that store. */
+function noteKrogerClientError(cp: KrogerCheckpoint, locationId: string): "query" | "location" {
+  if (cp.clientErrorLocationId === locationId) {
+    cp.clientErrorStreak += 1;
+  } else {
+    cp.clientErrorLocationId = locationId;
+    cp.clientErrorStreak = 1;
+  }
+  if (cp.clientErrorStreak >= KROGER_LOCATION_ERROR_LIMIT) {
+    cp.locationIndex += 1;
+    cp.queryIndex = 0;
     cp.start = 0;
     cp.pageIndex = 0;
     cp.attempts = 0;
-    return { checkpoint: cp, paused: kind === "fatal" ? null : kind, status: "running", error: message, stop: false };
+    cp.clientErrorStreak = 0;
+    return "location";
+  }
+  skipKrogerQuery(cp);
+  return "query";
+}
+
+async function failKroger(
+  cp: KrogerCheckpoint,
+  error: unknown,
+  sleep: (ms: number) => Promise<void>,
+  now: Date,
+  params: Record<string, string | number | boolean | null | undefined>
+): Promise<{ checkpoint: KrogerCheckpoint; paused: string | null; status: string; error: IngestErrorDetail; stop: boolean }> {
+  const detail = ingestErrorDetail("kroger", error, params, now);
+  const kind = retryClass(error);
+  if (kind === "fatal" || cp.attempts + 1 >= MAX_ATTEMPTS) {
+    skipKrogerQuery(cp);
+    return { checkpoint: cp, paused: kind === "fatal" ? null : kind, status: "running", error: detail, stop: false };
   }
   cp.attempts += 1;
   await sleep(backoffDelayMs(cp.attempts));
-  return { checkpoint: cp, paused: kind, status: "paused", error: message, stop: true };
+  return { checkpoint: cp, paused: kind, status: "paused", error: detail, stop: true };
 }
 
 export async function runDemoIngest(now = new Date()): Promise<SliceResult> {
