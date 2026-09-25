@@ -42,6 +42,60 @@ Offers that share a UPC (leading zeros ignored) become one product. Package size
 
 Demo UPCs are synthetic (`009999…`) so they do not merge with a real retailer code. Live rows win over a demo row for the same store and UPC. Department and search responses are cached in memory and in Mongo (`CatalogCache`, TTL index). Override with `CATALOG_DEPT_TTL_MINUTES` (default 360) and `CATALOG_SEARCH_TTL_MINUTES` (default 60).
 
+When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target stay on the demo shelf. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
+
+## Catalog ingestion
+
+A background job fills `CatalogMaster` (one row per UPC) and `CatalogOffer` (one price per store and, for Kroger, per location). Restarts continue from the checkpoint. Upserts are idempotent. Items not seen for `CATALOG_STALE_DAYS` (14) are marked stale; after `CATALOG_DISCONTINUE_DAYS` (45) they are discontinued and drop off the shelf. Images stay on the master.
+
+### What each provider can actually fill
+
+Checked 2026-09-25.
+
+| Provider | Browse mechanism | Published limit | Job budget (defaults) |
+| --- | --- | --- | --- |
+| **Walmart Affiliate** | `GET /taxonomy`, then `GET /paginated/items?category=&count=25`. The next page is the response `nextPage` (URL or cursor). Stop when `nextPage` is empty or `nextPageExist` is false. Only grocery leaves are walked (electronics and similar paths are skipped). | The public Affiliate introduction and taxonomy pages do **not** publish a numeric daily quota. Marketplace rate-limit tables are a different API and are not used here. HTTP **429** is the throttle. Search documents `numItems` max 25, so each catalog page asks for 25. | **1,500 calls/day**, at least **2 seconds** apart. That leaves headroom for shopper search. Shopper calls are not charged against this ledger and are never refused by it. |
+| **Kroger Products** | No category browse. `GET /v1/products` with `filter.term`, optional `filter.brand`, `filter.locationId`, `filter.start`, and `filter.limit`. A full page advances `filter.start`. A short page ends the term. | **10,000 product calls/day**. **1,600 location calls/day**. `filter.limit` max **200** (documented on Locations and used by Kroger product examples). This job asks for **50**. | **4,000 product calls/day** (6,000 left for shoppers and on-demand refresh), **200 location calls/day**, at least **500 ms** apart. |
+| **Kroger prices** | Stored per `locationId`. The product master is written once. | — | Seed ZIPs `45103` (Brandon), `10001`, `60601`, `75201`, `90012`, `30303`, plus up to 12 ZIPs seen on real browse or trip requests. A new ZIP is priced on the next tick (inserted in front of the Kroger walk). A finished cycle starts again after `CATALOG_REFRESH_HOURS` (24). |
+| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf only. Flipp weekly ads stay on the trip plan. |
+
+429 and 5xx use exponential backoff (1s, 2s, 4s, … capped at 60s, with jitter) and retry the same page. After 5 failures the job skips that category or term and records the error. A fatal 4xx skips immediately. The checkpoint is not advanced on a retry.
+
+### Size and time
+
+At the default caps (40,000 products, 160,000 offers) the estimate is about **1.2 KB × products + 0.4 KB × offers**, roughly **110 MB** of documents, and often about the same again for indexes, so plan on **about 200 MB**. New UPCs and offers are refused at the cap; prices for keys already stored still refresh.
+
+Walmart: 1,500 calls × 25 items is at most ~37,500 rows per day, and the 2 second gap is about 50 minutes of call time, spread by the scheduler. A grocery taxonomy of ~1,000 leaves × a few pages is on the order of **one to three days** for a first fill at this budget. Kroger: 6 locations × ~70 terms × up to 8 pages is a few thousand calls, so **one full pass fits in the 4,000 call day**. The term list is `src/ingest/krogerTerms.ts` (`KROGER_TERMS_VERSION`). Bump the version when the list changes so a resume does not skip ahead.
+
+Without Walmart and Kroger keys, `CATALOG_INGEST_ENABLED=true` loads the demo catalog once (or run `npm run ingest:demo`).
+
+### Railway setup
+
+Recommended: a second service so the crawl is not tied to web deploys. One service also works.
+
+1. Use the same repo and the same `MONGO_URL` as the web service.
+2. **Web service** variables:
+   - `CATALOG_DB_FIRST=true` so browse and trip planning read Mongo.
+   - `CATALOG_INGEST_ENABLED=false` so the web process does not crawl.
+   - `ADMIN_TOKEN` set to a long random string.
+   - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
+   - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
+3. **New service** (empty start command override):
+   - Start command: `npm run ingest`
+   - `CATALOG_INGEST_ENABLED=true`
+   - Same `MONGO_URL` and the same Walmart and Kroger keys.
+   - Do not set `PORT` handling; the process does not serve HTTP. It loops until Railway sends SIGTERM, then the next boot resumes the checkpoint.
+4. Optional on that worker: `WALMART_INGEST_DAILY_BUDGET`, `KROGER_INGEST_DAILY_BUDGET`, `KROGER_LOCATION_DAILY_BUDGET`, `WALMART_INGEST_MIN_INTERVAL_MS`, `KROGER_INGEST_MIN_INTERVAL_MS`, `CATALOG_INGEST_INTERVAL_SECONDS` (20), `CATALOG_INGEST_BATCH_CALLS` (4), `CATALOG_SEED_ZIPS`, `CATALOG_MAX_PRODUCTS`, `CATALOG_MAX_OFFERS`, `CATALOG_STALE_DAYS`, `CATALOG_DISCONTINUE_DAYS`, `CATALOG_REFRESH_HOURS`, `WALMART_INGEST_ENABLED`, `KROGER_INGEST_ENABLED`.
+5. Single-service alternative: set `CATALOG_INGEST_ENABLED=true` on the web service only. `src/index.ts` starts an in-process timer. A Mongo lock stops a second replica from crawling at the same time. Checkpoints still resume after a restart.
+6. Progress: `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/status`  
+   The JSON has counts per store and department, checkpoint phase, last error, and remaining daily budget. The route returns 503 until `ADMIN_TOKEN` is set and 401 when the token is wrong.
+
+Local demo, no keys:
+
+```bash
+npm run ingest:demo
+```
+
 ## Phone and tablet apps (later)
 
 This PR does **not** add Xcode or Android Studio projects. The UI is a static SPA in `public/` (no frontend build), with a web manifest, icons, and a network-first service worker so it can be installed as a PWA.

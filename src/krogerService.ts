@@ -43,13 +43,17 @@ type KrogerProductItem = {
 export class KrogerPricingError extends Error {
   readonly code: "missing_credentials" | "http" | "network";
 
+  readonly status?: number;
+
   constructor(
     message: string,
-    code: "missing_credentials" | "http" | "network" = "http"
+    code: "missing_credentials" | "http" | "network" = "http",
+    status?: number
   ) {
     super(message);
     this.name = "KrogerPricingError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -313,13 +317,21 @@ export class KrogerService {
 
   private async fetchProductPayload(
     term: string,
-    locationId?: string
-  ): Promise<KrogerProduct[]> {
+    locationId?: string,
+    paging?: { start?: number; limit?: number; brand?: string }
+  ): Promise<{ products: KrogerProduct[]; status: number }> {
     const token = await this.getAccessToken();
+    const limit = Math.min(Math.max(paging?.limit ?? 25, 1), 200);
     const params = new URLSearchParams({
       "filter.term": term,
-      "filter.limit": "25",
+      "filter.limit": String(limit),
     });
+    if (paging?.start && paging.start > 0) {
+      params.set("filter.start", String(Math.floor(paging.start)));
+    }
+    if (paging?.brand?.trim()) {
+      params.set("filter.brand", paging.brand.trim());
+    }
     if (locationId?.trim()) {
       params.set("filter.locationId", locationId.trim());
     }
@@ -345,12 +357,13 @@ export class KrogerService {
     if (!response.ok) {
       throw new KrogerPricingError(
         `Kroger products request failed (${response.status})`,
-        "http"
+        "http",
+        response.status
       );
     }
 
     const payload = (await response.json()) as ProductsResponse;
-    return payload.data ?? [];
+    return { products: payload.data ?? [], status: response.status };
   }
 
   /**
@@ -370,7 +383,8 @@ export class KrogerService {
 
     try {
       const storeId = locationId?.trim() || undefined;
-      const raw = await this.fetchProductPayload(query, storeId);
+      const rawPage = await this.fetchProductPayload(query, storeId);
+      const raw = rawPage.products;
       const priced = raw
         .map((product) => toCatalogProduct(product, storeId))
         .filter((product): product is CatalogProduct => product !== null);
@@ -379,7 +393,7 @@ export class KrogerService {
         return priced;
       }
 
-      const national = await this.fetchProductPayload(query);
+      const national = (await this.fetchProductPayload(query)).products;
       return national
         .map((product) => toCatalogProduct(product, storeId))
         .filter((product): product is CatalogProduct => product !== null);
@@ -393,6 +407,36 @@ export class KrogerService {
         "network"
       );
     }
+  }
+
+  /**
+   * One Products page for catalog ingestion.
+   * `filter.limit` is capped at 200 (the maximum Kroger documents for
+   * Locations pagination and the figure used by their product examples).
+   * `returned` is the raw row count, including rows we cannot price, so
+   * the crawler can tell a short page from a full one.
+   */
+  async searchProductsPage(input: {
+    term: string;
+    locationId?: string;
+    start?: number;
+    limit?: number;
+    brand?: string;
+  }): Promise<{ products: CatalogProduct[]; returned: number }> {
+    const term = input.term.trim();
+    if (!term) {
+      return { products: [], returned: 0 };
+    }
+    const locationId = input.locationId?.trim() || undefined;
+    const page = await this.fetchProductPayload(term, locationId, {
+      start: input.start,
+      limit: input.limit,
+      brand: input.brand,
+    });
+    const products = page.products
+      .map((product) => toCatalogProduct(product, locationId))
+      .filter((product): product is CatalogProduct => product !== null);
+    return { products, returned: page.products.length };
   }
 }
 

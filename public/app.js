@@ -366,9 +366,11 @@ async function loadPage(reset) {
     const demo = catalogSource === "demo";
     coverageBannerEl.textContent = demo
       ? "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse."
-      : catalogSource === "mixed"
-        ? "Live samples are mixed with the demo catalog. Stores without a catalog API stay labeled Demo."
-        : "Live catalog sample. This is not a full store assortment.";
+      : catalogSource === "database"
+        ? "Prices from Grocery Gitter’s saved catalog. Aldi and Target stay on the demo shelf until a feed exists."
+        : catalogSource === "mixed"
+          ? "Live samples are mixed with the demo catalog. Stores without a catalog API stay labeled Demo."
+          : "Live catalog sample. This is not a full store assortment.";
     if (body.warnings?.length) {
       showCatalogError(body.warnings.join(" "));
     }

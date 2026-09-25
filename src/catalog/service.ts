@@ -18,6 +18,9 @@ import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { rawFromCatalogProduct } from "./providers/fromCatalogProduct";
 import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
+import { ingestConfig } from "../ingest/config";
+import { readStoredById, readStoredRecords } from "../ingest/readStore";
+import { upsertCatalogRecords } from "../ingest/upsert";
 
 const GAP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
 const memoryCache = new Map<string, { expiresAt: number; products: BrowseProduct[]; warnings: string[] }>();
@@ -47,7 +50,7 @@ export type BrowsePage = {
   coverage: StoreCoverage[];
   warnings: string[];
   cached: boolean;
-  catalogSource: "demo" | "mixed" | "live";
+  catalogSource: "demo" | "mixed" | "live" | "database";
 };
 
 function ttlMs(envName: string, fallbackMinutes: number): number {
@@ -323,7 +326,7 @@ async function writeCache(
 async function loadScope(
   scope: { departmentId?: string; query?: string },
   zipCode?: string
-): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean }> {
+): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
   const query = scope.query?.trim();
   const departmentId = scope.departmentId?.trim();
   const demo = demoRecordsFor({
@@ -331,9 +334,27 @@ async function loadScope(
     ...(query ? { query } : {}),
   });
 
+  if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
+    const stored = await readStoredRecords({
+      ...(departmentId ? { departmentId } : {}),
+      ...(query ? { query } : {}),
+      ...(zipCode ? { zipCode } : {}),
+    });
+    if (stored.records.length > 0) {
+      const stores = new Set(stored.storeNames.map((store) => store.toLowerCase()));
+      const supplement = demo.filter((record) => !stores.has(record.storeName.toLowerCase()));
+      return {
+        products: groupOffersByUpc([...supplement, ...stored.records]),
+        warnings: stored.warnings,
+        cached: true,
+        fromDatabase: true,
+      };
+    }
+  }
+
   const wantsLive = liveConfigured() && (Boolean(departmentId) || Boolean(query && query.length >= 2));
   if (!wantsLive) {
-    return { products: groupOffersByUpc(demo), warnings: [], cached: false };
+    return { products: groupOffersByUpc(demo), warnings: [], cached: false, fromDatabase: false };
   }
 
   const cacheKey = [
@@ -345,7 +366,7 @@ async function loadScope(
   ].join(":");
   const cached = await readCache(cacheKey);
   if (cached) {
-    return { products: cached.products, warnings: cached.warnings, cached: true };
+    return { products: cached.products, warnings: cached.warnings, cached: true, fromDatabase: false };
   }
 
   const warnings: string[] = [];
@@ -357,13 +378,29 @@ async function loadScope(
   const ttl = query ? ttlMs("CATALOG_SEARCH_TTL_MINUTES", 60) : ttlMs("CATALOG_DEPT_TTL_MINUTES", 360);
   await writeCache(cacheKey, products, warnings, ttl);
   await persistLive(live);
-  return { products, warnings, cached: false };
+  if (ingestConfig().dbFirst && live.length > 0) {
+    await upsertCatalogRecords(live).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Catalog write-back failed: ${message}`);
+    });
+  }
+  return { products, warnings, cached: false, fromDatabase: false };
 }
 
-export async function loadKnownProducts(): Promise<BrowseProduct[]> {
+export async function loadKnownProducts(hints?: { queries?: string[] }): Promise<BrowseProduct[]> {
   const byId = new Map<string, BrowseProduct>();
   for (const product of demoBrowseProducts()) {
     byId.set(product.id, product);
+  }
+  if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
+    const queries = (hints?.queries ?? []).map((query) => query.trim()).filter((query) => query.length > 1);
+    const scopes = queries.length > 0 ? queries.map((query) => ({ query })) : [{}];
+    for (const scope of scopes) {
+      const stored = await readStoredRecords(scope);
+      for (const product of groupOffersByUpc(stored.records)) {
+        byId.set(product.id, product);
+      }
+    }
   }
   for (const entry of memoryCache.values()) {
     if (entry.expiresAt <= Date.now()) {
@@ -433,10 +470,10 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     total: page.total,
     nextCursor: page.nextCursor,
     facets: facetsFor(facetPool),
-    coverage: catalogCoverage(coverageFlags()),
+    coverage: catalogCoverage({ ...coverageFlags(), stored: scope.fromDatabase }),
     warnings: scope.warnings,
     cached: scope.cached,
-    catalogSource: catalogSourceOf(scope.products),
+    catalogSource: scope.fromDatabase ? "database" : catalogSourceOf(scope.products),
   };
 }
 
@@ -445,12 +482,31 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
   if (q.length < 1) {
     return [];
   }
+  if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
+    const stored = await readStoredRecords({ query: q });
+    if (stored.records.length > 0) {
+      const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
+      return matches.slice(0, Math.min(Math.max(limit, 1), 12));
+    }
+  }
   const known = await loadKnownProducts();
   const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q });
   return matches.slice(0, Math.min(Math.max(limit, 1), 12));
 }
 
 export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { gaps: CatalogGap[] }) | null> {
+  if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
+    const records = await readStoredById(id);
+    if (records.length > 0) {
+      const departmentId = records[0]?.departmentId;
+      const mates = await readStoredRecords(departmentId ? { departmentId } : {});
+      const products = groupOffersByUpc(mates.records);
+      const product = products.find((entry) => entry.id === id) ?? groupOffersByUpc(records)[0];
+      if (product) {
+        return { ...product, gaps: gapsForProduct(product, products, GAP_STORES) };
+      }
+    }
+  }
   const known = await loadKnownProducts();
   const product = known.find((entry) => entry.id === id);
   if (!product) {

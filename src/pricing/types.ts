@@ -22,16 +22,19 @@ export type PricingContext = {
 export class StorePricingError extends Error {
   readonly storeName: string;
   readonly code: "missing_credentials" | "http" | "network" | "not_available";
+  readonly status?: number;
 
   constructor(
     storeName: string,
     message: string,
-    code: "missing_credentials" | "http" | "network" | "not_available" = "http"
+    code: "missing_credentials" | "http" | "network" | "not_available" = "http",
+    status?: number
   ) {
     super(message);
     this.name = "StorePricingError";
     this.storeName = storeName;
     this.code = code;
+    this.status = status;
   }
 }
 

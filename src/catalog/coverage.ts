@@ -6,6 +6,8 @@ export type CoverageFlags = {
   targetPartner: boolean;
   flipp: boolean;
   partnerStores: string[];
+  /** Browse is reading the ingested Mongo catalog, not a live page. */
+  stored?: boolean;
 };
 
 const DEFAULT_STORES = ["Aldi", "Kroger", "Target", "Walmart"] as const;
@@ -27,13 +29,21 @@ function coverage(
  */
 export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
   const rows: StoreCoverage[] = [
-    flags.walmart
+    flags.stored
+      ? coverage(
+          "Walmart",
+          "taxonomy_sample",
+          flags.walmart,
+          "Stored Walmart catalog",
+          "Browse reads Grocery Gitter's database. A background job walks the Affiliate grocery taxonomy and pages /paginated/items with nextPage until each category is exhausted or the daily budget runs out. Prices are walmart.com catalog prices, not in-aisle. Shelves are only as deep as that job has filled."
+        )
+      : flags.walmart
       ? coverage(
           "Walmart",
           "taxonomy_sample",
           true,
           "Walmart category sample",
-          "Browse uses the Affiliate taxonomy and the first page of paginated items for a grocery category when that category id is returned. If taxonomy or paginated items is empty, Grocery Gitter falls back to a few search terms. Prices are walmart.com catalog prices — the search API has no store-price filter. This is not the full Walmart assortment."
+          "Browse uses the Affiliate taxonomy and the first page of paginated items for a grocery category when that category id is returned. If taxonomy or paginated items is empty, Grocery Gitter falls back to a few search terms. Prices are walmart.com catalog prices — the search API has no store-price filter. This is not the full Walmart assortment. Turn on catalog ingestion to fill the database instead."
         )
       : coverage(
           "Walmart",
@@ -42,13 +52,21 @@ export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
           "Demo catalog",
           "Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY to browse a live Walmart category sample. Until then this shelf is the demo catalog."
         ),
-    flags.kroger
+    flags.stored
+      ? coverage(
+          "Kroger",
+          "search_seeded",
+          flags.kroger,
+          "Stored Kroger catalog",
+          "Kroger has no category browse. The ingestion job pages filter.term (and a few brands) per department and stores a price per location. Browse shows the shopper ZIP's store when that location has been refreshed, otherwise a seeded metro. This is not the entire Kroger assortment; it is whatever the term list and daily budget have saved."
+        )
+      : flags.kroger
       ? coverage(
           "Kroger",
           "search_seeded",
           true,
           "Kroger search sample",
-          "Kroger's Products API is search-by-term (and brand). It does not offer category browse. Each department is filled with a few seeded search terms, then classified with the categories field on those results plus the product name. This is a sample of the aisle, not the full Kroger catalog. Prices use the ZIP's nearest store when a location id is available."
+          "Kroger's Products API is search-by-term (and brand). It does not offer category browse. Each department is filled with a few seeded search terms, then classified with the categories field on those results plus the product name. This is a sample of the aisle, not the full Kroger catalog. Prices use the ZIP's nearest store when a location id is available. Turn on catalog ingestion to page a broader term list into Mongo."
         )
       : coverage(
           "Kroger",

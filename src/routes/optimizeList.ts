@@ -9,6 +9,7 @@ import type { WalmartNearbyStore } from "../pricing/walmartProvider";
 import { enrichOptimizeResult } from "../storeHandoff";
 import { loadKnownProducts } from "../catalog/service";
 import { pinnedRowsForSelections, type BrowseSelection } from "../catalog/pinSelections";
+import { noteShopperZip } from "../ingest/runner";
 
 const router = Router();
 
@@ -196,6 +197,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
 
     let locationId: string | undefined;
     if (zipCode) {
+      void noteShopperZip(zipCode).catch(() => undefined);
       locationId = await krogerService.getClosestStoreLocation(zipCode);
     }
 
@@ -206,7 +208,9 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       zipCode
     );
     if (parsed.selections && parsed.selections.length > 0) {
-      const pool = await loadKnownProducts();
+      const pool = await loadKnownProducts({
+        queries: [...groceryList, ...parsed.selections.map((item) => item.name)],
+      });
       const pinned = pinnedRowsForSelections(pool.length ? parsed.selections : [], pool, {
         allowSubstitutes: parsed.allowSubstitutes === true,
       });
