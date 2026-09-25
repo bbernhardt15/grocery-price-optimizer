@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { demoBrowseProducts } from "./catalog/demoCatalog";
+import { pinnedRowsForSelections } from "./catalog/pinSelections";
 import { optimizeGroceryList, type CatalogProduct } from "./optimizeGroceryList";
 
 const catalog: CatalogProduct[] = [
@@ -384,5 +386,55 @@ describe("optimizeGroceryList", () => {
     const result = optimizeGroceryList(["chicken"], ["Kroger"], chicken);
     assert.equal(result.stores[0]?.items[0]?.name, "Boneless Skinless Chicken Breast");
     assert.equal(result.stores[0]?.items[0]?.unitPriceText, "$6.49/lb");
+  });
+
+  it("prices the pinned browse product and can fill a missing store with a labeled substitute", () => {
+    const products = demoBrowseProducts();
+    const milk = products.find(
+      (product) =>
+        product.brand === "Dairy Pure" &&
+        product.sizeLabel === "1 gal" &&
+        product.name === "Whole Milk"
+    );
+    assert.ok(milk);
+    const selection = [{ name: milk.name, quantity: 1, catalogId: milk.id, brand: milk.brand }];
+    const exactOnly = optimizeGroceryList(
+      ["1x Whole Milk"],
+      [],
+      pinnedRowsForSelections(selection, products, { allowSubstitutes: false })
+    );
+    assert.equal(exactOnly.stores[0]?.storeName, "Walmart");
+    assert.equal(exactOnly.stores[0]?.items[0]?.matchKind, undefined);
+    assert.equal(exactOnly.stores[0]?.items[0]?.price, 3.18);
+
+    const withSubstitutes = optimizeGroceryList(
+      ["1x Whole Milk"],
+      [],
+      pinnedRowsForSelections(selection, products, { allowSubstitutes: true })
+    );
+    const picked = withSubstitutes.stores.flatMap((store) => store.items);
+    assert.equal(picked.length, 1);
+    assert.equal(picked[0]?.storeName, "Aldi");
+    assert.equal(picked[0]?.matchKind, "substitute");
+    assert.equal(picked[0]?.name, "Whole Milk");
+    assert.equal(picked[0]?.brand, "Friendly Farms");
+    assert.equal(picked[0]?.substitutedFor, "Whole Milk");
+
+    const pasta = products.find((product) => product.brand === "Barilla" && product.name === "Spaghetti Pasta");
+    assert.ok(pasta);
+    const pastaPlan = optimizeGroceryList(
+      ["1x Spaghetti Pasta"],
+      [],
+      pinnedRowsForSelections(
+        [{ name: pasta.name, quantity: 1, catalogId: pasta.id, brand: pasta.brand }],
+        products,
+        { allowSubstitutes: true }
+      )
+    );
+    const pastaPick = pastaPlan.stores.flatMap((store) => store.items)[0];
+    assert.equal(pastaPick?.storeName, "Aldi");
+    assert.equal(pastaPick?.brand, "Reggano");
+    assert.equal(pastaPick?.matchKind, "substitute");
+    assert.equal(pastaPick?.price, 0.95);
   });
 });

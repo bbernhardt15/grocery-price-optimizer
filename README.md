@@ -2,11 +2,79 @@
 
 The product is **Grocery Gitter**. This GitHub repository’s slug remains `grocery-price-optimizer` (npm package id: `grocery-list-optimizer`).
 
-Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store so you can actually buy the split cart. A vanilla HTML dashboard is served from `public/`.
+Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store so you can actually buy the split cart. The shopper UI in `public/` is a mobile-first browse app (department shelves, search, filters, a persistent list, then the same trip plan).
+
+## Browse the shelves
+
+Open `/` and shop by department instead of typing a list first.
+
+- **Departments** — Produce, Dairy & Eggs, Meat & Seafood, Bakery, Deli, Pantry, Frozen, Snacks, Beverages, Breakfast, Baby, Household, Personal Care, Pet
+- **Product cards** — image (or a generated placeholder), name, size, best price and store, sale badge, checkbox, quantity stepper
+- **Search** — typeahead over the cached catalog; submitting search refreshes from configured providers (cached)
+- **Sort / filter** — relevance, lowest price, lowest unit price, name, on sale first; department, store, brand, size class, price range, on sale, store brand
+- **My list** — saved in the browser, with a live estimated total and a savings meter versus buying everything at one store
+- **Substitutes** — when a UPC is missing at a store, the closest same-department item is labeled **Substitute**, never as an exact match. **Allow substitutes in the trip plan** lets that item compete on price
+- **Plan the trip** — `POST /api/optimize-list` with the selected `catalogId`s. Checkout handoffs are unchanged (Kroger, Walmart add-to-cart, Instacart when configured)
+- **ZIP** — remembered in `localStorage`
+
+`GET /api/search-catalog` (FatSecret autocomplete) still works. The browse API is separate:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/catalog/departments` | Shared department tree |
+| `GET /api/catalog/browse` | Filter, sort, paginate (`cursor` is the next offset) |
+| `GET /api/catalog/suggest?q=` | Typeahead. Does **not** call retailer APIs |
+| `GET /api/catalog/products/:id` | One grouped product plus per-store substitute gaps |
+| `GET /api/catalog/coverage` | Honest per-store catalog coverage |
+| `GET /api/catalog/placeholder.svg` | Local placeholder image |
+
+Offers that share a UPC (leading zeros ignored) become one product. Package size still uses `parsePackageSize` / `formatUnitPrice`.
+
+### Catalog coverage (do not treat every shelf as live)
+
+| Store | Browse source when keys are set | Without keys |
+| --- | --- | --- |
+| **Walmart** | Affiliate `GET /taxonomy` plus the first page of `GET /paginated/items?category=`. If that is empty, a few search terms via `GET /search`. Prices are **walmart.com catalog**, not the nearest store's shelf. Not the full assortment. Cached 6 hours. | Demo catalog, badged **Demo** |
+| **Kroger** | **No category browse.** Each department runs two seeded `filter.term` searches. Hits are classified with the `categories` field when Products returns one, otherwise the product name. A sample of the aisle, not the full Kroger catalog. Nearest store when a ZIP is set. | Demo catalog |
+| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. Flipp weekly ads are **not** used as a browse shelf. | Demo catalog. Weekly ads still apply only inside trip planning |
+| **Aldi** | No catalog API. | Demo catalog only. Flipp can still price circular items on the trip plan, labeled **Weekly ad** |
+| **Partner banners** | Search-by-term stub when that feed's env vars are set. Unconfigured banners are omitted. | Not shown as a live catalog |
+
+Demo UPCs are synthetic (`009999…`) so they do not merge with a real retailer code. Live rows win over a demo row for the same store and UPC. Department and search responses are cached in memory and in Mongo (`CatalogCache`, TTL index). Override with `CATALOG_DEPT_TTL_MINUTES` (default 360) and `CATALOG_SEARCH_TTL_MINUTES` (default 60).
+
+## Phone and tablet apps (later)
+
+This PR does **not** add Xcode or Android Studio projects. The UI is a static SPA in `public/` (no frontend build), with a web manifest, icons, and a network-first service worker so it can be installed as a PWA.
+
+Recommended store path when you are ready:
+
+1. Keep secrets on the Express server. The native shell should load the deployed site, not embed API keys.
+2. Add Capacitor in a follow-up (not this PR):
+
+```bash
+npm install @capacitor/core @capacitor/ios @capacitor/android
+npm install -D @capacitor/cli
+npx cap init "Grocery Gitter" com.grocerygitter.app --web-dir public
+```
+
+3. Point the WebView at production so Railway stays the API and the UI updates with the site:
+
+```ts
+// capacitor.config.ts
+const config = {
+  appId: "com.grocerygitter.app",
+  appName: "Grocery Gitter",
+  webDir: "public",
+  server: { url: "https://grocery-price-optimizer-production.up.railway.app", cleartext: false },
+};
+```
+
+4. Open Kroger, Walmart, Target, and Instacart handoffs in the system browser (`@capacitor/browser`) so OAuth cookies and add-to-cart links work. The Kroger redirect URI stays the Railway HTTPS callback.
+5. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
 
 ## What it includes
 
-- **Dashboard** — Grocery Gitter search-first UI: pick catalog items with quantities, add a ZIP, click **Find Cheapest Stores**, see a trip plan (`15 Kroger + 5 Walmart + 10 Target`), **Live prices** / **Partner feed** / **Weekly ad** / **Demo catalog** badges per store, and a primary Open / Add to cart / Coming soon action per store
+- **Browse app** — department shelves, search, filters, My list, savings meter, then **Plan the trip** (`15 Kroger + 5 Walmart + 10 Target`) with **Live prices** / **Partner feed** / **Weekly ad** / **Demo catalog** badges and the existing Open / Add to cart / Coming soon actions
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `size` (optional retailer package text), `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks one product per item (the product itself, then the fair package price) and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart add-to-cart deep link or search, Target search)

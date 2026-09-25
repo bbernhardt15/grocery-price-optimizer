@@ -37,6 +37,12 @@ type WalmartItem = {
   msrp?: number;
   size?: string;
   productUrl?: string;
+  thumbnailImage?: string;
+  mediumImage?: string;
+  largeImage?: string;
+  categoryPath?: string;
+  categoryNode?: string;
+  stock?: string;
 };
 
 type WalmartSearchResponse = {
@@ -82,6 +88,22 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
   const productId = item.itemId != null ? String(item.itemId).trim() : "";
   const upc = item.upc?.trim();
   const size = item.size?.trim();
+  const imageUrls = [item.largeImage, item.mediumImage, item.thumbnailImage]
+    .map((url) => url?.trim())
+    .filter((url): url is string => Boolean(url));
+  const categories = [item.categoryPath, item.categoryNode]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const onSale =
+    typeof item.msrp === "number" &&
+    item.msrp > price &&
+    typeof item.salePrice === "number";
+  const stock = item.stock?.trim().toLowerCase();
+  const availability = !stock
+    ? undefined
+    : stock.includes("not") || stock.includes("out")
+      ? ("out_of_stock" as const)
+      : ("in_stock" as const);
   return {
     name,
     brand: (item.brandName || item.brand || "Walmart").trim() || "Walmart",
@@ -89,6 +111,10 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
     ...(productId ? { productId } : {}),
     ...(upc ? { upc } : {}),
     ...(size ? { size } : {}),
+    ...(imageUrls.length > 0 ? { imageUrls: [...new Set(imageUrls)].slice(0, 4) } : {}),
+    ...(categories.length > 0 ? { categories } : {}),
+    ...(onSale ? { onSale: true } : {}),
+    ...(availability ? { availability } : {}),
     price,
     unit,
     normalizedUnit: unit,
@@ -254,6 +280,20 @@ export class WalmartPricingProvider implements StorePricingProvider {
       store: store ?? null,
     });
     return store;
+  }
+
+  /**
+   * Signed GET against the Affiliate product host. Path must start with `/`
+   * and already include the query string (`/taxonomy`, `/paginated/items?…`).
+   */
+  async getJson(pathAndQuery: string): Promise<unknown> {
+    const credentials = this.credentialsOrThrow();
+    const response = await this.affiliateGet(pathAndQuery, credentials);
+    const payload = (await response.json().catch(() => ({}))) as WalmartSearchResponse;
+    if (!response.ok) {
+      throw new StorePricingError("Walmart", errorMessage(payload, response.status), "http");
+    }
+    return payload;
   }
 
   async searchProducts(

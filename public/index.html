@@ -1,131 +1,181 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta http-equiv="Cache-Control" content="no-store" />
-    <meta
-      name="description"
-      content="Grocery Gitter — search products, then price the trip across stores."
-    />
-    <title>Grocery Gitter — Product search</title>
-    <link rel="stylesheet" href="/styles.css?v=instacart-walmart" />
+    <meta name="theme-color" content="#0e7a45" />
+    <meta name="description" content="Grocery Gitter — browse groceries by department, compare prices, and split the trip across stores." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Gitter" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>Grocery Gitter</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/styles.css?v=browse-1" />
   </head>
   <body>
+    <a class="skip" href="#catalog">Skip to products</a>
     <div class="shell">
-      <aside class="panel" aria-label="Trip controls">
-        <header class="brand">
-          <p class="brand-kicker">Grocery Gitter</p>
-          <h1>Search products, then price the trip</h1>
-        </header>
-
-        <form id="optimize-form" class="controls" autocomplete="off">
-          <div class="field">
-            <label for="product-search">Product search</label>
-            <div class="product-search" id="product-search-wrap">
-              <svg class="product-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
-                <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-              <input
-                id="product-search"
-                name="productSearch"
-                type="text"
-                inputmode="search"
-                placeholder="Type milk, Cheerios, a brand…"
-                maxlength="120"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                spellcheck="false"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-expanded="false"
-                aria-controls="product-suggestions"
-                aria-haspopup="listbox"
-              />
-              <ul
-                id="product-suggestions"
-                class="product-search-menu"
-                role="listbox"
-                hidden
-              ></ul>
-            </div>
-            <p id="product-search-status" class="hint">
-              Matches appear in a list under this field as you type.
-            </p>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <div>
+            <p class="brand-kicker">Grocery Gitter</p>
+            <p class="brand-title">Browse the aisle</p>
           </div>
+        </div>
 
-          <div class="field">
-            <label for="zip-code">ZIP code</label>
-            <input
-              id="zip-code"
-              name="zipCode"
-              type="text"
-              inputmode="numeric"
-              autocomplete="off"
-              maxlength="10"
-              placeholder="e.g. 45202"
-              spellcheck="false"
-            />
-          </div>
-
-          <div class="field field-list">
-            <label>Shopping list</label>
-            <ul id="shopping-list" class="shopping-list"></ul>
-            <p id="cart-empty" class="hint">
-              Pick a catalog match to add it here with its own quantity.
-            </p>
-          </div>
-
-          <div class="actions">
-            <button id="find-btn" type="submit">Find Cheapest Stores</button>
-            <button id="sample-btn" class="ghost" type="button">Load sample list</button>
-          </div>
-          <p id="form-error" class="form-error" role="alert" hidden></p>
+        <form id="search-form" class="search" role="search" autocomplete="off">
+          <label class="sr-only" for="search">Search products</label>
+          <input
+            id="search"
+            type="search"
+            name="q"
+            placeholder="Search milk, bread, a brand…"
+            maxlength="80"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="suggestions"
+            aria-haspopup="listbox"
+            enterkeyhint="search"
+          />
+          <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
         </form>
-      </aside>
 
-      <main class="workspace">
-        <p id="loading" class="status status-busy" hidden>
-          Finding your nearest store and checking prices…
-        </p>
-        <p id="api-error" class="status status-error" role="alert" hidden></p>
+        <div class="top-actions">
+          <label class="zip">
+            <span>ZIP</span>
+            <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" aria-describedby="zip-hint" />
+          </label>
+          <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
+            <span aria-hidden="true" id="theme-glyph">◐</span>
+          </button>
+          <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
+            My list
+            <span id="list-count" class="count-pill">0</span>
+          </button>
+        </div>
+      </header>
+      <p id="zip-hint" class="sr-only">Five-digit ZIP, saved on this device. Used for store prices and the trip plan.</p>
 
-        <section id="empty-state" class="empty-state">
-          <p class="empty-title">No trip yet</p>
-          <p>
-            Results appear here as a trip plan — how many items go to each store,
-            then an Open / Add to Kroger cart / Add to Walmart cart / Coming soon action so you can buy the
-            split trip. Add to Walmart cart opens walmart.com with that store's items already in the cart when every Walmart line has an item id. Add to Kroger cart appears after you register a shopper
-            redirect URI; Grocery Gitter only reports items added when Kroger
-            returns HTTP 2xx. Each store card shows whether prices are <strong>live</strong>,
-            from a <strong>partner feed</strong>, from a <strong>weekly ad</strong>
-            (circular near your ZIP — not a full shelf catalog), or from the
-            <strong>demo catalog</strong>. When an Instacart Developer Platform
-            key is set on the server, cards without a native cart also offer
-            Shop on Instacart, and the trip total offers a way to shop the whole
-            list there.
-          </p>
-        </section>
-
-        <section id="results" class="results" hidden>
-          <article class="banner" aria-live="polite">
-            <div>
-              <p class="banner-label">Grand total</p>
-              <p id="summary-meta" class="banner-meta"></p>
-              <div id="instacart-whole-list" class="instacart-whole-list" hidden></div>
+      <div class="body">
+        <aside class="rail" aria-label="Departments and filters">
+          <nav id="dept-nav" class="dept-nav" aria-label="Departments"></nav>
+          <form id="filters" class="filters">
+            <div class="filters-head">
+              <h2>Filters</h2>
+              <button type="button" class="text-btn" id="filters-close">Close</button>
             </div>
-            <p id="grand-total" class="banner-amount">$0.00</p>
-          </article>
+            <label>Store
+              <select id="filter-store" name="store">
+                <option value="">All stores</option>
+              </select>
+            </label>
+            <label>Brand
+              <select id="filter-brand" name="brand">
+                <option value="">All brands</option>
+              </select>
+            </label>
+            <label>Subcategory
+              <select id="filter-sub" name="subcategory">
+                <option value="">All</option>
+              </select>
+            </label>
+            <label>Package size
+              <select id="filter-size" name="size">
+                <option value="any">Any size</option>
+                <option value="small">Small</option>
+                <option value="standard">Standard</option>
+                <option value="bulk">Family / bulk</option>
+              </select>
+            </label>
+            <div class="price-row">
+              <label>Min $
+                <input id="filter-min" inputmode="decimal" placeholder="0" />
+              </label>
+              <label>Max $
+                <input id="filter-max" inputmode="decimal" placeholder="20" />
+              </label>
+            </div>
+            <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
+            <label class="check-row"><input id="filter-store-brand" type="checkbox" /> Store brands</label>
+            <div class="filter-actions">
+              <button type="submit" class="primary">Apply</button>
+              <button type="button" class="ghost" id="filters-clear">Clear</button>
+            </div>
+          </form>
+        </aside>
 
-          <div id="store-grid" class="store-grid"></div>
-          <aside id="pricing-legend" class="pricing-legend" hidden></aside>
-          <aside id="unavailable" class="unavailable" hidden></aside>
-        </section>
-      </main>
+        <main id="catalog" class="catalog" tabindex="-1">
+          <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
+          <div class="toolbar">
+            <p id="result-count" class="result-count" aria-live="polite">Loading shelves…</p>
+            <div class="toolbar-actions">
+              <label class="sort">
+                <span class="sr-only">Sort</span>
+                <select id="sort" aria-label="Sort products">
+                  <option value="relevance">Relevance</option>
+                  <option value="price" selected>Lowest price</option>
+                  <option value="unitPrice">Lowest unit price</option>
+                  <option value="name">Name</option>
+                  <option value="onSale">On sale first</option>
+                </select>
+              </label>
+              <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">Filters</button>
+              <button id="coverage-open" type="button" class="text-btn">Coverage</button>
+            </div>
+          </div>
+          <p id="coverage-banner" class="coverage-banner"></p>
+          <p id="catalog-error" class="status" role="alert" hidden></p>
+          <div id="grid" class="grid" aria-live="polite"></div>
+          <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+          <section id="trip" class="trip" hidden aria-label="Trip plan"></section>
+        </main>
+
+        <aside id="list-panel" class="list-panel" aria-label="My list">
+          <div class="list-head">
+            <h2>My list</h2>
+            <button type="button" class="text-btn" id="list-close">Close</button>
+          </div>
+          <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device.</p>
+          <ul id="list-items" class="list-items"></ul>
+          <div class="savings" id="savings">
+            <div class="savings-copy">
+              <p class="savings-label">Estimated total</p>
+              <p id="estimate-total" class="savings-total">$0.00</p>
+              <p id="estimate-note" class="muted">Add items to see savings versus one store.</p>
+            </div>
+            <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Savings compared with buying everything at one store">
+              <span id="meter-fill" class="meter-fill"></span>
+            </div>
+            <p id="meter-caption" class="meter-caption">Savings meter</p>
+          </div>
+          <label class="check-row sub-toggle">
+            <input id="allow-subs" type="checkbox" />
+            Allow substitutes in the trip plan
+          </label>
+          <p class="muted sub-note">A substitute is a different product: same department, similar name and size. It is never shown as an exact match.</p>
+          <button id="plan-btn" type="button" class="primary plan-btn" disabled>Plan the trip</button>
+          <button id="sample-btn" type="button" class="ghost">Try a sample list</button>
+          <p id="plan-error" class="status" role="alert" hidden></p>
+        </aside>
+      </div>
+
+      <div class="list-bar" id="list-bar">
+        <button type="button" id="list-bar-btn" class="list-bar-btn">
+          <span id="bar-count">My list</span>
+          <span id="bar-total">$0.00</span>
+        </button>
+        <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
+      </div>
     </div>
-    <script src="/app.js?v=instacart-walmart"></script>
+
+    <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
+    <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js?v=browse-1"></script>
   </body>
 </html>
