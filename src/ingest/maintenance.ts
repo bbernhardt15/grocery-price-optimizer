@@ -1,3 +1,4 @@
+import { mapToDepartment } from "../catalog/departments";
 import { CatalogMaster, CatalogOffer, IngestCheckpoint } from "./models";
 
 /**
@@ -43,4 +44,37 @@ export async function dropShadowLocalKeys(): Promise<{ masters: number; offers: 
     masters += masterResult.deletedCount ?? 0;
   }
   return { masters, offers };
+}
+
+/**
+ * Recompute departmentId from each master's stored category path and name.
+ * Does not delete rows. A path that still maps to Other is left unchanged.
+ */
+export async function recategorizeCatalog(): Promise<{ examined: number; updated: number }> {
+  const rows = await CatalogMaster.find()
+    .select("key name categoryPaths departmentId subcategory")
+    .lean<Array<{ key: string; name: string; categoryPaths?: string[]; departmentId?: string; subcategory?: string }>>();
+  let updated = 0;
+  for (const row of rows) {
+    const mapped = mapToDepartment(row.categoryPaths, row.name);
+    if (mapped.departmentId === "other") {
+      continue;
+    }
+    const nextSubcategory = mapped.subcategory ?? "";
+    const currentSubcategory = row.subcategory ?? "";
+    if (mapped.departmentId === row.departmentId && nextSubcategory === currentSubcategory) {
+      continue;
+    }
+    await CatalogMaster.updateOne(
+      { key: row.key },
+      {
+        $set: {
+          departmentId: mapped.departmentId,
+          ...(mapped.subcategory ? { subcategory: mapped.subcategory } : {}),
+        },
+      }
+    );
+    updated += 1;
+  }
+  return { examined: rows.length, updated };
 }

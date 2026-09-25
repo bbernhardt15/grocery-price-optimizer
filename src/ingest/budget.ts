@@ -43,6 +43,8 @@ export type IngestErrorDetail = {
   status: number | null;
   message: string;
   params: Record<string, string | number | boolean | null>;
+  /** Kroger's response body on a 4xx/5xx, trimmed and with credentials removed. */
+  body?: string;
   at: string;
 };
 
@@ -62,13 +64,51 @@ export function ingestErrorDetail(
     }
     clean[key] = value;
   }
+  const body = responseBodyOf(error);
   return {
     provider,
     status: httpStatusOf(error),
     message: error instanceof Error ? error.message : String(error),
     params: clean,
+    ...(body ? { body } : {}),
     at: now.toISOString(),
   };
+}
+
+function responseBodyOf(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("body" in error)) {
+    return undefined;
+  }
+  const raw = (error as { body?: unknown }).body;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return undefined;
+  }
+  return raw
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/(client_secret|access_token|refresh_token|private_key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 500);
+}
+
+/** Thrown by {@link chargeCall} when the daily ledger is already at the cap. No HTTP call was made. */
+export class CallBudgetExceeded extends Error {
+  constructor() {
+    super("Ingest daily budget reached");
+    this.name = "CallBudgetExceeded";
+  }
+}
+
+/**
+ * The only way an ingest request is allowed to start. Taxonomy, the first
+ * page, every nextPage, location lookup, and a retry all come through here:
+ * the ledger is consumed, `count` runs once, then the HTTP call starts.
+ */
+export async function chargeCall<T>(gate: RateGate, run: () => Promise<T>, count: () => void): Promise<T> {
+  const slot = await gate.take();
+  if (slot === "budget") {
+    throw new CallBudgetExceeded();
+  }
+  count();
+  return run();
 }
 
 /**

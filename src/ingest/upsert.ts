@@ -75,10 +75,17 @@ export async function upsertCatalogRecords(
     if (!key || !name || !storeName || !Number.isFinite(record.price) || record.price < 0) {
       continue;
     }
-    const mapped = mapToDepartment(record.categories, name, {
-      departmentId: record.departmentId,
-      subcategory: record.subcategory,
-    });
+    const fromPath = mapToDepartment(record.categories, name);
+    const explicitId = record.departmentId?.trim();
+    const mapped =
+      fromPath.departmentId !== "other"
+        ? fromPath
+        : explicitId && explicitId !== "other"
+          ? mapToDepartment(record.categories, name, {
+              departmentId: explicitId,
+              subcategory: record.subcategory,
+            })
+          : fromPath;
     const existing = await CatalogMaster.findOne({ key }).lean<CatalogMasterLean | null>();
     if (!existing && productCount >= config.maxProducts) {
       skippedByCap += 1;

@@ -225,6 +225,31 @@ describe("KrogerService.searchProducts", () => {
     );
   });
 
+  it("attaches the response body when Products returns 400", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return new Response(JSON.stringify({ errors: [{ reason: "filter.start out of range" }] }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const service = new KrogerService();
+    await assert.rejects(
+      () => service.searchProductsPage({ term: "milk", locationId: "01400902", start: 250, limit: 50 }),
+      (error: unknown) => {
+        assert.ok(error instanceof KrogerPricingError);
+        assert.equal(error.status, 400);
+        assert.match(error.body ?? "", /filter\.start/);
+        return true;
+      }
+    );
+  });
+
   it("throws when the products request is rejected", async () => {
     process.env.KROGER_CLIENT_ID = "client-id";
     process.env.KROGER_CLIENT_SECRET = "client-secret";

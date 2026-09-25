@@ -45,15 +45,20 @@ export class KrogerPricingError extends Error {
 
   readonly status?: number;
 
+  /** Response body from a failed HTTP call, trimmed. No Authorization header. */
+  readonly body?: string;
+
   constructor(
     message: string,
     code: "missing_credentials" | "http" | "network" = "http",
-    status?: number
+    status?: number,
+    body?: string
   ) {
     super(message);
     this.name = "KrogerPricingError";
     this.code = code;
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -386,10 +391,12 @@ export class KrogerService {
     }
 
     if (!response.ok) {
+      const body = (await response.text()).replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 500);
       throw new KrogerPricingError(
         `Kroger products request failed (${response.status})`,
         "http",
-        response.status
+        response.status,
+        body
       );
     }
 

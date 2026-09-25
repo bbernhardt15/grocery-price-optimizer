@@ -35,6 +35,28 @@ describe("walmart catalog walk", () => {
     assert.equal(leaves[0]?.departmentId, "dairy-eggs");
   });
 
+  it("keeps the walked ancestry when Walmart repeats the root path on every node", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "food",
+          name: "Food",
+          path: "Food",
+          children: [
+            {
+              id: "breakfast",
+              name: "Breakfast Foods",
+              path: "Food",
+              children: [{ id: "cereal", name: "Cereal", path: "Food", children: [] }],
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(leaves[0]?.path, "Food/Breakfast Foods/Cereal");
+    assert.equal(leaves[0]?.departmentId, "breakfast");
+  });
+
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
     assert.equal(walmartPagePath("milk", null), "/paginated/items?category=milk&count=25");
     assert.equal(

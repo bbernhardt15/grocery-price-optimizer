@@ -71,11 +71,33 @@ export function flattenTaxonomy(value: unknown, parentPath = ""): Taxon[] {
     if (!id || !name) {
       continue;
     }
-    const path = String(record.path ?? "").trim() || (parentPath ? `${parentPath}/${name}` : name);
+    const path = taxonomyPath(String(record.path ?? "").trim(), parentPath, name);
     const children = flattenTaxonomy(record.children ?? record.categories ?? [], path);
     nodes.push({ id, name, path, children });
   }
   return nodes;
+}
+
+/**
+ * Walmart often sets `path` to the root ("Food") on every child. Prefer the
+ * ancestry we walked so "Breakfast Foods/Cereal" is not collapsed to "Food".
+ */
+function taxonomyPath(reported: string, parentPath: string, name: string): string {
+  const built = parentPath ? `${parentPath}/${name}` : name;
+  if (!reported) {
+    return built;
+  }
+  if (!parentPath) {
+    return reported.includes(name) ? reported : `${reported}/${name}`;
+  }
+  const root = parentPath.split("/")[0] ?? reported;
+  if (!reported.includes("/") || reported === root || reported === parentPath) {
+    return built;
+  }
+  if (!reported.endsWith(`/${name}`) && reported !== name) {
+    return `${reported}/${name}`;
+  }
+  return reported;
 }
 
 function isGrocery(node: Taxon): boolean {
@@ -112,7 +134,7 @@ export function groceryLeaves(taxonomy: unknown): WalmartCategory[] {
       id: node.id,
       name: node.name,
       path: node.path,
-      departmentId: mapped.departmentId === "other" ? "pantry" : mapped.departmentId,
+      departmentId: mapped.departmentId,
     });
   }
   return categories;

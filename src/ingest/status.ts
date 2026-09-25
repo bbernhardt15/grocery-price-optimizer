@@ -19,6 +19,7 @@ export function presentIngestError(entry: unknown): IngestErrorDetail | { messag
       status: typeof record.status === "number" ? record.status : null,
       message: typeof record.message === "string" ? record.message : "Ingest error",
       params,
+      ...(typeof record.body === "string" && record.body ? { body: record.body } : {}),
       at: typeof record.at === "string" ? record.at : "",
     };
   }

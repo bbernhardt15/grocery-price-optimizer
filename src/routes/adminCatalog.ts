@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { dropShadowLocalKeys, resetRunCounters } from "../ingest/maintenance";
+import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
 import { adminAuthorized, adminTokenConfigured, catalogStatus } from "../ingest/status";
 
 const router = Router();
@@ -44,6 +44,24 @@ router.post("/admin/catalog/reset-run-counters", async (req: Request, res: Respo
   }
   try {
     res.json(await resetRunCounters());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/recategorize", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  if (!confirmed(req, "recategorize-catalog")) {
+    res.status(400).json({
+      error: 'Send { "confirm": "recategorize-catalog" } to remap departments from stored category paths.',
+    });
+    return;
+  }
+  try {
+    res.json(await recategorizeCatalog());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });

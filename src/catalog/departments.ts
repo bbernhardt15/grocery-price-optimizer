@@ -77,6 +77,7 @@ const RULES: readonly Rule[] = [
   { test: /\brice\b/i, departmentId: "pantry", subcategory: "Pasta & Rice" },
   { test: /canned|tomato sauce|pasta sauce|marinara/i, departmentId: "pantry", subcategory: "Canned" },
   { test: /flour|sugar|baking/i, departmentId: "pantry", subcategory: "Baking" },
+  { test: /\bbreakfast\b/i, departmentId: "breakfast" },
   { test: /cereal|cheerios|oatmeal|oat meal|granola/i, departmentId: "breakfast", subcategory: "Cereal" },
   { test: /coffee|tea bag|green tea|black tea/i, departmentId: "beverages", subcategory: "Coffee & Tea" },
   { test: /orange juice|apple juice|\bjuice\b/i, departmentId: "beverages", subcategory: "Juice" },
@@ -88,7 +89,7 @@ const RULES: readonly Rule[] = [
   { test: /bagel|muffin|croissant/i, departmentId: "bakery", subcategory: "Rolls & Bagels" },
   { test: /tortilla/i, departmentId: "bakery", subcategory: "Tortillas" },
   { test: /bread|bakery|bun\b/i, departmentId: "bakery", subcategory: "Bread" },
-  { test: /deli|sliced turkey|sliced ham|lunch ?meat/i, departmentId: "deli", subcategory: "Sliced Meat" },
+  { test: /deli|sliced turkey|sliced ham|sliced meat|lunch ?meat/i, departmentId: "deli", subcategory: "Sliced Meat" },
   { test: /salmon|shrimp|seafood|fish fillet/i, departmentId: "meat-seafood", subcategory: "Seafood" },
   { test: /chicken|poultry/i, departmentId: "meat-seafood", subcategory: "Chicken" },
   { test: /ground beef|\bbeef\b|steak/i, departmentId: "meat-seafood", subcategory: "Beef" },
@@ -136,26 +137,28 @@ export type MappedDepartment = {
 const BROAD_CATEGORY =
   /^(dairy|grocery|food|frozen|pantry|snacks?|beverages?|household|meat|produce|bakery|deli|breakfast|baby|pets?|health|beauty|personal care|health & beauty)$/i;
 
+/** Walmart repeats the root ("Food", "Home Page") on every node. Those segments are not a department. */
+const GENERIC_SEGMENT = /^(home page|grocery|food|shop all|all|categories)$/i;
+
+function pathSegments(categories: string[]): string[] {
+  const segments: string[] = [];
+  for (const entry of categories) {
+    for (const part of entry.split(/\s*(?:\/|>)\s*/)) {
+      const trimmed = part.trim();
+      if (!trimmed || GENERIC_SEGMENT.test(trimmed)) {
+        continue;
+      }
+      segments.push(trimmed);
+    }
+  }
+  return segments;
+}
+
 function matchRules(text: string): Rule | undefined {
   if (!text.trim()) {
     return undefined;
   }
   return RULES.find((rule) => rule.test.test(text));
-}
-
-function leafCategories(categories: string[]): string[] {
-  const leaves: string[] = [];
-  for (const entry of categories) {
-    const parts = entry
-      .split(/\s*(?:\/|>)\s*/)
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const leaf = parts[parts.length - 1];
-    if (leaf) {
-      leaves.push(leaf);
-    }
-  }
-  return leaves;
 }
 
 function subcategoryFor(departmentId: string, text: string, explicit?: string): string | undefined {
@@ -193,11 +196,21 @@ export function mapToDepartment(
 
   const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
   const categoryText = labels.join(" / ");
-  const leaf = leafCategories(labels)
-    .map((text) => ({ text, rule: matchRules(text) }))
-    .find((entry) => entry.rule);
-  const fromCategory = leaf?.rule ?? matchRules(categoryText);
-  const categorySource = leaf?.text ?? categoryText;
+  const segments = pathSegments(labels);
+  let fromCategory: Rule | undefined;
+  let categorySource = "";
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const rule = matchRules(segments[index] ?? "");
+    if (rule) {
+      fromCategory = rule;
+      categorySource = segments[index] ?? "";
+      break;
+    }
+  }
+  if (!fromCategory) {
+    fromCategory = matchRules(categoryText);
+    categorySource = categoryText;
+  }
   const fromName = matchRules(name);
 
   let rule = fromCategory ?? fromName;

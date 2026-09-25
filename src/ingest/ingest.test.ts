@@ -11,7 +11,7 @@ import type { RawCatalogRecord } from "../catalog/types";
 import { MemoryBudgetStore, MongoBudgetStore } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
-import { dropShadowLocalKeys, resetRunCounters } from "./maintenance";
+import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "./maintenance";
 import { CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
 import { catalogStatus } from "./status";
@@ -145,6 +145,8 @@ describe("catalog ingestion", () => {
     assert.equal(await CatalogMaster.countDocuments({ key }), 1);
     const offers = await CatalogOffer.find({ productKey: key });
     assert.equal(offers.length, 3);
+    await upsertCatalogRecords([walmart]);
+    assert.equal(await CatalogOffer.countDocuments({ productKey: key }), 3);
     assert.deepEqual(
       offers.map((offer) => `${offer.storeName}:${offer.locationId}`).sort(),
       ["Kroger:01400001", "Kroger:01400002", "Walmart:"]
@@ -239,6 +241,7 @@ describe("catalog ingestion", () => {
     }>();
     assert.equal(saved?.checkpoint?.nextPage, "cursor-2");
     assert.equal(saved?.calls, 2);
+    assert.equal(await store.used("walmart", now()), 2);
     const callsBefore429 = pageCalls;
     const blocked = await stepWalmart({ client, maxCalls: 1, store, sleep, config, now });
     assert.equal(blocked.paused, "rate");
@@ -383,7 +386,9 @@ describe("catalog ingestion", () => {
         seen.push({ start: query.start, term: query.term });
         if (calls <= 3) {
           const error = new Error("Kroger products request failed (400)");
-          (error as Error & { status: number }).status = 400;
+          (error as Error & { status: number; body: string }).status = 400;
+          (error as Error & { body: string }).body =
+            '{"code":"invalidFilter","reason":"filter.start out of range"}';
           throw error;
         }
         return { returned: 1, records: [] };
@@ -404,7 +409,12 @@ describe("catalog ingestion", () => {
     const saved = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{
       status?: string;
       lastError?: string;
-      recentErrors?: Array<{ provider?: string; status?: number; params?: { term?: string; start?: number; locationId?: string; action?: string } }>;
+      recentErrors?: Array<{
+        provider?: string;
+        status?: number;
+        body?: string;
+        params?: { term?: string; start?: number; locationId?: string; action?: string };
+      }>;
       checkpoint?: { locationIndex?: number; phase?: string };
     }>();
     const logged = saved?.recentErrors?.find((entry) => entry.status === 400);
@@ -412,6 +422,7 @@ describe("catalog ingestion", () => {
     assert.equal(logged?.params?.term, "bananas");
     assert.equal(logged?.params?.start, 50);
     assert.equal(logged?.params?.locationId, "01400999");
+    assert.match(logged?.body ?? "", /filter\.start/);
     assert.ok(logged?.params?.action === "skipped-term" || logged?.params?.action === "skipped-location");
     assert.equal(saved?.checkpoint?.phase === "done" || (saved?.checkpoint?.locationIndex ?? 0) > 0, true);
     assert.match(saved?.lastError ?? "", /400/);
@@ -551,5 +562,22 @@ describe("catalog ingestion", () => {
     assert.equal(await CatalogMaster.countDocuments({ key: "local:walmart:4242" }), 0);
     assert.equal(await CatalogMaster.countDocuments({ key: "local:walmart:555" }), 1);
     assert.equal(await CatalogMaster.countDocuments({ key: sibling }), 1);
+  });
+
+  it("recategorizes a pantry row from its stored category path", async () => {
+    await CatalogMaster.create({
+      key: "local:walmart:cereal-path",
+      name: "Corn Flakes",
+      brand: "Great Value",
+      departmentId: "pantry",
+      categoryPaths: ["Food/Breakfast Foods/Cereal"],
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    const result = await recategorizeCatalog();
+    assert.ok(result.examined > 0);
+    assert.ok(result.updated >= 1);
+    const row = await CatalogMaster.findOne({ key: "local:walmart:cereal-path" });
+    assert.equal(row?.departmentId, "breakfast");
   });
 });

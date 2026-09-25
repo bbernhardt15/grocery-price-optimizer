@@ -3,6 +3,8 @@ import { demoRecords } from "../catalog/demoCatalog";
 import { krogerApiConfigured } from "../pricing/krogerProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import {
+  CallBudgetExceeded,
+  chargeCall,
   backoffDelayMs,
   httpStatusOf,
   ingestErrorDetail,
@@ -204,6 +206,21 @@ function gateFor(
   return new RateGate({ provider, dailyBudget: budget, minIntervalMs, store, now, sleep, initialNextAt });
 }
 
+/** Ledger consume and the run-counter increment live in this one call. */
+async function spendCall<T>(gate: RateGate, run: () => Promise<T>, count: () => void, stamp: () => void): Promise<T | "budget"> {
+  try {
+    const value = await chargeCall(gate, run, count);
+    stamp();
+    return value;
+  } catch (error) {
+    if (error instanceof CallBudgetExceeded) {
+      return "budget";
+    }
+    stamp();
+    throw error;
+  }
+}
+
 function epochMs(value: string | undefined): number {
   if (!value) {
     return 0;
@@ -276,16 +293,16 @@ export async function stepWalmart(options: {
       cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories, nextAllowedAt: cp.nextAllowedAt };
     }
     if (cp.phase === "taxonomy" || (cp.phase === "categories" && cp.categories.length === 0 && cp.index === 0)) {
-      const slot = await gate.take();
-      if (slot === "budget") {
-        paused = "budget";
-        await persist("paused", { lastError: "Walmart daily budget reached" });
-        break;
-      }
-      stampPace();
-      calls += 1;
       try {
-        const taxonomy = await options.client.taxonomy();
+        const charged = await spendCall(gate, () => options.client.taxonomy(), () => {
+          calls += 1;
+        }, stampPace);
+        if (charged === "budget") {
+          paused = "budget";
+          await persist("paused", { lastError: "Walmart daily budget reached" });
+          break;
+        }
+        const taxonomy = charged;
         cp.categories = groceryLeaves(taxonomy);
         cp.phase = cp.categories.length === 0 ? "done" : "categories";
         cp.index = 0;
@@ -318,16 +335,16 @@ export async function stepWalmart(options: {
 
     const category = cp.categories[cp.index];
     const path = walmartPagePath(category.id, cp.nextPage);
-    const slot = await gate.take();
-    if (slot === "budget") {
-      paused = "budget";
-      await persist("paused", { lastError: "Walmart daily budget reached" });
-      break;
-    }
-    stampPace();
-    calls += 1;
     try {
-      const payload = await options.client.page(path);
+      const charged = await spendCall(gate, () => options.client.page(path), () => {
+        calls += 1;
+      }, stampPace);
+      if (charged === "budget") {
+        paused = "budget";
+        await persist("paused", { lastError: "Walmart daily budget reached" });
+        break;
+      }
+      const payload = charged;
       const records = recordsFromWalmartPage(payload, category);
       const saved = await upsertCatalogRecords(records, nowFn());
       upserted += saved.offers;
@@ -501,15 +518,16 @@ export async function stepKroger(options: {
     if (cp.pendingZips.length > 0) {
       const zip = cp.pendingZips[0];
       if (!cp.locations.some((location) => location.zip === zip)) {
-        const slot = await locationGate.take();
-        if (slot === "budget") {
-          paused = "budget";
-          await persist("paused", { lastError: "Kroger location budget reached" });
-          break;
-        }
-        calls += 1;
         try {
-          const locationId = await options.client.resolveLocation(zip);
+          const charged = await spendCall(locationGate, () => options.client.resolveLocation(zip), () => {
+            calls += 1;
+          }, () => undefined);
+          if (charged === "budget") {
+            paused = "budget";
+            await persist("paused", { lastError: "Kroger location budget reached" });
+            break;
+          }
+          const locationId = charged;
           cp.pendingZips = cp.pendingZips.filter((item) => item !== zip);
           if (locationId) {
             cp.locations.splice(cp.locationIndex, 0, { zip, locationId });
@@ -556,15 +574,16 @@ export async function stepKroger(options: {
         continue;
       }
       const zip = cp.plannedZips[cp.zipCursor];
-      const slot = await locationGate.take();
-      if (slot === "budget") {
-        paused = "budget";
-        await persist("paused", { lastError: "Kroger location budget reached" });
-        break;
-      }
-      calls += 1;
       try {
-        const locationId = await options.client.resolveLocation(zip);
+        const charged = await spendCall(locationGate, () => options.client.resolveLocation(zip), () => {
+          calls += 1;
+        }, () => undefined);
+        if (charged === "budget") {
+          paused = "budget";
+          await persist("paused", { lastError: "Kroger location budget reached" });
+          break;
+        }
+        const locationId = charged;
         if (locationId && !cp.locations.some((location) => location.locationId === locationId)) {
           cp.locations.push({ zip, locationId });
         }
@@ -632,17 +651,6 @@ export async function stepKroger(options: {
       continue;
     }
 
-    const slot = await productGate.take();
-    if (slot === "budget") {
-      paused = "budget";
-      await persist("paused", { lastError: "Kroger daily budget reached" });
-      break;
-    }
-    const nextAt = productGate.nextAllowedAt();
-    if (nextAt > 0) {
-      cp.nextAllowedAt = new Date(nextAt).toISOString();
-    }
-    calls += 1;
     const requestParams = {
       term,
       brand,
@@ -652,16 +660,35 @@ export async function stepKroger(options: {
       zip: location.zip,
     };
     try {
-      const page = await options.client.page({
-        term,
-        locationId: location.locationId,
-        start: cp.start,
-        limit: config.krogerPageLimit,
-        ...(brand ? { brand } : {}),
-        departmentId: query.term.departmentId,
-        subcategory: query.term.subcategory,
-        zip: location.zip,
-      });
+      const charged = await spendCall(
+        productGate,
+        () =>
+          options.client.page({
+            term,
+            locationId: location.locationId,
+            start: cp.start,
+            limit: config.krogerPageLimit,
+            ...(brand ? { brand } : {}),
+            departmentId: query.term.departmentId,
+            subcategory: query.term.subcategory,
+            zip: location.zip,
+          }),
+        () => {
+          calls += 1;
+        },
+        () => {
+          const nextAt = productGate.nextAllowedAt();
+          if (nextAt > 0) {
+            cp.nextAllowedAt = new Date(nextAt).toISOString();
+          }
+        }
+      );
+      if (charged === "budget") {
+        paused = "budget";
+        await persist("paused", { lastError: "Kroger daily budget reached" });
+        break;
+      }
+      const page = charged;
       const saved = await upsertCatalogRecords(page.records, nowFn());
       upserted += saved.offers;
       const next = nextKrogerStart(cp.start, config.krogerPageLimit, page.returned, cp.pageIndex, config.krogerMaxPagesPerTerm);

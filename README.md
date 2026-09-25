@@ -61,7 +61,11 @@ Checked 2026-09-25.
 
 A Walmart **429** keeps the same category and `nextPage`, sets status to paused, and waits 15 minutes (doubling each strike in a row, capped at 6 hours and at the next UTC midnight). The next tick does not call Walmart until that time, then it resumes the same page. A run does not stay paused overnight. Other 5xx responses still use a short backoff (1s, 2s, 4s, … capped at 60s) and, after 5 failures, skip that category. A Kroger **400** is logged with provider, status, term, brand, start, limit, locationId, and ZIP (no secrets) and that term is skipped. `runs[].calls` counts each HTTP call once. `budget.*.used` / `budget.*.limit` is the daily ledger. Read the ledger for the cap; the run counter is only a progress total.
 
-The first production day (2026-09-25) showed `calls` well above 1,500 because each page save added the tick's running total again, and showed `offers == products` because a numeric Walmart `upc` was dropped, so those rows were stored as `local:walmart:{itemId}` and could not share a Kroger master. Kroger had also only priced the first seed store at that point. Seed ZIPs were inserted into `shopperZips` with `hits: 0`. Those three are fixed on the next deploy. Existing Mongo rows are kept. See the cleanup section below before deleting anything.
+The first production day (2026-09-25) showed `runs.walmart.calls` 2,712 against `budget.walmart.used` 1,137, and `runs.kroger.calls` 149 against `budget.kroger.used` 81 plus 6 location calls. Taxonomy, `nextPage`, and retries were already charged; the run counter was the number that ran ahead, because each page save added the tick's running total again (a 4-call tick adds 10). Walmart returned 429 at about 1,137 charged calls, under the 1,500 cap, because the 2 second burst was too fast. Every ingest HTTP call now starts in one function, `chargeCall`, which consumes the ledger and increments the run counter together. Shopper searches are still not charged and are not blocked.
+
+`offers` and `byStore` count distinct offer documents. On that snapshot Kroger 2,803 + Walmart 10,205 = 13,008 offers = 13,008 products, so each master had one offer and nothing had merged across stores. `upserted` counts writes, including the inflated counter, so it can be higher than the number of Kroger documents. Walmart's 12-digit UPC-A includes a check digit. Kroger's 13-digit `upc` / `productId` does not (the last digit fails the GTIN check). The key drops a valid check digit, then strips leading zeros, so those two codes match. A numeric Walmart `upc` is read as well.
+
+Department counts were piled into pantry, with bakery, frozen, snacks, and breakfast at 0. Two things did that. Walmart's taxonomy `path` is often just `Food` on every child, and any leaf that did not match a rule was forced to pantry, which then overrode the item's own category path. Kroger was also still on the first store (`locationIndex` 0, `queryIndex` 21 of a list that reaches bakery and frozen later). Mapping now walks the full path from the leaf upward, and a stored category path wins over that pantry fallback. `errors[]` for a Kroger 400 includes the term, brand, start, limit, locationId, ZIP, and the response body. Seed ZIPs are no longer written into `shopperZips`. Existing Mongo rows are kept. See the cleanup section below before deleting anything.
 
 ### Size and time
 
@@ -96,8 +100,10 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - Zero the inflated `calls` / `upserted` counters (the crawl position is kept):  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"reset-run-counters"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/reset-run-counters`
    - After Walmart has been crawled again and UPC masters exist, delete `local:` rows that duplicate those UPCs (rows that still have no UPC are kept):  
-     `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"drop-shadow-local-keys"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/drop-shadow-local-keys`  
-   Nothing runs these on boot.
+     `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"drop-shadow-local-keys"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/drop-shadow-local-keys`
+   - Remap departments from the category path already stored on each product (rows that still map to Other are left as they are):  
+     `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"recategorize-catalog"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/recategorize`  
+   Nothing runs these on boot. ZIP 10001 was stored as location `01400441`, which is the demo id the old lookup used when Locations failed. The next location pass will not substitute that id. This cycle keeps the saved locations until it finishes or you start a new cycle.
 
 Local demo, no keys:
 

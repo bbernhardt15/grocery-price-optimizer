@@ -18,6 +18,18 @@ describe("upcKey", () => {
     assert.equal(upcKey(""), null);
     assert.equal(upcKey("not-a-code"), null);
   });
+
+  it("drops Walmart's UPC-A check digit and keeps Kroger's 13-digit code that has none", () => {
+    const walmartUpcA = "049000042566";
+    const walmartEan = "0049000042566";
+    const walmartGtin = "00049000042566";
+    const krogerWithoutCheck = "0004900004256";
+    const key = upcKey(walmartUpcA);
+    assert.equal(key, upcKey(walmartEan));
+    assert.equal(key, upcKey(walmartGtin));
+    assert.equal(key, upcKey(krogerWithoutCheck));
+    assert.equal(key, "4900004256");
+  });
 });
 
 describe("groupOffersByUpc", () => {
