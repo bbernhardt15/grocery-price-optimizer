@@ -4,6 +4,8 @@ import { isKrogerCartOAuthConfigured } from "../krogerCartAuth";
 import { krogerService } from "../krogerService";
 import { optimizeGroceryList } from "../optimizeGroceryList";
 import { resolveCatalogProducts } from "../priceCache";
+import { walmartPricingProvider } from "../pricing/walmartProvider";
+import type { WalmartNearbyStore } from "../pricing/walmartProvider";
 import { enrichOptimizeResult } from "../storeHandoff";
 
 const router = Router();
@@ -110,6 +112,29 @@ function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "inv
   return { groceryList, stores: record.stores, zipCode };
 }
 
+function tripIncludesWalmart(stores: string[]): boolean {
+  if (stores.length === 0) {
+    return true;
+  }
+  return stores.some((store) => store.trim().toLowerCase() === "walmart");
+}
+
+async function lookupWalmartStore(
+  zipCode: string | undefined,
+  stores: string[]
+): Promise<WalmartNearbyStore | undefined> {
+  if (!zipCode || !tripIncludesWalmart(stores) || !walmartPricingProvider.isConfigured()) {
+    return undefined;
+  }
+  try {
+    return await walmartPricingProvider.getNearestStore(zipCode);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "lookup failed";
+    console.warn(`Walmart store lookup failed: ${message}`);
+    return undefined;
+  }
+}
+
 router.post("/optimize-list", async (req: Request, res: Response) => {
   const parsed = parseOptimizeListBody(req.body);
 
@@ -150,11 +175,13 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       locationId,
       zipCode
     );
+    const walmartStore = await lookupWalmartStore(zipCode, stores);
     const groupedByStore = enrichOptimizeResult(
       optimizeGroceryList(groceryList, stores, productsResult.products),
       {
         krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(),
         pricingByStore: productsResult.pricingByStore,
+        ...(walmartStore ? { walmartStore } : {}),
       }
     );
 

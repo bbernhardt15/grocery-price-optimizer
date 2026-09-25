@@ -24,9 +24,9 @@ Client-credentials can look up stores and shelf prices. They **cannot** write a 
 Customer-visible slice:
 
 1. After optimize, show a trip plan summary (`15 Kroger + 5 Walmart + 10 Target`) and a primary action on each store card.
-2. Each store group in the API includes a **handoff** object: item identities (name, brand, quantity, price, `productId` / `upc` / `locationId` when known) plus an `action` of `kroger_cart` | `search_deeplink` | `coming_soon`.
+2. Each store group in the API includes a **handoff** object: item identities (name, brand, quantity, price, `productId` / `upc` / `locationId` when known) plus an `action` of `kroger_cart` | `walmart_cart` | `search_deeplink` | `coming_soon`.
 3. **Kroger (always-available path):** “Open at Kroger” search/product deep links using `productId`/UPC when the Products API returned them, otherwise the item name. Shopper completes add-to-cart on kroger.com.
-4. **Walmart + Target:** same handoff shape with public search deep links (and honest copy that authenticated cart APIs are closed or partner-only).
+4. **Walmart:** when every assigned line has an Affiliate item id, **Add N items to Walmart cart** opens one `affil.walmart.com/cart/addToCart` link (Impact-wrapped when `WALMART_PUBLISHER_ID` is set). Otherwise a public search deep link. **Target:** public search deep link. Authenticated cart-write APIs are not invented.
 5. **Aldi / others:** `coming_soon` — no fake checkout.
 
 ---
@@ -38,7 +38,7 @@ Price the same verified items at more than Kroger so the 15/5/10 split reflects 
 | Store | Live source | Status | Keys |
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products APIs (`product.compact`) | Working (unchanged) | `KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET` |
-| **Walmart** | Official [Affiliate Marketing API](https://walmart.io/apidocs/affiliates/affiliate-marketing-api) `GET /search` with RSA headers | Adapter shipped; live when keys are set. Prices are **walmart.com catalog**, not in-aisle local shelf (the search API has no store-price filter). `/stores?zip=` is used only to label a nearby store id. | `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, `WALMART_PUBLISHER_ID` |
+| **Walmart** | Official [Affiliate Marketing API](https://walmart.io/apidocs/affiliates/affiliate-marketing-api) `GET /search` with RSA headers | Adapter shipped; live when keys are set. Prices are **walmart.com catalog**, not in-aisle local shelf (the search API has no store-price filter). [`GET /stores?zip=`](https://walmart.io/apidocs/affiliates/stores) labels the nearest store name and address (cached per ZIP) and does not change the price. | `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`. `WALMART_PUBLISHER_ID` optional (Impact attribution). |
 | **Target** | **No public product/price API.** RedSky is an internal storefront endpoint and is **not** used. | Adapter shipped for a licensed partner feed (`GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=`). Until those keys exist, Target can use Flipp weekly ads (if enabled) or the demo catalog. | `TARGET_PARTNER_BASE_URL`, `TARGET_PARTNER_API_KEY` |
 | **Aldi** | None (retailer). Flipp weekly-ad optional. | Demo catalog / `coming_soon` handoff until Flipp is enabled | `FLIPP_ENABLED` / `FLIPP_ACCESS_TOKEN` |
 
@@ -99,7 +99,7 @@ Where a retailer actually allows it, fill the shopper’s cart after they author
 | Retailer | Requirement | Status in Grocery Gitter |
 | --- | --- | --- |
 | **Kroger** | Authorization-code OAuth, `cart.basic:write` (or `cart.basic:rw`), redirect URI registered on the Kroger developer app **and** set as `KROGER_REDIRECT_URI` (must match the Railway/production HTTPS URL exactly) | **Implemented.** Dashboard shows **Add to Kroger cart** when that env is set and items have UPC/`productId`. Shopper logs in at Kroger, callback exchanges the code, then `PUT https://api.kroger.com/v1/cart/add` with `{ upc, quantity, modality }`. Success HTML/JSON only on HTTP 2xx. Cancelled login, missing scopes, or API rejection fall back to **Open at Kroger** search links — never a fake “added to cart”. Client-credentials tokens used for Products/Locations are **not** used for cart writes. |
-| **Walmart** | Shopper OAuth / partner cart APIs | **Not implemented.** Public cart-write is typically closed. Search deep links remain the fallback. Do not invent a Walmart cart API. |
+| **Walmart** | Documented affiliate add-to-cart URL (not a cart-write API) | **Implemented as a handoff link.** When every Walmart line has a numeric Affiliate item id, the card shows **Add N items to Walmart cart** → `https://affil.walmart.com/cart/addToCart?items=ITEMID\|QTY,…`. `WALMART_PUBLISHER_ID` wraps that destination with `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&u=…`. Unset publisher id still opens the cart, unattributed. Demo / Flipp lines (no Walmart item id) keep **Search at Walmart**. Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. |
 | **Target** | Partner / RedCard / shopper OAuth | **Not implemented.** Same: do not invent a cart API. Search deep links only. |
 | **Aldi** | Instacart Connect, if licensed | Stay `coming_soon` until a real cart API exists. Price stub is `INSTACART_PARTNER_*`. |
 | **Publix / H-E-B / Meijer / Albertsons / Ahold** | Partner cart or Instacart | Search deep links until a contract includes cart-write. |

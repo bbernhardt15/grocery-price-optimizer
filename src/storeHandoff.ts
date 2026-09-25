@@ -1,7 +1,16 @@
-import type { OptimizeResult, PickedItem, StoreGroup } from "./optimizeGroceryList";
+import type { OptimizeResult, PickedItem, PriceSource, StoreGroup } from "./optimizeGroceryList";
+import {
+  readWalmartPublisherId,
+  walmartAddToCartUrl,
+} from "./pricing/walmartCartLink";
+import type { WalmartNearbyStore } from "./pricing/walmartProvider";
 import type { StorePricingReport } from "./pricing/types";
 
-export type HandoffActionType = "kroger_cart" | "search_deeplink" | "coming_soon";
+export type HandoffActionType =
+  | "kroger_cart"
+  | "walmart_cart"
+  | "search_deeplink"
+  | "coming_soon";
 
 export type HandoffActionStatus =
   | "ready"
@@ -18,6 +27,7 @@ export type HandoffItem = {
   upc?: string;
   locationId?: string;
   url?: string;
+  priceSource?: PriceSource;
 };
 
 export type StoreHandoffAction = {
@@ -50,6 +60,8 @@ export type EnrichedStoreGroup = StoreGroup & {
   itemCount: number;
   handoff: StoreHandoff;
   pricing?: StorePricingReport;
+  /** Nearest Walmart from the Affiliate Store Locator, when a ZIP lookup succeeded. */
+  nearbyStore?: WalmartNearbyStore;
 };
 
 export type EnrichedOptimizeResult = OptimizeResult & {
@@ -66,6 +78,8 @@ export type HandoffOptions = {
    */
   krogerCartOAuthConfigured?: boolean;
   pricingByStore?: StorePricingReport[];
+  /** Nearest Walmart for this request's ZIP. Display only; prices stay catalog. */
+  walmartStore?: WalmartNearbyStore;
 };
 
 const KROGER_SEARCH = "https://www.kroger.com/search";
@@ -245,6 +259,7 @@ function toHandoffItem(storeName: string, item: PickedItem): HandoffItem {
     ...(item.upc ? { upc: item.upc } : {}),
     ...(item.locationId ? { locationId: item.locationId } : {}),
     ...(url ? { url } : {}),
+    ...(item.priceSource ? { priceSource: item.priceSource } : {}),
   };
 }
 
@@ -286,15 +301,59 @@ function krogerAction(
   };
 }
 
+/**
+ * Affiliate item ids are numeric. Demo rows omit them. Flipp weekly-ad rows
+ * may carry a flyer id, which is not a Walmart item id — those stay on the
+ * search handoff even if the flyer id is numeric.
+ */
+function walmartCartItemId(item: HandoffItem): string | undefined {
+  if (item.priceSource === "weekly_ad" || item.priceSource === "seed") {
+    return undefined;
+  }
+  const id = item.productId?.trim() ?? "";
+  return /^\d+$/.test(id) ? id : undefined;
+}
+
 function walmartAction(items: HandoffItem[]): StoreHandoffAction {
   const firstUrl = items.find((item) => item.url)?.url;
-  return {
+  const searchAction: StoreHandoffAction = {
     type: "search_deeplink",
     label: "Search at Walmart",
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
     detail:
       "Search deep link, not a cart fill. Authenticated Walmart cart APIs need partner access; Grocery Gitter does not invent a cart write.",
+  };
+
+  const itemIds = items.map(walmartCartItemId);
+  if (items.length === 0 || itemIds.some((id) => !id)) {
+    return searchAction;
+  }
+
+  const url = walmartAddToCartUrl(
+    items.map((item, index) => ({
+      itemId: itemIds[index] as string,
+      quantity: item.quantity,
+    })),
+    readWalmartPublisherId()
+  );
+  if (!url) {
+    return searchAction;
+  }
+
+  const count = itemCountOf(items);
+  const publisherId = readWalmartPublisherId();
+  const attribution = publisherId
+    ? "The link includes your Impact publisher id (WALMART_PUBLISHER_ID) so a qualifying Walmart.com purchase can earn commission."
+    : "WALMART_PUBLISHER_ID is unset, so this link is not attributed. Set it after Impact approval to earn commission; the cart link still works without it.";
+
+  return {
+    type: "walmart_cart",
+    label: `Add ${count} item${count === 1 ? "" : "s"} to Walmart cart`,
+    url,
+    status: "ready",
+    ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
+    detail: `Opens walmart.com with these item ids and quantities in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.`,
   };
 }
 
@@ -379,11 +438,16 @@ export function enrichOptimizeResult(
 ): EnrichedOptimizeResult {
   const stores = result.stores.map((group) => {
     const pricing = pricingForStore(group.storeName, options.pricingByStore);
+    const nearbyStore =
+      group.storeName.trim().toLowerCase() === "walmart"
+        ? options.walmartStore
+        : undefined;
     return {
       ...group,
       itemCount: itemCountOf(group.items),
       handoff: buildStoreHandoff(group, options),
       ...(pricing ? { pricing } : {}),
+      ...(nearbyStore ? { nearbyStore } : {}),
     };
   });
 
