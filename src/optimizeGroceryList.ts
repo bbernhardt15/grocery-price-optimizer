@@ -40,6 +40,8 @@ export type PickedItem = {
   itemTotal: number;
   unit: string;
   normalizedUnit: string;
+  /** Retailer package text ("1 gal", "16 oz", "12 ct") when the catalog had one. */
+  size?: string;
   /** Package unit price rounded to cents, in the same units as `unitPriceText`. */
   unitPrice?: number;
   /** For example "$3.29/gal" or "$0.20/ct" when the package size was parsed. */
@@ -132,6 +134,7 @@ function pickForLine(
     itemTotal: roundMoney(best.price * line.quantity),
     unit: best.unit,
     normalizedUnit: best.normalizedUnit,
+    ...(best.size ? { size: best.size } : {}),
     ...(unitPrice ?? {}),
     ...(best.locationId ? { locationId: best.locationId } : {}),
     ...(best.productId ? { productId: best.productId } : {}),

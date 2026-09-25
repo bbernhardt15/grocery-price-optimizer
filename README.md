@@ -98,8 +98,55 @@ After optimize, each store group includes a `handoff` object: `storeName`, `item
 | **Target** | `search_deeplink` | Public search URL. Not a cart fill — authenticated cart APIs need partner access. Grocery Gitter does not invent that API. |
 | **Publix / H-E-B / Meijer / Albertsons family / Ahold / club / Amazon** | `search_deeplink` | Public search URLs with honest copy (club membership; no third-party cart-write). |
 | **Aldi / unknown banners** | `coming_soon` | No fake checkout. |
+| **Instacart Developer Platform** | `POST /api/instacart/shopping-list` | Shown only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set. Not a native cart. See below. |
 
-Grocery Gitter **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx. Cancelled login, missing scopes, or a rejected UPC fall back to Open at Kroger search links.
+Grocery Gitter **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx. Cancelled login, missing scopes, or a rejected UPC fall back to Open at Kroger search links. An Instacart shopping-list link is a handoff to Instacart checkout, not an in-store cart write.
+
+### Instacart shopping list (Developer Platform)
+
+This is separate from the `INSTACART_PARTNER_*` price-feed stub in [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). The partner stub is a licensed price adapter. This handoff only creates a shopping-list page.
+
+**Endpoint:** `POST {INSTACART_API_BASE_URL}/idp/v1/products/products_link` with `Authorization: Bearer`. Docs: [Create shopping list page](https://docs.instacart.com/developer_platform_api/api/products/create_shopping_list_page).
+
+| Environment | Base URL |
+| --- | --- |
+| Development key | `https://connect.dev.instacart.tools` |
+| Production key | `https://connect.instacart.com` |
+
+The key stays on the server. The browser calls `POST /api/instacart/shopping-list` and opens the returned `products_link_url`. If either env var is unset (or the base is not `https`), `GET /api/instacart/status` is `{ "enabled": false }` and the buttons are not rendered.
+
+**What the shopper sees**
+
+- On each trip-plan store that does **not** have a native cart handoff (Target search, Aldi “Coming soon”, Publix/H-E-B/regional search, Walmart **Search at Walmart** fallback, and Kroger when it is only “Open at Kroger”): a **Shop on Instacart** button for that section’s items.
+- On the trip total: “or shop the whole list on Instacart”, which sends every store’s items as one list.
+- Kroger’s **Add to Kroger cart** section and Walmart’s **Add N items to Walmart cart** section do not get a second per-store Instacart button. Those items are still included in the whole-list option. The nearest Walmart store line and unit prices stay on the card.
+- Instacart opens a hosted list. The shopper picks a retailer, reviews matches, and checks out on Instacart (login if needed). Grocery Gitter does not claim the in-store cart was filled, and Instacart prices can differ.
+
+**Retailer hint:** the create-shopping-list body has **no retailer field**. [Instacart’s FAQ](https://docs.instacart.com/developer_platform_api/faq) says directing a shopper to a specific merchant is not supported on that page. The only documented hint is appending `?retailer_key=` after [`GET /idp/v1/retailers`](https://docs.instacart.com/developer_platform_api/api/retailers/get_nearby_retailers), and that query parameter is documented for [recipe page URLs](https://docs.instacart.com/developer_platform_api/get_started/recipe), which may need a separate API key. For a single store section with a ZIP, Grocery Gitter tries that lookup and appends `retailer_key` when the retailer **name** matches the trip-plan store. If lookup fails or nothing matches, the link still opens and the shopper chooses the store. The whole-list option never preselects a retailer.
+
+Line items send `name`, `quantity`, `line_item_measurements` (package `size` when we have it, otherwise Grocery Gitter units, mapped onto [Instacart’s units](https://docs.instacart.com/developer_platform_api/api/units_of_measurement); unknown units are sent as `each` and kept in `display_text`), and `upcs` when we have an 8–14 digit code. A measured size such as `16 oz` is the amount Instacart should match, times how many packages the shopper asked for. Count sizes such as `12 ct` stay one package per line (`each`) with the count in the display text, so Instacart does not add twelve cartons. Retailer product ids are not sent as Instacart `product_ids`.
+
+**Get a key** (as documented; checked 24 Sep 2026)
+
+1. Apply from [Get started](https://docs.instacart.com/developer_platform_api/get_started/overview) → [Apply today](https://www.instacart.com/company/business/developers) (18+, US or Canada resident or registered business, intended use case, accept the [Developer Platform terms](https://docs.instacart.com/developer_platform_api/guide/terms_and_policies/developer_terms)).
+2. That apply page currently says **new applications are not being accepted** and there is **no waitlist**. Check back, or use a key you already have.
+3. After you have a Developer Account, open the Developer Dashboard → **API Keys** → **Create New API Key** → name it → choose **Development** or **Production** → **Generate Key** → copy it once. Keys look like `keys.` plus a hex id. Steps: [Get an API key](https://docs.instacart.com/developer_platform_api/get_started/api-keys).
+4. Use the development base with a development key. A production key is a later step: record a demo and request production access ([pre-launch checklist](https://docs.instacart.com/developer_platform_api/guide/concepts/launch_activities/pre-launch_checklist)). Instacart’s get-started page says access request to production key is often about 30–40 days.
+5. Your first key might only allow `/products/products_link` or `/products/recipe`. This app calls **`/products/products_link`**. Nearby retailers may need another key.
+
+**Is it free?** Instacart does not publish a fee for Developer Platform keys or for Create shopping list page. Access is approval-gated, not a self-serve paid SKU. The terms allow Instacart to charge only if you ask to go past usage limits. After a live integration is approved, you can optionally join their affiliate program and **earn** commissions (Impact.com). That is revenue share, not a key price. Shoppers still pay Instacart’s own item, service, and delivery fees at checkout.
+
+**Railway** (service → Variables). Set both, or the button stays hidden:
+
+```bash
+INSTACART_API_KEY=keys.<your key>
+# development key:
+INSTACART_API_BASE_URL=https://connect.dev.instacart.tools
+# production key (only after Instacart approves it):
+# INSTACART_API_BASE_URL=https://connect.instacart.com
+```
+
+Do not put this key in `INSTACART_PARTNER_API_KEY`. Do not commit it. The button copy is Instacart’s approved **Shop on Instacart** CTA (dark theme, 46px, carrot logo) from their [CTA design](https://docs.instacart.com/developer_platform_api/guide/concepts/design/cta_design) guide.
 
 ### Enable Kroger shopper cart fill (Railway + Kroger portal)
 

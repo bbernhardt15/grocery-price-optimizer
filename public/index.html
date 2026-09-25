@@ -10,7 +10,7 @@
       content="Grocery Gitter — search products, then price the trip across stores."
     />
     <title>Grocery Gitter — Product search</title>
-    <link rel="stylesheet" href="/styles.css?v=walmart-cart" />
+    <link rel="stylesheet" href="/styles.css?v=instacart-walmart" />
   </head>
   <body>
     <div class="shell">
@@ -103,7 +103,10 @@
             returns HTTP 2xx. Each store card shows whether prices are <strong>live</strong>,
             from a <strong>partner feed</strong>, from a <strong>weekly ad</strong>
             (circular near your ZIP — not a full shelf catalog), or from the
-            <strong>demo catalog</strong>.
+            <strong>demo catalog</strong>. When an Instacart Developer Platform
+            key is set on the server, cards without a native cart also offer
+            Shop on Instacart, and the trip total offers a way to shop the whole
+            list there.
           </p>
         </section>
 
@@ -112,6 +115,7 @@
             <div>
               <p class="banner-label">Grand total</p>
               <p id="summary-meta" class="banner-meta"></p>
+              <div id="instacart-whole-list" class="instacart-whole-list" hidden></div>
             </div>
             <p id="grand-total" class="banner-amount">$0.00</p>
           </article>
@@ -122,6 +126,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=walmart-cart"></script>
+    <script src="/app.js?v=instacart-walmart"></script>
   </body>
 </html>

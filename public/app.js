@@ -47,6 +47,9 @@ let searchTimer = 0;
 let searchAbort = null;
 /** @type {null | { stores: Array<Record<string, unknown>> }} */
 let lastOptimize = null;
+let instacartEnabled = false;
+/** @type {Promise<void> | null} */
+let instacartStatusPromise = null;
 
 function money(value) {
   return new Intl.NumberFormat("en-US", {
@@ -81,6 +84,7 @@ function hideResults() {
   storeGridEl.innerHTML = "";
   grandTotalEl.textContent = "$0.00";
   summaryMetaEl.textContent = "";
+  renderInstacartWholeList();
   renderUnavailable([]);
   renderPricingLegend([]);
 }
@@ -375,10 +379,36 @@ function itemOpenUrl(store, item, index) {
   return fromHandoff || item.url || "";
 }
 
+function instacartCtaMarkup(attrs) {
+  return `<button type="button" class="instacart-cta" ${attrs}><img src="/instacart-carrot.svg" width="22" height="22" alt="" />Shop on Instacart</button>`;
+}
+
+function instacartStoreExtras(store) {
+  if (!instacartEnabled) {
+    return "";
+  }
+  const handoffType = store?.handoff?.action?.type;
+  if (handoffType === "kroger_cart" || handoffType === "walmart_cart") {
+    return "";
+  }
+  if (!Array.isArray(store?.items) || store.items.length === 0) {
+    return "";
+  }
+  return `
+    ${instacartCtaMarkup(
+      `data-instacart-scope="store" data-instacart-store="${escapeHtml(store.storeName)}"`
+    )}
+    <p class="handoff-detail">Opens an Instacart shopping list for these items. You pick the retailer and check out there. This does not fill ${escapeHtml(
+      store.storeName
+    )}'s own cart, and Instacart prices can differ.</p>
+  `;
+}
+
 function renderHandoffButton(store) {
   const action = store.handoff?.action;
+  const instacart = instacartStoreExtras(store);
   if (!action) {
-    return "";
+    return instacart ? `<footer class="store-handoff">${instacart}</footer>` : "";
   }
 
   const detail = action.detail
@@ -392,6 +422,7 @@ function renderHandoffButton(store) {
           action.label || "Coming soon"
         )}</button>
         ${detail}
+        ${instacart}
       </footer>
     `;
   }
@@ -431,6 +462,7 @@ function renderHandoffButton(store) {
         >${escapeHtml(action.label)}</button>
         ${fallback}
         ${detail}
+        ${instacart}
       </footer>
     `;
   }
@@ -445,6 +477,7 @@ function renderHandoffButton(store) {
           rel="noopener noreferrer"
         >${escapeHtml(action.label)}</a>
         ${detail}
+        ${instacart}
       </footer>
     `;
   }
@@ -455,6 +488,7 @@ function renderHandoffButton(store) {
         action.label || "Unavailable"
       )}</button>
       ${detail}
+      ${instacart}
     </footer>
   `;
 }
@@ -532,8 +566,27 @@ function renderResults(payload) {
         }${payload.locationId ? ` · Kroger ${payload.locationId}` : ""}`
       : "Nothing in the catalog matched this list.";
   storeGridEl.innerHTML = payload.stores.map(renderStoreCard).join("");
+  renderInstacartWholeList();
   renderUnavailable(payload.unavailable ?? []);
   renderPricingLegend(payload.pricingByStore ?? []);
+}
+
+function renderInstacartWholeList() {
+  const slot = document.querySelector("#instacart-whole-list");
+  if (!slot) {
+    return;
+  }
+  const stores = lastOptimize?.stores ?? [];
+  if (!instacartEnabled || stores.length === 0) {
+    slot.hidden = true;
+    slot.innerHTML = "";
+    return;
+  }
+  slot.hidden = false;
+  slot.innerHTML = `
+    <p class="instacart-whole-caption">or shop the whole list on Instacart</p>
+    ${instacartCtaMarkup('data-instacart-scope="list"')}
+  `;
 }
 
 async function startKrogerCart(store, button) {
@@ -589,6 +642,120 @@ async function startKrogerCart(store, button) {
   }
 }
 
+function instacartItemsFrom(stores) {
+  const items = [];
+  for (const store of stores) {
+    for (const item of store.items ?? []) {
+      if (!item || typeof item.name !== "string" || !item.name.trim()) {
+        continue;
+      }
+      const line = {
+        name: item.name,
+        quantity: item.quantity ?? 1,
+      };
+      if (item.unit) {
+        line.unit = item.unit;
+      }
+      if (item.size) {
+        line.size = item.size;
+      }
+      if (item.brand) {
+        line.brand = item.brand;
+      }
+      if (item.upc) {
+        line.upc = item.upc;
+      }
+      items.push(line);
+    }
+  }
+  return items;
+}
+
+async function openInstacartList(button) {
+  const scope = button.dataset.instacartScope;
+  const storeName = button.dataset.instacartStore || "";
+  const stores = lastOptimize?.stores ?? [];
+  const selected =
+    scope === "store" ? stores.filter((store) => store.storeName === storeName) : stores;
+  const items = instacartItemsFrom(selected);
+  showApiError("");
+  if (items.length === 0) {
+    showApiError("Nothing on this list can be sent to Instacart.");
+    return;
+  }
+
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.textContent = "Opening Instacart…";
+  try {
+    const postalCode = normalizeZip(zipCodeEl.value);
+    const response = await fetch("/api/instacart/shopping-list", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        items,
+        ...(scope === "store" && storeName ? { storeName } : {}),
+        ...(ZIP_PATTERN.test(postalCode) ? { postalCode } : {}),
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Instacart shopping list failed (${response.status})`);
+    }
+    if (!payload.productsLinkUrl) {
+      throw new Error("Instacart did not return a shopping list link.");
+    }
+    const note = payload.retailerNote ? ` ${payload.retailerNote}` : "";
+    // "noopener" in window.open features makes Chrome return null even when the
+    // tab opened. Drop opener after a normal open so a real popup block is detectable.
+    const opened = window.open(payload.productsLinkUrl, "_blank");
+    if (opened) {
+      opened.opener = null;
+    }
+    if (!opened) {
+      showApiError(
+        `Instacart created the list, but the browser blocked the new tab.${note} Copy this link: ${payload.productsLinkUrl}`
+      );
+      return;
+    }
+    showApiSuccess(`Opened an Instacart shopping list.${note}`);
+  } catch (error) {
+    showApiError(
+      error instanceof Error ? error.message : "Could not open an Instacart shopping list."
+    );
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
+function loadInstacartStatus() {
+  if (!instacartStatusPromise) {
+    instacartStatusPromise = fetch("/api/instacart/status", {
+      headers: { Accept: "application/json" },
+    })
+      .then((response) => (response.ok ? response.json() : { enabled: false }))
+      .then((payload) => {
+        instacartEnabled = Boolean(payload.enabled);
+      })
+      .catch(() => {
+        instacartEnabled = false;
+      });
+  }
+  return instacartStatusPromise;
+}
+
+resultsEl.addEventListener("click", (event) => {
+  const button = event.target.closest(".instacart-cta");
+  if (!button || !resultsEl.contains(button)) {
+    return;
+  }
+  void openInstacartList(button);
+});
+
 storeGridEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-handoff-store]");
   if (!button) {
@@ -641,6 +808,7 @@ async function findCheapestStores() {
 
   setBusy(true);
   try {
+    await loadInstacartStatus();
     const response = await fetch("/api/optimize-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -752,3 +920,4 @@ sampleBtn.addEventListener("click", () => {
 });
 
 renderCart();
+void loadInstacartStatus();
