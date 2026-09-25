@@ -355,11 +355,19 @@ function itemSourceMark(item) {
   return "";
 }
 
-function itemFragment(item) {
+function itemLabel(item) {
+  const quantity = item.quantity ?? 1;
+  const brand = item.brand ? ` (${item.brand})` : "";
+  return `${quantity}x ${item.name}${brand}`;
+}
+
+function itemPriceHtml(item) {
   const quantity = item.quantity ?? 1;
   const itemTotal = item.itemTotal ?? item.price * quantity;
-  const brand = item.brand ? ` (${item.brand})` : "";
-  return `${quantity}x ${item.name}${brand} — ${money(itemTotal)}`;
+  const unit = item.unitPriceText
+    ? ` <span class="unit-price">(${escapeHtml(item.unitPriceText)})</span>`
+    : "";
+  return `${money(itemTotal)}${unit}`;
 }
 
 function itemOpenUrl(store, item, index) {
@@ -473,9 +481,11 @@ function renderStoreCard(store) {
       const openLink = openUrl
         ? `<a class="item-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener noreferrer">Open</a>`
         : "";
-      return `<li class="item-line"><span>${escapeHtml(
-        itemFragment(item)
-      )}${itemSourceMark(item)}</span>${openLink}</li>`;
+      return `<li class="item-line"><span class="item-copy">${escapeHtml(
+        itemLabel(item)
+      )}${itemSourceMark(item)}</span><span class="item-price">${itemPriceHtml(
+        item
+      )}</span>${openLink}</li>`;
     })
     .join("");
 

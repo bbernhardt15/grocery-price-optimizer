@@ -81,12 +81,14 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
   const unit = parseGroceryUnit(item.size);
   const productId = item.itemId != null ? String(item.itemId).trim() : "";
   const upc = item.upc?.trim();
+  const size = item.size?.trim();
   return {
     name,
     brand: (item.brandName || item.brand || "Walmart").trim() || "Walmart",
     storeName: "Walmart",
     ...(productId ? { productId } : {}),
     ...(upc ? { upc } : {}),
+    ...(size ? { size } : {}),
     price,
     unit,
     normalizedUnit: unit,

@@ -49,6 +49,7 @@ function toCatalogProduct(
     : parseGroceryUnit(item.size || item.unit);
   const productId = (item.productId || item.tcin)?.trim();
   const upc = item.upc?.trim();
+  const size = item.size?.trim();
   return {
     name,
     brand: item.brand?.trim() || "Target",
@@ -56,6 +57,7 @@ function toCatalogProduct(
     ...(productId ? { productId } : {}),
     ...(upc ? { upc } : {}),
     ...(zipCode ? { locationId: zipCode } : {}),
+    ...(size ? { size } : {}),
     price,
     unit,
     normalizedUnit: unit,

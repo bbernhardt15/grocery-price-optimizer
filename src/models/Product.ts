@@ -11,6 +11,8 @@ const productSchema = new Schema(
     productId: { type: String, trim: true },
     upc: { type: String, trim: true },
     price: { type: Number, required: true, min: 0 },
+    /** Raw package size from a retailer API ("12 oz", "1 gal", "18 ct"). */
+    size: { type: String, trim: true },
     unit: {
       type: String,
       required: true,

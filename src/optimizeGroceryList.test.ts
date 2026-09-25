@@ -210,4 +210,179 @@ describe("optimizeGroceryList", () => {
 
     assert.equal(result.total, 6.94);
   });
+
+  it("picks plain honey over a cheaper honey-flavored food", () => {
+    const honey: CatalogProduct[] = [
+      {
+        name: "Honey Nut Cheerios Cereal",
+        brand: "General Mills",
+        storeName: "Kroger",
+        price: 3.49,
+        unit: "oz",
+        normalizedUnit: "oz",
+        size: "12 oz",
+      },
+      {
+        name: "Honey Roasted Peanuts",
+        brand: "Planters",
+        storeName: "Kroger",
+        price: 2.99,
+        unit: "oz",
+        normalizedUnit: "oz",
+        size: "16 oz",
+      },
+      {
+        name: "Kroger Clover Honey",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 5.49,
+        unit: "oz",
+        normalizedUnit: "oz",
+        size: "12 oz",
+      },
+      {
+        name: "Great Value Honey",
+        brand: "Great Value",
+        storeName: "Walmart",
+        price: 4,
+        unit: "oz",
+        normalizedUnit: "oz",
+        size: "16 oz",
+      },
+    ];
+
+    const result = optimizeGroceryList(["Honey"], ["Kroger", "Walmart"], honey);
+    const pick = result.stores.flatMap((store) => store.items)[0];
+    assert.equal(pick?.name, "Great Value Honey");
+    assert.equal(pick?.storeName, "Walmart");
+    assert.equal(pick?.price, 4);
+    assert.equal(pick?.unitPriceText, "$4.00/lb");
+  });
+
+  it("compares milk by the gallon when the list does not name a size", () => {
+    const milk: CatalogProduct[] = [
+      {
+        name: "Great Value Whole Milk",
+        brand: "Great Value",
+        storeName: "Walmart",
+        price: 2,
+        unit: "gal",
+        normalizedUnit: "gal",
+        size: "0.5 gal",
+      },
+      {
+        name: "Kroger Vitamin D Whole Milk",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 3.5,
+        unit: "gal",
+        normalizedUnit: "gal",
+        size: "1 gal",
+      },
+    ];
+
+    const result = optimizeGroceryList(["milk"], ["Kroger", "Walmart"], milk);
+    const pick = result.stores[0]?.items[0];
+    assert.equal(pick?.name, "Kroger Vitamin D Whole Milk");
+    assert.equal(pick?.price, 3.5);
+    assert.equal(pick?.unitPriceText, "$3.50/gal");
+    assert.equal(result.total, 3.5);
+  });
+
+  it("keeps the gallon when the shopper asked for one, even if the half gallon has a better unit price", () => {
+    const milk: CatalogProduct[] = [
+      {
+        name: "Great Value Whole Milk",
+        brand: "Great Value",
+        storeName: "Walmart",
+        price: 1.5,
+        unit: "gal",
+        normalizedUnit: "gal",
+        size: "0.5 gal",
+      },
+      {
+        name: "Kroger Vitamin D Whole Milk",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 3.5,
+        unit: "gal",
+        normalizedUnit: "gal",
+        size: "1 gal",
+      },
+    ];
+
+    const byUnit = optimizeGroceryList(["milk"], ["Kroger", "Walmart"], milk);
+    assert.equal(byUnit.stores[0]?.items[0]?.name, "Great Value Whole Milk");
+    assert.equal(byUnit.stores[0]?.items[0]?.unitPriceText, "$3.00/gal");
+
+    const byRequest = optimizeGroceryList(
+      ["gallon of milk"],
+      ["Kroger", "Walmart"],
+      milk
+    );
+    const pick = byRequest.stores[0]?.items[0];
+    assert.equal(pick?.name, "Kroger Vitamin D Whole Milk");
+    assert.equal(pick?.price, 3.5);
+    assert.equal(pick?.unitPriceText, "$3.50/gal");
+  });
+
+  it("compares eggs per count, and respects a requested dozen", () => {
+    const eggs: CatalogProduct[] = [
+      {
+        name: "Large Eggs",
+        brand: "Great Value",
+        storeName: "Walmart",
+        price: 3,
+        unit: "count",
+        normalizedUnit: "count",
+        size: "12 ct",
+      },
+      {
+        name: "Large Eggs",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 3.6,
+        unit: "count",
+        normalizedUnit: "count",
+        size: "18 ct",
+      },
+    ];
+
+    const open = optimizeGroceryList(["eggs"], ["Kroger", "Walmart"], eggs);
+    assert.equal(open.stores[0]?.items[0]?.storeName, "Kroger");
+    assert.equal(open.stores[0]?.items[0]?.unitPriceText, "$0.20/ct");
+
+    const dozen = optimizeGroceryList(["12 ct eggs"], ["Kroger", "Walmart"], eggs);
+    const pick = dozen.stores[0]?.items[0];
+    assert.equal(pick?.storeName, "Walmart");
+    assert.equal(pick?.price, 3);
+    assert.equal(pick?.unitPriceText, "$0.25/ct");
+  });
+
+  it("prefers chicken breast over cheaper chicken-flavored crackers", () => {
+    const chicken: CatalogProduct[] = [
+      {
+        name: "Chicken Flavored Crackers",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 1.99,
+        unit: "oz",
+        normalizedUnit: "oz",
+        size: "8 oz",
+      },
+      {
+        name: "Boneless Skinless Chicken Breast",
+        brand: "Simple Truth",
+        storeName: "Kroger",
+        price: 6.49,
+        unit: "lbs",
+        normalizedUnit: "lbs",
+        size: "1 lb",
+      },
+    ];
+
+    const result = optimizeGroceryList(["chicken"], ["Kroger"], chicken);
+    assert.equal(result.stores[0]?.items[0]?.name, "Boneless Skinless Chicken Breast");
+    assert.equal(result.stores[0]?.items[0]?.unitPriceText, "$6.49/lb");
+  });
 });

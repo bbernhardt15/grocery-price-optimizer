@@ -16,6 +16,7 @@ type LeanProduct = {
   productId?: string;
   upc?: string;
   price: number;
+  size?: string;
   unit: string;
   normalizedUnit: string;
   lastUpdated?: Date;
@@ -80,6 +81,7 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
     productId: doc.productId,
     upc: doc.upc,
     price: doc.price,
+    ...(doc.size ? { size: doc.size } : {}),
     unit: doc.unit,
     normalizedUnit: doc.normalizedUnit,
     lastUpdated: doc.lastUpdated,

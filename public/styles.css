@@ -654,10 +654,21 @@ button:disabled {
   white-space: nowrap;
 }
 
-.item-line span {
+.item-line .item-copy {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.item-price {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit-price {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
 }
 
 .item-open {

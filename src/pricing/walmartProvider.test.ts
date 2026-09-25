@@ -68,6 +68,7 @@ describe("WalmartPricingProvider", () => {
     assert.equal(products[0].upc, "078742000012");
     assert.equal(products[0].priceSource, "live");
     assert.equal(products[0].unit, "gal");
+    assert.equal(products[0].size, "1 gal");
     assert.ok(calls[0].startsWith(`${WALMART_AFFILIATE_BASE}/search?`));
     assert.match(calls[0], /query=milk/);
     assert.match(calls[0], /publisherId=impact-123/);

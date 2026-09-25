@@ -29,6 +29,15 @@ describe("parseGroceryLine", () => {
     assert.equal(parseGroceryLine("Milk x 2")?.quantity, 2);
   });
 
+  it("keeps a leading package size on the item name", () => {
+    assert.equal(parseGroceryLine("12 ct eggs")?.name, "12 ct eggs");
+    assert.equal(parseGroceryLine("12 ct eggs")?.quantity, 1);
+    assert.equal(parseGroceryLine("12 oz honey")?.name, "12 oz honey");
+    assert.equal(parseGroceryLine("12 oz honey")?.quantity, 1);
+    assert.equal(parseGroceryLine("1 gallon of milk")?.name, "1 gallon of milk");
+    assert.equal(parseGroceryLine("1 gallon of milk")?.quantity, 1);
+  });
+
   it("does not treat 2% Milk as quantity 2", () => {
     assert.equal(parseGroceryLine("2% Milk")?.name, "2% Milk");
     assert.equal(parseGroceryLine("2% Milk")?.quantity, 1);
