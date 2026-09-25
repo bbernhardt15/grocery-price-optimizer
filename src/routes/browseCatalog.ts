@@ -8,6 +8,7 @@ import {
 } from "../catalog/service";
 import { catalogCoverage } from "../catalog/coverage";
 import type { BrowseSort, SizeClass } from "../catalog/types";
+import { noteShopperZip } from "../ingest/runner";
 
 const router = Router();
 
@@ -120,6 +121,9 @@ router.get("/catalog/browse", async (req, res) => {
   if (zipCode === "invalid") {
     res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
     return;
+  }
+  if (zipCode) {
+    void noteShopperZip(zipCode).catch(() => undefined);
   }
   const sortRaw = String(req.query.sort ?? "");
   const sizeRaw = String(req.query.size ?? req.query.sizeClass ?? "");

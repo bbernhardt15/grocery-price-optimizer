@@ -19,6 +19,10 @@ export type RawCatalogRecord = {
   /** Retailer item id used for cart handoff (Walmart itemId, Kroger productId). */
   retailerItemId?: string;
   locationId?: string;
+  /** ZIP this offer was priced for (Kroger location refresh). */
+  zip?: string;
+  /** Walmart product page, kept for add-to-cart context. */
+  productUrl?: string;
   size?: string;
   imageUrls?: string[];
   /** Already-mapped department, when the caller knows it (demo catalog). */

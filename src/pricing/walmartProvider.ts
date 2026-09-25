@@ -291,7 +291,7 @@ export class WalmartPricingProvider implements StorePricingProvider {
     const response = await this.affiliateGet(pathAndQuery, credentials);
     const payload = (await response.json().catch(() => ({}))) as WalmartSearchResponse;
     if (!response.ok) {
-      throw new StorePricingError("Walmart", errorMessage(payload, response.status), "http");
+      throw new StorePricingError("Walmart", errorMessage(payload, response.status), "http", response.status);
     }
     return payload;
   }

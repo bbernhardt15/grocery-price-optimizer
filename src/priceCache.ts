@@ -19,6 +19,10 @@ import type {
 } from "./pricing/types";
 import { StorePricingError } from "./pricing/types";
 import { productSearchAttempts } from "./productSearchQuery";
+import { ingestConfig } from "./ingest/config";
+import { storedLineProducts } from "./ingest/readStore";
+import { upsertCatalogRecords } from "./ingest/upsert";
+import { rawFromCatalogProduct } from "./catalog/providers/fromCatalogProduct";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -258,6 +262,23 @@ export async function resolveCatalogProducts(
       const dedicated = dedicatedProviderForStore(storeName);
       const flipp = flippProviderForStore(storeName);
 
+      if (ingestConfig().dbFirst) {
+        const storedKey = storeName.trim().toLowerCase();
+        if (storedKey === "walmart" || storedKey === "kroger") {
+          const stored = await storedLineProducts(line.name, storeName, krogerId);
+          if (stored.length > 0) {
+            const seeded = stored.every((product) => product.priceSource === "seed");
+            add(stored, line.name, seeded ? "seed" : "cached_live");
+            if (seeded) {
+              acc.seedHits += 1;
+            } else {
+              acc.cachedHits += 1;
+            }
+            continue;
+          }
+        }
+      }
+
       const liveCached = await fetchMatchingProductsForQuery(
         line.name,
         [storeName],
@@ -287,6 +308,14 @@ export async function resolveCatalogProducts(
             add(saved, line.name, "live");
             acc.liveHits += 1;
             acc.fetchedAt = new Date();
+            if (ingestConfig().dbFirst && (storeName.trim().toLowerCase() === "walmart" || storeName.trim().toLowerCase() === "kroger")) {
+              const records = live
+                .map((product) => rawFromCatalogProduct(product, "live"))
+                .filter((record): record is NonNullable<typeof record> => record !== null);
+              await upsertCatalogRecords(records).catch((error: unknown) => {
+                console.warn(`Catalog write-back failed: ${error instanceof Error ? error.message : String(error)}`);
+              });
+            }
             continue;
           }
         } catch (error) {
