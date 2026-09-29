@@ -121,6 +121,7 @@ export async function upsertCatalogRecords(
     const useExplicit = Boolean(
       explicitId &&
         explicitId !== "other" &&
+        fromPath.signal !== "excluded" &&
         !categoryIsSpecific &&
         !nameKnows &&
         (fromPath.signal === "broad" || fromPath.signal === "none" || fromPath.departmentId === "other")

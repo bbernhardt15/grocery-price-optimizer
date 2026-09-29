@@ -7,6 +7,8 @@ import { walmartPricingProvider } from "../pricing/walmartProvider";
 export type WalmartCatalogClient = {
   taxonomy(): Promise<unknown>;
   page(path: string): Promise<unknown>;
+  /** Affiliate GET /items?upc=. Optional so tests that only page stay quiet. */
+  lookupUpc?(upc: string): Promise<unknown>;
 };
 
 export type KrogerPageQuery = {
@@ -23,12 +25,15 @@ export type KrogerPageQuery = {
 export type KrogerCatalogClient = {
   page(query: KrogerPageQuery): Promise<{ records: RawCatalogRecord[]; returned: number }>;
   resolveLocation(zip: string): Promise<string | null>;
+  /** Products API filter.productId. Optional so term-only tests stay quiet. */
+  lookupProductId?(productId: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
 };
 
 export function walmartAffiliateClient(): WalmartCatalogClient {
   return {
     taxonomy: () => walmartPricingProvider.getJson("/taxonomy"),
     page: (path) => walmartPricingProvider.getJson(path),
+    lookupUpc: (upc) => walmartPricingProvider.lookupByUpc(upc),
   };
 }
 
@@ -64,6 +69,21 @@ export function krogerProductsClient(): KrogerCatalogClient {
       }
       const locationId = await krogerService.getClosestStoreLocationStrict(zip);
       return locationId?.trim() || null;
+    },
+    async lookupProductId(productId, locationId) {
+      const page = await krogerService.productsById(productId, locationId);
+      const records: RawCatalogRecord[] = [];
+      for (const product of page.products) {
+        const raw = rawFromCatalogProduct(product, "live");
+        if (!raw) {
+          continue;
+        }
+        if (locationId) {
+          raw.locationId = locationId;
+        }
+        records.push(raw);
+      }
+      return { records, returned: page.returned };
     },
   };
 }

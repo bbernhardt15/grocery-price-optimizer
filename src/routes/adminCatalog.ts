@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
-import { adminAuthorized, adminTokenConfigured, catalogStatus } from "../ingest/status";
+import { adminAuthorized, adminTokenConfigured, catalogMatchSample, catalogSample, catalogStatus } from "../ingest/status";
 
 const router = Router();
 
@@ -28,6 +28,37 @@ router.get("/admin/catalog/status", async (req: Request, res: Response) => {
   }
   try {
     res.json(await catalogStatus());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/sample", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  const department = typeof req.query.department === "string" ? req.query.department : "";
+  const limit = Number(req.query.limit ?? 20);
+  try {
+    const body = await catalogSample(department, limit);
+    if ("error" in body) {
+      res.status(400).json(body);
+      return;
+    }
+    res.json(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/match-sample", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  try {
+    res.json(await catalogMatchSample());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });

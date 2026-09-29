@@ -100,8 +100,13 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
   return reported;
 }
 
+export const WALMART_TAXONOMY_VERSION = 2;
+
 function isGrocery(node: Taxon): boolean {
   const mapped = mapToDepartment([node.path, node.name], node.name);
+  if (mapped.signal === "excluded") {
+    return false;
+  }
   if (mapped.departmentId !== "other") {
     return true;
   }

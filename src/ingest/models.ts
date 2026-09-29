@@ -14,6 +14,9 @@ const masterSchema = new Schema(
     walmartItemId: { type: String },
     krogerProductId: { type: String },
     lastSeenAt: { type: Date, required: true },
+    /** Set when a cross-store UPC lookup has been tried. Not a delete. */
+    matchWalmartAt: { type: Date },
+    matchKrogerAt: { type: Date },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -116,6 +119,8 @@ export type CatalogMasterDoc = {
   walmartItemId?: string;
   krogerProductId?: string;
   lastSeenAt: Date;
+  matchWalmartAt?: Date;
+  matchKrogerAt?: Date;
   status: CatalogStatus;
 };
 

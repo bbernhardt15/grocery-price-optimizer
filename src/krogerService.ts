@@ -355,14 +355,19 @@ export class KrogerService {
   private async fetchProductPayload(
     term: string,
     locationId?: string,
-    paging?: { start?: number; limit?: number; brand?: string }
+    paging?: { start?: number; limit?: number; brand?: string; productId?: string }
   ): Promise<{ products: KrogerProduct[]; status: number }> {
     const token = await this.getAccessToken();
     const limit = Math.min(Math.max(paging?.limit ?? 25, 1), 200);
     const params = new URLSearchParams({
-      "filter.term": term,
       "filter.limit": String(limit),
     });
+    const productId = paging?.productId?.trim();
+    if (productId) {
+      params.set("filter.productId", productId);
+    } else {
+      params.set("filter.term", term);
+    }
     const startParam = krogerStartParam(paging?.start);
     if (startParam.action === "too-high") {
       throw new KrogerPricingError(
@@ -482,6 +487,27 @@ export class KrogerService {
     });
     const products = page.products
       .map((product) => toCatalogProduct(product, locationId))
+      .filter((product): product is CatalogProduct => product !== null);
+    return { products, returned: page.products.length };
+  }
+
+  /**
+   * GET /v1/products?filter.productId={id}
+   * Kroger's id is the 13-digit UPC body (no check digit). One id per call.
+   * Shopper search does not use this. Ingest charges it on the Kroger budget.
+   */
+  async productsById(
+    productId: string,
+    locationId?: string
+  ): Promise<{ products: CatalogProduct[]; returned: number }> {
+    const id = productId.trim();
+    if (!/^\d{8,14}$/.test(id)) {
+      return { products: [], returned: 0 };
+    }
+    const storeId = locationId?.trim() || undefined;
+    const page = await this.fetchProductPayload("", storeId, { productId: id, limit: 5 });
+    const products = page.products
+      .map((product) => toCatalogProduct(product, storeId))
       .filter((product): product is CatalogProduct => product !== null);
     return { products, returned: page.products.length };
   }
