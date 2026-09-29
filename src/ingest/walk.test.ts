@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { nextKrogerStart, sanitizeKrogerParam } from "./krogerTerms";
+import { krogerAdvance, krogerStartParam, nextKrogerStart, pickBrandSplits, sanitizeKrogerParam } from "./krogerTerms";
 import { groceryLeaves, recordsFromWalmartPage, walmartNextCursor, walmartPagePath } from "./walmartWalk";
 
 describe("walmart catalog walk", () => {
@@ -128,5 +128,17 @@ describe("kroger page advance", () => {
     assert.equal(nextKrogerStart(0, 50, 50, 0, 3), 50);
     assert.equal(nextKrogerStart(50, 50, 12, 1, 3), null);
     assert.equal(nextKrogerStart(100, 50, 50, 2, 3), null);
+  });
+
+  it("treats start 0 as the first page and never advances past 250", () => {
+    assert.deepEqual(krogerStartParam(0), { action: "omit" });
+    assert.deepEqual(krogerStartParam(undefined), { action: "omit" });
+    assert.deepEqual(krogerStartParam(1), { action: "send", value: 1 });
+    assert.deepEqual(krogerStartParam(250), { action: "send", value: 250 });
+    assert.deepEqual(krogerStartParam(300), { action: "too-high" });
+    assert.equal(nextKrogerStart(200, 50, 50, 4, 20), 250);
+    assert.equal(krogerAdvance(250, 50, 50, 5, 20).kind, "start-ceiling");
+    assert.equal(nextKrogerStart(250, 50, 50, 5, 20), null);
+    assert.deepEqual(pickBrandSplits(["Chiquita", "Chiquita", "Dole", "Kroger"], ["Kroger"], 6), ["Chiquita", "Dole"]);
   });
 });

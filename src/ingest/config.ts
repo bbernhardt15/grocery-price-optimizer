@@ -74,14 +74,17 @@ export function ingestConfig(): IngestConfig {
     batchCalls: intEnv("CATALOG_INGEST_BATCH_CALLS", 4, 1, 25),
     staleDays,
     discontinueDays,
-    maxProducts: intEnv("CATALOG_MAX_PRODUCTS", 40_000, 1, 500_000),
-    maxOffers: intEnv("CATALOG_MAX_OFFERS", 160_000, 1, 2_000_000),
+    // 150k masters is about 180 MB of documents; 500k offers about 200 MB.
+    // Indexes are often about the same size again, so plan on roughly 760 MB.
+    maxProducts: intEnv("CATALOG_MAX_PRODUCTS", 150_000, 1, 500_000),
+    maxOffers: intEnv("CATALOG_MAX_OFFERS", 500_000, 1, 2_000_000),
     refreshHours: intEnv("CATALOG_REFRESH_HOURS", 24, 1, 24 * 30),
     walmartEnabled: boolEnv("WALMART_INGEST_ENABLED", true),
     krogerEnabled: boolEnv("KROGER_INGEST_ENABLED", true),
-    walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 1500, 1, 100_000),
-    // 5s: production 429'd on a ~2s burst well under the daily cap (2026-09-25).
-    walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 5000, 0, 120_000),
+    // 500/day: production 429'd at ~660 calls with a 5s gap (2026-09-29).
+    // This caps the crawler only. Shopper searches are not charged and are not blocked.
+    walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 500, 1, 100_000),
+    walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 10_000, 0, 120_000),
     krogerDailyBudget: intEnv("KROGER_INGEST_DAILY_BUDGET", 4000, 1, 100_000),
     krogerMinIntervalMs: intEnv("KROGER_INGEST_MIN_INTERVAL_MS", 500, 0, 120_000),
     krogerPageLimit: intEnv("KROGER_PAGE_LIMIT", 50, 1, 200),

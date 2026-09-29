@@ -66,4 +66,43 @@ describe("mapToDepartment", () => {
   it("falls back to Other when nothing matches", () => {
     assert.equal(mapToDepartment(["Miscellaneous"], "Widget").departmentId, "other");
   });
+
+  it("maps Kroger aisle labels and keeps pantry for shelf-stable staples", () => {
+    const labels: Array<[string, string]> = [
+      ["Snacks", "snacks"],
+      ["Frozen", "frozen"],
+      ["Beverages", "beverages"],
+      ["Breakfast", "breakfast"],
+      ["Bakery", "bakery"],
+      ["Canned & Packaged", "pantry"],
+      ["Condiments & Sauces", "pantry"],
+      ["Baking Goods", "pantry"],
+      ["Pasta, Sauces, Grain", "pantry"],
+      ["International", "pantry"],
+      ["Adult Beverage", "beverages"],
+      ["Health & Beauty", "personal-care"],
+      ["Cleaning Products", "household"],
+      ["Pet Care", "pet"],
+      ["Baby", "baby"],
+    ];
+    for (const [label, departmentId] of labels) {
+      assert.equal(mapToDepartment([label], "Store Brand Item").departmentId, departmentId, label);
+    }
+    assert.equal(mapToDepartment(["Canned & Packaged"], "Chicken Breast").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Pet Care"], "Chicken Recipe").departmentId, "pet");
+    assert.equal(mapToDepartment(["Condiments & Sauces"], "Ketchup").subcategory, "Condiments");
+    assert.equal(mapToDepartment(["Baking Goods"], "All Purpose Flour").subcategory, "Baking");
+  });
+
+  it("does not let a trailing Pantry bucket beat a more specific aisle", () => {
+    assert.equal(
+      mapToDepartment(["Food/Breakfast Foods/Cereal", "Food/Pantry"], "Toasted Flakes").departmentId,
+      "breakfast"
+    );
+    assert.equal(mapToDepartment(["Snacks", "Pantry"], "Party Mix").departmentId, "snacks");
+    assert.equal(mapToDepartment(["Pet Care", "Pantry"], "Savory Recipe").departmentId, "pet");
+    assert.equal(mapToDepartment(["Pantry"], "Creamy Peanut Butter").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Pantry"], "Purina ONE").signal, "broad");
+    assert.equal(mapToDepartment(["Pantry"], "Dry Dog Food").departmentId, "pet");
+  });
 });

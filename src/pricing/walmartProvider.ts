@@ -122,6 +122,16 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
   };
 }
 
+function rateLimitHeaders(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    if (/^(retry-after|ratelimit-|x-ratelimit-|x-rate-limit-)/i.test(key)) {
+      out[key.toLowerCase()] = value.slice(0, 200);
+    }
+  });
+  return out;
+}
+
 function errorMessage(payload: WalmartSearchResponse, status: number): string {
   const nested = payload.errors
     ?.map((entry) => entry.message || entry.description)
@@ -285,13 +295,27 @@ export class WalmartPricingProvider implements StorePricingProvider {
   /**
    * Signed GET against the Affiliate product host. Path must start with `/`
    * and already include the query string (`/taxonomy`, `/paginated/items?…`).
+   * A 429 keeps Retry-After, rate-limit headers, and the body on the error
+   * so the ingest log can show why the crawl paused. This call is not charged
+   * against the ingest ledger; shopper browse uses it the same way.
    */
   async getJson(pathAndQuery: string): Promise<unknown> {
     const credentials = this.credentialsOrThrow();
     const response = await this.affiliateGet(pathAndQuery, credentials);
-    const payload = (await response.json().catch(() => ({}))) as WalmartSearchResponse;
+    const text = await response.text();
+    let payload: WalmartSearchResponse = {};
+    if (text.trim()) {
+      try {
+        payload = JSON.parse(text) as WalmartSearchResponse;
+      } catch {
+        payload = { message: text.slice(0, 500) };
+      }
+    }
     if (!response.ok) {
-      throw new StorePricingError("Walmart", errorMessage(payload, response.status), "http", response.status);
+      throw new StorePricingError("Walmart", errorMessage(payload, response.status), "http", response.status, {
+        body: text.slice(0, 500),
+        headers: rateLimitHeaders(response.headers),
+      });
     }
     return payload;
   }

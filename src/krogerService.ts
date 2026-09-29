@@ -1,3 +1,4 @@
+import { krogerStartParam } from "./ingest/krogerTerms";
 import type { CatalogProduct } from "./optimizeGroceryList";
 
 const KROGER_API_BASE = "https://api.kroger.com/v1";
@@ -362,8 +363,16 @@ export class KrogerService {
       "filter.term": term,
       "filter.limit": String(limit),
     });
-    if (paging?.start && paging.start > 0) {
-      params.set("filter.start", String(Math.floor(paging.start)));
+    const startParam = krogerStartParam(paging?.start);
+    if (startParam.action === "too-high") {
+      throw new KrogerPricingError(
+        `Kroger filter.start ${Math.floor(paging?.start ?? 0)} is above 250 and was not sent`,
+        "http",
+        400
+      );
+    }
+    if (startParam.action === "send") {
+      params.set("filter.start", String(startParam.value));
     }
     if (paging?.brand?.trim()) {
       params.set("filter.brand", paging.brand.trim());

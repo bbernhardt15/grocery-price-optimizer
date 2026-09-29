@@ -41,8 +41,15 @@ describe("ingest throttle", () => {
     assert.equal(afternoon, "2026-09-25T18:55:00.000Z");
     const doubled = walmartCooldownUntil(new Date("2026-09-25T18:40:00.000Z"), 2);
     assert.equal(doubled, "2026-09-25T19:10:00.000Z");
-    const late = walmartCooldownUntil(new Date("2026-09-25T23:50:00.000Z"), 3);
+    const late = walmartCooldownUntil(new Date("2026-09-25T23:50:00.000Z"), 2);
     assert.equal(late, "2026-09-26T00:00:00.000Z");
+  });
+
+  it("stops Walmart for the rest of the UTC day after repeated 429s", () => {
+    const midday = walmartCooldownUntil(new Date("2026-09-29T13:12:00.000Z"), 3);
+    assert.equal(midday, "2026-09-30T00:00:00.000Z");
+    const evening = walmartCooldownUntil(new Date("2026-09-29T20:30:00.000Z"), 4);
+    assert.equal(evening, "2026-09-30T02:30:00.000Z");
   });
 
   it("resets the budget on the next UTC day", async () => {

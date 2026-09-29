@@ -462,15 +462,29 @@ describe("catalog ingestion", () => {
     const ok = await fetch(`${origin}/api/admin/catalog/status`, { headers: { authorization: "Bearer secret-token" } });
     assert.equal(ok.status, 200);
     delete process.env.WALMART_INGEST_MIN_INTERVAL_MS;
+    delete process.env.WALMART_INGEST_DAILY_BUDGET;
+    delete process.env.CATALOG_MAX_PRODUCTS;
+    delete process.env.CATALOG_MAX_OFFERS;
     const body = (await ok.json()) as {
-      counts: { products: number };
+      counts: {
+        products: number;
+        masters: { localWalmart: number; krogerOnly: number; walmartUpc: number; merged: number };
+      };
+      caps: { maxProducts: number; maxOffers: number };
       budget: { walmart: { limit: number; minIntervalMs: number } };
       shopperZips: Array<{ zip: string; hits: number }>;
       seedZips: string[];
     };
     assert.ok(body.counts.products > 0);
-    assert.equal(body.budget.walmart.limit, 1500);
-    assert.equal(body.budget.walmart.minIntervalMs, 5000);
+    assert.equal(body.caps.maxProducts, 150_000);
+    assert.equal(body.caps.maxOffers, 500_000);
+    assert.equal(body.budget.walmart.limit, 500);
+    assert.equal(body.budget.walmart.minIntervalMs, 10_000);
+    assert.equal(typeof body.counts.masters.localWalmart, "number");
+    assert.equal(
+      body.counts.masters.krogerOnly + body.counts.masters.walmartUpc + body.counts.masters.merged >= 0,
+      true
+    );
     const unconfirmed = await fetch(`${origin}/api/admin/catalog/reset-run-counters`, {
       method: "POST",
       headers: { authorization: "Bearer secret-token", "content-type": "application/json" },
@@ -579,5 +593,293 @@ describe("catalog ingestion", () => {
     assert.ok(result.updated >= 1);
     const row = await CatalogMaster.findOne({ key: "local:walmart:cereal-path" });
     assert.equal(row?.departmentId, "breakfast");
+    const krogerKey = upcKey("00032100000017");
+    await CatalogMaster.create({
+      key: krogerKey,
+      name: "Ice Pops",
+      brand: "Kroger",
+      departmentId: "pantry",
+      subcategory: "Canned",
+      categoryPaths: ["Frozen"],
+      krogerProductId: "00032100000017",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: "upc-canned-staple",
+      name: "Diced Tomatoes",
+      brand: "Kroger",
+      departmentId: "other",
+      categoryPaths: ["Canned & Packaged"],
+      krogerProductId: "00032100000024",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: "upc-pantry-path",
+      name: "Toasted Flakes",
+      brand: "Great Value",
+      departmentId: "pantry",
+      categoryPaths: ["Food/Breakfast Foods/Cereal", "Food/Pantry"],
+      walmartItemId: "9001",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    const again = await recategorizeCatalog();
+    assert.ok(again.updated >= 2);
+    assert.equal((await CatalogMaster.findOne({ key: krogerKey }))?.departmentId, "frozen");
+    assert.equal((await CatalogMaster.findOne({ key: krogerKey }))?.subcategory, undefined);
+    assert.equal((await CatalogMaster.findOne({ key: "upc-canned-staple" }))?.departmentId, "pantry");
+    assert.equal((await CatalogMaster.findOne({ key: "upc-pantry-path" }))?.departmentId, "breakfast");
+  });
+
+  it("upgrades a local Walmart key to the UPC in place when the catalog is full", async () => {
+    await CatalogMaster.deleteMany({ key: { $in: ["local:walmart:77", "local:walmart:88"] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: ["local:walmart:77", "local:walmart:88"] } });
+    await CatalogMaster.create({
+      key: "local:walmart:77",
+      name: "Mystery Cereal",
+      brand: "Great Value",
+      departmentId: "breakfast",
+      walmartItemId: "77",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "local:walmart:77",
+      storeName: "Walmart",
+      locationId: "",
+      price: 2.4,
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    const before = await CatalogMaster.countDocuments();
+    process.env.CATALOG_MAX_PRODUCTS = String(before);
+    const [withUpc] = recordsFromWalmartPage({
+      items: [{ itemId: 77, name: "Mystery Cereal", brandName: "Great Value", salePrice: 2.5, upc: "00066677788899" }],
+    });
+    const upgraded = await upsertCatalogRecords([withUpc!]);
+    const upc = upcKey("00066677788899");
+    assert.equal(upgraded.skippedByCap, 0);
+    assert.equal(await CatalogMaster.countDocuments(), before);
+    assert.equal(await CatalogMaster.countDocuments({ key: "local:walmart:77" }), 0);
+    assert.equal(await CatalogMaster.countDocuments({ key: upc }), 1);
+    assert.equal((await CatalogMaster.findOne({ key: upc }))?.walmartItemId, "77");
+    assert.equal(await CatalogOffer.countDocuments({ productKey: upc, storeName: "Walmart" }), 1);
+    assert.equal(await CatalogOffer.countDocuments({ productKey: "local:walmart:77" }), 0);
+    const blocked = await upsertCatalogRecords([
+      {
+        name: "New Cheese",
+        brand: "Kroger",
+        storeName: "Kroger",
+        price: 2.5,
+        upc: "00099900011122",
+        priceSource: "live",
+      },
+    ]);
+    assert.equal(blocked.skippedByCap, 1);
+    assert.equal(await CatalogMaster.countDocuments({ key: upcKey("00099900011122") }), 0);
+    delete process.env.CATALOG_MAX_PRODUCTS;
+  });
+
+  it("keeps a Kroger search term when the only category label is Pantry", async () => {
+    const saved = await upsertCatalogRecords([
+      {
+        name: "Purina ONE",
+        brand: "Purina",
+        storeName: "Kroger",
+        price: 14.5,
+        upc: "00017800123456",
+        productId: "00017800123456",
+        categories: ["Pantry"],
+        departmentId: "pet",
+        subcategory: "Dog",
+        priceSource: "live",
+      },
+    ]);
+    assert.equal(saved.skippedByCap, 0);
+    const row = await CatalogMaster.findOne({ key: upcKey("00017800123456") });
+    assert.equal(row?.departmentId, "pet");
+    assert.equal(row?.subcategory, "Dog");
+    assert.equal(row?.krogerProductId, "00017800123456");
+  });
+
+  it("stops a Kroger term at filter.start 250 and continues by brand", async () => {
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      calls: 0,
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 250,
+        pageIndex: 5,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        seenBrands: ["Dole"],
+        cycleStartedAt: "2026-09-29T12:00:00.000Z",
+      },
+    });
+    const seen: Array<{ start: number; term: string; brand?: string }> = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.krogerPageLimit = 50;
+    config.krogerMaxPagesPerTerm = 8;
+    const client = {
+      resolveLocation: async () => "01400431",
+      page: async (query: { start: number; term: string; brand?: string }) => {
+        seen.push({ start: query.start, term: query.term, brand: query.brand });
+        assert.ok(query.start <= 250);
+        if (query.brand) {
+          return { returned: 1, records: [] };
+        }
+        return {
+          returned: 50,
+          records: [
+            {
+              name: "Bananas",
+              brand: "Chiquita",
+              storeName: "Kroger",
+              price: 0.6,
+              upc: "00040110000018",
+              priceSource: "live" as const,
+            },
+          ],
+        };
+      },
+    };
+    await stepKroger({
+      client,
+      maxCalls: 2,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => new Date("2026-09-29T13:00:00.000Z"),
+    });
+    assert.equal(seen[0]?.start, 250);
+    assert.equal(seen[0]?.brand, undefined);
+    assert.equal(seen[1]?.start, 0);
+    assert.equal(seen[1]?.brand, "Dole");
+    assert.equal(seen[0]?.term, seen[1]?.term);
+    assert.equal(seen.some((row) => row.start > 250), false);
+  });
+
+  it("does not call Kroger when a saved start is already above 250", async () => {
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      calls: 0,
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 300,
+        pageIndex: 6,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: "2026-09-29T12:00:00.000Z",
+      },
+    });
+    const seen: number[] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    const client = {
+      resolveLocation: async () => "01400431",
+      page: async (query: { start: number; term: string }) => {
+        seen.push(query.start);
+        assert.ok(query.start <= 250);
+        return { returned: 1, records: [] };
+      },
+    };
+    await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => new Date("2026-09-29T13:00:00.000Z"),
+    });
+    assert.deepEqual(seen, [0]);
+    assert.equal(seen.includes(300), false);
+  });
+
+  it("escalates consecutive Walmart 429s and stores the rate-limit headers", async () => {
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    let clock = Date.parse("2026-09-29T13:12:00.000Z");
+    const now = () => new Date(clock);
+    const sleep = async (ms: number) => {
+      clock += ms;
+    };
+    let mode: "fail" | "ok" = "fail";
+    const client = {
+      taxonomy: async () => ({ categories: [{ id: "milk", name: "Milk", path: "Food/Dairy/Milk", children: [] }] }),
+      page: async () => {
+        if (mode === "ok") {
+          return { items: [], nextPage: "cursor-ok", nextPageExist: true };
+        }
+        const error = new Error("Walmart Affiliate API failed (429)");
+        (error as Error & { status: number; body: string; headers: Record<string, string> }).status = 429;
+        (error as Error & { body: string }).body = '{"message":"rate limit"}';
+        (error as Error & { headers: Record<string, string> }).headers = {
+          "retry-after": "900",
+          "x-ratelimit-remaining": "0",
+          authorization: "Bearer secret",
+        };
+        throw error;
+      },
+    };
+    const store = new MemoryBudgetStore();
+    await stepWalmart({ client, maxCalls: 2, store, sleep, config, now });
+    const firstHold = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { rateStrikes?: number; cooldownUntil?: string; index?: number };
+      recentErrors?: Array<{ status?: number; body?: string; headers?: Record<string, string> }>;
+    }>();
+    assert.equal(firstHold?.checkpoint?.rateStrikes, 1);
+    assert.equal(firstHold?.checkpoint?.index, 0);
+    assert.equal(firstHold?.checkpoint?.cooldownUntil, "2026-09-29T13:27:00.000Z");
+    assert.equal(firstHold?.recentErrors?.at(-1)?.headers?.["retry-after"], "900");
+    assert.equal(firstHold?.recentErrors?.at(-1)?.headers?.authorization, undefined);
+    assert.match(firstHold?.recentErrors?.at(-1)?.body ?? "", /rate limit/);
+    clock = Date.parse(firstHold?.checkpoint?.cooldownUntil ?? "") + 1000;
+    await stepWalmart({ client, maxCalls: 1, store, sleep, config, now });
+    const second = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { rateStrikes?: number; cooldownUntil?: string };
+    }>();
+    assert.equal(second?.checkpoint?.rateStrikes, 2);
+    assert.equal(second?.checkpoint?.cooldownUntil, new Date(clock + 30 * 60_000).toISOString());
+    mode = "ok";
+    clock = Date.parse(second?.checkpoint?.cooldownUntil ?? "") + 1000;
+    await stepWalmart({ client, maxCalls: 1, store, sleep, config, now });
+    const afterSuccess = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { rateStrikes?: number; successStreak?: number };
+    }>();
+    assert.equal(afterSuccess?.checkpoint?.rateStrikes, 2);
+    assert.equal(afterSuccess?.checkpoint?.successStreak, 1);
+    mode = "fail";
+    await stepWalmart({ client, maxCalls: 1, store, sleep, config, now });
+    const halted = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { rateStrikes?: number; cooldownUntil?: string; index?: number };
+    }>();
+    assert.equal(halted?.checkpoint?.rateStrikes, 3);
+    assert.equal(halted?.checkpoint?.index, 0);
+    assert.equal(halted?.checkpoint?.cooldownUntil, "2026-09-30T00:00:00.000Z");
   });
 });

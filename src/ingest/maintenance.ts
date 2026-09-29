@@ -48,7 +48,9 @@ export async function dropShadowLocalKeys(): Promise<{ masters: number; offers: 
 
 /**
  * Recompute departmentId from each master's stored category path and name.
- * Does not delete rows. A path that still maps to Other is left unchanged.
+ * Kroger-sourced rows are included: their `categories` array is what was
+ * saved on `categoryPaths`. Does not delete rows. A path that still maps
+ * to Other is left unchanged.
  */
 export async function recategorizeCatalog(): Promise<{ examined: number; updated: number }> {
   const rows = await CatalogMaster.find()
@@ -67,12 +69,9 @@ export async function recategorizeCatalog(): Promise<{ examined: number; updated
     }
     await CatalogMaster.updateOne(
       { key: row.key },
-      {
-        $set: {
-          departmentId: mapped.departmentId,
-          ...(mapped.subcategory ? { subcategory: mapped.subcategory } : {}),
-        },
-      }
+      mapped.subcategory
+        ? { $set: { departmentId: mapped.departmentId, subcategory: mapped.subcategory } }
+        : { $set: { departmentId: mapped.departmentId }, $unset: { subcategory: "" } }
     );
     updated += 1;
   }
