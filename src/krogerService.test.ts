@@ -225,6 +225,38 @@ describe("KrogerService.searchProducts", () => {
     );
   });
 
+  it("omits filter.start on the first page and refuses a start above 250", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    const urls: string[] = [];
+    mockFetch(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ data: [] });
+    });
+    const service = new KrogerService();
+    await service.searchProductsPage({ term: "milk", start: 0, limit: 50 });
+    const firstPage = urls.find((url) => url.includes("/products"));
+    assert.ok(firstPage);
+    assert.equal(firstPage.includes("filter.start"), false);
+    await service.searchProductsPage({ term: "milk", start: 250, limit: 50 });
+    const paged = urls.filter((url) => url.includes("/products")).at(-1) ?? "";
+    assert.match(paged, /filter\.start=250/);
+    await assert.rejects(
+      () => service.searchProductsPage({ term: "body wash", start: 300, limit: 50 }),
+      (error: unknown) => {
+        assert.ok(error instanceof KrogerPricingError);
+        assert.equal(error.status, 400);
+        assert.match(error.message, /was not sent/);
+        return true;
+      }
+    );
+    assert.equal(urls.some((url) => url.includes("filter.start=300")), false);
+  });
+
   it("attaches the response body when Products returns 400", async () => {
     process.env.KROGER_CLIENT_ID = "client-id";
     process.env.KROGER_CLIENT_SECRET = "client-secret";

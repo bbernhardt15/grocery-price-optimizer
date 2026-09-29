@@ -5,7 +5,19 @@
  * so a resume does not skip ahead on a stale index.
  */
 
-export const KROGER_TERMS_VERSION = 1;
+export const KROGER_TERMS_VERSION = 2;
+
+/**
+ * `filter.start` is how many rows to skip. The first page omits it
+ * (checkpoint start 0). Kroger rejects a sent value outside 1..250
+ * (PRODUCT-2021), so 250 is the last legal skip and 300 is never sent.
+ * That is a skip count, not a 1-based item index: a full page of 50
+ * advances 0 → 50 → 100 → 150 → 200 → 250, then the term stops.
+ */
+export const KROGER_START_MAX = 250;
+
+/** Brand queries queued when a broad term fills the start window. */
+export const KROGER_BRAND_SPLIT_LIMIT = 6;
 
 export type KrogerIngestTerm = {
   departmentId: string;
@@ -72,9 +84,14 @@ export const KROGER_INGEST_TERMS: readonly KrogerIngestTerm[] = [
   { departmentId: "household", subcategory: "Laundry", term: "laundry detergent" },
   { departmentId: "personal-care", subcategory: "Hair", term: "shampoo" },
   { departmentId: "personal-care", subcategory: "Body", term: "body wash" },
+  { departmentId: "personal-care", subcategory: "Body", term: "bar soap" },
   { departmentId: "personal-care", subcategory: "Oral Care", term: "toothpaste" },
   { departmentId: "pet", subcategory: "Dog", term: "dog food" },
+  { departmentId: "pet", subcategory: "Dog", term: "dry dog food" },
+  { departmentId: "pet", subcategory: "Dog", term: "wet dog food" },
   { departmentId: "pet", subcategory: "Cat", term: "cat food" },
+  { departmentId: "pet", subcategory: "Cat", term: "dry cat food" },
+  { departmentId: "pet", subcategory: "Cat", term: "wet cat food" },
 ];
 
 export type KrogerQuery = {
@@ -113,6 +130,50 @@ export function krogerQueries(): KrogerQuery[] {
   return queries;
 }
 
+export type KrogerStartParam =
+  | { action: "omit" }
+  | { action: "send"; value: number }
+  | { action: "too-high" };
+
+/**
+ * What to put in `filter.start`.
+ * Below 1 (including the checkpoint's 0) is the first page: omit the field.
+ * 1..250 is a skip count the Products API accepts.
+ * Above 250 must not be sent.
+ */
+export function krogerStartParam(start: number | undefined): KrogerStartParam {
+  if (start === undefined || !Number.isFinite(start) || start < 1) {
+    return { action: "omit" };
+  }
+  const value = Math.floor(start);
+  if (value > KROGER_START_MAX) {
+    return { action: "too-high" };
+  }
+  return { action: "send", value };
+}
+
+export type KrogerAdvanceKind = "page" | "short" | "page-cap" | "start-ceiling";
+
+export function krogerAdvance(
+  start: number,
+  limit: number,
+  returned: number,
+  pageIndex: number,
+  maxPages: number
+): { kind: KrogerAdvanceKind; start: number | null } {
+  if (returned < limit) {
+    return { kind: "short", start: null };
+  }
+  const next = start + returned;
+  if (next > KROGER_START_MAX) {
+    return { kind: "start-ceiling", start: null };
+  }
+  if (pageIndex + 1 >= maxPages) {
+    return { kind: "page-cap", start: null };
+  }
+  return { kind: "page", start: next };
+}
+
 export function nextKrogerStart(
   start: number,
   limit: number,
@@ -120,11 +181,32 @@ export function nextKrogerStart(
   pageIndex: number,
   maxPages: number
 ): number | null {
-  if (returned < limit) {
-    return null;
+  return krogerAdvance(start, limit, returned, pageIndex, maxPages).start;
+}
+
+/** Distinct brand names to search after an unbranded term hits the start ceiling. */
+export function pickBrandSplits(
+  brands: string[] | undefined,
+  skip: string[] = [],
+  limit = KROGER_BRAND_SPLIT_LIMIT
+): string[] {
+  const skipKeys = new Set(skip.map((brand) => brand.trim().toLowerCase()).filter(Boolean));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const brand of brands ?? []) {
+    const cleaned = sanitizeKrogerParam(brand, 40);
+    if (!cleaned) {
+      continue;
+    }
+    const key = cleaned.toLowerCase();
+    if (seen.has(key) || skipKeys.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(cleaned);
+    if (out.length >= limit) {
+      break;
+    }
   }
-  if (pageIndex + 1 >= maxPages) {
-    return null;
-  }
-  return start + returned;
+  return out;
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import { WALMART_AFFILIATE_BASE } from "./walmartAuth";
+import { StorePricingError } from "./types";
 import { WALMART_SETUP_HINT, WalmartPricingProvider } from "./walmartProvider";
 
 const originalFetch = globalThis.fetch;
@@ -85,6 +86,32 @@ describe("WalmartPricingProvider", () => {
       () => provider.searchProducts("eggs"),
       (error: unknown) => {
         assert.equal((error as Error).message, "Invalid consumer id");
+        return true;
+      }
+    );
+  });
+
+  it("keeps Retry-After, rate-limit headers, and the body on a 429", async () => {
+    installWalmartKeys();
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ message: "rate limit" }), {
+        status: 429,
+        headers: {
+          "retry-after": "900",
+          "x-ratelimit-remaining": "0",
+          "wm_sec.auth_signature": "do-not-store",
+        },
+      });
+    const provider = new WalmartPricingProvider();
+    await assert.rejects(
+      () => provider.getJson("/paginated/items?category=milk&count=25"),
+      (error: unknown) => {
+        assert.ok(error instanceof StorePricingError);
+        assert.equal(error.status, 429);
+        assert.match(error.body ?? "", /rate limit/);
+        assert.equal(error.headers?.["retry-after"], "900");
+        assert.equal(error.headers?.["x-ratelimit-remaining"], "0");
+        assert.equal(error.headers?.["wm_sec.auth_signature"], undefined);
         return true;
       }
     );

@@ -11,13 +11,21 @@ import {
   MongoBudgetStore,
   RateGate,
   retryClass,
+  WALMART_RATE_HALT_STRIKES,
   walmartCooldownUntil,
   type BudgetStore,
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
 import { ingestConfig, type IngestConfig } from "./config";
-import { KROGER_TERMS_VERSION, krogerQueries, nextKrogerStart, sanitizeKrogerParam } from "./krogerTerms";
+import {
+  KROGER_TERMS_VERSION,
+  krogerAdvance,
+  krogerQueries,
+  krogerStartParam,
+  pickBrandSplits,
+  sanitizeKrogerParam,
+} from "./krogerTerms";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import {
@@ -40,6 +48,8 @@ export type WalmartCheckpoint = {
   nextPage: string | null;
   attempts: number;
   rateStrikes: number;
+  /** Clean pages since the last 429. Three in a row clear the strike count. */
+  successStreak: number;
   cooldownUntil?: string;
   nextAllowedAt?: string;
   cycleStartedAt: string;
@@ -58,6 +68,12 @@ export type KrogerCheckpoint = {
   start: number;
   pageIndex: number;
   attempts: number;
+  /** Brands still to run for the current term after filter.start hits 250. */
+  brandSplits?: string[];
+  /** Brand applied on top of the current term. Unset during the unbranded pass. */
+  splitBrand?: string;
+  /** Brands seen on the unbranded pass, used if the start ceiling is hit. */
+  seenBrands?: string[];
   pendingZips: string[];
   clientErrorStreak: number;
   clientErrorLocationId?: string;
@@ -98,6 +114,7 @@ function emptyWalmart(now: Date): WalmartCheckpoint {
     nextPage: null,
     attempts: 0,
     rateStrikes: 0,
+    successStreak: 0,
     cycleStartedAt: now.toISOString(),
   };
 }
@@ -127,6 +144,7 @@ function asWalmart(value: unknown, now: Date): WalmartCheckpoint {
     ...record,
     categories: Array.isArray(record.categories) ? record.categories : [],
     rateStrikes: typeof record.rateStrikes === "number" ? record.rateStrikes : 0,
+    successStreak: typeof record.successStreak === "number" ? record.successStreak : 0,
   };
 }
 
@@ -139,6 +157,9 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     plannedZips: Array.isArray(record.plannedZips) ? record.plannedZips : [],
     pendingZips: Array.isArray(record.pendingZips) ? record.pendingZips.filter((zip) => /^\d{5}$/.test(zip)) : [],
     clientErrorStreak: typeof record.clientErrorStreak === "number" ? record.clientErrorStreak : 0,
+    brandSplits: Array.isArray(record.brandSplits) ? record.brandSplits.filter((brand) => typeof brand === "string") : [],
+    seenBrands: Array.isArray(record.seenBrands) ? record.seenBrands.filter((brand) => typeof brand === "string") : [],
+    splitBrand: typeof record.splitBrand === "string" ? record.splitBrand : undefined,
   };
 }
 
@@ -229,6 +250,32 @@ function epochMs(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const WALMART_CLEAN_PAGES_TO_CLEAR = 3;
+
+/** One good page does not forgive a 429. Three clean pages in a row do. */
+function noteWalmartSuccess(cp: WalmartCheckpoint): void {
+  cp.successStreak += 1;
+  cp.attempts = 0;
+  delete cp.cooldownUntil;
+  if (cp.successStreak >= WALMART_CLEAN_PAGES_TO_CLEAR) {
+    cp.rateStrikes = 0;
+    cp.successStreak = 0;
+  }
+}
+
+/** A day-long halt expires into a fresh strike count so the next UTC day can try again. */
+function releaseWalmartHalt(cp: WalmartCheckpoint, now: Date): void {
+  if (cp.rateStrikes < WALMART_RATE_HALT_STRIKES) {
+    return;
+  }
+  const until = epochMs(cp.cooldownUntil);
+  if (until > 0 && until <= now.getTime()) {
+    cp.rateStrikes = 0;
+    cp.successStreak = 0;
+    delete cp.cooldownUntil;
+  }
+}
+
 export async function stepWalmart(options: {
   client: WalmartCatalogClient;
   maxCalls: number;
@@ -289,6 +336,7 @@ export async function stepWalmart(options: {
       await persist("paused");
       break;
     }
+    releaseWalmartHalt(cp, nowFn());
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories, nextAllowedAt: cp.nextAllowedAt };
     }
@@ -307,9 +355,7 @@ export async function stepWalmart(options: {
         cp.phase = cp.categories.length === 0 ? "done" : "categories";
         cp.index = 0;
         cp.nextPage = null;
-        cp.attempts = 0;
-        cp.rateStrikes = 0;
-        delete cp.cooldownUntil;
+        noteWalmartSuccess(cp);
         if (cp.phase === "done") {
           await persist("completed", { finished: true, cycle: true, clearError: true });
           break;
@@ -349,9 +395,7 @@ export async function stepWalmart(options: {
       const saved = await upsertCatalogRecords(records, nowFn());
       upserted += saved.offers;
       const next = walmartNextCursor(payload);
-      cp.attempts = 0;
-      cp.rateStrikes = 0;
-      delete cp.cooldownUntil;
+      noteWalmartSuccess(cp);
       if (next && next !== cp.nextPage) {
         cp.nextPage = next;
       } else {
@@ -396,6 +440,7 @@ async function failWalmart(
   const kind = retryClass(error);
   if (kind === "rate") {
     cp.rateStrikes += 1;
+    cp.successStreak = 0;
     cp.attempts = cp.rateStrikes;
     cp.cooldownUntil = walmartCooldownUntil(now, cp.rateStrikes);
     return { checkpoint: cp, paused: "rate", status: "paused", error: detail, stop: true };
@@ -484,6 +529,9 @@ export async function stepKroger(options: {
     cp.queryIndex = 0;
     cp.start = 0;
     cp.pageIndex = 0;
+    delete cp.splitBrand;
+    cp.brandSplits = [];
+    cp.seenBrands = [];
   }
   const queries = krogerQueries();
   let calls = 0;
@@ -534,6 +582,9 @@ export async function stepKroger(options: {
             cp.queryIndex = 0;
             cp.start = 0;
             cp.pageIndex = 0;
+            delete cp.splitBrand;
+            cp.brandSplits = [];
+            cp.seenBrands = [];
             await ShopperZip.updateOne({ zip }, { $set: { locationId } });
           }
           await persist("running", { clearError: true });
@@ -621,6 +672,9 @@ export async function stepKroger(options: {
       cp.queryIndex = 0;
       cp.start = 0;
       cp.pageIndex = 0;
+      delete cp.splitBrand;
+      cp.brandSplits = [];
+      cp.seenBrands = [];
       if (cp.locationIndex >= cp.locations.length) {
         cp.phase = "done";
         await persist("completed", { finished: true });
@@ -631,7 +685,8 @@ export async function stepKroger(options: {
     }
 
     const term = sanitizeKrogerParam(query.term.term, 80);
-    const brand = query.brand ? sanitizeKrogerParam(query.brand, 40) : null;
+    const splitBrand = cp.splitBrand ? sanitizeKrogerParam(cp.splitBrand, 40) : null;
+    const brand = splitBrand ?? (query.brand ? sanitizeKrogerParam(query.brand, 40) : null);
     if (!term || (query.brand && !brand)) {
       const detail = ingestErrorDetail(
         "kroger",
@@ -659,6 +714,15 @@ export async function stepKroger(options: {
       locationId: location.locationId,
       zip: location.zip,
     };
+    if (krogerStartParam(cp.start).action === "too-high") {
+      const opened = !cp.splitBrand && !query.brand && beginKrogerBrandSplit(cp, query.term.brands);
+      const continued = !opened && continueKrogerBrandSplit(cp);
+      if (!opened && !continued) {
+        skipKrogerQuery(cp);
+      }
+      await persist("running");
+      continue;
+    }
     try {
       const charged = await spendCall(
         productGate,
@@ -691,16 +755,27 @@ export async function stepKroger(options: {
       const page = charged;
       const saved = await upsertCatalogRecords(page.records, nowFn());
       upserted += saved.offers;
-      const next = nextKrogerStart(cp.start, config.krogerPageLimit, page.returned, cp.pageIndex, config.krogerMaxPagesPerTerm);
+      if (!brand) {
+        rememberKrogerBrands(cp, page.records);
+      }
+      const advance = krogerAdvance(
+        cp.start,
+        config.krogerPageLimit,
+        page.returned,
+        cp.pageIndex,
+        config.krogerMaxPagesPerTerm
+      );
       cp.attempts = 0;
       cp.clientErrorStreak = 0;
-      if (next === null) {
-        cp.queryIndex += 1;
-        cp.start = 0;
-        cp.pageIndex = 0;
-      } else {
-        cp.start = next;
+      if (advance.kind === "page" && advance.start !== null) {
+        cp.start = advance.start;
         cp.pageIndex += 1;
+      } else if (advance.kind === "start-ceiling" && !cp.splitBrand && !query.brand && beginKrogerBrandSplit(cp, query.term.brands)) {
+        // Broad term filled the 1..250 window. Keep going by brand instead of start=300.
+      } else if (cp.splitBrand && continueKrogerBrandSplit(cp)) {
+        // This brand is done. The next queued brand starts at the first page.
+      } else {
+        skipKrogerQuery(cp);
       }
       await persist("running", { clearError: true });
     } catch (error) {
@@ -731,11 +806,55 @@ export async function stepKroger(options: {
   return { provider: "kroger", calls, upserted, paused };
 }
 
+function rememberKrogerBrands(cp: KrogerCheckpoint, records: Array<{ brand?: string }>): void {
+  const next = [...(cp.seenBrands ?? [])];
+  for (const record of records) {
+    const brand = sanitizeKrogerParam(record.brand, 40);
+    if (!brand || next.some((item) => item.toLowerCase() === brand.toLowerCase())) {
+      continue;
+    }
+    next.push(brand);
+    if (next.length >= 24) {
+      break;
+    }
+  }
+  cp.seenBrands = next;
+}
+
+function beginKrogerBrandSplit(cp: KrogerCheckpoint, skip: string[] | undefined): boolean {
+  const splits = pickBrandSplits(cp.seenBrands, skip);
+  cp.seenBrands = [];
+  if (splits.length === 0) {
+    return false;
+  }
+  cp.splitBrand = splits[0];
+  cp.brandSplits = splits.slice(1);
+  cp.start = 0;
+  cp.pageIndex = 0;
+  return true;
+}
+
+function continueKrogerBrandSplit(cp: KrogerCheckpoint): boolean {
+  const next = cp.brandSplits?.[0];
+  if (!next) {
+    return false;
+  }
+  cp.brandSplits = cp.brandSplits?.slice(1) ?? [];
+  cp.splitBrand = next;
+  cp.start = 0;
+  cp.pageIndex = 0;
+  cp.seenBrands = [];
+  return true;
+}
+
 function skipKrogerQuery(cp: KrogerCheckpoint): void {
   cp.queryIndex += 1;
   cp.start = 0;
   cp.pageIndex = 0;
   cp.attempts = 0;
+  delete cp.splitBrand;
+  cp.brandSplits = [];
+  cp.seenBrands = [];
   if (cp.queryIndex < 0) {
     cp.queryIndex = 0;
   }
@@ -756,6 +875,9 @@ function noteKrogerClientError(cp: KrogerCheckpoint, locationId: string): "query
     cp.pageIndex = 0;
     cp.attempts = 0;
     cp.clientErrorStreak = 0;
+    delete cp.splitBrand;
+    cp.brandSplits = [];
+    cp.seenBrands = [];
     return "location";
   }
   skipKrogerQuery(cp);

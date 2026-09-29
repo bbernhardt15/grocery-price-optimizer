@@ -5,6 +5,15 @@ import type { RawCatalogRecord } from "../catalog/types";
 import { ingestConfig } from "./config";
 import { CatalogMaster, CatalogOffer, type CatalogStatus } from "./models";
 
+type CatalogMasterLean = {
+  name: string;
+  brand?: string;
+  imageUrls?: string[];
+  categoryPaths?: string[];
+  walmartItemId?: string;
+  krogerProductId?: string;
+};
+
 export function freshnessStatus(lastSeenAt: Date, now: Date, staleDays: number, discontinueDays: number): CatalogStatus {
   const ageMs = now.getTime() - lastSeenAt.getTime();
   if (ageMs >= discontinueDays * 86_400_000) {
@@ -16,17 +25,44 @@ export function freshnessStatus(lastSeenAt: Date, now: Date, staleDays: number, 
   return "active";
 }
 
-export function productKeyFor(record: RawCatalogRecord): string | null {
-  const upc = upcKey(record.upc);
-  if (upc) {
-    return upc;
-  }
+export function localProductKey(record: RawCatalogRecord): string | null {
   const itemId = record.retailerItemId?.trim() || record.productId?.trim();
   const store = record.storeName.trim().toLowerCase();
   if (!itemId || !store) {
     return null;
   }
   return `local:${store}:${itemId}`;
+}
+
+export function productKeyFor(record: RawCatalogRecord): string | null {
+  const upc = upcKey(record.upc);
+  if (upc) {
+    return upc;
+  }
+  return localProductKey(record);
+}
+
+/**
+ * Move offers off a `local:` shadow onto the UPC key. A colliding offer
+ * (same store and location) is dropped. Returns how many offer documents
+ * were removed.
+ */
+async function rekeyLocalOffers(fromKey: string, toKey: string): Promise<number> {
+  const offers = await CatalogOffer.find({ productKey: fromKey })
+    .select("_id storeName locationId")
+    .lean<Array<{ _id: unknown; storeName: string; locationId?: string }>>();
+  let removed = 0;
+  for (const offer of offers) {
+    const locationId = offer.locationId ?? "";
+    const clash = await CatalogOffer.exists({ productKey: toKey, storeName: offer.storeName, locationId });
+    if (clash) {
+      await CatalogOffer.deleteOne({ _id: offer._id });
+      removed += 1;
+    } else {
+      await CatalogOffer.updateOne({ _id: offer._id }, { $set: { productKey: toKey } });
+    }
+  }
+  return removed;
 }
 
 function unionCap(existing: string[] | undefined, incoming: string[] | undefined, cap: number): string[] {
@@ -56,6 +92,8 @@ export type UpsertResult = {
  * Idempotent upsert. The same UPC from Walmart and Kroger shares one master.
  * A second write updates price and lastSeenAt and clears a stale flag.
  * New keys are refused once the configured caps are reached.
+ * Renaming `local:walmart:{itemId}` onto a UPC is an in-place upgrade: it
+ * does not count as a new product, including when the catalog is already full.
  */
 export async function upsertCatalogRecords(
   records: RawCatalogRecord[],
@@ -76,17 +114,39 @@ export async function upsertCatalogRecords(
       continue;
     }
     const fromPath = mapToDepartment(record.categories, name);
+    const nameOnly = mapToDepartment(undefined, name);
     const explicitId = record.departmentId?.trim();
-    const mapped =
-      fromPath.departmentId !== "other"
-        ? fromPath
-        : explicitId && explicitId !== "other"
-          ? mapToDepartment(record.categories, name, {
-              departmentId: explicitId,
-              subcategory: record.subcategory,
-            })
-          : fromPath;
-    const existing = await CatalogMaster.findOne({ key }).lean<CatalogMasterLean | null>();
+    const categoryIsSpecific = fromPath.signal === "specific";
+    const nameKnows = nameOnly.departmentId !== "other";
+    const useExplicit = Boolean(
+      explicitId &&
+        explicitId !== "other" &&
+        !categoryIsSpecific &&
+        !nameKnows &&
+        (fromPath.signal === "broad" || fromPath.signal === "none" || fromPath.departmentId === "other")
+    );
+    const mapped = useExplicit
+      ? mapToDepartment(record.categories, name, {
+          departmentId: explicitId,
+          subcategory: record.subcategory,
+        })
+      : fromPath;
+    let existing = await CatalogMaster.findOne({ key }).lean<CatalogMasterLean | null>();
+    const shadowKey = localProductKey(record);
+    if (shadowKey && shadowKey !== key) {
+      const shadow = await CatalogMaster.findOne({ key: shadowKey }).lean<CatalogMasterLean | null>();
+      if (shadow) {
+        const removedOffers = await rekeyLocalOffers(shadowKey, key);
+        offerCount = Math.max(0, offerCount - removedOffers);
+        if (existing) {
+          await CatalogMaster.deleteOne({ key: shadowKey });
+          productCount = Math.max(0, productCount - 1);
+        } else {
+          await CatalogMaster.updateOne({ key: shadowKey }, { $set: { key } });
+          existing = shadow;
+        }
+      }
+    }
     if (!existing && productCount >= config.maxProducts) {
       skippedByCap += 1;
       continue;
@@ -170,15 +230,6 @@ export async function upsertCatalogRecords(
 
   return { masters, offers, skippedByCap };
 }
-
-type CatalogMasterLean = {
-  name: string;
-  brand?: string;
-  imageUrls?: string[];
-  categoryPaths?: string[];
-  walmartItemId?: string;
-  krogerProductId?: string;
-};
 
 export async function markStaleCatalog(now = new Date()): Promise<{ stale: number; discontinued: number }> {
   const config = ingestConfig();

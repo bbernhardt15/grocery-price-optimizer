@@ -43,8 +43,10 @@ export type IngestErrorDetail = {
   status: number | null;
   message: string;
   params: Record<string, string | number | boolean | null>;
-  /** Kroger's response body on a 4xx/5xx, trimmed and with credentials removed. */
+  /** Response body on a 4xx/5xx, trimmed and with credentials removed. */
   body?: string;
+  /** Retry-After and rate-limit headers only. Auth headers are dropped. */
+  headers?: Record<string, string>;
   at: string;
 };
 
@@ -65,14 +67,36 @@ export function ingestErrorDetail(
     clean[key] = value;
   }
   const body = responseBodyOf(error);
+  const headers = responseHeadersOf(error);
   return {
     provider,
     status: httpStatusOf(error),
     message: error instanceof Error ? error.message : String(error),
     params: clean,
     ...(body ? { body } : {}),
+    ...(headers ? { headers } : {}),
     at: now.toISOString(),
   };
+}
+
+const RATE_HEADER = /^(retry-after|ratelimit-.*|x-ratelimit-.*|x-rate-limit-.*)$/i;
+
+function responseHeadersOf(error: unknown): Record<string, string> | undefined {
+  if (!error || typeof error !== "object" || !("headers" in error)) {
+    return undefined;
+  }
+  const raw = (error as { headers?: unknown }).headers;
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string" || !value.trim() || SECRET_PARAM.test(key) || !RATE_HEADER.test(key)) {
+      continue;
+    }
+    out[key.toLowerCase()] = value.slice(0, 200);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function responseBodyOf(error: unknown): string | undefined {
@@ -111,16 +135,23 @@ export async function chargeCall<T>(gate: RateGate, run: () => Promise<T>, count
   return run();
 }
 
+/** After this many 429s in a row, stop Walmart ingest until the next UTC day (or six hours). */
+export const WALMART_RATE_HALT_STRIKES = 3;
+
 /**
- * 429 cooldown. Fifteen minutes, doubling each strike, never longer than six
- * hours and never past the next UTC midnight (when the daily ledger resets).
+ * 429 cooldown. Fifteen minutes, then thirty. A third strike stops the crawl
+ * until the next UTC midnight, and for at least six hours when midnight is
+ * sooner than that. One successful page does not clear the strike count.
  */
 export function walmartCooldownUntil(now: Date, strikes: number): string {
-  const baseMs = 15 * 60_000;
-  const capMs = 6 * 60 * 60_000;
-  const delay = Math.min(capMs, baseMs * 2 ** Math.max(0, strikes - 1));
-  const resume = now.getTime() + delay;
   const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  if (strikes >= WALMART_RATE_HALT_STRIKES) {
+    const sixHours = now.getTime() + 6 * 60 * 60_000;
+    return new Date(Math.max(midnight, sixHours)).toISOString();
+  }
+  const baseMs = 15 * 60_000;
+  const delay = baseMs * 2 ** Math.max(0, strikes - 1);
+  const resume = now.getTime() + delay;
   return new Date(Math.min(resume, midnight)).toISOString();
 }
 

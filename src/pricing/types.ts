@@ -23,18 +23,25 @@ export class StorePricingError extends Error {
   readonly storeName: string;
   readonly code: "missing_credentials" | "http" | "network" | "not_available";
   readonly status?: number;
+  /** Response body, trimmed. No Authorization header. */
+  readonly body?: string;
+  /** Retry-After and rate-limit headers captured from a 429. */
+  readonly headers?: Record<string, string>;
 
   constructor(
     storeName: string,
     message: string,
     code: "missing_credentials" | "http" | "network" | "not_available" = "http",
-    status?: number
+    status?: number,
+    extras?: { body?: string; headers?: Record<string, string> }
   ) {
     super(message);
     this.name = "StorePricingError";
     this.storeName = storeName;
     this.code = code;
     this.status = status;
+    this.body = extras?.body;
+    this.headers = extras?.headers;
   }
 }
 

@@ -55,6 +55,21 @@ type Rule = {
  * ("peanut butter" before "butter", "ice cream" before "cream").
  */
 const RULES: readonly Rule[] = [
+  { test: /^snacks?$/i, departmentId: "snacks" },
+  { test: /^frozen(?:\s+foods?)?$/i, departmentId: "frozen" },
+  { test: /^beverages?$/i, departmentId: "beverages" },
+  { test: /^breakfast(?:\s+foods?)?$/i, departmentId: "breakfast" },
+  { test: /^bakery(?:\s*&\s*bread)?$/i, departmentId: "bakery" },
+  { test: /^canned\s*&\s*packaged$/i, departmentId: "pantry", subcategory: "Canned" },
+  { test: /^condiments?\s*&\s*(?:sauces?|toppings)$/i, departmentId: "pantry", subcategory: "Condiments" },
+  { test: /^baking goods$/i, departmentId: "pantry", subcategory: "Baking" },
+  { test: /^pasta,\s*sauces?,\s*grain$/i, departmentId: "pantry", subcategory: "Pasta & Rice" },
+  { test: /^international$/i, departmentId: "pantry" },
+  { test: /^adult beverages?$/i, departmentId: "beverages" },
+  { test: /^health\s*&\s*beauty$/i, departmentId: "personal-care" },
+  { test: /^cleaning products?$/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /^pet care$/i, departmentId: "pet" },
+  { test: /^baby$/i, departmentId: "baby" },
   { test: /diaper|baby wipe|infant formula|baby food/i, departmentId: "baby", subcategory: "Diapers" },
   { test: /formula/i, departmentId: "baby", subcategory: "Baby Food" },
   { test: /dog food|dog treat|puppy/i, departmentId: "pet", subcategory: "Dog" },
@@ -132,13 +147,22 @@ export type MappedDepartment = {
   departmentId: string;
   departmentName: string;
   subcategory?: string;
+  /**
+   * specific: a real aisle label (Snacks, Pet Care, Canned & Packaged).
+   * broad: only a weak bucket such as Pantry, so a search term may still win.
+   * name: the product name decided. none: nothing matched.
+   */
+  signal?: "specific" | "broad" | "name" | "none";
 };
+
+/** A lone "Pantry" (or Grocery/Food) must not beat a more specific aisle later in the path. */
+const WEAK_SEGMENT = /^(pantry|grocery|food|natural\s*&\s*organic)$/i;
 
 const BROAD_CATEGORY =
   /^(dairy|grocery|food|frozen|pantry|snacks?|beverages?|household|meat|produce|bakery|deli|breakfast|baby|pets?|health|beauty|personal care|health & beauty)$/i;
 
 /** Walmart repeats the root ("Food", "Home Page") on every node. Those segments are not a department. */
-const GENERIC_SEGMENT = /^(home page|grocery|food|shop all|all|categories)$/i;
+const GENERIC_SEGMENT = /^(home page|grocery|food|shop all|all|categories|natural\s*&\s*organic)$/i;
 
 function pathSegments(categories: string[]): string[] {
   const segments: string[] = [];
@@ -191,25 +215,43 @@ export function mapToDepartment(
         `${(categories ?? []).join(" ")} ${name}`,
         explicit?.subcategory
       ),
+      signal: "specific",
     };
   }
 
   const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
   const categoryText = labels.join(" / ");
   const segments = pathSegments(labels);
-  let fromCategory: Rule | undefined;
-  let categorySource = "";
+  let specificRule: Rule | undefined;
+  let specificSource = "";
+  let weakRule: Rule | undefined;
+  let weakSource = "";
   for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const rule = matchRules(segments[index] ?? "");
-    if (rule) {
-      fromCategory = rule;
-      categorySource = segments[index] ?? "";
-      break;
+    const segment = segments[index] ?? "";
+    const rule = matchRules(segment);
+    if (!rule) {
+      continue;
     }
+    if (WEAK_SEGMENT.test(segment.trim())) {
+      if (!weakRule) {
+        weakRule = rule;
+        weakSource = segment;
+      }
+      continue;
+    }
+    specificRule = rule;
+    specificSource = segment;
+    break;
   }
+  let fromCategory = specificRule ?? weakRule;
+  let categorySource = specificRule ? specificSource : weakSource;
+  let signal: MappedDepartment["signal"] = specificRule ? "specific" : fromCategory ? "broad" : "none";
   if (!fromCategory) {
     fromCategory = matchRules(categoryText);
     categorySource = categoryText;
+    if (fromCategory) {
+      signal = WEAK_SEGMENT.test(categorySource.trim()) || BROAD_CATEGORY.test(categorySource.trim()) ? "broad" : "specific";
+    }
   }
   const fromName = matchRules(name);
 
@@ -218,9 +260,13 @@ export function mapToDepartment(
     fromCategory &&
     fromName &&
     fromName.departmentId !== fromCategory.departmentId &&
-    BROAD_CATEGORY.test(categorySource.trim())
+    signal === "broad"
   ) {
     rule = fromName;
+    signal = "name";
+  } else if (!fromCategory && fromName) {
+    rule = fromName;
+    signal = "name";
   }
 
   const departmentId = rule?.departmentId ?? "other";
@@ -235,5 +281,6 @@ export function mapToDepartment(
       haystack,
       sameDepartment?.subcategory ?? rule?.subcategory ?? explicit?.subcategory
     ),
+    signal,
   };
 }

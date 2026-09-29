@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import type { PipelineStage } from "mongoose";
 import { DEPARTMENTS } from "../catalog/departments";
 import { estimateStorageBytes, ingestConfig } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
@@ -20,10 +21,78 @@ export function presentIngestError(entry: unknown): IngestErrorDetail | { messag
       message: typeof record.message === "string" ? record.message : "Ingest error",
       params,
       ...(typeof record.body === "string" && record.body ? { body: record.body } : {}),
+      ...(record.headers && typeof record.headers === "object" ? { headers: stringHeaders(record.headers) } : {}),
       at: typeof record.at === "string" ? record.at : "",
     };
   }
   return { message: String(entry) };
+}
+
+function stringHeaders(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string" && entry.trim()) {
+      out[key] = entry;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+type MasterCensus = {
+  localWalmart: number;
+  localOther: number;
+  krogerOnly: number;
+  walmartUpc: number;
+  merged: number;
+  otherUpc: number;
+};
+
+const EMPTY_CENSUS: MasterCensus = {
+  localWalmart: 0,
+  localOther: 0,
+  krogerOnly: 0,
+  walmartUpc: 0,
+  merged: 0,
+  otherUpc: 0,
+};
+
+/** How the product cap is filled: shadow keys vs Kroger-only vs Walmart UPC vs merged. */
+async function masterKeyCensus(): Promise<MasterCensus> {
+  const local = { $regexMatch: { input: "$key", regex: "^local:" } };
+  const localWalmart = { $regexMatch: { input: "$key", regex: "^local:walmart:" } };
+  const notLocal = { $not: [local] };
+  const hasWalmart = { $gt: [{ $strLenCP: { $ifNull: ["$walmartItemId", ""] } }, 0] };
+  const hasKroger = { $gt: [{ $strLenCP: { $ifNull: ["$krogerProductId", ""] } }, 0] };
+  const noWalmart = { $eq: [{ $strLenCP: { $ifNull: ["$walmartItemId", ""] } }, 0] };
+  const noKroger = { $eq: [{ $strLenCP: { $ifNull: ["$krogerProductId", ""] } }, 0] };
+  const count = (match: object) => ({ $sum: { $cond: [match, 1, 0] } });
+  const [row] = await CatalogMaster.aggregate<MasterCensus & { _id: null }>([
+    {
+      $group: {
+        _id: null,
+        localWalmart: count(localWalmart),
+        localOther: count({ $and: [local, { $not: [localWalmart] }] }),
+        merged: count({ $and: [notLocal, hasWalmart, hasKroger] }),
+        krogerOnly: count({ $and: [notLocal, hasKroger, noWalmart] }),
+        walmartUpc: count({ $and: [notLocal, hasWalmart, noKroger] }),
+        otherUpc: count({ $and: [notLocal, noWalmart, noKroger] }),
+      },
+    },
+  ] as PipelineStage[]);
+  if (!row) {
+    return EMPTY_CENSUS;
+  }
+  return {
+    localWalmart: row.localWalmart ?? 0,
+    localOther: row.localOther ?? 0,
+    krogerOnly: row.krogerOnly ?? 0,
+    walmartUpc: row.walmartUpc ?? 0,
+    merged: row.merged ?? 0,
+    otherUpc: row.otherUpc ?? 0,
+  };
 }
 
 function seedLocationsFrom(checkpoint: unknown, seedZips: string[]): Array<{ zip: string; locationId: string }> {
@@ -70,7 +139,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -87,6 +156,7 @@ export async function catalogStatus() {
     IngestCheckpoint.find().lean(),
     IngestBudget.find({ day }).lean<Array<{ provider: string; calls: number }>>(),
     ShopperZip.find({ hits: { $gt: 0 } }).sort({ lastSeenAt: -1 }).limit(config.shopperZipLimit).lean(),
+    masterKeyCensus(),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -106,6 +176,7 @@ export async function catalogStatus() {
       discontinuedOffers: discontinued,
       byStore: Object.fromEntries(byStore.map((row) => [row._id, row.count])),
       byDepartment: departmentCounts,
+      masters,
     },
     caps: {
       maxProducts: config.maxProducts,
