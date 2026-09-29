@@ -67,6 +67,49 @@ function hasGtinCheckDigit(digits: string): boolean {
   return gtinCheckDigit(digits.slice(0, -1)) === Number(digits[digits.length - 1]);
 }
 
+/** UPC-E, UPC-A, EAN-13, and GTIN-14 are the only lengths that carry a check digit. */
+function hasStandardCheckDigit(digits: string): boolean {
+  if (digits.length !== 8 && digits.length !== 12 && digits.length !== 13 && digits.length !== 14) {
+    return false;
+  }
+  return hasGtinCheckDigit(digits);
+}
+
+/**
+ * Digits with a valid GS1 check digit removed.
+ * A JSON number drops leading zeros (`049000042566` becomes `49000042566`).
+ * When the shorter value is not itself a check-digit code, pad it back to
+ * 12, 13, or 14 and keep the pad only if that form checks. A 13-digit
+ * Kroger code is left alone: its last digit is not a check digit, and
+ * padding it to 14 would risk dropping a real digit.
+ */
+function digitsWithoutCheck(upc: string | undefined | null): string | null {
+  if (!upc) {
+    return null;
+  }
+  let digits = upc.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 14) {
+    return null;
+  }
+  if (!hasStandardCheckDigit(digits) && digits.length < 13) {
+    const widths = digits.length <= 12 ? [12, 13, 14] : [13, 14];
+    for (const width of widths) {
+      if (digits.length >= width) {
+        continue;
+      }
+      const padded = digits.padStart(width, "0");
+      if (hasStandardCheckDigit(padded)) {
+        digits = padded;
+        break;
+      }
+    }
+  }
+  if (hasStandardCheckDigit(digits)) {
+    digits = digits.slice(0, -1);
+  }
+  return digits;
+}
+
 /**
  * Digits-only key shared by Walmart and Kroger.
  *
@@ -77,18 +120,35 @@ function hasGtinCheckDigit(digits: string): boolean {
  * are stripped, so both forms land on the same key. Too-short codes are ignored.
  */
 export function upcKey(upc: string | undefined | null): string | null {
-  if (!upc) {
+  const digits = digitsWithoutCheck(upc);
+  if (!digits) {
     return null;
-  }
-  let digits = upc.replace(/\D/g, "");
-  if (digits.length < 8 || digits.length > 14) {
-    return null;
-  }
-  if ((digits.length === 8 || digits.length === 12 || digits.length === 13 || digits.length === 14) && hasGtinCheckDigit(digits)) {
-    digits = digits.slice(0, -1);
   }
   const stripped = digits.replace(/^0+/, "");
   return stripped.length > 0 ? stripped : null;
+}
+
+/** 13-digit Kroger `filter.productId` (UPC body, no check digit, leading zeros kept). */
+export function krogerProductIdForLookup(upc: string | undefined | null): string | null {
+  const digits = digitsWithoutCheck(upc);
+  if (!digits || digits.length > 13) {
+    return null;
+  }
+  return digits.padStart(13, "0");
+}
+
+/** 12-digit UPC-A with check digit, for Walmart Affiliate `GET /items?upc=`. */
+export function walmartUpcForLookup(upc: string | undefined | null): string | null {
+  const digits = digitsWithoutCheck(upc);
+  if (!digits) {
+    return null;
+  }
+  const body = digits.replace(/^0+/, "");
+  if (body.length === 0 || body.length > 11) {
+    return null;
+  }
+  const upcBody = body.padStart(11, "0");
+  return `${upcBody}${gtinCheckDigit(upcBody)}`;
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

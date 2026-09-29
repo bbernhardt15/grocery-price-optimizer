@@ -26,9 +26,11 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
+import { markKrogerLookup, markWalmartLookup, nextKrogerLookup, nextWalmartLookup } from "./crossLookup";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import {
+  WALMART_TAXONOMY_VERSION,
   groceryLeaves,
   recordsFromWalmartPage,
   walmartNextCursor,
@@ -43,6 +45,8 @@ const KROGER_LOCATION_ERROR_LIMIT = 3;
 
 export type WalmartCheckpoint = {
   phase: "taxonomy" | "categories" | "done";
+  /** Bump WALMART_TAXONOMY_VERSION to re-read the tree (baby gear vs household). */
+  taxonomyVersion: number;
   categories: WalmartCategory[];
   index: number;
   nextPage: string | null;
@@ -50,6 +54,9 @@ export type WalmartCheckpoint = {
   rateStrikes: number;
   /** Clean pages since the last 429. Three in a row clear the strike count. */
   successStreak: number;
+  /** UPC lookups of Kroger-only masters. Charged on the Walmart budget. */
+  matchAttempts: number;
+  matchHits: number;
   cooldownUntil?: string;
   nextAllowedAt?: string;
   cycleStartedAt: string;
@@ -74,6 +81,9 @@ export type KrogerCheckpoint = {
   splitBrand?: string;
   /** Brands seen on the unbranded pass, used if the start ceiling is hit. */
   seenBrands?: string[];
+  /** UPC lookups of Walmart-only masters. Charged on the Kroger budget. */
+  matchAttempts: number;
+  matchHits: number;
   pendingZips: string[];
   clientErrorStreak: number;
   clientErrorLocationId?: string;
@@ -109,12 +119,15 @@ export type SliceResult = {
 function emptyWalmart(now: Date): WalmartCheckpoint {
   return {
     phase: "taxonomy",
+    taxonomyVersion: WALMART_TAXONOMY_VERSION,
     categories: [],
     index: 0,
     nextPage: null,
     attempts: 0,
     rateStrikes: 0,
     successStreak: 0,
+    matchAttempts: 0,
+    matchHits: 0,
     cycleStartedAt: now.toISOString(),
   };
 }
@@ -133,6 +146,8 @@ function emptyKroger(now: Date): KrogerCheckpoint {
     attempts: 0,
     pendingZips: [],
     clientErrorStreak: 0,
+    matchAttempts: 0,
+    matchHits: 0,
     cycleStartedAt: now.toISOString(),
   };
 }
@@ -145,6 +160,9 @@ function asWalmart(value: unknown, now: Date): WalmartCheckpoint {
     categories: Array.isArray(record.categories) ? record.categories : [],
     rateStrikes: typeof record.rateStrikes === "number" ? record.rateStrikes : 0,
     successStreak: typeof record.successStreak === "number" ? record.successStreak : 0,
+    taxonomyVersion: typeof record.taxonomyVersion === "number" ? record.taxonomyVersion : 0,
+    matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
+    matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
   };
 }
 
@@ -160,6 +178,8 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     brandSplits: Array.isArray(record.brandSplits) ? record.brandSplits.filter((brand) => typeof brand === "string") : [],
     seenBrands: Array.isArray(record.seenBrands) ? record.seenBrands.filter((brand) => typeof brand === "string") : [],
     splitBrand: typeof record.splitBrand === "string" ? record.splitBrand : undefined,
+    matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
+    matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
   };
 }
 
@@ -337,6 +357,70 @@ export async function stepWalmart(options: {
       break;
     }
     releaseWalmartHalt(cp, nowFn());
+    if (cp.taxonomyVersion !== WALMART_TAXONOMY_VERSION) {
+      cp.taxonomyVersion = WALMART_TAXONOMY_VERSION;
+      cp.phase = "taxonomy";
+      cp.categories = [];
+      cp.index = 0;
+      cp.nextPage = null;
+    }
+    if (options.client.lookupUpc && calls === 0) {
+      const picked = await nextWalmartLookup(nowFn());
+      if (picked) {
+        try {
+          const charged = await spendCall(
+            gate,
+            () => options.client.lookupUpc!(picked.upc),
+            () => {
+              calls += 1;
+            },
+            stampPace
+          );
+          if (charged === "budget") {
+            paused = "budget";
+            await persist("paused", { lastError: "Walmart daily budget reached" });
+            break;
+          }
+          const records = recordsFromWalmartPage(charged);
+          cp.matchAttempts += 1;
+          if (records.length > 0) {
+            const saved = await upsertCatalogRecords(records, nowFn());
+            upserted += saved.offers;
+            cp.matchHits += 1;
+          }
+          await markWalmartLookup(picked.key, nowFn());
+          noteWalmartSuccess(cp);
+          await persist("running", { clearError: true });
+        } catch (error) {
+          const kind = retryClass(error);
+          if (kind === "rate") {
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), { request: "items", upc: picked.upc });
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          } else if (kind === "fatal" || cp.attempts >= 2) {
+            cp.matchAttempts += 1;
+            cp.attempts = 0;
+            await markWalmartLookup(picked.key, nowFn());
+            await persist("running", {
+              error: ingestErrorDetail("walmart", error, { request: "items", upc: picked.upc }, nowFn()),
+            });
+          } else {
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), { request: "items", upc: picked.upc });
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          }
+        }
+        continue;
+      }
+    }
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories, nextAllowedAt: cp.nextAllowedAt };
     }
@@ -558,6 +642,63 @@ export async function stepKroger(options: {
   };
 
   while (calls < options.maxCalls) {
+    if (options.client.lookupProductId && calls === 0) {
+      const picked = await nextKrogerLookup(nowFn());
+      if (picked) {
+        const locationId = cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        try {
+          const charged = await spendCall(
+            productGate,
+            () => options.client.lookupProductId!(picked.productId, locationId),
+            () => {
+              calls += 1;
+            },
+            () => {
+              const nextAt = productGate.nextAllowedAt();
+              if (nextAt > 0) {
+                cp.nextAllowedAt = new Date(nextAt).toISOString();
+              }
+            }
+          );
+          if (charged === "budget") {
+            paused = "budget";
+            await persist("paused", { lastError: "Kroger daily budget reached" });
+            break;
+          }
+          cp.matchAttempts += 1;
+          if (charged.records.length > 0) {
+            const saved = await upsertCatalogRecords(charged.records, nowFn());
+            upserted += saved.offers;
+            cp.matchHits += 1;
+          }
+          await markKrogerLookup(picked.key, nowFn());
+          cp.attempts = 0;
+          await persist("running", { clearError: true });
+        } catch (error) {
+          const kind = retryClass(error);
+          if (kind === "fatal" || cp.attempts >= 2) {
+            cp.matchAttempts += 1;
+            cp.attempts = 0;
+            await markKrogerLookup(picked.key, nowFn());
+            await persist("running", {
+              error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.productId }, nowFn()),
+            });
+          } else {
+            const outcome = await failKroger(cp, error, sleep, nowFn(), {
+              request: "products",
+              productId: picked.productId,
+            });
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          }
+        }
+        continue;
+      }
+    }
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       const pending = cp.pendingZips;
       cp = { ...emptyKroger(nowFn()), pendingZips: pending, phase: "locations" };

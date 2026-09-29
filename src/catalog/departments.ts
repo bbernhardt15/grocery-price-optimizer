@@ -67,18 +67,29 @@ const RULES: readonly Rule[] = [
   { test: /^international$/i, departmentId: "pantry" },
   { test: /^adult beverages?$/i, departmentId: "beverages" },
   { test: /^health\s*&\s*beauty$/i, departmentId: "personal-care" },
-  { test: /^cleaning products?$/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /^cleaning (?:products?|supplies)$/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /^paper\s*(?:&|and)\s*plastic$/i, departmentId: "household", subcategory: "Paper" },
+  { test: /^paper goods$/i, departmentId: "household", subcategory: "Paper" },
+  { test: /^laundry$/i, departmentId: "household", subcategory: "Laundry" },
+  { test: /^household essentials?$/i, departmentId: "household" },
   { test: /^pet care$/i, departmentId: "pet" },
   { test: /^baby$/i, departmentId: "baby" },
-  { test: /diaper|baby wipe|infant formula|baby food/i, departmentId: "baby", subcategory: "Diapers" },
-  { test: /formula/i, departmentId: "baby", subcategory: "Baby Food" },
+  { test: /baby back ribs?/i, departmentId: "meat-seafood", subcategory: "Pork" },
+  { test: /carrot cake/i, departmentId: "bakery" },
+  {
+    test: /\bbaby\s+(?:carrots?|spinach|kale|bok choy|potatoes|potato|bella|portobell\w*|arugula|gem|broccoli|romaine|greens)\b/i,
+    departmentId: "produce",
+    subcategory: "Vegetables",
+  },
+  { test: /diaper|baby wipe/i, departmentId: "baby", subcategory: "Diapers" },
+  { test: /infant formula|baby formula|baby food/i, departmentId: "baby", subcategory: "Baby Food" },
   { test: /dog food|dog treat|puppy/i, departmentId: "pet", subcategory: "Dog" },
   { test: /cat food|cat litter|kitten/i, departmentId: "pet", subcategory: "Cat" },
   { test: /pet food|pet supply/i, departmentId: "pet" },
-  { test: /paper towel|toilet paper|bath tissue/i, departmentId: "household", subcategory: "Paper" },
-  { test: /dish soap|dishwasher|all-purpose cleaner|trash bag/i, departmentId: "household", subcategory: "Cleaning" },
-  { test: /laundry|detergent|fabric softener/i, departmentId: "household", subcategory: "Laundry" },
-  { test: /household|cleaning supply|paper & plastic/i, departmentId: "household" },
+  { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bag/i, departmentId: "household", subcategory: "Paper" },
+  { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|sponge/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
+  { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
   { test: /shampoo|conditioner/i, departmentId: "personal-care", subcategory: "Hair" },
   { test: /toothpaste|toothbrush|mouthwash/i, departmentId: "personal-care", subcategory: "Oral Care" },
   { test: /deodorant|body wash|lotion|personal care|beauty|hair care/i, departmentId: "personal-care", subcategory: "Body" },
@@ -89,17 +100,17 @@ const RULES: readonly Rule[] = [
   { test: /peanut butter|almond butter/i, departmentId: "pantry", subcategory: "Condiments" },
   { test: /coconut milk/i, departmentId: "pantry", subcategory: "Canned" },
   { test: /pasta|spaghetti|noodle|macaroni/i, departmentId: "pantry", subcategory: "Pasta & Rice" },
+  { test: /cereal|cheerios|krispies|\bchex\b|oatmeal|oat meal|granola/i, departmentId: "breakfast", subcategory: "Cereal" },
   { test: /\brice\b/i, departmentId: "pantry", subcategory: "Pasta & Rice" },
   { test: /canned|tomato sauce|pasta sauce|marinara/i, departmentId: "pantry", subcategory: "Canned" },
+  { test: /potato chip|tortilla chip|\bchips\b|pretzel/i, departmentId: "snacks", subcategory: "Chips" },
+  { test: /cracker|cookie/i, departmentId: "snacks", subcategory: "Crackers" },
   { test: /flour|sugar|baking/i, departmentId: "pantry", subcategory: "Baking" },
   { test: /\bbreakfast\b/i, departmentId: "breakfast" },
-  { test: /cereal|cheerios|oatmeal|oat meal|granola/i, departmentId: "breakfast", subcategory: "Cereal" },
   { test: /coffee|tea bag|green tea|black tea/i, departmentId: "beverages", subcategory: "Coffee & Tea" },
   { test: /orange juice|apple juice|\bjuice\b/i, departmentId: "beverages", subcategory: "Juice" },
   { test: /soda|cola|sparkling water|\bwater\b/i, departmentId: "beverages", subcategory: "Soda" },
   { test: /beverage|drink/i, departmentId: "beverages" },
-  { test: /potato chip|tortilla chip|\bchips\b|pretzel/i, departmentId: "snacks", subcategory: "Chips" },
-  { test: /cracker|cookie/i, departmentId: "snacks", subcategory: "Crackers" },
   { test: /\bsnack/i, departmentId: "snacks" },
   { test: /bagel|muffin|croissant/i, departmentId: "bakery", subcategory: "Rolls & Bagels" },
   { test: /tortilla/i, departmentId: "bakery", subcategory: "Tortillas" },
@@ -116,9 +127,10 @@ const RULES: readonly Rule[] = [
   { test: /butter|margarine/i, departmentId: "dairy-eggs", subcategory: "Butter" },
   { test: /milk|cream|dairy/i, departmentId: "dairy-eggs", subcategory: "Milk" },
   { test: /banana|apple|berry|fruit|avocado|grape/i, departmentId: "produce", subcategory: "Fruit" },
-  { test: /spinach|lettuce|vegetable|broccoli|herb|onion|potato/i, departmentId: "produce", subcategory: "Vegetables" },
+  { test: /\bcarrots?\b/i, departmentId: "produce", subcategory: "Vegetables" },
+  { test: /spinach|lettuce|vegetable|broccoli|herb|onion|potato|bok choy|kale|arugula/i, departmentId: "produce", subcategory: "Vegetables" },
   { test: /produce/i, departmentId: "produce" },
-  { test: /pantry|condiment|sauce|soup/i, departmentId: "pantry" },
+  { test: /\bpantry\b|\bcondiments?\b|\bsauce\b|\bsoup\b/i, departmentId: "pantry" },
 ];
 
 const SUBCATEGORY_RULES: Record<string, readonly { test: RegExp; subcategory: string }[]> = {
@@ -152,11 +164,17 @@ export type MappedDepartment = {
    * broad: only a weak bucket such as Pantry, so a search term may still win.
    * name: the product name decided. none: nothing matched.
    */
-  signal?: "specific" | "broad" | "name" | "none";
+  signal?: "specific" | "broad" | "name" | "none" | "excluded";
+  /** Short explanation of the match, for the admin sample route. */
+  reason?: string;
 };
 
-/** A lone "Pantry" (or Grocery/Food) must not beat a more specific aisle later in the path. */
-const WEAK_SEGMENT = /^(pantry|grocery|food|natural\s*&\s*organic)$/i;
+/**
+ * A lone "Pantry" or "Baby" must not beat a more specific aisle, and must not
+ * beat the product name. "Baby" as a whole Walmart/Kroger department also
+ * covers strollers and clothes; those are excluded separately.
+ */
+const WEAK_SEGMENT = /^(pantry|grocery|food|natural\s*&\s*organic|baby)$/i;
 
 const BROAD_CATEGORY =
   /^(dairy|grocery|food|frozen|pantry|snacks?|beverages?|household|meat|produce|bakery|deli|breakfast|baby|pets?|health|beauty|personal care|health & beauty)$/i;
@@ -176,6 +194,45 @@ function pathSegments(categories: string[]): string[] {
     }
   }
   return segments;
+}
+
+/**
+ * Walmart's Baby tree is mostly gear. A diaper or a jar of baby food stays
+ * in baby. A stroller, car seat, or onesie does not, even when the path
+ * starts with Baby.
+ */
+const NON_GROCERY_GEAR =
+  /\b(?:strollers?|car\s*seats?|cribs?|bassinets?|nursery|onesies|bodysuits?|clothing|apparel|footwear|shoes|toys?|playards?|play\s*yards?|high\s*chairs?|bouncers?|baby\s*swings?|diaper\s*bags?|baby\s*gates?|pacifiers?|teethers?|bedding|swaddles?|sleep\s*sacks?|walkers?|jumpers?|baby\s*monitors?|furniture)\b/i;
+
+const BABY_CONSUMABLE = /\b(?:diapers?|baby wipes?|infant formula|baby formula|baby foods?)\b/i;
+
+function babyGearLabel(categories: string[], name: string): string | null {
+  const haystack = `${categories.join(" ")} ${name}`.replace(/\s+/g, " ").trim();
+  const match = haystack.match(NON_GROCERY_GEAR);
+  if (!match) {
+    return null;
+  }
+  const babyContext = /\bbaby\b/i.test(categories.join(" ")) || /\bbaby\b/i.test(name);
+  const label = match[0].toLowerCase().replace(/\s+/g, " ");
+  const unambiguous = /stroller|car seat|crib|bassinet|pacifier|diaper bag|teether|playard|high chair|bouncer|baby monitor|baby gate/i.test(label);
+  if (!babyContext && !unambiguous) {
+    return null;
+  }
+  if (/\bdiaper\s*bags?\b/i.test(haystack)) {
+    return "diaper bag";
+  }
+  if (BABY_CONSUMABLE.test(name) && !/\bdiaper\s*bags?\b/i.test(name)) {
+    return null;
+  }
+  return label;
+}
+
+function reasonText(kind: "path" | "name" | "none", source: string, departmentId: string): string {
+  if (kind === "none") {
+    return "none";
+  }
+  const label = source.replace(/\s+/g, " ").trim().slice(0, 48);
+  return `${kind}:${label}→${departmentId}`;
 }
 
 function matchRules(text: string): Rule | undefined {
@@ -205,6 +262,18 @@ export function mapToDepartment(
   name: string,
   explicit?: { departmentId?: string; subcategory?: string }
 ): MappedDepartment {
+  const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
+  const gear = babyGearLabel(labels, name);
+  if (gear) {
+    const other = departmentById("other") ?? DEPARTMENTS[DEPARTMENTS.length - 1];
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      reason: `gear:${gear}→other`,
+    };
+  }
+
   const forced = departmentById(explicit?.departmentId);
   if (forced && forced.id !== "other") {
     return {
@@ -212,14 +281,14 @@ export function mapToDepartment(
       departmentName: forced.name,
       subcategory: subcategoryFor(
         forced.id,
-        `${(categories ?? []).join(" ")} ${name}`,
+        `${labels.join(" ")} ${name}`,
         explicit?.subcategory
       ),
       signal: "specific",
+      reason: `explicit:${forced.id}`,
     };
   }
 
-  const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
   const categoryText = labels.join(" / ");
   const segments = pathSegments(labels);
   let specificRule: Rule | undefined;
@@ -256,17 +325,25 @@ export function mapToDepartment(
   const fromName = matchRules(name);
 
   let rule = fromCategory ?? fromName;
+  let reasonKind: "path" | "name" | "none" = fromCategory ? "path" : "none";
+  let reasonSource = categorySource;
+  const householdBeatsCare =
+    fromCategory?.departmentId === "personal-care" && fromName?.departmentId === "household";
   if (
     fromCategory &&
     fromName &&
     fromName.departmentId !== fromCategory.departmentId &&
-    signal === "broad"
+    (signal === "broad" || householdBeatsCare)
   ) {
     rule = fromName;
     signal = "name";
+    reasonKind = "name";
+    reasonSource = name;
   } else if (!fromCategory && fromName) {
     rule = fromName;
     signal = "name";
+    reasonKind = "name";
+    reasonSource = name;
   }
 
   const departmentId = rule?.departmentId ?? "other";
@@ -282,5 +359,6 @@ export function mapToDepartment(
       sameDepartment?.subcategory ?? rule?.subcategory ?? explicit?.subcategory
     ),
     signal,
+    reason: reasonText(reasonKind, reasonSource, department.id),
   };
 }

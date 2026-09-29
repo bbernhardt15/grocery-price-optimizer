@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { PipelineStage } from "mongoose";
-import { DEPARTMENTS } from "../catalog/departments";
+import { DEPARTMENTS, departmentById, mapToDepartment } from "../catalog/departments";
+import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
 import { estimateStorageBytes, ingestConfig } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
@@ -139,7 +140,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -157,6 +158,8 @@ export async function catalogStatus() {
     IngestBudget.find({ day }).lean<Array<{ provider: string; calls: number }>>(),
     ShopperZip.find({ hits: { $gt: 0 } }).sort({ lastSeenAt: -1 }).limit(config.shopperZipLimit).lean(),
     masterKeyCensus(),
+    CatalogMaster.countDocuments({ matchWalmartAt: { $type: "date" } }),
+    CatalogMaster.countDocuments({ matchKrogerAt: { $type: "date" } }),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -177,6 +180,12 @@ export async function catalogStatus() {
       byStore: Object.fromEntries(byStore.map((row) => [row._id, row.count])),
       byDepartment: departmentCounts,
       masters,
+    },
+    match: {
+      merged: masters.merged,
+      walmartLookups,
+      krogerLookups,
+      note: "One UPC lookup per master, inside the existing daily budgets. Nothing is deleted.",
     },
     caps: {
       maxProducts: config.maxProducts,
@@ -234,5 +243,112 @@ export async function catalogStatus() {
     })),
     seedZips: config.seedZips,
     seedLocations: seedLocationsFrom(krogerRun?.checkpoint, config.seedZips),
+  };
+}
+
+function storesOf(row: { walmartItemId?: string; krogerProductId?: string }): string {
+  const stores = [
+    row.krogerProductId?.trim() ? "kroger" : "",
+    row.walmartItemId?.trim() ? "walmart" : "",
+  ].filter(Boolean);
+  return stores.join("+") || "none";
+}
+
+function clip(value: string, max: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * Random masters in one department, with the rule the current mapper would use.
+ * Compact so a PowerShell paste stays small.
+ */
+export async function catalogSample(department: string, rawLimit: number): Promise<
+  | { error: string }
+  | {
+      department: string;
+      n: number;
+      items: Array<{ name: string; brand: string; stores: string; paths: string; stored: string; now: string; rule: string }>;
+    }
+> {
+  const known = departmentById(department);
+  if (!known) {
+    return { error: `Unknown department "${department}".` };
+  }
+  const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 20));
+  const rows = await CatalogMaster.aggregate<
+    { name?: string; brand?: string; walmartItemId?: string; krogerProductId?: string; categoryPaths?: string[]; departmentId?: string }
+  >([
+    { $match: { departmentId: known.id, status: { $ne: "discontinued" } } },
+    { $sample: { size: limit } },
+    { $project: { name: 1, brand: 1, walmartItemId: 1, krogerProductId: 1, categoryPaths: 1, departmentId: 1 } },
+  ]);
+  const items = rows.map((row) => {
+    const paths = row.categoryPaths ?? [];
+    const mapped = mapToDepartment(paths, row.name ?? "");
+    return {
+      name: clip(row.name ?? "", 80),
+      brand: clip(row.brand ?? "", 40),
+      stores: storesOf(row),
+      paths: clip(paths.join(" | "), 120),
+      stored: row.departmentId ?? "",
+      now: mapped.departmentId,
+      rule: mapped.reason ?? "none",
+    };
+  });
+  return { department: known.id, n: items.length, items };
+}
+
+type KeyRow = { name?: string; upc?: string; key?: string; walmartItemId?: string; krogerProductId?: string };
+
+function keySample(row: KeyRow): { name: string; key: string; upc: string; krogerId: string; walmartUpc: string; stores: string } {
+  const source = row.upc || row.key || "";
+  return {
+    name: clip(row.name ?? "", 60),
+    key: row.key ?? "",
+    upc: row.upc ?? "",
+    krogerId: krogerProductIdForLookup(source) ?? "",
+    walmartUpc: walmartUpcForLookup(source) ?? "",
+    stores: storesOf(row),
+  };
+}
+
+async function sampleMasters(match: Record<string, unknown>, limit: number): Promise<KeyRow[]> {
+  return CatalogMaster.aggregate<KeyRow>([
+    { $match: match },
+    { $sample: { size: limit } },
+    { $project: { name: 1, upc: 1, key: 1, walmartItemId: 1, krogerProductId: 1 } },
+  ]);
+}
+
+/** A few normalized keys from each side, so production can confirm they line up. */
+export async function catalogMatchSample(): Promise<{
+  merged: number;
+  walmartLookups: number;
+  krogerLookups: number;
+  note: string;
+  krogerOnly: ReturnType<typeof keySample>[];
+  walmartUpc: ReturnType<typeof keySample>[];
+  both: ReturnType<typeof keySample>[];
+}> {
+  const notLocal = { key: { $not: { $regex: "^local:" } } };
+  const has = (field: string) => ({ [field]: { $type: "string", $gt: "" } });
+  const missing = (field: string) => ({ $or: [{ [field]: { $exists: false } }, { [field]: null }, { [field]: "" }] });
+  const [krogerOnly, walmartUpc, both, merged, walmartLookups, krogerLookups] = await Promise.all([
+    sampleMasters({ ...notLocal, ...has("krogerProductId"), ...missing("walmartItemId") }, 3),
+    sampleMasters({ ...notLocal, ...has("walmartItemId"), ...missing("krogerProductId") }, 3),
+    sampleMasters({ ...notLocal, ...has("walmartItemId"), ...has("krogerProductId") }, 3),
+    CatalogMaster.countDocuments({ ...notLocal, ...has("walmartItemId"), ...has("krogerProductId") }),
+    CatalogMaster.countDocuments({ matchWalmartAt: { $type: "date" } }),
+    CatalogMaster.countDocuments({ matchKrogerAt: { $type: "date" } }),
+  ]);
+  return {
+    merged,
+    walmartLookups,
+    krogerLookups,
+    note: "krogerId is the 13-digit Kroger form. walmartUpc is 12-digit UPC-A with the check digit. The same product should share key.",
+    krogerOnly: krogerOnly.map(keySample),
+    walmartUpc: walmartUpc.map(keySample),
+    both: both.map(keySample),
   };
 }

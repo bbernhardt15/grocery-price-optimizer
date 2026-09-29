@@ -195,4 +195,22 @@ describe("WalmartPricingProvider", () => {
     assert.equal(await provider.getNearestStore("45202"), undefined);
     assert.equal(storeCalls, 2);
   });
+
+  it("looks up an item by UPC on the Affiliate /items endpoint", async () => {
+    installWalmartKeys();
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return Response.json({
+        items: [{ itemId: 99, name: "Coca-Cola", salePrice: 1.25, upc: "049000042566", brandName: "Coca-Cola" }],
+      });
+    };
+    const provider = new WalmartPricingProvider();
+    const payload = (await provider.lookupByUpc("049000042566")) as { items: Array<{ itemId: number }> };
+    assert.equal(payload.items[0]?.itemId, 99);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/items\?/);
+    assert.match(calls[0], /upc=049000042566/);
+    assert.match(calls[0], /publisherId=impact-123/);
+  });
 });

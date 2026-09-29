@@ -299,4 +299,38 @@ describe("KrogerService.searchProducts", () => {
       /Kroger products request failed \(403\)/
     );
   });
+
+  it("looks up one product by filter.productId and does not send filter.term", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    const urls: string[] = [];
+    mockFetch(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({
+        data: [
+          {
+            productId: "0004900004256",
+            upc: "0004900004256",
+            brand: "Coca-Cola",
+            description: "Coca-Cola Classic",
+            categories: ["Beverages"],
+            items: [{ price: { regular: 1.25 }, size: "12 fl oz" }],
+          },
+        ],
+      });
+    });
+    const service = new KrogerService();
+    const page = await service.productsById("0004900004256", "01400431");
+    assert.equal(page.returned, 1);
+    assert.equal(page.products[0]?.productId, "0004900004256");
+    const productUrl = urls.find((url) => url.includes("/products"));
+    assert.ok(productUrl);
+    assert.match(productUrl, /filter\.productId=0004900004256/);
+    assert.match(productUrl, /filter\.locationId=01400431/);
+    assert.equal(productUrl.includes("filter.term"), false);
+  });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { groupOffersByUpc, isStoreBrand, upcKey } from "./normalize";
+import { gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -29,6 +29,36 @@ describe("upcKey", () => {
     assert.equal(key, upcKey(walmartGtin));
     assert.equal(key, upcKey(krogerWithoutCheck));
     assert.equal(key, "4900004256");
+  });
+
+  it("matches real Walmart and Kroger forms, including a numeric UPC that lost its leading zero", () => {
+    const cokeWalmart = "049000042566";
+    const cokeKroger = "0004900004256";
+    const cokeNumeric = String(Number(cokeWalmart));
+    assert.equal(cokeNumeric, "49000042566");
+    assert.equal(upcKey(cokeWalmart), upcKey(cokeKroger));
+    assert.equal(upcKey(cokeNumeric), upcKey(cokeKroger));
+    assert.equal(krogerProductIdForLookup(cokeWalmart), cokeKroger);
+    assert.equal(krogerProductIdForLookup(cokeNumeric), cokeKroger);
+    assert.equal(walmartUpcForLookup(cokeKroger), cokeWalmart);
+    assert.equal(walmartUpcForLookup(upcKey(cokeKroger)), cokeWalmart);
+
+    const generalMillsBody = "01600027528";
+    const generalMillsCheck = String(gtinCheckDigit(generalMillsBody));
+    const generalMillsWalmart = `${generalMillsBody}${generalMillsCheck}`;
+    const generalMillsKroger = generalMillsBody.padStart(13, "0");
+    assert.equal(generalMillsWalmart, "016000275287");
+    assert.equal(upcKey(generalMillsWalmart), upcKey(generalMillsKroger));
+    assert.equal(upcKey(String(Number(generalMillsWalmart))), upcKey(generalMillsKroger));
+    assert.equal(walmartUpcForLookup(generalMillsKroger), generalMillsWalmart);
+    assert.equal(krogerProductIdForLookup(generalMillsWalmart), generalMillsKroger);
+
+    const pgBody = "03700031802";
+    const pgWalmart = `${pgBody}${gtinCheckDigit(pgBody)}`;
+    const pgKroger = pgBody.padStart(13, "0");
+    assert.equal(upcKey(pgWalmart), upcKey(pgKroger));
+    assert.equal(upcKey(pgWalmart.padStart(14, "0")), upcKey(pgKroger));
+    assert.equal(walmartUpcForLookup(pgKroger), pgWalmart);
   });
 });
 

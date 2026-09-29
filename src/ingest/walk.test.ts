@@ -57,6 +57,38 @@ describe("walmart catalog walk", () => {
     assert.equal(leaves[0]?.departmentId, "breakfast");
   });
 
+  it("keeps diapers and cleaning supplies and skips strollers and clothes", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "baby",
+          name: "Baby",
+          path: "Baby",
+          children: [
+            { id: "diapers", name: "Diapers", path: "Baby", children: [] },
+            { id: "strollers", name: "Strollers", path: "Baby", children: [] },
+            { id: "bodysuits", name: "Bodysuits", path: "Baby", children: [] },
+          ],
+        },
+        {
+          id: "home",
+          name: "Household Essentials",
+          path: "Household Essentials",
+          children: [
+            { id: "clean", name: "Cleaning Supplies", path: "Household Essentials", children: [] },
+            { id: "paper", name: "Paper Goods", path: "Household Essentials", children: [] },
+          ],
+        },
+      ],
+    });
+    const ids = leaves.map((leaf) => leaf.id).sort();
+    assert.deepEqual(ids, ["clean", "diapers", "paper"]);
+    assert.equal(leaves.find((leaf) => leaf.id === "diapers")?.departmentId, "baby");
+    assert.equal(leaves.find((leaf) => leaf.id === "clean")?.departmentId, "household");
+    assert.equal(leaves.find((leaf) => leaf.id === "paper")?.departmentId, "household");
+    assert.equal(leaves.find((leaf) => leaf.id === "diapers")?.path, "Baby/Diapers");
+  });
+
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
     assert.equal(walmartPagePath("milk", null), "/paginated/items?category=milk&count=25");
     assert.equal(
