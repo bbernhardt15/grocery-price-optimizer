@@ -89,6 +89,36 @@ describe("estimateSavings", () => {
     assert.match(describeSavings(partial).note, /No single store/);
   });
 
+  it("compares each item with its highest price when no store stocks the whole list", () => {
+    const meter = estimateSavings([
+      {
+        quantity: 1,
+        quotes: [
+          { storeName: "Aldi", price: 1 },
+          { storeName: "Kroger", price: 2 },
+        ],
+      },
+      {
+        quantity: 1,
+        quotes: [
+          { storeName: "Walmart", price: 3 },
+          { storeName: "Target", price: 5 },
+        ],
+      },
+    ]);
+    assert.equal(meter.status, "partial");
+    assert.equal(meter.storeCount, 0);
+    assert.equal(meter.splitTotal, 4);
+    assert.equal(meter.highEachTotal, 7);
+    assert.equal(meter.saved, 3);
+    assert.equal(meter.ratio, 43);
+    const copy = describeSavings(meter, { allowSubstitutes: false });
+    assert.equal(copy.badge, "Save $3.00");
+    assert.match(copy.note, /highest price/);
+    assert.match(copy.note, /Allow substitutes/);
+    assert.match(copy.caption, /43%/);
+  });
+
   it("does not invent savings when the cheapest store already matches the split", () => {
     const meter = estimateSavings([
       {

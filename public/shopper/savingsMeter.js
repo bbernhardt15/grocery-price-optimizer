@@ -74,10 +74,12 @@ export function estimateSavings(lines, options = {}) {
   const totals = Object.fromEntries(storeNames.map((store) => [store, 0]));
   const missing = Object.fromEntries(storeNames.map((store) => [store, false]));
   let split = 0;
+  let highEach = 0;
 
   for (const line of priced) {
     const prices = line.quotes.map((quote) => quote.price);
     split += roundMoney(Math.min(...prices) * line.quantity);
+    highEach += roundMoney(Math.max(...prices) * line.quantity);
     for (const store of storeNames) {
       const hit = line.quotes.find((quote) => quote.storeName === store);
       if (!hit) missing[store] = true;
@@ -91,10 +93,14 @@ export function estimateSavings(lines, options = {}) {
     .sort((a, b) => a.total - b.total || a.storeName.localeCompare(b.storeName));
 
   split = roundMoney(split);
+  highEach = roundMoney(highEach);
   const override = Number(options.splitTotal);
   if (Number.isFinite(override) && override >= 0) split = roundMoney(override);
 
   if (complete.length === 0 || unpricedCount > 0) {
+    const comparable = unpricedCount === 0 && highEach > 0;
+    const saved = comparable ? roundMoney(Math.max(0, highEach - split)) : 0;
+    const ratio = comparable && highEach > 0 ? Math.min(100, Math.round((saved / highEach) * 100)) : 0;
     return {
       status: "partial",
       lineCount: priced.length,
@@ -103,9 +109,10 @@ export function estimateSavings(lines, options = {}) {
       splitTotal: split,
       expensive: null,
       baseline: null,
-      saved: 0,
+      highEachTotal: comparable ? highEach : null,
+      saved,
       savedVsBaseline: 0,
-      ratio: 0,
+      ratio,
     };
   }
 
@@ -164,6 +171,12 @@ export function describeSavings(meter, options = {}) {
       options.allowSubstitutes === false
         ? " Allow substitutes if a close item would fill a gap."
         : "";
+    if (meter.saved > 0 && meter.highEachTotal > 0) {
+      const badge = `Save ${formatMoney(meter.saved)}`;
+      const note = `No single store carries every item. You still save ${formatMoney(meter.saved)} versus ${formatMoney(meter.highEachTotal)} if each item is bought at its highest price.${extra}`;
+      const caption = `${formatMoney(meter.saved)} saved · ${meter.ratio}% under the highest price on each item`;
+      return { badge, note, caption, meterText: note };
+    }
     const note = `No single store carries every item. The split so far is ${formatMoney(meter.splitTotal)}.${extra}`;
     return {
       badge: null,
@@ -197,7 +210,7 @@ export function describeSavings(meter, options = {}) {
   if (meter.saved > 0) {
     const badge = `Save ${formatMoney(meter.saved)}`;
     let note = `You save ${formatMoney(meter.saved)} versus ${formatMoney(expensive.total)} at ${expensive.storeName}, the priciest store for this list.`;
-    if (meter.savedVsBaseline >= 0.01 && baseline.storeName !== expensive.storeName) {
+    if (meter.savedVsBaseline >= 0.05 && baseline.storeName !== expensive.storeName) {
       note += ` Splitting also beats ${baseline.storeName} by ${formatMoney(meter.savedVsBaseline)}.`;
     }
     const caption = `${formatMoney(meter.saved)} saved · ${meter.ratio}% less than ${expensive.storeName}`;
