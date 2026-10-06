@@ -36,13 +36,13 @@ Offers that share a UPC (leading zeros ignored) become one product. Package size
 | --- | --- | --- |
 | **Walmart** | Affiliate `GET /taxonomy` plus the first page of `GET /paginated/items?category=`. If that is empty, a few search terms via `GET /search`. Prices are **walmart.com catalog**, not the nearest store's shelf. Not the full assortment. Cached 6 hours. | Demo catalog, badged **Demo** |
 | **Kroger** | **No category browse.** Each department runs two seeded `filter.term` searches. Hits are classified with the `categories` field when Products returns one, otherwise the product name. A sample of the aisle, not the full Kroger catalog. Nearest store when a ZIP is set. | Demo catalog |
-| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. Flipp weekly ads are **not** used as a browse shelf. | Demo catalog. Weekly ads still apply only inside trip planning |
-| **Aldi** | No catalog API. | Demo catalog only. Flipp can still price circular items on the trip plan, labeled **Weekly ad** |
+| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. With `FLIPP_ENABLED` and a ZIP, browse/search also show this week's circular, labeled **Weekly ad**. | Demo catalog until Flipp or a partner feed is set |
+| **Aldi** | No catalog API. With `FLIPP_ENABLED` and a ZIP, browse/search show circular items labeled **Weekly ad**. | Demo catalog. Trip planning uses the same circular when a ZIP is set |
 | **Partner banners** | Search-by-term stub when that feed's env vars are set. Unconfigured banners are omitted. | Not shown as a live catalog |
 
 Demo UPCs are synthetic (`009999…`) so they do not merge with a real retailer code. Live rows win over a demo row for the same store and UPC. Department and search responses are cached in memory and in Mongo (`CatalogCache`, TTL index). Override with `CATALOG_DEPT_TTL_MINUTES` (default 360) and `CATALOG_SEARCH_TTL_MINUTES` (default 60).
 
-When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target stay on the demo shelf. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
+When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target are not ingested. When Flipp is on, browse still merges that ZIP's weekly-ad items on top of the saved catalog and does not delete or rewrite ingest rows. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
 
 ## Catalog ingestion
 
@@ -57,7 +57,7 @@ Checked 2026-09-25.
 | **Walmart Affiliate** | `GET /taxonomy`, then `GET /paginated/items?category=&count=25`. The next page is the response `nextPage` (URL or cursor). Stop when `nextPage` is empty or `nextPageExist` is false. Only grocery leaves are walked (electronics and similar paths are skipped). UPC is read from `upc` or `gtin` (string or number) so a row can share a Kroger master. | The public Affiliate introduction and taxonomy pages do **not** publish a numeric daily quota. Marketplace rate-limit tables are a different API and are not used here. HTTP **429** is the throttle. Search documents `numItems` max 25, so each catalog page asks for 25. | **500 calls/day**, at least **10 seconds** apart, and that gap is kept across scheduler ticks. The 500 figure is a hard ledger for the crawler only. Shopper searches are not charged and are not blocked. |
 | **Kroger Products** | No category browse. `GET /v1/products` with `filter.term`, optional `filter.brand`, `filter.locationId`, `filter.start`, and `filter.limit`. A full page advances `filter.start`. A short page ends the term. `filter.start` is a skip count: the first page omits it (checkpoint `start` 0). Kroger accepts a sent value only from **1 to 250** (PRODUCT-2021). The crawl stops at 250 and, for a broad term, continues with `filter.brand` or a narrower term instead of sending 300. A **400** ends that term (it is not retried). Three 400s in a row on the same `locationId` skip that store. | **10,000 product calls/day**. **1,600 location calls/day**. Locations documents `filter.limit` max **200**; this job asks for **50**. | **4,000 product calls/day** (6,000 left for shoppers and on-demand refresh), **200 location calls/day**, at least **500 ms** apart. |
 | **Kroger prices** | Stored per `locationId`. The product master is written once, keyed by UPC with leading zeros stripped (UPC-A, EAN-13, and GTIN-14 of the same code share one master). The offer key is product + store + location, so six seed stores are six offers. | — | Seed ZIPs `45103` (Brandon), `10001`, `60601`, `75201`, `90012`, `30303`, plus up to 12 ZIPs that real shoppers have used (`hits` > 0). Seeds are not written into the shopper-ZIP list. A new shopper ZIP is priced on the next tick (inserted in front of the Kroger walk). A finished cycle starts again after `CATALOG_REFRESH_HOURS` (24). Ingest never substitutes the demo location id `01400441` when a ZIP lookup fails. |
-| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf only. Flipp weekly ads stay on the trip plan. |
+| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf, plus Flipp weekly ads on browse and the trip when `FLIPP_ENABLED` and a ZIP are set. |
 
 A Walmart **429** keeps the same category and `nextPage`, sets status to paused, and waits 15 minutes, then 30. The response's Retry-After header, any rate-limit headers, and the body are stored on that error. One successful page does not clear the strike count; three clean pages in a row do. A third 429 stops Walmart ingest until the next UTC midnight, or for six hours when that is longer. The next tick does not call Walmart until that time, then it resumes the same page. Other 5xx responses still use a short backoff (1s, 2s, 4s, … capped at 60s) and, after 5 failures, skip that category. A Kroger **400** is logged with provider, status, term, brand, start, limit, locationId, and ZIP (no secrets) and that term is skipped. `runs[].calls` counts each HTTP call once. `budget.*.used` / `budget.*.limit` is the daily ledger. Read the ledger for the cap; the run counter is only a progress total. Shopper searches never touch this ledger.
 
@@ -92,6 +92,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - `ADMIN_TOKEN` set to a long random string.
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
+   - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
    - `CATALOG_INGEST_ENABLED=true`
@@ -207,8 +208,8 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
 | **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store is a label only. Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
-| **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. |
-| **Aldi** (and Publix-like banners) | No retailer product API. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. | Demo catalog | Weekly-ad / circular prices near the ZIP when Flipp is enabled |
+| **Target** | **No public product API.** This app does **not** call RedSky, Target Circle, or RedCard pricing (those are account-specific and not a shelf feed). If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. Otherwise the weekly circular. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. Circular rows stay **Weekly ad**. |
+| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
 
 Configured **partner feeds** (Publix, Meijer, H-E-B, Instacart-style banners, Datasembly-class shelf file) use the same optimize path when `SHELF_FEED_*` / `INSTACART_PARTNER_*` / `PUBLIX_PARTNER_*` / `HEB_PARTNER_*` / `MEIJER_PARTNER_*` are set. Hits are labeled **Partner feed**, not a fake retailer API. See [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). Licensed shelf feeds beat Flipp weekly ads for the same banner. Unconfigured partner banners are not added to the default trip.
 
@@ -223,11 +224,32 @@ Banners without a public grocery API (Aldi, Target when the partner feed is abse
 | Path | When | What it calls | Honesty / risk |
 | --- | --- | --- | --- |
 | **FlyerKit v4.0** (preferred) | `FLIPP_ACCESS_TOKEN` is set | Documented `GET https://api.flipp.com/flyerkit/v4.0/publications/{merchant_identifier}/products?access_token=&locale=en-US&postal_code=&keywords=` ([FlyerKit docs](https://api.flipp.com/flyerkit/v4.0/documentation)). Tokens are issued by a Flipp technical contact (typically merchant-scoped). | Legitimate partner API. |
-| **Consumer flyer search** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com: `GET https://backflipp.wishabi.com/flipp/items/search?locale=en-us&postal_code={ZIP}&q={merchant AND term}`. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
+| **Consumer circular** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com. Grocery Gitter loads `GET https://backflipp.wishabi.com/flipp/flyers?postal_code={ZIP}` and then each matching flyer. A `merchant AND term` search returns an empty `items` list, so the grocery words are matched on the circular locally. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
 
-Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. Request extra banners via `stores` on optimize-list; the default trip still considers Kroger, Walmart, Target, and Aldi.
+**ZIP.** Weekly ads require a 5-digit US ZIP. `45202-1234` is accepted and sent as `45202`. The price is whatever flyer Flipp publishes for that postal code. It is not a store-locator aisle price, and a banner can appear in the circular even when the nearest store is far away. With no ZIP, browse keeps the demo catalog and says so; the trip labels that store **Unavailable** or **Demo catalog** instead of pretending a circular was checked.
 
-Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric `current_price` (BOGO / “% off” only) are skipped so we do not invent a price.
+Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. When Flipp is on, those banners join the default trip. Pass `stores` to limit the list. Food Lion is merchant `2100`, H-E-B `2467`, US Safeway `5667` (not Safeway Liquor), Giant Eagle `2130`.
+
+Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric price (BOGO / “% off” only) are skipped so we do not invent a price. A flyer id is not a Target TCIN or a Walmart item id; those handoffs stay search links.
+
+### Verify weekly ads (Railway)
+
+On the **web** service (the one that serves `/api`, not the ingest worker):
+
+1. Variables: `FLIPP_ENABLED` = `true`. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp has issued a FlyerKit token. Do not set fake `TARGET_PARTNER_*` keys.
+2. Redeploy the web service. No catalog ingest change and no database delete.
+3. From PowerShell, using your public HTTPS host:
+
+```powershell
+$base = "https://<your-service>.up.railway.app"
+Invoke-RestMethod "$base/api/catalog/coverage"
+Invoke-RestMethod "$base/api/catalog/browse?q=chicken&zip=45202"
+Invoke-RestMethod "$base/api/catalog/browse?department=meat-seafood&zip=75201"
+```
+
+Coverage for Target and Aldi should say **Weekly ad only**, and Food Lion, H-E-B, Safeway, Giant Eagle, Publix, Meijer, and Costco should say **Weekly ad**. A chicken or meat response should include `priceSource` `weekly_ad` when that ZIP's circular actually lists the item. An empty circular for a staple is honest: the offer stays demo or the trip store says **Unavailable**. Browse without `zip` returns a warning that a 5-digit ZIP is required.
+
+`Invoke-RestMethod "$base/api/catalog/browse?q=milk"` (no ZIP) should not invent Aldi or Target shelf prices.
 
 This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 

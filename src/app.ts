@@ -35,7 +35,7 @@ app.get("/api", (_req, res) => {
       "GET /api/search-catalog":
         "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "GET /api/catalog/browse":
-        "Browse the unified catalog by department, search, sort, and filters. Groups offers by UPC. Demo catalog when retailer keys are absent.",
+        "Browse the unified catalog by department, search, sort, and filters. Groups offers by UPC. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
       "GET /api/catalog/suggest":
         "Typeahead over the cached and demo catalog. Does not call retailer APIs.",
       "GET /api/catalog/departments":

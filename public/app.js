@@ -364,15 +364,23 @@ async function loadPage(reset) {
     const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
     resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     const demo = catalogSource === "demo";
-    coverageBannerEl.textContent = demo
-      ? "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse."
-      : catalogSource === "database"
-        ? "Prices from Grocery Gitter’s saved catalog. Aldi and Target stay on the demo shelf until a feed exists."
-        : catalogSource === "mixed"
-          ? "Live samples are mixed with the demo catalog. Stores without a catalog API stay labeled Demo."
-          : "Live catalog sample. This is not a full store assortment.";
-    if (body.warnings?.length) {
-      showCatalogError(body.warnings.join(" "));
+    const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
+    const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
+    const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
+    if (!zipOk && weeklyAds) {
+      coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
+    } else if (demo) {
+      coverageBannerEl.textContent = "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.";
+    } else if (catalogSource === "database") {
+      coverageBannerEl.textContent = "Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.";
+    } else if (catalogSource === "mixed") {
+      coverageBannerEl.textContent = "Live samples are mixed with the demo catalog. Weekly-ad prices are labeled Weekly ad, not a live shelf.";
+    } else {
+      coverageBannerEl.textContent = "Live catalog sample. This is not a full store assortment.";
+    }
+    const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
+    if (hardWarnings.length) {
+      showCatalogError(hardWarnings.join(" "));
     }
   } catch (error) {
     showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
@@ -512,7 +520,20 @@ function pricingClass(pricing) {
   const source = pricing?.source;
   if (source === "live" || source === "cached_live" || source === "partner_feed") return "badge-live";
   if (source === "weekly_ad" || source === "cached_weekly_ad") return "badge-ad";
+  if (source === "unavailable") return "badge-demo";
   return "badge-demo";
+}
+
+function checkedStoresHtml(payload, shown) {
+  const reports = payload.pricingByStore ?? [];
+  const shownNames = new Set(shown.map((store) => store.storeName));
+  const extras = reports.filter((report) => !shownNames.has(report.storeName));
+  if (!extras.length) return "";
+  return `<h3>Also checked</h3><ul class="offer-list">${extras
+    .map(
+      (report) => `<li><span><strong>${escapeHtml(report.storeName)}</strong> · ${escapeHtml(report.label || "Unavailable")}<br /><span class="muted">${escapeHtml(report.detail || "")}</span></span></li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderTrip(payload) {
@@ -536,6 +557,7 @@ function renderTrip(payload) {
       ${stores.map(renderStore).join("")}
     </div>
     ${(payload.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(payload.unavailable.join(", "))}</p>` : ""}
+    ${checkedStoresHtml(payload, stores)}
   `;
   const whole = $("instacart-whole");
   if (instacartEnabled && stores.length) {
@@ -577,6 +599,7 @@ function renderStore(store) {
         <h3>${escapeHtml(store.storeName)}</h3>
         ${nearby}
         <span class="${pricingClass(store.pricing)}">${escapeHtml(store.pricing?.label || "Prices")}</span>
+        ${store.pricing?.detail ? `<p class="muted">${escapeHtml(store.pricing.detail)}</p>` : ""}
       </div>
       <strong>${money(store.subtotal)}</strong>
     </header>

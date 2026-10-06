@@ -278,6 +278,17 @@ describe("buildStoreHandoff", () => {
     assert.match(handoff.action.detail ?? "", /not a cart fill/i);
   });
 
+  it("does not turn a Flipp flyer id into a Target product page", () => {
+    assert.equal(
+      targetSearchUrl({
+        name: "Good & Gather Large Eggs",
+        productId: "1041810480",
+        priceSource: "weekly_ad",
+      }),
+      "https://www.target.com/s?searchTerm=Good+%26+Gather+Large+Eggs"
+    );
+  });
+
   it("does not treat a Flipp flyer id as a Walmart item id", () => {
     const handoff = buildStoreHandoff({
       storeName: "Walmart",

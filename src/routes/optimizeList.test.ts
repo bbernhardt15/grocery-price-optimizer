@@ -12,6 +12,7 @@ import { krogerService } from "../krogerService";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { targetPricingProvider } from "../pricing/targetProvider";
 import { flippProviderForStore, type FlippDealsProvider } from "../pricing/flipp/flippProvider";
+import { FLIPP_MERCHANT_MAPPINGS } from "../pricing/flipp/merchants";
 
 describe("POST /api/optimize-list", () => {
   let memory: MongoMemoryServer;
@@ -1055,46 +1056,47 @@ describe("POST /api/optimize-list", () => {
       ];
     };
 
-    stubFlipp("Aldi", async (term, context) => {
-      assert.equal(context?.zipCode, "45202");
-      if (term !== "FlippAmaranth") {
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      stubFlipp(mapping.storeName, async (term, context) => {
+        if (mapping.storeName === "Aldi") {
+          assert.equal(context?.zipCode, "45202");
+          if (term !== "FlippAmaranth") {
+            return [];
+          }
+          return [
+            {
+              name: "Friendly Farms FlippAmaranth",
+              brand: "Friendly Farms",
+              storeName: "Aldi",
+              locationId: "45202",
+              price: 1.79,
+              unit: "count",
+              normalizedUnit: "count",
+              priceSource: "weekly_ad",
+            },
+          ];
+        }
+        if (mapping.storeName === "Target") {
+          assert.equal(context?.zipCode, "45202");
+          if (term !== "FlippBokChoy") {
+            return [];
+          }
+          return [
+            {
+              name: "Good & Gather FlippBokChoy",
+              brand: "Good & Gather",
+              storeName: "Target",
+              locationId: "45202",
+              price: 1.45,
+              unit: "count",
+              normalizedUnit: "count",
+              priceSource: "weekly_ad",
+            },
+          ];
+        }
         return [];
-      }
-      return [
-        {
-          name: "Friendly Farms FlippAmaranth",
-          brand: "Friendly Farms",
-          storeName: "Aldi",
-          locationId: "45202",
-          price: 1.79,
-          unit: "count",
-          normalizedUnit: "count",
-          priceSource: "weekly_ad",
-        },
-      ];
-    });
-    stubFlipp("Target", async (term, context) => {
-      assert.equal(context?.zipCode, "45202");
-      if (term !== "FlippBokChoy") {
-        return [];
-      }
-      return [
-        {
-          name: "Good & Gather FlippBokChoy",
-          brand: "Good & Gather",
-          storeName: "Target",
-          locationId: "45202",
-          price: 1.45,
-          unit: "count",
-          normalizedUnit: "count",
-          priceSource: "weekly_ad",
-        },
-      ];
-    });
-    for (const store of ["Walmart", "Kroger", "Publix", "Meijer"] as const) {
-      stubFlipp(store, async () => []);
+      });
     }
-
     try {
       const { status, json } = await optimize({
         groceryList: ["FlippAmaranth", "FlippBokChoy"],
@@ -1240,11 +1242,11 @@ describe("POST /api/optimize-list", () => {
       ];
     };
 
-    for (const storeName of ["Aldi", "Target", "Walmart", "Kroger"] as const) {
-      const provider = flippProviderForStore(storeName);
-      assert.ok(provider, `expected Flipp mapping for ${storeName}`);
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      const provider = flippProviderForStore(mapping.storeName);
+      assert.ok(provider, `expected Flipp mapping for ${mapping.storeName}`);
       stubs.push({
-        store: storeName,
+        store: mapping.storeName,
         original: provider.searchProducts.bind(provider),
       });
       provider.searchProducts = async () => [];
