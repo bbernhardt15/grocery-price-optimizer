@@ -89,6 +89,33 @@ describe("walmart catalog walk", () => {
     assert.equal(leaves.find((leaf) => leaf.id === "diapers")?.path, "Baby/Diapers");
   });
 
+  it("does not crawl nursery, travel, activities, resale, or brand-shop leaves", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "baby",
+          name: "Baby",
+          path: "Baby",
+          children: [
+            { id: "food", name: "Baby Food", path: "Baby", children: [] },
+            { id: "formula", name: "Formula", path: "Baby", children: [] },
+            { id: "feeding", name: "Bottle Feeding", path: "Baby", children: [] },
+            { id: "activities", name: "Baby Activities", path: "Baby", children: [] },
+            { id: "nursery", name: "Nursery", path: "Baby", children: [] },
+            { id: "travel", name: "Travel Gear", path: "Baby", children: [] },
+            { id: "resold", name: "Resold Baby", path: "Baby", children: [] },
+            { id: "brand", name: "Shop by Baby Brand", path: "Baby", children: [] },
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(
+      leaves.map((leaf) => leaf.id).sort(),
+      ["food", "formula"]
+    );
+    assert.equal(leaves.find((leaf) => leaf.id === "formula")?.departmentId, "baby");
+  });
+
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
     assert.equal(walmartPagePath("milk", null), "/paginated/items?category=milk&count=25");
     assert.equal(

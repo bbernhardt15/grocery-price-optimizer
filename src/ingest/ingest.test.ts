@@ -651,8 +651,21 @@ describe("catalog ingestion", () => {
       status: "active",
     });
     await recategorizeCatalog();
-    assert.equal((await CatalogMaster.findOne({ key: "keep-widget" }))?.departmentId, "snacks");
+    assert.equal((await CatalogMaster.findOne({ key: "keep-widget" }))?.departmentId, "other");
     assert.equal((await CatalogMaster.findOne({ key: "stroller-row" }))?.departmentId, "other");
+    await CatalogMaster.create({
+      key: "wipe-warmer-row",
+      name: "Wipe Warmer",
+      brand: "Munchkin",
+      departmentId: "baby",
+      categoryPaths: ["Baby/Feeding"],
+      walmartItemId: "warmer-1",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await recategorizeCatalog();
+    assert.equal((await CatalogMaster.findOne({ key: "wipe-warmer-row" }))?.departmentId, "other");
+    assert.equal(await CatalogMaster.countDocuments({ key: "wipe-warmer-row" }), 1);
     assert.equal(await CatalogMaster.countDocuments({ key: "stroller-row" }), 1);
   });
 

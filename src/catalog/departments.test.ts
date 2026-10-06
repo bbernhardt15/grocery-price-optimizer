@@ -83,7 +83,7 @@ describe("mapToDepartment", () => {
       ["Health & Beauty", "personal-care"],
       ["Cleaning Products", "household"],
       ["Pet Care", "pet"],
-      ["Baby", "baby"],
+      ["Baby", "other"],
     ];
     for (const [label, departmentId] of labels) {
       assert.equal(mapToDepartment([label], "Store Brand Item").departmentId, departmentId, label);
@@ -114,9 +114,26 @@ describe("mapToDepartment", () => {
     assert.equal(mapToDepartment(["Baby"], "Baby Back Ribs").subcategory, "Pork");
     assert.equal(mapToDepartment(undefined, "Formula 409").departmentId, "other");
     assert.equal(mapToDepartment(["Cleaning Products"], "Formula 409").departmentId, "household");
-    assert.equal(mapToDepartment(["Baby"], "Pampers Swaddlers").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby"], "Pampers Swaddlers").departmentId, "other");
     assert.equal(mapToDepartment(["Baby/Diapering/Diapers"], "Pampers Swaddlers").departmentId, "baby");
     assert.equal(mapToDepartment(["Baby/Baby Food/Purees"], "Gerber Peas").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Formula"], "Similac Infant Formula").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Formula"], "Enfamil Formula").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Formula"], "Similac Bottles").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Baby Food"], "Happy Baby food pouch").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Diapering"], "Overnight Diapers").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Potty Training"], "Goodnites Sleep Shorts").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Feeding"], "Wipe Warmer").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Feeding"], "Breast Pump").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Bottle Feeding"], "Similac Bottles").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Feeding"], "Toddler Plates").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Feeding"], "Sippy Cups").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Feeding"], "Baby Food Maker").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Nursing"], "Nursing Cover").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Health/Toddler Medicine"], "Rolaids").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Shop by Baby Brand"], "Axle Gear").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby"], "L A Naturals Parasite Formula").departmentId, "other");
+    assert.equal(mapToDepartment(["Baby/Pacifiers"], "Philips Pacifier").signal, "excluded");
     assert.match(mapToDepartment(["Baby"], "Baby Carrots").reason ?? "", /produce/);
     const stroller = mapToDepartment(["Baby/Strollers/Full-Size"], "Graco Modes");
     assert.equal(stroller.departmentId, "other");
@@ -139,6 +156,21 @@ describe("mapToDepartment", () => {
     assert.equal(mapToDepartment(undefined, "Marinara Sauce").departmentId, "pantry");
     assert.equal(mapToDepartment(undefined, "Applesauce").departmentId, "produce");
     assert.equal(mapToDepartment(["Pantry"], "Rice Krispies").departmentId, "breakfast");
+    assert.equal(mapToDepartment(["Snacks"], "Walkers Shortbread").departmentId, "snacks");
     assert.equal(mapToDepartment(["Canned & Packaged"], "Chicken Breast").departmentId, "pantry");
+    assert.equal(
+      mapToDepartment(["Video Games/SpongeBob SquarePants"], "SpongeBob SquarePants Battle for Bikini Bottom").departmentId,
+      "other"
+    );
+    assert.equal(
+      mapToDepartment(["Household Essentials/Paper & Plastic/Toilet Paper"], "Mainstays Bathroom Storage Cabinet").departmentId,
+      "other"
+    );
+    assert.equal(
+      mapToDepartment(["Household Essentials/Paper & Plastic/Toilet Paper"], "Charmin Ultra Soft").departmentId,
+      "household"
+    );
+    assert.equal(mapToDepartment(["Cleaning Supplies"], "Lysol Disinfecting Wipes").departmentId, "household");
+    assert.equal(mapToDepartment(["Laundry"], "Tide Pods").departmentId, "household");
   });
 });

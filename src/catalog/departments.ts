@@ -82,12 +82,12 @@ const RULES: readonly Rule[] = [
     subcategory: "Vegetables",
   },
   { test: /diaper|baby wipe/i, departmentId: "baby", subcategory: "Diapers" },
-  { test: /infant formula|baby formula|baby food/i, departmentId: "baby", subcategory: "Baby Food" },
+  { test: /infant formula|baby formula|baby food(?!\s*makers?\b)/i, departmentId: "baby", subcategory: "Baby Food" },
   { test: /dog food|dog treat|puppy/i, departmentId: "pet", subcategory: "Dog" },
   { test: /cat food|cat litter|kitten/i, departmentId: "pet", subcategory: "Cat" },
   { test: /pet food|pet supply/i, departmentId: "pet" },
   { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bag/i, departmentId: "household", subcategory: "Paper" },
-  { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|sponge/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
   { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
   { test: /shampoo|conditioner/i, departmentId: "personal-care", subcategory: "Hair" },
@@ -197,34 +197,102 @@ function pathSegments(categories: string[]): string[] {
 }
 
 /**
- * Walmart's Baby tree is mostly gear. A diaper or a jar of baby food stays
- * in baby. A stroller, car seat, or onesie does not, even when the path
- * starts with Baby.
+ * Grocery baby is diapers, wipes, formula, and baby food. Feeding gear,
+ * nursery, travel, activities, and brand-shop leaves are not.
  */
-const NON_GROCERY_GEAR =
-  /\b(?:strollers?|car\s*seats?|cribs?|bassinets?|nursery|onesies|bodysuits?|clothing|apparel|footwear|shoes|toys?|playards?|play\s*yards?|high\s*chairs?|bouncers?|baby\s*swings?|diaper\s*bags?|baby\s*gates?|pacifiers?|teethers?|bedding|swaddles?|sleep\s*sacks?|walkers?|jumpers?|baby\s*monitors?|furniture)\b/i;
+const BABY_FALSE_FRIEND =
+  /^baby\s+(?:carrots?|spinach|kale|bok choy|potatoes|potato|bella|portobell\w*|arugula|gem|broccoli|romaine|greens|back ribs?)$/i;
 
-const BABY_CONSUMABLE = /\b(?:diapers?|baby wipes?|infant formula|baby formula|baby foods?)\b/i;
+const BABY_BLOCKED_BRANCH =
+  /^(?:baby activities|activities|nursery|travel gear|resold baby|shop by baby brand|shop by brand|car seats?|strollers?|clothing|apparel|toys|feeding gear)$/i;
+
+const BABY_EQUIPMENT =
+  /\b(?:wipe warmers?|breast pumps?|nursing covers?|sippy cups?|toddler plates?|sleep shorts?|food makers?|baby food makers?|bottle feed(?:ing|ers?)?|baby bottles?|pacifiers?|teethers?|strollers?|car\s*seats?|cribs?|bassinets?|high\s*chairs?|playards?|play\s*yards?|baby\s*swings?|nursing pillows?|diaper\s*bags?|onesies|bodysuits?|baby monitors?)\b/i;
+
+const BABY_CONSUMABLE =
+  /\b(?:diapers?|diapering|baby wipes?|infant formula|baby formula|baby foods?(?!\s*makers?\b)|food pouches?)\b/i;
+
+const NOT_GROCERY =
+  /\b(?:video games?|xbox|playstation|nintendo)\b|\b(?:cabinets?|bookcases?|dressers?|nightstands?|bathroom storage)\b/i;
+
+function inBabyDepartment(categories: string[]): boolean {
+  return pathSegments(categories).some((segment) => {
+    if (BABY_FALSE_FRIEND.test(segment)) {
+      return false;
+    }
+    return /^baby$/i.test(segment) || /^baby\b/i.test(segment) || BABY_BLOCKED_BRANCH.test(segment);
+  });
+}
+
+function isBabyConsumable(categories: string[], name: string): boolean {
+  const segments = pathSegments(categories);
+  const leaf = segments.at(-1) ?? "";
+  const focus = `${leaf} ${name}`;
+  const text = `${categories.join(" ")} ${name}`;
+  if (BABY_EQUIPMENT.test(focus)) {
+    return false;
+  }
+  if (/\bparasite\b|\bformula\s*409\b/i.test(text)) {
+    return false;
+  }
+  if (/\bbottles?\b/i.test(focus) && !/\b(?:infant|baby)\s+formula\b/i.test(focus)) {
+    return false;
+  }
+  if (BABY_CONSUMABLE.test(text)) {
+    return true;
+  }
+  if (!inBabyDepartment(categories)) {
+    return false;
+  }
+  if (/\bformula\b/i.test(text)) {
+    return true;
+  }
+  return /\b(?:wipes|purees?|jars?)\b/i.test(focus);
+}
 
 function babyGearLabel(categories: string[], name: string): string | null {
-  const haystack = `${categories.join(" ")} ${name}`.replace(/\s+/g, " ").trim();
-  const match = haystack.match(NON_GROCERY_GEAR);
+  const segments = pathSegments(categories);
+  const leaf = segments.at(-1) ?? "";
+  const focus = `${leaf} ${name}`;
+  if (isBabyConsumable(categories, name)) {
+    return null;
+  }
+  const equipment = focus.match(BABY_EQUIPMENT);
+  if (equipment && (inBabyDepartment(categories) || BABY_EQUIPMENT.test(name))) {
+    return equipment[0].toLowerCase().replace(/\s+/g, " ");
+  }
+  if (inBabyDepartment(categories) && /\bwalkers?\b/i.test(focus)) {
+    return "walker";
+  }
+  if (inBabyDepartment(categories) && /\bswings?\b/i.test(focus)) {
+    return "swing";
+  }
+  if (inBabyDepartment(categories) && /\bbottles?\b/i.test(focus) && !/\b(?:infant|baby)\s+formula\b/i.test(focus)) {
+    return "bottles";
+  }
+  if (!inBabyDepartment(categories)) {
+    return null;
+  }
+  for (const segment of segments) {
+    if (BABY_BLOCKED_BRANCH.test(segment)) {
+      return segment.toLowerCase();
+    }
+  }
+  return null;
+}
+
+function notGroceryLabel(categories: string[], name: string): string | null {
+  const leaf = pathSegments(categories).at(-1) ?? "";
+  const focus = `${leaf} ${name}`;
+  const match = focus.match(NOT_GROCERY) ?? `${categories.join(" ")} ${name}`.match(/\b(?:video games?|xbox|playstation|nintendo)\b/i);
   if (!match) {
     return null;
   }
-  const babyContext = /\bbaby\b/i.test(categories.join(" ")) || /\bbaby\b/i.test(name);
-  const label = match[0].toLowerCase().replace(/\s+/g, " ");
-  const unambiguous = /stroller|car seat|crib|bassinet|pacifier|diaper bag|teether|playard|high chair|bouncer|baby monitor|baby gate/i.test(label);
-  if (!babyContext && !unambiguous) {
-    return null;
+  const label = match[0].toLowerCase();
+  if (/video game|xbox|playstation|nintendo/.test(label)) {
+    return "video game";
   }
-  if (/\bdiaper\s*bags?\b/i.test(haystack)) {
-    return "diaper bag";
-  }
-  if (BABY_CONSUMABLE.test(name) && !/\bdiaper\s*bags?\b/i.test(name)) {
-    return null;
-  }
-  return label;
+  return "furniture";
 }
 
 function reasonText(kind: "path" | "name" | "none", source: string, departmentId: string): string {
@@ -263,9 +331,18 @@ export function mapToDepartment(
   explicit?: { departmentId?: string; subcategory?: string }
 ): MappedDepartment {
   const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
+  const other = departmentById("other") ?? DEPARTMENTS[DEPARTMENTS.length - 1];
+  const junk = notGroceryLabel(labels, name);
+  if (junk) {
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      reason: `not-grocery:${junk}→other`,
+    };
+  }
   const gear = babyGearLabel(labels, name);
   if (gear) {
-    const other = departmentById("other") ?? DEPARTMENTS[DEPARTMENTS.length - 1];
     return {
       departmentId: other.id,
       departmentName: other.name,
@@ -350,6 +427,14 @@ export function mapToDepartment(
   const department = departmentById(departmentId) ?? DEPARTMENTS[DEPARTMENTS.length - 1];
   const sameDepartment = fromName?.departmentId === department.id ? fromName : undefined;
   const haystack = `${categoryText} ${name}`;
+  if (department.id === "baby" && !isBabyConsumable(labels, name)) {
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      reason: "baby:not diaper, wipe, formula, or baby food→other",
+    };
+  }
   return {
     departmentId: department.id,
     departmentName: department.name,
