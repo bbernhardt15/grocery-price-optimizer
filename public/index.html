@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0e7a45" />
+    <script>
+      (function () {
+        var theme = "system";
+        try {
+          var saved = localStorage.getItem("gg-theme");
+          if (saved === "light" || saved === "dark" || saved === "system") theme = saved;
+        } catch (err) {}
+        var dark =
+          theme === "dark" ||
+          (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var root = document.documentElement;
+        root.setAttribute("data-theme", theme);
+        root.setAttribute("data-resolved", dark ? "dark" : "light");
+        root.style.colorScheme = dark ? "dark" : "light";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", dark ? "#1c221e" : "#0e7a45");
+      })();
+    </script>
+    <style>
+      html { background: #f4efe6; color-scheme: light; }
+      html[data-resolved="dark"] { background: #1c221e; color-scheme: dark; }
+    </style>
     <meta name="description" content="Grocery Gitter — browse groceries by department, compare prices, and split the trip across stores." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Gitter" />
@@ -13,7 +35,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=browse-1" />
+    <link rel="stylesheet" href="/styles.css?v=polish-1" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -38,11 +60,14 @@
             role="combobox"
             aria-autocomplete="list"
             aria-expanded="false"
-            aria-controls="suggestions"
+            aria-controls="suggest-panel"
             aria-haspopup="listbox"
             enterkeyhint="search"
           />
-          <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+          <div id="suggest-panel" class="suggestions" hidden>
+            <p id="suggest-status" class="suggest-status" role="status" hidden></p>
+            <ul id="suggestions" role="listbox" hidden></ul>
+          </div>
         </form>
 
         <div class="top-actions">
@@ -142,16 +167,21 @@
           </div>
           <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device.</p>
           <ul id="list-items" class="list-items"></ul>
-          <div class="savings" id="savings">
+          <div class="savings" id="savings" data-state="empty">
+            <p id="savings-loading" class="sr-only" hidden>Checking prices for your list.</p>
+            <div class="savings-skel" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
             <div class="savings-copy">
               <p class="savings-label">Estimated total</p>
               <p id="estimate-total" class="savings-total">$0.00</p>
-              <p id="estimate-note" class="muted">Add items to see savings versus one store.</p>
+              <p id="savings-badge" class="savings-badge" hidden></p>
+              <p id="estimate-note" class="muted">Add items to compare a split trip with the priciest store that carries all of them.</p>
             </div>
-            <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Savings compared with buying everything at one store">
+            <div id="savings-meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Add items to see savings versus the priciest store.">
               <span id="meter-fill" class="meter-fill"></span>
             </div>
-            <p id="meter-caption" class="meter-caption">Savings meter</p>
+            <p id="meter-caption" class="meter-caption">Waiting for your list</p>
           </div>
           <label class="check-row sub-toggle">
             <input id="allow-subs" type="checkbox" />
@@ -167,15 +197,19 @@
       <div class="list-bar" id="list-bar">
         <button type="button" id="list-bar-btn" class="list-bar-btn">
           <span id="bar-count">My list</span>
-          <span id="bar-total">$0.00</span>
+          <span class="bar-figures">
+            <span id="bar-save" class="bar-save" hidden></span>
+            <span id="bar-total">$0.00</span>
+          </span>
         </button>
         <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
+        <p id="bar-caption" class="bar-caption">Add items to see savings</p>
       </div>
     </div>
 
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
     <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/app.js?v=browse-1"></script>
+    <script type="module" src="/app.js?v=polish-1"></script>
   </body>
 </html>

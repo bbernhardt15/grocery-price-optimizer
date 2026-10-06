@@ -1,3 +1,21 @@
+import { describeSavings, estimateSavings, formatMoney } from "./shopper/savingsMeter.js";
+import {
+  highlightMatch,
+  nextSuggestIndex,
+  SUGGEST_DEBOUNCE_MS,
+  suggestionFacts,
+  suggestionPriceLabel,
+} from "./shopper/typeahead.js";
+import {
+  nextTheme,
+  parseThemeChoice,
+  THEME_KEY,
+  themeButtonLabel,
+  themeColor,
+  themeGlyph,
+  themeIsDark,
+} from "./shopper/theme.js";
+
 const $ = (id) => document.getElementById(id);
 
 const searchEl = $("search");
@@ -17,8 +35,10 @@ const estimateTotalEl = $("estimate-total");
 const estimateNoteEl = $("estimate-note");
 const meterFillEl = $("meter-fill");
 const barMeterEl = $("bar-meter");
-const meterEl = document.querySelector(".meter");
+const meterEl = $("savings-meter");
 const meterCaptionEl = $("meter-caption");
+const suggestPanel = $("suggest-panel");
+const suggestStatus = $("suggest-status");
 const planBtn = $("plan-btn");
 const planErrorEl = $("plan-error");
 const allowSubsEl = $("allow-subs");
@@ -29,7 +49,6 @@ const coverageDialog = $("coverage-dialog");
 
 const ZIP_KEY = "gg-zip";
 const LIST_KEY = "gg-list";
-const THEME_KEY = "gg-theme";
 const SUBS_KEY = "gg-subs";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
@@ -49,14 +68,16 @@ let instacartEnabled = false;
 /** @type {Record<string, any> | null} */
 let lastOptimize = null;
 let searchTimer = 0;
+let suggestLoadingTimer = 0;
 let suggestAbort = null;
 let activeSuggest = -1;
+let listLoading = false;
 /** @type {Array<Record<string, any>>} */
 let suggestions = [];
+/** Query the current suggestion rows belong to. */
+let suggestionQuery = "";
 
-function money(value) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value) || 0);
-}
+const money = formatMoney;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -97,72 +118,101 @@ function saveList() {
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
 }
 
-function estimate() {
-  const allow = allowSubsEl.checked;
-  const stores = ["Aldi", "Kroger", "Target", "Walmart"];
-  let split = 0;
-  const totals = Object.fromEntries(stores.map((store) => [store, 0]));
-  const missing = Object.fromEntries(stores.map((store) => [store, false]));
-  for (const entry of list.values()) {
-    const offers = entry.product.offers.filter((offer) => offer.availability !== "out_of_stock");
-    const gaps = entry.product.gaps ?? [];
-    const candidates = [];
-    for (const offer of offers) {
-      candidates.push({ storeName: offer.storeName, price: offer.price });
-    }
-    if (allow) {
-      for (const gap of gaps) {
-        if (!gap.substitute) continue;
-        if (offers.some((offer) => offer.storeName === gap.storeName)) continue;
-        candidates.push({ storeName: gap.storeName, price: gap.substitute.price });
-      }
-    }
-    if (candidates.length === 0) continue;
-    split += Math.min(...candidates.map((candidate) => candidate.price)) * entry.quantity;
-    for (const store of stores) {
-      const hit = candidates.find((candidate) => candidate.storeName === store);
-      if (!hit) missing[store] = true;
-      else totals[store] += hit.price * entry.quantity;
+function quotesForProduct(product, allowSubs) {
+  const quotes = [];
+  for (const offer of product?.offers ?? []) {
+    if (offer.availability === "out_of_stock") continue;
+    quotes.push({ storeName: offer.storeName, price: Number(offer.price) });
+  }
+  if (allowSubs) {
+    for (const gap of product?.gaps ?? []) {
+      if (!gap.substitute) continue;
+      if (quotes.some((quote) => quote.storeName === gap.storeName)) continue;
+      quotes.push({ storeName: gap.storeName, price: Number(gap.substitute.price) });
     }
   }
-  const complete = stores.filter((store) => !missing[store] && list.size > 0);
-  complete.sort((a, b) => totals[a] - totals[b]);
-  const single = complete[0];
-  const singleTotal = single ? totals[single] : null;
-  const savings = singleTotal === null ? 0 : Math.max(0, Math.round((singleTotal - split) * 100) / 100);
-  const ratio = singleTotal ? Math.min(100, Math.round((savings / singleTotal) * 100)) : 0;
-  return { split, single, singleTotal, savings, ratio };
+  return quotes;
+}
+
+function listLines() {
+  const allow = allowSubsEl.checked;
+  return [...list.values()].map((entry) => ({
+    quantity: entry.quantity,
+    quotes: quotesForProduct(entry.product, allow),
+  }));
 }
 
 function renderEstimate() {
-  const { split, single, singleTotal, savings, ratio } = estimate();
   const count = [...list.values()].reduce((sum, entry) => sum + entry.quantity, 0);
+  const savingsEl = $("savings");
+  const badgeEl = $("savings-badge");
+  const barSave = $("bar-save");
+  const barCaption = $("bar-caption");
+  const listBar = $("list-bar");
   listCountEl.textContent = String(count);
-  estimateTotalEl.textContent = money(split);
-  $("bar-total").textContent = money(split);
   $("bar-count").textContent = count ? `My list · ${count}` : "My list";
-  planBtn.disabled = list.size === 0;
-  listEmptyEl.hidden = list.size > 0;
-  const width = savings > 0 ? Math.max(ratio, 8) : 0;
+  planBtn.disabled = list.size === 0 || listLoading;
+  listEmptyEl.hidden = list.size > 0 || listLoading;
+
+  const loadingNote = $("savings-loading");
+  if (listLoading) {
+    savingsEl.dataset.state = "loading";
+    savingsEl.setAttribute("aria-busy", "true");
+    loadingNote.hidden = false;
+    listBar.dataset.state = "loading";
+    meterEl.setAttribute("aria-valuenow", "0");
+    meterEl.setAttribute("aria-valuetext", "Checking prices for your list.");
+    barMeterEl.style.width = "0%";
+    badgeEl.hidden = true;
+    barSave.hidden = true;
+    barCaption.textContent = "Checking prices…";
+    renderListRows();
+    return;
+  }
+
+  const meter = estimateSavings(listLines());
+  const copy = describeSavings(meter, { allowSubstitutes: allowSubsEl.checked });
+  const width = meter.saved > 0 ? Math.max(meter.ratio, 8) : 0;
+  savingsEl.dataset.state = meter.status;
+  savingsEl.setAttribute("aria-busy", "false");
+  loadingNote.hidden = true;
+  listBar.dataset.state = meter.status;
+  estimateTotalEl.textContent = money(meter.splitTotal);
+  $("bar-total").textContent = money(meter.splitTotal);
+  estimateNoteEl.textContent = copy.note;
+  meterCaptionEl.textContent = copy.caption;
+  barCaption.textContent = meter.status === "empty" ? "Add items to see savings" : copy.caption;
   meterFillEl.style.width = `${width}%`;
   barMeterEl.style.width = `${width}%`;
-  if (meterEl) meterEl.setAttribute("aria-valuenow", String(ratio));
-  if (!list.size) {
-    estimateNoteEl.textContent = "Add items to see savings versus one store.";
-    meterCaptionEl.textContent = "Savings meter";
-  } else if (single && savings > 0) {
-    estimateNoteEl.textContent = `Save ${money(savings)} versus buying everything at ${single} (${money(singleTotal)}).`;
-    meterCaptionEl.textContent = `${money(savings)} saved · ${ratio}% of a one-store trip`;
-  } else if (single) {
-    estimateNoteEl.textContent = `${single} is already the cheapest way to buy this list.`;
-    meterCaptionEl.textContent = "No split savings yet";
+  meterEl.setAttribute("aria-valuenow", String(meter.ratio));
+  meterEl.setAttribute("aria-valuetext", copy.meterText);
+  if (copy.badge) {
+    badgeEl.hidden = false;
+    badgeEl.textContent = copy.badge;
+    barSave.hidden = false;
+    barSave.textContent = copy.badge;
   } else {
-    estimateNoteEl.textContent = allowSubsEl.checked
-      ? "No single store can cover this list, even with substitutes."
-      : "No single store carries every exact item. Allow substitutes to fill the gaps.";
-    meterCaptionEl.textContent = "Savings meter";
+    badgeEl.hidden = true;
+    badgeEl.textContent = "";
+    barSave.hidden = true;
   }
   renderListRows();
+}
+
+function savingsBlock(total, subject) {
+  const meter = estimateSavings(listLines(), Number.isFinite(total) ? { splitTotal: total } : {});
+  const copy = describeSavings(meter, { subject });
+  if (meter.status === "empty") return "";
+  const width = meter.saved > 0 ? Math.max(meter.ratio, 8) : 0;
+  const badge = copy.badge ? `<p class="savings-badge">${escapeHtml(copy.badge)}</p>` : "";
+  return `<div class="trip-savings">
+    ${badge}
+    <p class="muted">${escapeHtml(copy.note)}</p>
+    <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meter.ratio}" aria-valuetext="${escapeHtml(copy.meterText)}">
+      <span class="meter-fill" style="width:${width}%"></span>
+    </div>
+    <p class="meter-caption">${escapeHtml(copy.caption)}</p>
+  </div>`;
 }
 
 function renderListRows() {
@@ -389,39 +439,127 @@ function selectDepartment(id) {
   activeDepartment = id;
   query = "";
   searchEl.value = "";
-  suggestionsEl.hidden = true;
+  closeSuggestions();
   renderDepartments();
   const chip = document.querySelector(`[data-dept="${CSS.escape(id)}"]`);
   chip?.scrollIntoView({ inline: "center", block: "nearest" });
   void loadPage(true);
 }
 
+function highlightHtml(text, q) {
+  return highlightMatch(text, q)
+    .map((part) => (part.match ? `<mark>${escapeHtml(part.text)}</mark>` : escapeHtml(part.text)))
+    .join("");
+}
+
+function closeSuggestions() {
+  window.clearTimeout(suggestLoadingTimer);
+  suggestAbort?.abort();
+  suggestPanel.hidden = true;
+  suggestionsEl.hidden = true;
+  suggestStatus.hidden = true;
+  searchEl.setAttribute("aria-expanded", "false");
+  searchEl.removeAttribute("aria-activedescendant");
+}
+
+function paintActiveSuggest() {
+  const options = suggestionsEl.querySelectorAll("[role=option]");
+  options.forEach((option, index) => {
+    const selected = index === activeSuggest;
+    option.setAttribute("aria-selected", String(selected));
+    if (selected) option.scrollIntoView({ block: "nearest" });
+  });
+  if (activeSuggest >= 0) searchEl.setAttribute("aria-activedescendant", `suggest-${activeSuggest}`);
+  else searchEl.removeAttribute("aria-activedescendant");
+}
+
+function showSuggestStatus(message) {
+  suggestPanel.hidden = false;
+  suggestionsEl.hidden = true;
+  suggestionsEl.innerHTML = "";
+  suggestStatus.hidden = false;
+  suggestStatus.textContent = message;
+  searchEl.setAttribute("aria-expanded", "true");
+  searchEl.removeAttribute("aria-activedescendant");
+}
+
+function renderSuggestionRows(q) {
+  suggestionsEl.innerHTML = suggestions
+    .map((item, index) => {
+      const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
+      const price = suggestionPriceLabel(item.bestPrice, item.bestStore, money);
+      const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
+      const thumb = item.imageUrl
+        ? `<img src="${escapeHtml(item.imageUrl)}" alt="" />`
+        : "";
+      return `<li role="presentation"><button type="button" class="suggest-option" role="option" data-suggest="${index}" id="suggest-${index}" aria-selected="${index === activeSuggest}">
+        ${thumb}
+        <span>
+          <span class="suggest-name">${highlightHtml(item.name || "", q)}</span>
+          ${meta ? `<span class="suggest-meta">${meta}</span>` : ""}
+        </span>
+      </button></li>`;
+    })
+    .join("");
+  suggestStatus.hidden = true;
+  suggestionsEl.hidden = false;
+  suggestPanel.hidden = false;
+  searchEl.setAttribute("aria-expanded", "true");
+  paintActiveSuggest();
+}
+
+function chooseSuggestion(index) {
+  const item = suggestions[index];
+  if (!item) return;
+  query = item.name;
+  searchEl.value = item.name;
+  activeDepartment = "all";
+  renderDepartments();
+  closeSuggestions();
+  void loadPage(true);
+}
+
 async function loadSuggestions(text) {
   const q = text.trim();
-  if (q.length < 1) {
-    suggestionsEl.hidden = true;
-    searchEl.setAttribute("aria-expanded", "false");
+  if (!q) {
+    suggestions = [];
+    suggestionQuery = "";
+    activeSuggest = -1;
+    showSuggestStatus("Type a product, brand, or aisle.");
     return;
   }
+  window.clearTimeout(suggestLoadingTimer);
   suggestAbort?.abort();
-  suggestAbort = new AbortController();
-  try {
-    const response = await fetch(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, { signal: suggestAbort.signal });
-    const body = await response.json();
-    suggestions = body.suggestions ?? [];
+  const controller = new AbortController();
+  suggestAbort = controller;
+  const requestQuery = q;
+  if (suggestionQuery !== q) {
+    suggestions = [];
     activeSuggest = -1;
-    suggestionsEl.innerHTML = suggestions
-      .map(
-        (item, index) => `<li role="presentation"><button type="button" role="option" data-suggest="${index}" id="suggest-${index}">
-          ${escapeHtml(item.name)}
-          <span class="suggest-meta">${escapeHtml(item.brand)} · ${escapeHtml(item.departmentName)} · ${money(item.bestPrice)}</span>
-        </button></li>`
-      )
-      .join("");
-    suggestionsEl.hidden = suggestions.length === 0;
-    searchEl.setAttribute("aria-expanded", String(suggestions.length > 0));
+    suggestionQuery = "";
+  }
+  suggestLoadingTimer = window.setTimeout(() => {
+    if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
+  }, 200);
+  try {
+    const response = await fetch(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    const body = await response.json().catch(() => ({}));
+    if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
+    window.clearTimeout(suggestLoadingTimer);
+    suggestions = body.suggestions ?? [];
+    suggestionQuery = q;
+    activeSuggest = -1;
+    if (suggestions.length === 0) {
+      showSuggestStatus(`No matches for “${q}”. Press Enter to search the shelves.`);
+      return;
+    }
+    renderSuggestionRows(q);
   } catch (error) {
-    if (error.name !== "AbortError") suggestionsEl.hidden = true;
+    if (error?.name === "AbortError") return;
+    window.clearTimeout(suggestLoadingTimer);
+    if (searchEl.value.trim() !== requestQuery) return;
+    suggestions = [];
+    showSuggestStatus(`No matches for “${q}”. Press Enter to search the shelves.`);
   }
 }
 
@@ -438,6 +576,12 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
 }
 
+function itemCompareNote(product) {
+  const meter = estimateSavings([{ quantity: 1, quotes: quotesForProduct(product, false) }]);
+  if (meter.status !== "ready") return "";
+  return `<p class="compare-note">${escapeHtml(describeSavings(meter, { subject: "item" }).note)}</p>`;
+}
+
 function openProduct(product) {
   const offers = [...product.offers].sort((a, b) => a.price - b.price);
   const gaps = product.gaps ?? [];
@@ -446,6 +590,7 @@ function openProduct(product) {
     <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
     <h2 id="dialog-title">${escapeHtml(product.name)}</h2>
     <p class="muted">${escapeHtml(product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
+    ${itemCompareNote(product)}
     <h3>Prices</h3>
     <ul class="offer-list">
       ${offers
@@ -531,6 +676,7 @@ function renderTrip(payload) {
       </div>
       <p class="trip-total">${money(payload.total)}</p>
     </div>
+    ${savingsBlock(Number(payload.total))}
     ${payload.pricingWarning ? `<p class="muted">${escapeHtml(payload.pricingWarning)}</p>` : ""}
     <div class="store-grid">
       ${stores.map(renderStore).join("")}
@@ -693,11 +839,17 @@ async function startKroger(storeName, button) {
 }
 
 function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
-  const dark =
-    theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.querySelector('meta[name="theme-color"]').setAttribute("content", dark ? "#121411" : "#0e7a45");
+  const choice = parseThemeChoice(theme);
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = themeIsDark(choice, systemDark);
+  document.documentElement.dataset.theme = choice;
+  document.documentElement.dataset.resolved = dark ? "dark" : "light";
+  document.documentElement.style.colorScheme = dark ? "dark" : "light";
+  localStorage.setItem(THEME_KEY, choice);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColor(choice, systemDark));
+  const glyph = $("theme-glyph");
+  if (glyph) glyph.textContent = themeGlyph(choice);
+  $("theme-btn")?.setAttribute("aria-label", themeButtonLabel(choice, systemDark));
 }
 
 async function restoreList() {
@@ -748,6 +900,7 @@ async function addSample() {
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+  if (!target.closest(".search") && !suggestPanel.hidden) closeSuggestions();
   const dept = target.closest("[data-dept]");
   if (dept) {
     selectDepartment(dept.getAttribute("data-dept"));
@@ -790,14 +943,7 @@ document.addEventListener("click", (event) => {
   }
   const suggest = target.closest("[data-suggest]");
   if (suggest) {
-    const item = suggestions[Number(suggest.getAttribute("data-suggest"))];
-    if (!item) return;
-    query = item.name;
-    searchEl.value = item.name;
-    activeDepartment = "all";
-    renderDepartments();
-    suggestionsEl.hidden = true;
-    void loadPage(true);
+    chooseSuggestion(Number(suggest.getAttribute("data-suggest")));
     return;
   }
   if (target.closest("[data-kroger]")) {
@@ -825,32 +971,53 @@ $("search-form").addEventListener("submit", (event) => {
     activeDepartment = "all";
     renderDepartments();
   }
-  suggestionsEl.hidden = true;
-  searchEl.setAttribute("aria-expanded", "false");
+  closeSuggestions();
   void loadPage(true);
 });
 
 searchEl.addEventListener("input", () => {
   window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => void loadSuggestions(searchEl.value), 180);
+  window.clearTimeout(suggestLoadingTimer);
+  const value = searchEl.value;
+  if (!value.trim()) {
+    suggestAbort?.abort();
+    suggestions = [];
+    suggestionQuery = "";
+    activeSuggest = -1;
+    if (document.activeElement === searchEl) showSuggestStatus("Type a product, brand, or aisle.");
+    else closeSuggestions();
+    return;
+  }
+  searchTimer = window.setTimeout(() => void loadSuggestions(value), SUGGEST_DEBOUNCE_MS);
+});
+
+searchEl.addEventListener("focus", () => {
+  if (!searchEl.value.trim()) showSuggestStatus("Type a product, brand, or aisle.");
+  else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
 });
 
 searchEl.addEventListener("keydown", (event) => {
-  if (suggestionsEl.hidden) return;
+  if (event.key === "Escape") {
+    if (!suggestPanel.hidden) {
+      event.preventDefault();
+      closeSuggestions();
+    }
+    return;
+  }
+  const open = !suggestPanel.hidden && !suggestionsEl.hidden && suggestions.length > 0;
+  if (!open) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    activeSuggest = event.key === "ArrowDown" ? Math.min(suggestions.length - 1, activeSuggest + 1) : Math.max(0, activeSuggest - 1);
-    suggestionsEl.querySelectorAll("[role=option]").forEach((option, index) => {
-      option.setAttribute("aria-selected", String(index === activeSuggest));
-    });
-    searchEl.setAttribute("aria-activedescendant", `suggest-${activeSuggest}`);
+    activeSuggest = nextSuggestIndex(activeSuggest, suggestions.length, event.key);
+    paintActiveSuggest();
   } else if (event.key === "Enter" && activeSuggest >= 0) {
     event.preventDefault();
-    suggestionsEl.querySelector(`[data-suggest="${activeSuggest}"]`)?.click();
-  } else if (event.key === "Escape") {
-    suggestionsEl.hidden = true;
-    searchEl.setAttribute("aria-expanded", "false");
+    chooseSuggestion(activeSuggest);
   }
+});
+
+suggestPanel.addEventListener("mousedown", (event) => {
+  event.preventDefault();
 });
 
 sortEl.addEventListener("change", () => void loadPage(true));
@@ -890,9 +1057,11 @@ zipEl.addEventListener("change", () => {
   void loadPage(true);
 });
 $("theme-btn").addEventListener("click", () => {
-  const current = document.documentElement.dataset.theme || "system";
-  const next = current === "system" ? "dark" : current === "dark" ? "light" : "system";
-  applyTheme(next);
+  applyTheme(nextTheme(document.documentElement.dataset.theme || "system"));
+});
+
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (parseThemeChoice(document.documentElement.dataset.theme) === "system") applyTheme("system");
 });
 
 document.addEventListener("keydown", (event) => {
@@ -911,11 +1080,21 @@ async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
+  let savedRows = [];
+  try {
+    savedRows = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+  } catch {
+    savedRows = [];
+  }
+  listLoading = Array.isArray(savedRows) && savedRows.some((row) => row?.id);
+  renderEstimate();
   const deptResponse = await fetch("/api/catalog/departments");
   const deptBody = await deptResponse.json();
   departments = deptBody.departments ?? [];
   renderDepartments();
   await restoreList();
+  listLoading = false;
+  renderEstimate();
   await loadPage(true);
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
