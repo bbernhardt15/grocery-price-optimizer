@@ -34,9 +34,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Grocery Gitter</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon-192.png?v=store-1" sizes="192x192" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-1" />
-    <link rel="stylesheet" href="/styles.css?v=store-1" />
+    <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
+    <link rel="stylesheet" href="/styles.css?v=store-2" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -172,8 +172,20 @@
             <h2>My list</h2>
             <button type="button" class="text-btn" id="list-close">Close</button>
           </div>
-          <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device.</p>
+          <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device until you share.</p>
           <ul id="list-items" class="list-items"></ul>
+          <section id="share-box" class="share-box" aria-label="Share this list">
+            <label>Your name on this list
+              <input id="display-name" maxlength="40" placeholder="Optional" autocomplete="nickname" />
+            </label>
+            <p id="share-status" class="muted">Share a link so someone else can shop this list with you.</p>
+            <div class="share-actions">
+              <button type="button" id="share-btn" class="ghost">Share list</button>
+              <button type="button" id="share-viewonly" class="ghost" hidden>Make view-only</button>
+              <button type="button" id="share-revoke" class="ghost" hidden>Revoke link</button>
+              <button type="button" id="share-own" class="ghost" hidden>My own list</button>
+            </div>
+          </section>
           <div class="savings" id="savings" data-state="empty">
             <p id="savings-loading" class="sr-only" hidden>Checking prices for your list.</p>
             <div class="savings-skel" aria-hidden="true">
@@ -221,8 +233,8 @@
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
     <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/native-config.js?v=store-1"></script>
-    <script src="/native-shell.js?v=store-1"></script>
-    <script type="module" src="/app.js?v=store-1"></script>
+    <script src="/native-config.js?v=store-2"></script>
+    <script src="/native-shell.js?v=store-2"></script>
+    <script type="module" src="/app.js?v=store-2"></script>
   </body>
 </html>

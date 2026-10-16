@@ -7,6 +7,7 @@ import krogerCartRouter from "./routes/krogerCart";
 import instacartShoppingListRouter from "./routes/instacartShoppingList";
 import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
+import sharedListsRouter from "./routes/sharedLists";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -45,7 +46,9 @@ app.get("/api", (_req, res) => {
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, today's hit rate, and how many masters gained both store ids today. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+      "GET /api/admin/catalog/match-queue":
+        "Dry run of the next cross-store lookup batch. Does not call Walmart or Kroger and does not mark masters. Same admin token as status.",
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":
@@ -58,6 +61,16 @@ app.get("/api", (_req, res) => {
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":
         "Creates an Instacart Developer Platform shopping list (POST /idp/v1/products/products_link) and returns productsLinkUrl. Hidden in the UI when the key or base URL is unset.",
+      "POST /api/lists":
+        "Creates a shared shopping list, or resumes the one tied to a saved owner token. Returns the share token and owner token. There is no list of other people's lists.",
+      "GET /api/lists/:shareToken":
+        "Reads one shared list. ?since=seq returns changed:false when nothing is new. Owner header x-list-owner can still read a revoked link.",
+      "GET /api/lists/:shareToken/events":
+        "Server-sent events for one list. Polling the GET route is the fallback.",
+      "PATCH /api/lists/:shareToken/items":
+        "Edits items. Last write wins per item. View-only guests are refused. Rate limited.",
+      "POST /api/lists/:shareToken/settings":
+        "Owner only. mode view or edit, revoke, or rotate the link.",
     },
   });
 });
@@ -68,6 +81,7 @@ app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
+app.use("/api", sharedListsRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));

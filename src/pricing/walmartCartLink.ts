@@ -1,29 +1,40 @@
 /**
- * Walmart affiliate add-to-cart deep link.
+ * Walmart add-to-cart deep link.
  *
- * Cart URL (works with or without an Impact publisher id):
- *   https://affil.walmart.com/cart/addToCart?items={itemId}|{qty},{itemId}|{qty}
+ * The Add To Cart service works for partners whether or not they are
+ * onboarded to Impact. It does not require WALMART_PUBLISHER_ID.
  *
- * That `items` syntax is the affiliate add-to-cart URL carried by the
- * Affiliate item field `addToCartUrl` ("Walmart.com cart page Url with the
- * item added to cart") and wrapped by `affiliateAddToCartUrl` when a
- * publisher id is present. See:
- * - https://walmart.io/docs/affiliates/v1/gm-add-to-cart
- * - https://walmart.io/apidocs/affiliates/item-response-groups
- *   (`addToCartUrl`, `affiliateAddToCartUrl`)
+ *   https://www.walmart.com/sc/cart/addToCart
+ *     ?items={itemId}|{qty},{itemId}
+ *     &offers={offerId}|{qty}
+ *     &storeId={fulfillmentStoreId}
+ *     &ap={accessPointId}
  *
- * Attribution, when WALMART_PUBLISHER_ID is set, uses the Impact template
- * Walmart publishes on productTrackingUrl:
+ * `items` is comma-separated `itemId|qty`. Quantity 1 may be the bare
+ * itemId. `items` is required when `offers` is not passed.
+ * `offers` is comma-separated `offerId|qty` and is an alternative to
+ * `items`. This builder sends `offers` only when the caller already has
+ * offer ids and has no numeric item ids.
+ * `storeId` is the fulfillmentStoreId for the access point.
+ * `ap` is the accessPointId from the store locator.
+ * Both are omitted when unknown.
+ *
+ * A link that includes an item Walmart cannot add shows an error modal
+ * and sends the shopper to the Walmart home page. Callers must drop
+ * lines that lack a numeric item id before opening the link.
+ *
+ * Attribution, when WALMART_PUBLISHER_ID is set, still uses the Impact
+ * template Walmart publishes on productTrackingUrl. The wrapped `u`
+ * value is this add-to-cart URL:
  *   https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u={encoded destination}
  * Source: https://walmart.io/apidocs/affiliates/reviews
  * (`productTrackingUrl` example). 568844 / 9383 are Walmart's Impact
  * campaign and ad ids in that example. `sourceid=imp_000011112222333344`
  * is the placeholder in the same example; the publisher id in the path is
- * what identifies the affiliate. The unwrapped affil.walmart.com URL is
- * used when the publisher id is unset so the cart link still opens.
+ * what identifies the affiliate.
  */
 
-export const WALMART_ADD_TO_CART_URL = "https://affil.walmart.com/cart/addToCart";
+export const WALMART_ADD_TO_CART_URL = "https://www.walmart.com/sc/cart/addToCart";
 
 /** Impact campaign id from Walmart's published productTrackingUrl template. */
 export const WALMART_IMPACT_CAMPAIGN_ID = "568844";
@@ -33,8 +44,18 @@ export const WALMART_IMPACT_AD_ID = "9383";
 export const WALMART_IMPACT_SOURCE_ID = "imp_000011112222333344";
 
 export type WalmartCartLine = {
-  itemId: string;
+  /** Numeric Walmart item id. Lines without one are left off the link. */
+  itemId?: string;
+  /** Offer id, used only when the line has no numeric item id. */
+  offerId?: string;
   quantity: number;
+};
+
+export type WalmartAddToCartOptions = {
+  /** fulfillmentStoreId from the store locator. Sent as `storeId`. */
+  storeId?: string;
+  /** accessPointId from the store locator. Sent as `ap`. */
+  accessPointId?: string;
 };
 
 export function readWalmartPublisherId(): string | undefined {
@@ -49,25 +70,74 @@ function cartQuantity(quantity: number): number {
   return Math.max(1, Math.floor(quantity));
 }
 
+/** Quantity 1 is the bare id. Larger quantities use id|qty. */
+function formatIdQty(id: string, quantity: number): string {
+  const qty = cartQuantity(quantity);
+  return qty === 1 ? id : `${id}|${qty}`;
+}
+
+function numericItemId(value: string | undefined): string | undefined {
+  const id = value?.trim() ?? "";
+  return /^\d+$/.test(id) ? id : undefined;
+}
+
+/** Offer ids are opaque tokens. Pipes and commas would break the list. */
+function offerToken(value: string | undefined): string | undefined {
+  const id = value?.trim() ?? "";
+  return /^[A-Za-z0-9_-]+$/.test(id) ? id : undefined;
+}
+
+function numericStoreId(value: string | undefined): string | undefined {
+  const id = value?.trim() ?? "";
+  return /^\d+$/.test(id) ? id : undefined;
+}
+
+function accessPointToken(value: string | undefined): string | undefined {
+  const id = value?.trim() ?? "";
+  return /^[A-Za-z0-9-]+$/.test(id) ? id : undefined;
+}
+
 /**
- * Unwrapped add-to-cart URL. Returns undefined when there is nothing to add.
- * Item ids must already be numeric Walmart item ids.
+ * Unwrapped add-to-cart URL. Returns undefined when nothing valid remains.
+ * Lines without a numeric item id are dropped. Offer ids are used only
+ * when no numeric item id is present on the request.
  */
 export function walmartAddToCartDestination(
-  lines: WalmartCartLine[]
+  lines: WalmartCartLine[],
+  options: WalmartAddToCartOptions = {}
 ): string | undefined {
-  const pairs: string[] = [];
+  const itemPairs: string[] = [];
+  const offerPairs: string[] = [];
   for (const line of lines) {
-    const itemId = line.itemId.trim();
-    if (!/^\d+$/.test(itemId)) {
-      return undefined;
+    const itemId = numericItemId(line.itemId);
+    if (itemId) {
+      itemPairs.push(formatIdQty(itemId, line.quantity));
+      continue;
     }
-    pairs.push(`${itemId}|${cartQuantity(line.quantity)}`);
+    const offerId = offerToken(line.offerId);
+    if (offerId) {
+      offerPairs.push(formatIdQty(offerId, line.quantity));
+    }
   }
-  if (pairs.length === 0) {
+
+  const params = new URLSearchParams();
+  if (itemPairs.length > 0) {
+    params.set("items", itemPairs.join(","));
+  } else if (offerPairs.length > 0) {
+    params.set("offers", offerPairs.join(","));
+  } else {
     return undefined;
   }
-  const params = new URLSearchParams({ items: pairs.join(",") });
+
+  const storeId = numericStoreId(options.storeId);
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+  const accessPointId = accessPointToken(options.accessPointId);
+  if (accessPointId) {
+    params.set("ap", accessPointId);
+  }
+
   return `${WALMART_ADD_TO_CART_URL}?${params.toString()}`;
 }
 
@@ -87,13 +157,15 @@ export function walmartImpactTrackingUrl(
 
 /**
  * Shopper-facing cart link. Attributed when `publisherId` is set; otherwise
- * the plain affil.walmart.com URL, which still adds the items.
+ * the plain walmart.com URL, which still adds the items.
+ * `storeId` and `ap` are included only when the caller already knows them.
  */
 export function walmartAddToCartUrl(
   lines: WalmartCartLine[],
-  publisherId?: string
+  publisherId?: string,
+  options?: WalmartAddToCartOptions
 ): string | undefined {
-  const destination = walmartAddToCartDestination(lines);
+  const destination = walmartAddToCartDestination(lines, options);
   if (!destination) {
     return undefined;
   }

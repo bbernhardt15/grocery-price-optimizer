@@ -1,7 +1,9 @@
 apply plugin: 'com.android.application'
 
-// Upload key for Play Console. Create android/key.properties locally (gitignored).
-// storeFile is relative to the android/ directory. See docs/APP_STORE.md.
+// Codemagic writes android/key.properties from the grocery_gitter env group.
+// A local release build stays unsigned until that file exists. It is gitignored.
+// storeFile is a path Gradle resolves from android/app, or an absolute path.
+// See docs/APP_STORE.md.
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
@@ -15,7 +17,7 @@ android {
         applicationId "app.grocerygitter"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode project.hasProperty("versionCode") ? project.property("versionCode").toInteger() : 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -29,18 +31,18 @@ android {
             if (keystorePropertiesFile.exists()) {
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
-                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
                 storePassword keystoreProperties['storePassword']
             }
         }
     }
     buildTypes {
         release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             if (keystorePropertiesFile.exists()) {
                 signingConfig signingConfigs.release
             }
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 }

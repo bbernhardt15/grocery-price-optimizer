@@ -1,0 +1,204 @@
+# yaml-language-server: $schema=https://codemagic.io/codemagic-schema.json
+#
+# Cloud builds for the Capacitor shells. Secrets stay in Codemagic.
+# This file only names the environment group and the App Store Connect integration.
+#
+# Environment group "grocery_gitter" (create it in the Codemagic UI):
+#   CAPACITOR_API_URL
+#     https://grocery-price-optimizer-production.up.railway.app
+#   APP_STORE_APPLE_ID
+#     Numeric Apple ID from App Store Connect > App Information.
+#   Android signing (base64 keystore, not the file itself):
+#     CM_KEYSTORE
+#     CM_KEYSTORE_PASSWORD
+#     CM_KEY_ALIAS
+#     CM_KEY_PASSWORD
+#   Optional, only if you uncomment Google Play publishing below:
+#     GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+#
+# Integration name "app_store_connect":
+#   Team integrations > Developer Portal > the App Store Connect API key.
+#   ios_signing then fetches the App Store certificate and profile for
+#   app.grocerygitter (capacitor.config.ts appId).
+
+workflows:
+  ios-testflight:
+    name: iOS TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      app_store_connect: app_store_connect
+    environment:
+      groups:
+        - grocery_gitter
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.grocerygitter
+      vars:
+        XCODE_WORKSPACE: ios/App/App.xcworkspace
+        XCODE_SCHEME: App
+      node: "22"
+      xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/Library/Caches/CocoaPods
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*"
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm ci
+      - name: Compile the API
+        script: npm run build
+      - name: Sync the iOS shell
+        script: |
+          case "${CAPACITOR_API_URL:-}" in
+            https://*)
+              ;;
+            *)
+              echo "Set CAPACITOR_API_URL in the grocery_gitter environment group to an https origin, for example https://grocery-price-optimizer-production.up.railway.app"
+              exit 1
+              ;;
+          esac
+          unset CAPACITOR_SERVER_URL
+          npx cap sync ios
+      - name: Install CocoaPods dependencies
+        working_directory: ios/App
+        script: pod install
+      - name: Set up code signing on the Xcode project
+        script: xcode-project use-profiles --project "$CM_BUILD_DIR/ios/App/App.xcodeproj"
+      - name: Increment the TestFlight build number
+        working_directory: ios/App
+        script: |
+          if [ -z "${APP_STORE_APPLE_ID:-}" ]; then
+            echo "Set APP_STORE_APPLE_ID in the grocery_gitter environment group. It is the numeric Apple ID under App Store Connect > App Information."
+            exit 1
+          fi
+          if ! LATEST_RAW="$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID")"; then
+            echo "Could not read the latest TestFlight build number for APP_STORE_APPLE_ID=$APP_STORE_APPLE_ID."
+            exit 1
+          fi
+          LATEST_BUILD_NUMBER="$(printf '%s\n' "$LATEST_RAW" | awk '/^[0-9]+$/ { n=$0 } END { print n }')"
+          if [ -z "$LATEST_BUILD_NUMBER" ]; then
+            LATEST_BUILD_NUMBER=0
+          fi
+          NEXT_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
+          echo "TestFlight build ${LATEST_BUILD_NUMBER} -> ${NEXT_BUILD_NUMBER}"
+          agvtool new-version -all "$NEXT_BUILD_NUMBER"
+      - name: Build the IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME" \
+            --archive-flags="-destination 'generic/platform=iOS'"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-aab:
+    name: Android App Bundle
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      groups:
+        - grocery_gitter
+      vars:
+        PACKAGE_NAME: app.grocerygitter
+      node: "22"
+      java: "21"
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/.gradle/caches
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*"
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm ci
+      - name: Compile the API
+        script: npm run build
+      - name: Sync the Android shell
+        script: |
+          case "${CAPACITOR_API_URL:-}" in
+            https://*)
+              ;;
+            *)
+              echo "Set CAPACITOR_API_URL in the grocery_gitter environment group to an https origin, for example https://grocery-price-optimizer-production.up.railway.app"
+              exit 1
+              ;;
+          esac
+          unset CAPACITOR_SERVER_URL
+          npx cap sync android
+      - name: Decode the upload keystore
+        script: |
+          python3 - <<'PY'
+          import base64
+          import binascii
+          import os
+          from pathlib import Path
+
+          missing = [
+              name
+              for name in (
+                  "CM_KEYSTORE",
+                  "CM_KEYSTORE_PASSWORD",
+                  "CM_KEY_ALIAS",
+                  "CM_KEY_PASSWORD",
+              )
+              if not os.environ.get(name, "").strip()
+          ]
+          if missing:
+              print(
+                  "Add these to the grocery_gitter environment group: "
+                  + ", ".join(missing)
+              )
+              raise SystemExit(1)
+
+          root = Path(os.environ["CM_BUILD_DIR"])
+          keystore = root / "android" / "app" / "upload-keystore.jks"
+          encoded = "".join(os.environ["CM_KEYSTORE"].split())
+          try:
+              keystore.write_bytes(base64.b64decode(encoded, validate=True))
+          except (binascii.Error, ValueError) as error:
+              print(f"CM_KEYSTORE is not valid base64: {error}")
+              raise SystemExit(1)
+          keystore.chmod(0o600)
+          props = root / "android" / "key.properties"
+          props.write_text(
+              "storePassword={}\nkeyPassword={}\nkeyAlias={}\nstoreFile={}\n".format(
+                  os.environ["CM_KEYSTORE_PASSWORD"],
+                  os.environ["CM_KEY_PASSWORD"],
+                  os.environ["CM_KEY_ALIAS"],
+                  keystore,
+              )
+          )
+          props.chmod(0o600)
+          PY
+      - name: Point Gradle at the Android SDK
+        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build the release AAB
+        working_directory: android
+        script: ./gradlew bundleRelease -PversionCode="${BUILD_NUMBER:-1}"
+    artifacts:
+      - android/app/build/outputs/bundle/**/*.aab
+    # Google Play publishing is off. To turn it on, add this under the workflow
+    # and put the Play service-account JSON in grocery_gitter as
+    # GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS. Upload the first AAB by hand.
+    #
+    # publishing:
+    #   google_play:
+    #     credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+    #     track: internal
