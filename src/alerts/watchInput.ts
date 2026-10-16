@@ -1,11 +1,20 @@
 import { catalogProductKey } from "./compare";
 import type { ItemWatchMode, PriceWatchItem } from "./models";
 
-const PUBLIC_ID = /^[A-Za-z0-9_-]{8,80}$/;
+const DEVICE_ID = /^[A-Za-z0-9_-]{8,80}$/;
+/** Local list ids are short. A shared-list token is 43–128 characters. */
+const LIST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const PRODUCT_ID = /^[A-Za-z0-9:._-]{1,200}$/;
 
 export function parsePublicId(value: unknown): string | null {
-  if (typeof value !== "string" || !PUBLIC_ID.test(value)) {
+  if (typeof value !== "string" || !DEVICE_ID.test(value)) {
+    return null;
+  }
+  return value;
+}
+
+export function parseListId(value: unknown): string | null {
+  if (typeof value !== "string" || !LIST_ID.test(value)) {
     return null;
   }
   return value;
@@ -109,7 +118,7 @@ export function parseWatchBody(body: unknown): WatchBody | null {
   }
   const row = body as Record<string, unknown>;
   const deviceId = parsePublicId(row.deviceId);
-  const listId = parsePublicId(row.listId);
+  const listId = parseListId(row.listId);
   const zip = parseZip(row.zip);
   const items = parseWatchItems(row.items);
   if (!deviceId || !listId || zip == null || !items) {

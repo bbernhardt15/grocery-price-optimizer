@@ -228,8 +228,10 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.action.label, "Add 3 items to Walmart cart");
     assert.equal(handoff.action.status, "ready");
     const url = new URL(handoff.action.url ?? "");
-    assert.equal(url.origin + url.pathname, "https://affil.walmart.com/cart/addToCart");
-    assert.equal(url.searchParams.get("items"), "554433|2,998877|1");
+    assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
+    assert.equal(url.searchParams.get("items"), "554433|2,998877");
+    assert.equal(url.searchParams.get("storeId"), null);
+    assert.equal(url.searchParams.get("ap"), null);
     assert.match(handoff.action.fallbackUrl ?? "", /walmart\.com\/ip\/554433/);
     assert.match(handoff.action.detail ?? "", /WALMART_PUBLISHER_ID is unset/);
     assert.match(handoff.action.detail ?? "", /does not report the cart as filled/);
@@ -261,21 +263,100 @@ describe("buildStoreHandoff", () => {
     assert.equal(url.origin, "https://goto.walmart.com");
     assert.match(url.pathname, /^\/c\/impact-42\/568844\/9383$/);
     const destination = new URL(url.searchParams.get("u") ?? "");
-    assert.equal(destination.searchParams.get("items"), "554433|1");
+    assert.equal(destination.origin + destination.pathname, "https://www.walmart.com/sc/cart/addToCart");
+    assert.equal(destination.searchParams.get("items"), "554433");
   });
 
-  it("keeps the search handoff when any Walmart line lacks an affiliate item id", () => {
+  it("adds storeId and ap from the nearby Walmart when the locator sent them", () => {
+    const handoff = buildStoreHandoff(
+      {
+        storeName: "Walmart",
+        items: [
+          {
+            ...walmartBread,
+            quantity: 2,
+            productId: "554433",
+            priceSource: "live",
+          },
+        ],
+        subtotal: 2.56,
+      },
+      {
+        walmartStore: {
+          storeId: "100",
+          fulfillmentStoreId: "2066",
+          accessPointId: "6168c2e3-fc36-4827-98e6-d717d10af1d6",
+          name: "WM Supercenter",
+          streetAddress: "2727 DUNVALE RD",
+          city: "HOUSTON",
+          state: "TX",
+          zip: "77063",
+        },
+      }
+    );
+    const url = new URL(handoff.action.url ?? "");
+    assert.equal(url.searchParams.get("items"), "554433|2");
+    assert.equal(url.searchParams.get("storeId"), "2066");
+    assert.equal(url.searchParams.get("ap"), "6168c2e3-fc36-4827-98e6-d717d10af1d6");
+  });
+
+  it("passes the nearby store number and omits ap when the locator has no access point", () => {
+    const handoff = buildStoreHandoff(
+      {
+        storeName: "Walmart",
+        items: [
+          {
+            ...walmartBread,
+            productId: "554433",
+            priceSource: "live",
+          },
+        ],
+        subtotal: 1.28,
+      },
+      {
+        walmartStore: {
+          storeId: "2066",
+          name: "WM Supercenter",
+          streetAddress: "2727 DUNVALE RD",
+          city: "HOUSTON",
+          state: "TX",
+          zip: "77063",
+        },
+      }
+    );
+    const url = new URL(handoff.action.url ?? "");
+    assert.equal(url.searchParams.get("items"), "554433");
+    assert.equal(url.searchParams.get("storeId"), "2066");
+    assert.equal(url.searchParams.get("ap"), null);
+  });
+
+  it("links the valid Walmart lines and names the items left off the cart link", () => {
     const handoff = buildStoreHandoff({
       storeName: "Walmart",
       items: [
-        { ...walmartBread, productId: "554433", priceSource: "live" },
+        { ...walmartBread, productId: "554433", priceSource: "live", quantity: 2 },
         { ...walmartBread, name: "Bananas", priceSource: "seed" },
       ],
       subtotal: 2,
     });
-    assert.equal(handoff.action.type, "search_deeplink");
-    assert.equal(handoff.action.label, "Search at Walmart");
-    assert.match(handoff.action.detail ?? "", /not a cart fill/i);
+    assert.equal(handoff.action.type, "walmart_cart");
+    assert.equal(handoff.action.label, "Add 2 items to Walmart cart");
+    const url = new URL(handoff.action.url ?? "");
+    assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
+    assert.equal(url.searchParams.get("items"), "554433|2");
+    assert.match(handoff.action.detail ?? "", /Skipped 1 item \(Bananas\)/);
+    assert.match(handoff.action.detail ?? "", /home page/);
+  });
+
+  it("does not turn a Flipp flyer id into a Target product page", () => {
+    assert.equal(
+      targetSearchUrl({
+        name: "Good & Gather Large Eggs",
+        productId: "1041810480",
+        priceSource: "weekly_ad",
+      }),
+      "https://www.target.com/s?searchTerm=Good+%26+Gather+Large+Eggs"
+    );
   });
 
   it("does not treat a Flipp flyer id as a Walmart item id", () => {

@@ -35,9 +35,9 @@ Goal: local prices so optimize can split the list.
 | --- | --- |
 | **Kroger Products + Locations** | Live (client-credentials). Keep. |
 | **Walmart Affiliate Marketing API** | Optional. **walmart.com catalog**, not in-aisle shelf. `GET /stores` labels the nearest store; search has no store-price filter. |
-| **Target licensed feed** | Stub (`TARGET_PARTNER_*`). No public API. |
+| **Target licensed feed** | Stub (`TARGET_PARTNER_*`). No public API. Target Circle and RedCard are account discounts, not a shelf feed, and are not scraped. Until a license exists, the weekly circular is the shippable price. |
 | **Datasembly-class shelf feed** | Fastest path to many banners’ **in-store** prices. Stub: `SHELF_FEED_*`. |
-| **Flipp / weekly ads** | Circulars and featured prices, **not** a full shelf file. **Wired** as `FlippDealsProvider` (`FLIPP_ACCESS_TOKEN` / `FLIPP_ENABLED`). Dashboard label: **Weekly ad**. Do not treat flyer rows as aisle-wide unit prices. |
+| **Flipp / weekly ads** | Circulars and featured prices, **not** a full shelf file. **Wired** as `FlippDealsProvider` (`FLIPP_ACCESS_TOKEN` / `FLIPP_ENABLED`). Browse and the default trip use the ZIP's flyer. Dashboard label: **Weekly ad**. Do not treat flyer rows as aisle-wide unit prices. |
 | **Albertsons / Ahold / Publix / H-E-B / Meijer feeds** | Per-chain licensed files or the shelf-feed vendor above. |
 
 ### Cart / fulfillment partners
@@ -49,7 +49,7 @@ Goal: shopper can actually buy the split trip.
 | **Kroger Cart API** | Only path with a documented write (`PUT /v1/cart/add`) after **shopper** OAuth. Redirect URI must be unlocked. |
 | **Instacart Connect / Platform** | Best multi-banner **fulfillment** bet (Aldi, many regionals). Sales-led. Prices often include **markup**. Cart create only if the contract says so. |
 | **Instacart Developer Platform shopping list** | **Not a price feed.** Self-serve (when applications are open) `POST /idp/v1/products/products_link` link. Shopper picks a retailer and checks out on Instacart. See the section below. Env: `INSTACART_API_KEY`, `INSTACART_API_BASE_URL`. |
-| **Walmart add-to-cart URL** | Shopper handoff when every Walmart line has an Affiliate item id. Opens walmart.com with those items in the cart. Impact-wrapped only when `WALMART_PUBLISHER_ID` is set. Not an API cart-write, and not reported as filled. |
+| **Walmart add-to-cart URL** | Shopper handoff for Walmart lines that have a numeric item id. Opens `https://www.walmart.com/sc/cart/addToCart` with those items. Lines without an item id are left off the link. Impact-wrapped only when `WALMART_PUBLISHER_ID` is set. Not an API cart-write, and not reported as filled. |
 | **Retailer site search deep links** | Default handoff for Target, Publix, H-E-B, Meijer, Albertsons family, Ahold banners, club stores, and Walmart lines that lack an item id. **Not** a cart fill. |
 | **Amazon / club apps** | Cart-write for third parties is effectively **unavailable**. Membership and app-only prices. |
 
@@ -256,6 +256,15 @@ HTTP contract the stub already implements (put a proxy in front of the vendor if
 | **Flipp weekly ads** | **live** (optional) | FlyerKit (`FLIPP_ACCESS_TOKEN`) or opt-in consumer search (`FLIPP_ENABLED=true`). Labeled **Weekly ad**, not a shelf catalog. Licensed partner feeds beat Flipp for the same banner. |
 
 ---
+
+## Target and Aldi (what ships without a license)
+
+| Banner | Shippable now | Still not available |
+| --- | --- | --- |
+| **Target** | Weekly circular for a 5-digit ZIP when `FLIPP_ENABLED=true`, labeled **Weekly ad**, in browse, search, and the trip. Search handoff only. | No public shelf API. RedSky is not called. Target Circle offers and RedCard 5% are signed-in account discounts, not a price file we can license from a docs page. Full shelf still needs `TARGET_PARTNER_*` or a Datasembly-class feed. |
+| **Aldi** | Same weekly-ad path. Aldi merchant id `2353`. Handoff stays **Coming soon**. | No public product or cart API. The ad is a small subset of the store (many staples never appear). In-stock shelf price needs `SHELF_FEED_STORES=Aldi` or an Instacart Connect contract. Instacart prices are often marked up and must stay labeled **Partner feed**. |
+
+Food Lion (`2100`), H-E-B (`2467`), US Safeway (`5667`), and Giant Eagle (`2130`) use that same circular path. They are not live shelf prices.
 
 ## What NOT to do
 

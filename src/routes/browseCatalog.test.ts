@@ -3,6 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import app from "../app";
+import { clearFlippSearchCache } from "../pricing/flipp/client";
 
 describe("browse catalog routes", () => {
   let server: http.Server;
@@ -83,6 +84,74 @@ describe("browse catalog routes", () => {
     assert.equal(suggest.status, 200);
     const suggestions = (await suggest.json()) as { suggestions: Array<{ name: string }> };
     assert.ok(suggestions.suggestions.some((item) => /spaghetti/i.test(item.name)));
+  });
+
+  it("shows Target and Aldi weekly-ad prices for a ZIP and asks for a ZIP when it is missing", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    clearFlippSearchCache();
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.startsWith(origin)) {
+        return original(input, init);
+      }
+      if (url.includes("/flipp/flyers?")) {
+        return Response.json({
+          flyers: [
+            { id: 1, merchant: "ALDI", merchant_id: 2353, name: "Weekly Ad" },
+            { id: 2, merchant: "Target", merchant_id: 2040, name: "Weekly Circular" },
+          ],
+        });
+      }
+      if (url.includes("/flipp/flyers/1")) {
+        return Response.json({
+          items: [
+            {
+              id: 11,
+              name: "Friendly Farms Whole Milk",
+              price: "2.89",
+              post_price_text: "gal",
+            },
+          ],
+        });
+      }
+      if (url.includes("/flipp/flyers/2")) {
+        return Response.json({
+          items: [{ id: 22, name: "Good & Gather Large Eggs", price: "1.79" }],
+        });
+      }
+      return Response.json({ flyers: [], items: [] });
+    };
+
+    try {
+      const response = await fetch(`${origin}/api/catalog/browse?q=milk&zip=45202`);
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as {
+        items: Array<{ name: string; offers: Array<{ storeName: string; priceSource: string; price: number }> }>;
+        coverage: Array<{ storeName: string; mode: string; label: string }>;
+        warnings: string[];
+      };
+      const weekly = body.items.find((item) =>
+        item.offers.some((offer) => offer.storeName === "Aldi" && offer.priceSource === "weekly_ad")
+      );
+      assert.equal(weekly?.name, "Friendly Farms Whole Milk");
+      assert.equal(weekly?.offers[0]?.price, 2.89);
+      const target = body.coverage.find((store) => store.storeName === "Target");
+      assert.equal(target?.mode, "weekly_ad_only");
+      assert.equal(target?.label, "Weekly ad only");
+      const foodLion = body.coverage.find((store) => store.storeName === "Food Lion");
+      assert.equal(foodLion?.mode, "weekly_ad_only");
+      assert.equal(body.warnings?.some((warning) => /5-digit US ZIP/i.test(warning)) ?? false, false);
+
+      const missingZip = await fetch(`${origin}/api/catalog/browse?q=milk`);
+      assert.equal(missingZip.status, 200);
+      const missingBody = (await missingZip.json()) as { warnings?: string[] };
+      assert.ok(missingBody.warnings?.some((warning) => /5-digit US ZIP/i.test(warning)));
+    } finally {
+      globalThis.fetch = original;
+      delete process.env.FLIPP_ENABLED;
+      clearFlippSearchCache();
+    }
   });
 
   it("returns an svg placeholder and 400 for a bad ZIP", async () => {

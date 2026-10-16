@@ -14,9 +14,14 @@ const masterSchema = new Schema(
     walmartItemId: { type: String },
     krogerProductId: { type: String },
     lastSeenAt: { type: Date, required: true },
-    /** Set when a cross-store UPC lookup has been tried. Not a delete. */
+    /** Last finished cross-store lookup. A miss is tried again after the cooldown. Not a delete. */
     matchWalmartAt: { type: Date },
     matchKrogerAt: { type: Date },
+    /** Next GTIN variant to send. Zero means the primary code. */
+    matchWalmartVariant: { type: Number },
+    matchKrogerVariant: { type: Number },
+    /** When this master first carried both a Walmart id and a Kroger id. */
+    mergedAt: { type: Date },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -29,6 +34,9 @@ const masterSchema = new Schema(
 
 masterSchema.index({ name: "text", brand: "text" });
 masterSchema.index({ departmentId: 1, status: 1, name: 1 });
+masterSchema.index({ matchWalmartAt: 1, departmentId: 1 });
+masterSchema.index({ matchKrogerAt: 1, departmentId: 1 });
+masterSchema.index({ mergedAt: 1 });
 
 const offerSchema = new Schema(
   {
@@ -104,6 +112,25 @@ const shopperZipSchema = new Schema({
   locationId: { type: String },
 });
 
+const catalogDemandSchema = new Schema({
+  kind: { type: String, enum: ["list", "search"], required: true },
+  text: { type: String, required: true },
+  upcKey: { type: String },
+  hits: { type: Number, default: 0 },
+  lastSeenAt: { type: Date, required: true },
+});
+catalogDemandSchema.index({ kind: 1, text: 1 }, { unique: true });
+catalogDemandSchema.index({ lastSeenAt: -1 });
+catalogDemandSchema.index({ upcKey: 1, lastSeenAt: -1 });
+
+const matchDaySchema = new Schema({
+  day: { type: String, required: true, unique: true },
+  walmartAttempts: { type: Number, default: 0 },
+  walmartHits: { type: Number, default: 0 },
+  krogerAttempts: { type: Number, default: 0 },
+  krogerHits: { type: Number, default: 0 },
+});
+
 export type CatalogStatus = "active" | "stale" | "discontinued";
 
 export type CatalogMasterDoc = {
@@ -121,6 +148,9 @@ export type CatalogMasterDoc = {
   lastSeenAt: Date;
   matchWalmartAt?: Date;
   matchKrogerAt?: Date;
+  matchWalmartVariant?: number;
+  matchKrogerVariant?: number;
+  mergedAt?: Date;
   status: CatalogStatus;
 };
 
@@ -148,3 +178,5 @@ export const IngestCheckpoint = mongoose.model("IngestCheckpoint", checkpointSch
 export const IngestLock = mongoose.model("IngestLock", lockSchema);
 export const IngestBudget = mongoose.model("IngestBudget", budgetSchema);
 export const ShopperZip = mongoose.model("ShopperZip", shopperZipSchema);
+export const CatalogDemand = mongoose.model("CatalogDemand", catalogDemandSchema);
+export const CatalogMatchDay = mongoose.model("CatalogMatchDay", matchDaySchema);

@@ -10,7 +10,10 @@ export const FLIPP_SETUP_HINT =
 
 /** Shown when Flipp is already on. Do not reuse FLIPP_SETUP_HINT — that reads as “unset env vars”. */
 export const FLIPP_ENABLED_HINT =
-  "Weekly-ad / circular prices from Flipp are enabled. They are sale prices printed in the flyer, not a full live shelf catalog. Requires a ZIP.";
+  "Weekly-ad / circular prices from Flipp are enabled. They are sale prices printed in the flyer for a 5-digit US ZIP, not a full live shelf catalog. ZIP+4 is accepted and shortened to five digits. Without a ZIP these stores stay Unavailable or on the demo catalog.";
+
+export const FLIPP_ZIP_NOTICE =
+  "Target, Aldi, and other weekly-ad stores need a 5-digit US ZIP. ZIP+4 is fine; only the first five digits are used. Circular prices are the flyer Flipp publishes for that ZIP, not a national shelf and not an in-aisle price. Without a ZIP those shelves stay on the demo catalog.";
 
 export class FlippDealsProvider implements StorePricingProvider {
   constructor(readonly storeName: string) {}
@@ -65,10 +68,12 @@ export class FlippDealsProvider implements StorePricingProvider {
           locationId: zip5,
           ...(deal.flyerItemId ? { productId: deal.flyerItemId } : {}),
           ...(sizeText ? { size: sizeText } : {}),
+          ...(deal.imageUrl ? { imageUrls: [deal.imageUrl] } : {}),
           price: deal.price,
           unit,
           normalizedUnit: unit,
           priceSource: "weekly_ad" as const,
+          onSale: true,
         };
       });
     } catch (error) {

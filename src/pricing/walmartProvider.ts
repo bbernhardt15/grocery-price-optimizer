@@ -10,9 +10,13 @@ import {
 } from "./walmartAuth";
 
 export const WALMART_SETUP_HINT =
-  "Walmart live prices use the official Affiliate Marketing API (walmart.io). Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY (PEM; newlines as \\n). Optional WALMART_KEY_VERSION (default 1). Optional WALMART_PUBLISHER_ID (Impact publisher id) attributes search and the add-to-cart link after Impact approval; catalog search and the cart link still work without it. Prices are walmart.com catalog, not in-aisle local shelf. GET /stores?zip= only labels the nearest store — the search API has no store-price filter.";
+  "Walmart live prices use the official Affiliate Marketing API (walmart.io). Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY (PEM; newlines as \\n). Optional WALMART_KEY_VERSION (default 1). Optional WALMART_PUBLISHER_ID (Impact publisher id) attributes search and the add-to-cart link after Impact approval; catalog search and the cart link still work without it. Prices are walmart.com catalog, not in-aisle local shelf. GET /stores?zip= labels the nearest store and can set add-to-cart storeId/ap — the search API has no store-price filter.";
 
-/** Nearest store from the Affiliate Store Locator. Display only. */
+/**
+ * Nearest store from the Affiliate Store Locator.
+ * `storeId` is the store number (`no`). `accessPointId` and
+ * `fulfillmentStoreId` are set only when the locator response includes them.
+ */
 export type WalmartNearbyStore = {
   storeId: string;
   name: string;
@@ -20,6 +24,10 @@ export type WalmartNearbyStore = {
   city: string;
   state: string;
   zip: string;
+  /** accessPointId from the store locator, when the response includes one. */
+  accessPointId?: string;
+  /** fulfillmentStoreId that matches that access point, when present. */
+  fulfillmentStoreId?: string;
 };
 
 /** Store locations change rarely; one lookup per ZIP is enough for a day. */
@@ -52,6 +60,15 @@ type WalmartSearchResponse = {
   errors?: Array<{ message?: string; description?: string }>;
 };
 
+type WalmartAccessPoint = {
+  id?: number | string;
+  accessPointId?: number | string;
+  fulfillmentStoreId?: number | string;
+  accessType?: string;
+  fulfillmentOption?: string;
+  name?: string;
+};
+
 type WalmartStore = {
   storeId?: number | string;
   no?: number | string;
@@ -60,6 +77,10 @@ type WalmartStore = {
   city?: string;
   stateProvCode?: string;
   zip?: string | number;
+  accessPointId?: number | string;
+  fulfillmentStoreId?: number | string;
+  accessPoint?: WalmartAccessPoint;
+  accessPoints?: WalmartAccessPoint[];
 };
 
 type StoreCacheEntry = {
@@ -161,6 +182,55 @@ function storesFromPayload(payload: unknown): WalmartStore[] {
   return [];
 }
 
+function locatorId(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  return undefined;
+}
+
+function accessPointKind(point: WalmartAccessPoint): string {
+  return `${point.accessType ?? ""} ${point.fulfillmentOption ?? ""} ${point.name ?? ""}`.toUpperCase();
+}
+
+/**
+ * The affiliate store payload documents store number and address. Newer
+ * locator payloads may also include an access point. Read those fields
+ * when they are present and leave them unset otherwise.
+ */
+function locatorFulfillment(store: WalmartStore): {
+  accessPointId?: string;
+  fulfillmentStoreId?: string;
+} {
+  const points = [
+    ...(store.accessPoint ? [store.accessPoint] : []),
+    ...(Array.isArray(store.accessPoints) ? store.accessPoints : []),
+  ];
+  const parsed = points
+    .map((point) => ({
+      accessPointId: locatorId(point.accessPointId ?? point.id),
+      fulfillmentStoreId: locatorId(point.fulfillmentStoreId),
+      pickup: accessPointKind(point).includes("PICKUP"),
+    }))
+    .filter((point) => point.accessPointId || point.fulfillmentStoreId);
+  const chosen =
+    parsed.find((point) => point.pickup && point.accessPointId) ??
+    parsed.find((point) => point.accessPointId) ??
+    parsed[0];
+
+  const accessPointId = locatorId(store.accessPointId) ?? chosen?.accessPointId;
+  const fulfillmentStoreId =
+    locatorId(store.fulfillmentStoreId) ?? chosen?.fulfillmentStoreId;
+  return {
+    ...(accessPointId ? { accessPointId } : {}),
+    ...(fulfillmentStoreId ? { fulfillmentStoreId } : {}),
+  };
+}
+
 function toNearbyStore(store: WalmartStore): WalmartNearbyStore | undefined {
   const id = store.no ?? store.storeId;
   const storeId = id != null ? String(id).trim() : "";
@@ -169,6 +239,7 @@ function toNearbyStore(store: WalmartStore): WalmartNearbyStore | undefined {
   }
   const name = store.name?.trim() || `Walmart #${storeId}`;
   const zip = store.zip != null ? String(store.zip).trim() : "";
+  const fulfillment = locatorFulfillment(store);
   return {
     storeId,
     name,
@@ -176,6 +247,7 @@ function toNearbyStore(store: WalmartStore): WalmartNearbyStore | undefined {
     city: store.city?.trim() ?? "",
     state: store.stateProvCode?.trim() ?? "",
     zip,
+    ...fulfillment,
   };
 }
 
@@ -237,8 +309,10 @@ export class WalmartPricingProvider implements StorePricingProvider {
    *
    * Store-scoped pricing is not supported. Affiliate `/search` and `/items`
    * accept publisherId, query, category, and response group — not a store id
-   * — so salePrice stays the walmart.com catalog price. This lookup is only
-   * used to label the nearest store on the trip plan.
+   * — so salePrice stays the walmart.com catalog price. This lookup labels
+   * the nearest store on the trip plan and, when the response includes
+   * them, supplies fulfillmentStoreId and accessPointId for the add-to-cart
+   * link. Both cart params are omitted when the locator does not send them.
    */
   async getNearestStore(zipCode: string): Promise<WalmartNearbyStore | undefined> {
     const zip = zip5(zipCode);
@@ -321,16 +395,32 @@ export class WalmartPricingProvider implements StorePricingProvider {
   }
 
   /**
-   * Affiliate Product Lookup by UPC: GET /items?upc={12-digit UPC-A}.
-   * Not charged here. Catalog ingest charges the call on the Walmart budget.
+   * Affiliate Product Lookup by UPC: GET /items?upc={code}.
+   * Several 12–14 digit codes go in one call, comma-separated, same as `ids`
+   * (the documented list length is 20). Not charged here. Catalog ingest
+   * charges the call on the Walmart budget.
    */
   async lookupByUpc(upc: string): Promise<unknown> {
-    const code = upc.trim();
-    if (!/^\d{12,14}$/.test(code)) {
+    return this.lookupByUpcs(upc.split(/[\s,]+/));
+  }
+
+  async lookupByUpcs(upcs: string[]): Promise<unknown> {
+    const codes: string[] = [];
+    for (const raw of upcs) {
+      const code = raw.trim();
+      if (!/^\d{12,14}$/.test(code) || codes.includes(code)) {
+        continue;
+      }
+      codes.push(code);
+      if (codes.length >= 20) {
+        break;
+      }
+    }
+    if (codes.length === 0) {
       return { items: [] };
     }
     const credentials = this.credentialsOrThrow();
-    const params = new URLSearchParams({ upc: code });
+    const params = new URLSearchParams({ upc: codes.join(",") });
     if (credentials.publisherId) {
       params.set("publisherId", credentials.publisherId);
     }

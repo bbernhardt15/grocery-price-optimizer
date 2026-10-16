@@ -17,7 +17,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
-import { ingestConfig, type IngestConfig } from "./config";
+import { ingestConfig, lookupCallsForTick, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
   krogerAdvance,
@@ -26,7 +26,7 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
-import { markKrogerLookup, markWalmartLookup, nextKrogerLookup, nextWalmartLookup } from "./crossLookup";
+import { finishLookups, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
@@ -58,6 +58,8 @@ export type WalmartCheckpoint = {
   /** UPC lookups of Kroger-only masters. Charged on the Walmart budget. */
   matchAttempts: number;
   matchHits: number;
+  /** A 400 on a multi-UPC lookup switches this cycle to one UPC per call. */
+  lookupSingle?: boolean;
   cooldownUntil?: string;
   nextAllowedAt?: string;
   cycleStartedAt: string;
@@ -164,6 +166,7 @@ function asWalmart(value: unknown, now: Date): WalmartCheckpoint {
     taxonomyVersion: typeof record.taxonomyVersion === "number" ? record.taxonomyVersion : 0,
     matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
     matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
+    lookupSingle: record.lookupSingle === true,
   };
 }
 
@@ -325,6 +328,12 @@ export async function stepWalmart(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
+  const lookupBudget = lookupCallsForTick(options.maxCalls, config.matchLookupShare);
+  let lookupsDone = 0;
+  let lookupExhausted = false;
+  const lookupUpcs =
+    options.client.lookupUpcs ??
+    (options.client.lookupUpc ? (upcs: string[]) => options.client.lookupUpc!(upcs.join(",")) : undefined);
 
   const stampPace = () => {
     const nextAt = gate.nextAllowedAt();
@@ -365,13 +374,19 @@ export async function stepWalmart(options: {
       cp.index = 0;
       cp.nextPage = null;
     }
-    if (options.client.lookupUpc && calls === 0) {
-      const picked = await nextWalmartLookup(nowFn());
-      if (picked) {
+    if (lookupUpcs && !lookupExhausted && lookupsDone < lookupBudget) {
+      const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
+      const picks = await nextWalmartLookups(nowFn(), limit);
+      if (picks.length === 0) {
+        lookupExhausted = true;
+      } else {
+        const codes = [...new Set(picks.map((pick) => pick.code))];
+        const params = { request: "items", upc: codes.join(",").slice(0, 300) };
+        lookupsDone += 1;
         try {
           const charged = await spendCall(
             gate,
-            () => options.client.lookupUpc!(picked.upc),
+            () => lookupUpcs(codes),
             () => {
               calls += 1;
             },
@@ -383,34 +398,36 @@ export async function stepWalmart(options: {
             break;
           }
           const records = recordsFromWalmartPage(charged);
-          cp.matchAttempts += 1;
           if (records.length > 0) {
             const saved = await upsertCatalogRecords(records, nowFn());
             upserted += saved.offers;
-            cp.matchHits += 1;
           }
-          await markWalmartLookup(picked.key, nowFn());
+          const finished = await finishLookups("walmart", picks, nowFn());
+          cp.matchAttempts += finished.attempts;
+          cp.matchHits += finished.hits;
           noteWalmartSuccess(cp);
           await persist("running", { clearError: true });
         } catch (error) {
           const kind = retryClass(error);
           if (kind === "rate") {
-            const outcome = await failWalmart(cp, error, sleep, nowFn(), { request: "items", upc: picked.upc });
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
             cp = outcome.checkpoint;
             paused = outcome.paused;
             await persist(outcome.status, { error: outcome.error });
             if (outcome.stop) {
               break;
             }
-          } else if (kind === "fatal" || cp.attempts >= 2) {
-            cp.matchAttempts += 1;
+          } else if (kind === "fatal" && httpStatusOf(error) === 400 && picks.length > 1) {
+            cp.lookupSingle = true;
             cp.attempts = 0;
-            await markWalmartLookup(picked.key, nowFn());
-            await persist("running", {
-              error: ingestErrorDetail("walmart", error, { request: "items", upc: picked.upc }, nowFn()),
-            });
+            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
+          } else if (kind === "fatal" || cp.attempts >= 2) {
+            const finished = await finishLookups("walmart", picks, nowFn(), { forceMiss: true });
+            cp.matchAttempts += finished.attempts;
+            cp.attempts = 0;
+            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
           } else {
-            const outcome = await failWalmart(cp, error, sleep, nowFn(), { request: "items", upc: picked.upc });
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
             cp = outcome.checkpoint;
             paused = outcome.paused;
             await persist(outcome.status, { error: outcome.error });
@@ -624,6 +641,9 @@ export async function stepKroger(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
+  const lookupBudget = lookupCallsForTick(options.maxCalls, config.matchLookupShare);
+  let lookupsDone = 0;
+  let lookupExhausted = false;
 
   const persist = async (status: string, extra?: PersistExtra) => {
     const callDelta = calls - countedCalls;
@@ -643,14 +663,17 @@ export async function stepKroger(options: {
   };
 
   while (calls < options.maxCalls) {
-    if (options.client.lookupProductId && calls === 0) {
-      const picked = await nextKrogerLookup(nowFn());
-      if (picked) {
+    if (options.client.lookupProductId && !lookupExhausted && lookupsDone < lookupBudget) {
+      const [picked] = await nextKrogerLookups(nowFn(), 1);
+      if (!picked) {
+        lookupExhausted = true;
+      } else {
         const locationId = cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        lookupsDone += 1;
         try {
           const charged = await spendCall(
             productGate,
-            () => options.client.lookupProductId!(picked.productId, locationId),
+            () => options.client.lookupProductId!(picked.code, locationId),
             () => {
               calls += 1;
             },
@@ -666,28 +689,28 @@ export async function stepKroger(options: {
             await persist("paused", { lastError: "Kroger daily budget reached" });
             break;
           }
-          cp.matchAttempts += 1;
           if (charged.records.length > 0) {
             const saved = await upsertCatalogRecords(charged.records, nowFn());
             upserted += saved.offers;
-            cp.matchHits += 1;
           }
-          await markKrogerLookup(picked.key, nowFn());
+          const finished = await finishLookups("kroger", [picked], nowFn());
+          cp.matchAttempts += finished.attempts;
+          cp.matchHits += finished.hits;
           cp.attempts = 0;
           await persist("running", { clearError: true });
         } catch (error) {
           const kind = retryClass(error);
           if (kind === "fatal" || cp.attempts >= 2) {
-            cp.matchAttempts += 1;
+            const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true });
+            cp.matchAttempts += finished.attempts;
             cp.attempts = 0;
-            await markKrogerLookup(picked.key, nowFn());
             await persist("running", {
-              error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.productId }, nowFn()),
+              error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code }, nowFn()),
             });
           } else {
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",
-              productId: picked.productId,
+              productId: picked.code,
             });
             cp = outcome.checkpoint;
             paused = outcome.paused;

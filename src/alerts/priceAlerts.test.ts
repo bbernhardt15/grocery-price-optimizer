@@ -7,6 +7,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import app from "../app";
 import { detectPriceDrops } from "./detect";
 import { PriceAlert, PriceWatch, PushSubscription } from "./models";
+import { parseWatchBody } from "./watchInput";
 import { clearNativePushTransports, registerNativePushTransport, setWebPushSender } from "./push";
 import { CatalogOffer, IngestCheckpoint } from "../ingest/models";
 import { runIngestTick } from "../ingest/runner";
@@ -377,5 +378,39 @@ describe("price drop alerts", { concurrency: false }, () => {
     assert.equal(next[0]?.oldPrice, 0.49);
     assert.equal(next[0]?.newPrice, 0.25);
     assert.equal(next[0]?.savings, 0.24);
+  });
+});
+
+describe("price alert list ids", () => {
+  it("accepts a shared-list token as the list id", () => {
+    const item = {
+      productId: "upc:12345",
+      name: "Whole Milk",
+      baselinePrice: 4,
+    };
+    const shareToken = "a".repeat(43);
+    const parsed = parseWatchBody({
+      deviceId: DEVICE,
+      listId: shareToken,
+      enabled: true,
+      items: [item],
+    });
+    assert.equal(parsed?.listId, shareToken);
+    const longest = parseWatchBody({
+      deviceId: DEVICE,
+      listId: "b".repeat(128),
+      enabled: false,
+      items: [item],
+    });
+    assert.equal(longest?.listId, "b".repeat(128));
+    assert.equal(
+      parseWatchBody({
+        deviceId: DEVICE,
+        listId: "c".repeat(129),
+        enabled: false,
+        items: [item],
+      }),
+      null
+    );
   });
 });

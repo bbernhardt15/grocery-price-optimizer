@@ -50,7 +50,11 @@ export const FLIPP_MERCHANT_MAPPINGS: FlippMerchantMapping[] = [
   },
   {
     storeName: "Kroger",
-    merchantIds: [2707, 2774],
+    // US regional circulars (Cincinnati, Atlanta, Columbus, Dallas, and others).
+    // Live Kroger Products still wins when those keys are set.
+    merchantIds: [
+      2706, 2707, 2774, 2775, 2776, 2777, 2778, 2779, 2780, 2781, 3883, 6133,
+    ],
     nameAliases: [
       "kroger",
       "ralphs",
@@ -97,31 +101,36 @@ export const FLIPP_MERCHANT_MAPPINGS: FlippMerchantMapping[] = [
   },
   {
     storeName: "Food Lion",
-    merchantIds: [],
+    merchantIds: [2100],
     nameAliases: ["food lion"],
     searchName: "Food Lion",
     flyerKitSlug: "foodlion",
+    exactName: true,
   },
   {
     storeName: "H-E-B",
-    merchantIds: [],
+    merchantIds: [2467],
     nameAliases: ["h-e-b", "heb"],
     searchName: "H-E-B",
     flyerKitSlug: "heb",
+    exactName: true,
   },
   {
     storeName: "Safeway",
-    merchantIds: [],
+    // 5667 is US Safeway. 2126 is Safeway Canada and 4623 is Safeway Liquor.
+    merchantIds: [5667],
     nameAliases: ["safeway"],
     searchName: "Safeway",
     flyerKitSlug: "safeway",
+    exactName: true,
   },
   {
     storeName: "Giant Eagle",
-    merchantIds: [],
+    merchantIds: [2130],
     nameAliases: ["giant eagle"],
     searchName: "Giant Eagle",
     flyerKitSlug: "gianteagle",
+    exactName: true,
   },
   {
     storeName: "Costco",

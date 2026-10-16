@@ -9,11 +9,18 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/alerts/**/*.test.ts",
+    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/alerts/**/*.test.ts src/lists/**/*.test.ts",
     "ingest": "tsx src/ingest/cli.ts",
     "ingest:demo": "tsx src/ingest/cli.ts --demo",
     "scrape": "tsx src/scrape-grocery.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "cap:sync": "node scripts/cap-sync.mjs",
+    "cap:sync:ios": "node scripts/cap-sync.mjs ios",
+    "cap:sync:android": "node scripts/cap-sync.mjs android",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android",
+    "cap:run:ios": "cap run ios",
+    "cap:run:android": "cap run android"
   },
   "engines": {
     "node": ">=20"
@@ -30,6 +37,12 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
+    "@capacitor/splash-screen": "^8.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^22.20.2",

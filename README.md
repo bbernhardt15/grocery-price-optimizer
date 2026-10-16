@@ -38,13 +38,13 @@ Offers that share a UPC (leading zeros ignored) become one product. Package size
 | --- | --- | --- |
 | **Walmart** | Affiliate `GET /taxonomy` plus the first page of `GET /paginated/items?category=`. If that is empty, a few search terms via `GET /search`. Prices are **walmart.com catalog**, not the nearest store's shelf. Not the full assortment. Cached 6 hours. | Demo catalog, badged **Demo** |
 | **Kroger** | **No category browse.** Each department runs two seeded `filter.term` searches. Hits are classified with the `categories` field when Products returns one, otherwise the product name. A sample of the aisle, not the full Kroger catalog. Nearest store when a ZIP is set. | Demo catalog |
-| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. Flipp weekly ads are **not** used as a browse shelf. | Demo catalog. Weekly ads still apply only inside trip planning |
-| **Aldi** | No catalog API. | Demo catalog only. Flipp can still price circular items on the trip plan, labeled **Weekly ad** |
+| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. With `FLIPP_ENABLED` and a ZIP, browse/search also show this week's circular, labeled **Weekly ad**. | Demo catalog until Flipp or a partner feed is set |
+| **Aldi** | No catalog API. With `FLIPP_ENABLED` and a ZIP, browse/search show circular items labeled **Weekly ad**. | Demo catalog. Trip planning uses the same circular when a ZIP is set |
 | **Partner banners** | Search-by-term stub when that feed's env vars are set. Unconfigured banners are omitted. | Not shown as a live catalog |
 
 Demo UPCs are synthetic (`009999…`) so they do not merge with a real retailer code. Live rows win over a demo row for the same store and UPC. Department and search responses are cached in memory and in Mongo (`CatalogCache`, TTL index). Override with `CATALOG_DEPT_TTL_MINUTES` (default 360) and `CATALOG_SEARCH_TTL_MINUTES` (default 60).
 
-When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target stay on the demo shelf. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
+When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target are not ingested. When Flipp is on, browse still merges that ZIP's weekly-ad items on top of the saved catalog and does not delete or rewrite ingest rows. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
 
 ## Catalog ingestion
 
@@ -59,7 +59,7 @@ Checked 2026-09-25.
 | **Walmart Affiliate** | `GET /taxonomy`, then `GET /paginated/items?category=&count=25`. The next page is the response `nextPage` (URL or cursor). Stop when `nextPage` is empty or `nextPageExist` is false. Only grocery leaves are walked (electronics and similar paths are skipped). UPC is read from `upc` or `gtin` (string or number) so a row can share a Kroger master. | The public Affiliate introduction and taxonomy pages do **not** publish a numeric daily quota. Marketplace rate-limit tables are a different API and are not used here. HTTP **429** is the throttle. Search documents `numItems` max 25, so each catalog page asks for 25. | **500 calls/day**, at least **10 seconds** apart, and that gap is kept across scheduler ticks. The 500 figure is a hard ledger for the crawler only. Shopper searches are not charged and are not blocked. |
 | **Kroger Products** | No category browse. `GET /v1/products` with `filter.term`, optional `filter.brand`, `filter.locationId`, `filter.start`, and `filter.limit`. A full page advances `filter.start`. A short page ends the term. `filter.start` is a skip count: the first page omits it (checkpoint `start` 0). Kroger accepts a sent value only from **1 to 250** (PRODUCT-2021). The crawl stops at 250 and, for a broad term, continues with `filter.brand` or a narrower term instead of sending 300. A **400** ends that term (it is not retried). Three 400s in a row on the same `locationId` skip that store. | **10,000 product calls/day**. **1,600 location calls/day**. Locations documents `filter.limit` max **200**; this job asks for **50**. | **4,000 product calls/day** (6,000 left for shoppers and on-demand refresh), **200 location calls/day**, at least **500 ms** apart. |
 | **Kroger prices** | Stored per `locationId`. The product master is written once, keyed by UPC with leading zeros stripped (UPC-A, EAN-13, and GTIN-14 of the same code share one master). The offer key is product + store + location, so six seed stores are six offers. | — | Seed ZIPs `45103` (Brandon), `10001`, `60601`, `75201`, `90012`, `30303`, plus up to 12 ZIPs that real shoppers have used (`hits` > 0). Seeds are not written into the shopper-ZIP list. A new shopper ZIP is priced on the next tick (inserted in front of the Kroger walk). A finished cycle starts again after `CATALOG_REFRESH_HOURS` (24). Ingest never substitutes the demo location id `01400441` when a ZIP lookup fails. |
-| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf only. Flipp weekly ads stay on the trip plan. |
+| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf, plus Flipp weekly ads on browse and the trip when `FLIPP_ENABLED` and a ZIP are set. |
 
 A Walmart **429** keeps the same category and `nextPage`, sets status to paused, and waits 15 minutes, then 30. The response's Retry-After header, any rate-limit headers, and the body are stored on that error. One successful page does not clear the strike count; three clean pages in a row do. A third 429 stops Walmart ingest until the next UTC midnight, or for six hours when that is longer. The next tick does not call Walmart until that time, then it resumes the same page. Other 5xx responses still use a short backoff (1s, 2s, 4s, … capped at 60s) and, after 5 failures, skip that category. A Kroger **400** is logged with provider, status, term, brand, start, limit, locationId, and ZIP (no secrets) and that term is skipped. `runs[].calls` counts each HTTP call once. `budget.*.used` / `budget.*.limit` is the daily ledger. Read the ledger for the cap; the run counter is only a progress total. Shopper searches never touch this ledger.
 
@@ -71,9 +71,11 @@ Department counts were piled into pantry, with bakery, frozen, snacks, and break
 
 On 2026-09-29 the catalog sat at the 40,000 product cap (pantry about half of that), Walmart had about 23.6k offers, and `drop-shadow-local-keys` deleted nothing. New Walmart UPCs were refused, including the upgrade of an existing `local:walmart:{itemId}` row into the UPC master, so no UPC sibling existed for that cleanup to find. That upgrade is now an in-place rename and does not count against the cap. The default caps are 150,000 masters and 500,000 offers. `counts.masters` on the status route splits local Walmart keys, Kroger-only UPCs, Walmart UPCs, and rows that carry both store ids.
 
-Grocery baby is only diapers, wipes, infant or baby formula, and baby food. A bare `Baby` label does not keep a product in baby. Feeding gear (bottles, pumps, sippy cups, plates, food makers, nursing covers, wipe warmers), nursery, travel, activities, resale, and shop-by-brand leaves map to Other and are not crawled. Baby carrots, baby spinach, and baby back ribs still follow the food name. Recategorize writes every department change, including a move to Other, and does not delete rows. Cleaning supplies, paper goods, napkins, trash bags, and laundry map to household. A video game or a storage cabinet does not, even when the path mentions sponge or toilet paper. `GET /api/admin/catalog/sample?department=baby&limit=50` returns a random compact sample (name, brand, stores, paths, stored department, the department the current rules would pick, and the rule). `GET /api/admin/catalog/match-sample` returns a few normalized keys from each store. `counts` on status includes `match.walmartLookups` and `match.krogerLookups`.
+Grocery baby is only diapers, wipes, infant or baby formula, and baby food. A bare `Baby` label does not keep a product in baby. Feeding gear (bottles, pumps, sippy cups, plates, food makers, nursing covers, wipe warmers), nursery, travel, activities, resale, and shop-by-brand leaves map to Other and are not crawled. Baby carrots, baby spinach, and baby back ribs still follow the food name. Recategorize writes every department change, including a move to Other, and does not delete rows. Cleaning supplies, paper goods, napkins, trash bags, and laundry map to household. A video game or a storage cabinet does not, even when the path mentions sponge or toilet paper. `GET /api/admin/catalog/sample?department=baby&limit=50` returns a random compact sample (name, brand, stores, paths, stored department, the department the current rules would pick, and the rule). `GET /api/admin/catalog/match-sample` returns a few normalized keys from each store. `counts` on status includes `match.walmartLookups` and `match.krogerLookups`. `match.queue` is how many masters are still waiting, `match.hitRate` is today's hits over attempts, and `match.mergedToday` is how many masters gained both store ids that UTC day.
 
-The same product already shares one key when both stores have sent a code: Walmart UPC-A (12 digits, check digit), EAN-13, GTIN-14, and Kroger's 13-digit code with no check digit. A numeric Walmart `upc` that dropped a leading zero is padded back when that restores a valid check digit. Most masters still have only one store id because each crawl saw a different set of products, not because the keys disagree. The worker spends the first call of a Walmart tick on `GET /items?upc=` for a Kroger-only staple, and the first call of a Kroger tick on `filter.productId` for a Walmart UPC. Both use the existing daily budgets and the Walmart 429 pause. Each master is tried once. Nothing is deleted. A new Walmart taxonomy version re-reads the category tree once so stroller leaves drop out and cleaning and paper leaves are walked.
+The same product already shares one key when both stores have sent a code: Walmart UPC-A (12 digits, check digit), EAN-13, GTIN-14, and Kroger's 13-digit code with no check digit. A numeric Walmart `upc` that dropped a leading zero is padded back when that restores a valid check digit. A UPC-E (8 digits, number system 0 or 1) expands to that same UPC-A before the key is built, so the short code and the long code land on one master. Most masters still have only one store id because each crawl saw a different set of products, not because the keys disagree.
+
+Cross-store lookup uses the existing daily budgets and the Walmart 429 pause. `CATALOG_MATCH_LOOKUP_SHARE` (default `0.5`) is the fraction of each Walmart tick and each Kroger tick spent on lookups; the rest of the tick keeps crawling. With the default batch of 4 calls, that is 2 lookup calls. Walmart sends up to 20 UPCs on one `GET /items?upc=` (`WALMART_LOOKUP_BATCH`, default 20, the same cap as the Affiliate `ids` list). Kroger still takes one `filter.productId` per call. Staples are first, and a product on a shopper's saved list or in a recent search or recent priced result goes ahead of the aisle. Each try sends the next GTIN form: the 12-digit UPC-A, then the same code with a leading zero (EAN-13) and two leading zeros (GTIN-14) for Walmart; the 13-digit Kroger id, then a 14-digit pad and the 12-digit form when it has a leading zero. A miss is tried again after `CATALOG_MATCH_RETRY_DAYS` (default 14). A hit, or a code that cannot be a UPC, is left alone until that cooldown too. Nothing is deleted. A 400 on a multi-UPC Walmart call switches that crawl cycle to one UPC at a time and does not burn the batch. A new Walmart taxonomy version re-reads the category tree once so stroller leaves drop out and cleaning and paper leaves are walked.
 
 ### Size and time
 
@@ -95,15 +97,17 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
    - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only.
+   - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
    - `CATALOG_INGEST_ENABLED=true`
    - Same `MONGO_URL` and the same Walmart and Kroger keys.
    - Do not set `PORT` handling; the process does not serve HTTP. It loops until Railway sends SIGTERM, then the next boot resumes the checkpoint.
-4. Optional on that worker: `WALMART_INGEST_DAILY_BUDGET`, `KROGER_INGEST_DAILY_BUDGET`, `KROGER_LOCATION_DAILY_BUDGET`, `WALMART_INGEST_MIN_INTERVAL_MS`, `KROGER_INGEST_MIN_INTERVAL_MS`, `CATALOG_INGEST_INTERVAL_SECONDS` (20), `CATALOG_INGEST_BATCH_CALLS` (4), `CATALOG_SEED_ZIPS`, `CATALOG_MAX_PRODUCTS`, `CATALOG_MAX_OFFERS`, `CATALOG_STALE_DAYS`, `CATALOG_DISCONTINUE_DAYS`, `CATALOG_REFRESH_HOURS`, `WALMART_INGEST_ENABLED`, `KROGER_INGEST_ENABLED`.
+4. Optional on that worker: `WALMART_INGEST_DAILY_BUDGET`, `KROGER_INGEST_DAILY_BUDGET`, `KROGER_LOCATION_DAILY_BUDGET`, `WALMART_INGEST_MIN_INTERVAL_MS`, `KROGER_INGEST_MIN_INTERVAL_MS`, `CATALOG_INGEST_INTERVAL_SECONDS` (20), `CATALOG_INGEST_BATCH_CALLS` (4), `CATALOG_MATCH_LOOKUP_SHARE` (0.5), `CATALOG_MATCH_RETRY_DAYS` (14), `WALMART_LOOKUP_BATCH` (20), `CATALOG_SEED_ZIPS`, `CATALOG_MAX_PRODUCTS`, `CATALOG_MAX_OFFERS`, `CATALOG_STALE_DAYS`, `CATALOG_DISCONTINUE_DAYS`, `CATALOG_REFRESH_HOURS`, `WALMART_INGEST_ENABLED`, `KROGER_INGEST_ENABLED`.
 5. Single-service alternative: set `CATALOG_INGEST_ENABLED=true` on the web service only. `src/index.ts` starts an in-process timer. A Mongo lock stops a second replica from crawling at the same time. Checkpoints still resume after a restart.
 6. Progress: `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/status`  
-   The JSON has counts per store and department, `counts.masters` (local Walmart keys, Kroger-only, Walmart UPC, merged), checkpoint phase, `budget.walmart.used` / `limit` (and the same for Kroger), `cooldownUntil` after a 429, and `errors[]` with provider, status, params, body, rate-limit headers, and timestamp. `shopperZips` is real demand (`hits` > 0). `seedZips` and `seedLocations` are the configured metros. The route returns 503 until `ADMIN_TOKEN` is set and 401 when the token is wrong.
+   The JSON has counts per store and department, `counts.masters` (local Walmart keys, Kroger-only, Walmart UPC, merged), `match.queue` (masters still waiting on a Walmart or Kroger lookup), `match.hitRate` (today's hits and attempts), `match.mergedToday`, checkpoint phase, `budget.walmart.used` / `limit` (and the same for Kroger), `cooldownUntil` after a 429, and `errors[]` with provider, status, params, body, rate-limit headers, and timestamp. `shopperZips` is real demand (`hits` > 0). `seedZips` and `seedLocations` are the configured metros. The route returns 503 until `ADMIN_TOKEN` is set and 401 when the token is wrong.
+   The next batch, without spending a call: `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/match-queue`
 7. Redeploy after this catalog fix. No new variable is required. On the service that crawls, delete `WALMART_INGEST_DAILY_BUDGET` or set `500` (a saved `1500` still overrides the new default). Delete `WALMART_INGEST_MIN_INTERVAL_MS` or set `10000` (a saved `5000` or `2000` still overrides the new 10 second default). Delete `CATALOG_MAX_PRODUCTS` or set `150000`, and delete `CATALOG_MAX_OFFERS` or set `500000`, if those were pinned to the old caps. Shopper traffic is unchanged.
 8. Existing products and offers stay. Do not drop the database. The crawl resumes from the checkpoint. Nothing below runs on boot. Each POST is refused unless the JSON body carries the exact `confirm` string.
    - Read a random sample before remapping. `department` is a department id (`baby`, `household`, `pantry`, …) and `limit` is at most 50:  
@@ -132,40 +136,138 @@ The price that matters is the best in-stock price across stores in the saved cat
 
 The Alerts panel lists the item, the store, the old price, the new price, and the savings. The badge is the number you have not opened yet.
 
+A shared list uses the same controls. The choice stays on this device; each collaborator sets their own. While a share link is open, alerts follow that link. A new link, or turning the link off, stops alerts for the previous one.
+
 Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification). `VAPID_SUBJECT` is a `mailto:` or `https:` URL; it defaults to `mailto:price-alerts@grocerygitter.app`. Generate a pair with `npx web-push generate-vapid-keys`. If the keys are unset, alerts still show in the app and `POST /api/price-alerts/push` returns 503.
 
-Phone push (Capacitor, APNs, or FCM) is not sent yet. Alerts are stored the same way, and a native transport can register later without a new collection. `GET /api/price-alerts/status` reports `nativePush.enabled: false` until that exists.
+Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the in-app badge and Alerts panel. A native transport can register later without a new collection. `GET /api/price-alerts/status` reports `nativePush.enabled: false` until that exists.
 
-## Phone and tablet apps (later)
+## Share a list
 
-This PR does **not** add Xcode or Android Studio projects. The UI is a static SPA in `public/` (no frontend build), with a web manifest, icons, and a network-first service worker so it can be installed as a PWA.
+A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
 
-Recommended store path when you are ready:
+Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
 
-1. Keep secrets on the Express server. The native shell should load the deployed site, not embed API keys.
-2. Add Capacitor in a follow-up (not this PR):
+Anyone with the link can open the same list, add items, change quantities, and check items off. The page keeps up by listening for live updates, and falls back to checking every few seconds. If two people edit the same item, the later edit wins and the other item is left alone. When a name was entered, the row says who added it and who checked it off.
+
+The person who created the link can **Make view-only** or **Revoke link**. A view-only link can still be opened, but only that person can change it. A revoked link stops working. Sharing again makes a new link. One list never includes another list, and the link is not a guessable id.
+
+A shared list holds at most 100 items. Edits are rate-limited. The database stores hashes of the secrets, not the secrets themselves.
+
+Share links use the hosted origin from `CAPACITOR_API_URL` / `apiUrl()`. That helper reads `GroceryGitterNative.resolveApiOrigin`, the same origin the native shell uses for API calls. On the website the link is this site's origin. In the bundled app it is `CAPACITOR_API_URL`, or the production Railway origin when that variable is unset, so the link is not `capacitor://localhost` or `https://localhost`.
+
+## Phone and tablet apps (Capacitor)
+
+The shopper UI stays a static SPA in `public/` (no frontend bundler). The website and the installed PWA are unchanged: the manifest, icons, and network-first service worker still install from the browser, and `/api` stays on the same origin.
+
+Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` is still only the TypeScript server (`tsc` → `dist/`), and `npm start` still serves `public/` from Express.
+
+The native WebView loads those copied files. It then calls the HTTPS API at `CAPACITOR_API_URL`, or `https://grocery-price-optimizer-production.up.railway.app` when that variable is unset. Retailer secrets stay on the server. Express already enables CORS, so the WebView origin (`capacitor://localhost` on iOS, `https://localhost` on Android) can call the API.
+
+Kroger, Walmart, Target, and Instacart handoffs open in the system browser (`@capacitor/browser`). The Kroger redirect URI stays the Railway HTTPS callback. There is no custom inbound URL scheme: checkout returns to that HTTPS page, not into the app.
+
+### Prerequisites
+
+- **Node.js 20+** (same as the API)
+- **iOS:** a Mac with current Xcode and the iOS 15+ simulator runtime. The Xcode project’s deployment target is iOS 15. A paid Apple Developer account is only needed for a physical device or App Store upload. Capacitor 8 links plugins with Swift Package Manager (`ios/App/CapApp-SPM`), so CocoaPods is not required to run the simulator. `ios/App/Podfile` is there so the Codemagic Mac build can run `pod install` and open a workspace. To ship an iPhone build without a Mac, follow `docs/IOS_CLOUD_BUILD.md`.
+- **Android:** Android Studio, with Android SDK 36 (the project’s compile SDK) and an emulator or a device with USB debugging. Minimum device SDK is 24.
+
+`npm install` on a machine where you will run the native apps. The Capacitor packages are dev dependencies, so a production Railway install can omit them.
+
+### First-time setup
 
 ```bash
-npm install @capacitor/core @capacitor/ios @capacitor/android
-npm install -D @capacitor/cli
-npx cap init "Grocery Gitter" com.grocerygitter.app --web-dir public
+npm install
+npm run cap:sync
 ```
 
-3. Point the WebView at production so Railway stays the API and the UI updates with the site:
+The copies of the website inside `ios/` and `android/` are generated by that command and are not committed. Open Xcode or Android Studio after syncing.
 
-```ts
-// capacitor.config.ts
-const config = {
-  appId: "com.grocerygitter.app",
-  appName: "Grocery Gitter",
-  webDir: "public",
-  server: { url: "https://grocery-price-optimizer-production.up.railway.app", cleartext: false },
-};
+`npm run cap:sync` reads `.env` when that file exists. Optional variables (see `.env.example`):
+
+| Variable | Effect |
+| --- | --- |
+| `CAPACITOR_API_URL` | HTTPS origin written into the native copies of `public/native-config.js`. Unset uses the Railway production URL above. `http://` is rejected. |
+| `CAPACITOR_SERVER_URL` | Live reload. The WebView loads this URL instead of the copied files, and API calls stay on that origin. Use `http://<your-LAN-ip>:3000` while `npm run dev` is running. Unset it and sync again before a store build. |
+
+### Sync after web changes
+
+Edit `public/` (HTML, CSS, `app.js`). Then:
+
+```bash
+npm run cap:sync
 ```
 
-4. Open Kroger, Walmart, Target, and Instacart handoffs in the system browser (`@capacitor/browser`) so OAuth cookies and add-to-cart links work. The Kroger redirect URI stays the Railway HTTPS callback.
-5. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
-6. Price alerts already show in the web view. When you add a native shell, register a push transport on the server (`registerNativePushTransport` in `src/alerts/push.ts`) and store the device token on `PushSubscription` with `channel: "native"`. Web Push keeps working beside it. Do not add a second alert scanner.
+That refreshes both native projects. One platform at a time:
+
+```bash
+npm run cap:sync:ios
+npm run cap:sync:android
+```
+
+Railway deploys the same `public/` files on the next web deploy. You do not run Capacitor on Railway.
+
+### Open and run
+
+iOS simulator or device (Mac):
+
+```bash
+npm run cap:open:ios
+```
+
+In Xcode, select an iPhone simulator (or a connected iPhone), then Product → Run (⌘R).
+
+From the terminal, with Xcode’s simulators installed:
+
+```bash
+npm run cap:run:ios
+```
+
+Android emulator or device:
+
+```bash
+npm run cap:open:android
+```
+
+In Android Studio, select a device or emulator and press Run.
+
+From the terminal, with a device or emulator already running:
+
+```bash
+npm run cap:run:android
+```
+
+Live reload against the local API (example):
+
+```bash
+npm run dev
+CAPACITOR_SERVER_URL=http://192.168.1.20:3000 npm run cap:sync
+npm run cap:run:android
+```
+
+Use your computer’s LAN address. `http://localhost` on a phone is the phone, not your computer. Android’s emulator can use `http://10.0.2.2:3000`.
+
+### What the shell already handles
+
+- **Safe areas.** `viewport-fit=cover` was already set. The top bar, side edges, bottom list bar, and sheets pad with `env(safe-area-inset-*)`, and with Capacitor’s `--safe-area-inset-*` variables on older Android WebViews. The iOS web view is edge-to-edge (`contentInset: never`).
+- **Status bar.** Capacitor SystemBars follows the light or dark theme (dark icons on the cream bar, light icons on the dark theme).
+- **Splash.** Green `#0e7a45` launch screen, hidden when the page boots (and auto-hidden if the page never boots).
+- **Deep links that already exist.** Walmart add-to-cart, Kroger and Target search, and Instacart open outside the WebView. Kroger shopper login does too, so the Railway OAuth callback is unchanged.
+- **Service worker.** Registered on the website only, so the native shell does not cache a second copy of the UI.
+- **Price alerts.** The badge and Alerts panel show inside the WebView. The website can also register browser push. Native push (APNs or FCM) registers later through `registerNativePushTransport` in `src/alerts/push.ts`.
+
+### App Store / Play Store prep
+
+Icons, screenshots, and privacy labels are still a checklist. `codemagic.yaml` builds a signed iOS app and sends it to TestFlight, and builds a signed Android App Bundle without uploading it to Play. The steps for someone without a Mac are in `docs/IOS_CLOUD_BUILD.md`.
+
+- [ ] Replace the default Capacitor icons: iOS `ios/App/App/Assets.xcassets/AppIcon.appiconset`, Android `android/app/src/main/res/mipmap-*`. Include a 1024×1024 App Store icon with no transparency.
+- [ ] Replace the splash artwork (iOS launch storyboard / `Splash.imageset`, Android `drawable*/splash.png`) and keep the green background `#0e7a45`.
+- [ ] Privacy: the app stores the shopping list and ZIP in on-device `localStorage`. There is no Grocery Gitter account. Say that in App Store privacy nutrition labels and the Play Data safety form. Retailer login (Kroger, Instacart) happens in the system browser on the retailer’s site.
+- [ ] Signing: Apple Developer account, distribution certificate, and provisioning profile for `app.grocerygitter`. Android upload keystore (`android/key.properties`, a `.jks` or `.keystore` — both are gitignored) and Play App Signing.
+- [ ] Create the App Store Connect app and the Play Console app with bundle / application id `app.grocerygitter` and name Grocery Gitter.
+- [ ] Screenshots, description, support URL, and age rating. Point support at the public Railway site.
+- [ ] Confirm a release build was synced **without** `CAPACITOR_SERVER_URL`, so the binary bundles `public/` and calls only the HTTPS API.
+- [ ] Confirm Kroger’s registered redirect URI is still the Railway `https://…/api/kroger/oauth/callback`, not an app URL scheme.
 
 ## What it includes
 
@@ -222,9 +324,9 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | Store | What actually runs | Offline / no keys | Live keys |
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
-| **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store is a label only. Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
-| **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. |
-| **Aldi** (and Publix-like banners) | No retailer product API. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. | Demo catalog | Weekly-ad / circular prices near the ZIP when Flipp is enabled |
+| **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address, plus `accessPointId` / `fulfillmentStoreId` when the locator sends them. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store does not change the price. It is passed on the add-to-cart link as `storeId` (and `ap` when an access point id is present). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
+| **Target** | **No public product API.** This app does **not** call RedSky, Target Circle, or RedCard pricing (those are account-specific and not a shelf feed). If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. Otherwise the weekly circular. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. Circular rows stay **Weekly ad**. |
+| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
 
 Configured **partner feeds** (Publix, Meijer, H-E-B, Instacart-style banners, Datasembly-class shelf file) use the same optimize path when `SHELF_FEED_*` / `INSTACART_PARTNER_*` / `PUBLIX_PARTNER_*` / `HEB_PARTNER_*` / `MEIJER_PARTNER_*` are set. Hits are labeled **Partner feed**, not a fake retailer API. See [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). Licensed shelf feeds beat Flipp weekly ads for the same banner. Unconfigured partner banners are not added to the default trip.
 
@@ -239,11 +341,32 @@ Banners without a public grocery API (Aldi, Target when the partner feed is abse
 | Path | When | What it calls | Honesty / risk |
 | --- | --- | --- | --- |
 | **FlyerKit v4.0** (preferred) | `FLIPP_ACCESS_TOKEN` is set | Documented `GET https://api.flipp.com/flyerkit/v4.0/publications/{merchant_identifier}/products?access_token=&locale=en-US&postal_code=&keywords=` ([FlyerKit docs](https://api.flipp.com/flyerkit/v4.0/documentation)). Tokens are issued by a Flipp technical contact (typically merchant-scoped). | Legitimate partner API. |
-| **Consumer flyer search** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com: `GET https://backflipp.wishabi.com/flipp/items/search?locale=en-us&postal_code={ZIP}&q={merchant AND term}`. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
+| **Consumer circular** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com. Grocery Gitter loads `GET https://backflipp.wishabi.com/flipp/flyers?postal_code={ZIP}` and then each matching flyer. A `merchant AND term` search returns an empty `items` list, so the grocery words are matched on the circular locally. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
 
-Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. Request extra banners via `stores` on optimize-list; the default trip still considers Kroger, Walmart, Target, and Aldi.
+**ZIP.** Weekly ads require a 5-digit US ZIP. `45202-1234` is accepted and sent as `45202`. The price is whatever flyer Flipp publishes for that postal code. It is not a store-locator aisle price, and a banner can appear in the circular even when the nearest store is far away. With no ZIP, browse keeps the demo catalog and says so; the trip labels that store **Unavailable** or **Demo catalog** instead of pretending a circular was checked.
 
-Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric `current_price` (BOGO / “% off” only) are skipped so we do not invent a price.
+Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. When Flipp is on, those banners join the default trip. Pass `stores` to limit the list. Food Lion is merchant `2100`, H-E-B `2467`, US Safeway `5667` (not Safeway Liquor), Giant Eagle `2130`.
+
+Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric price (BOGO / “% off” only) are skipped so we do not invent a price. A flyer id is not a Target TCIN or a Walmart item id; those handoffs stay search links.
+
+### Verify weekly ads (Railway)
+
+On the **web** service (the one that serves `/api`, not the ingest worker):
+
+1. Variables: `FLIPP_ENABLED` = `true`. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp has issued a FlyerKit token. Do not set fake `TARGET_PARTNER_*` keys.
+2. Redeploy the web service. No catalog ingest change and no database delete.
+3. From PowerShell, using your public HTTPS host:
+
+```powershell
+$base = "https://<your-service>.up.railway.app"
+Invoke-RestMethod "$base/api/catalog/coverage"
+Invoke-RestMethod "$base/api/catalog/browse?q=chicken&zip=45202"
+Invoke-RestMethod "$base/api/catalog/browse?department=meat-seafood&zip=75201"
+```
+
+Coverage for Target and Aldi should say **Weekly ad only**, and Food Lion, H-E-B, Safeway, Giant Eagle, Publix, Meijer, and Costco should say **Weekly ad**. A chicken or meat response should include `priceSource` `weekly_ad` when that ZIP's circular actually lists the item. An empty circular for a staple is honest: the offer stays demo or the trip store says **Unavailable**. Browse without `zip` returns a warning that a 5-digit ZIP is required.
+
+`Invoke-RestMethod "$base/api/catalog/browse?q=milk"` (no ZIP) should not invent Aldi or Target shelf prices.
 
 This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 
@@ -257,7 +380,7 @@ After optimize, each store group includes a `handoff` object: `storeName`, `item
 | --- | --- | --- |
 | **Kroger** | `search_deeplink` → **Open at Kroger** | Default when `KROGER_REDIRECT_URI` is unset, or when items have no UPC. Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
 | **Kroger** | `kroger_cart` → **Add to Kroger cart** | When `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC/`productId`. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
-| **Walmart** | `walmart_cart` → **Add N items to Walmart cart** | When every Walmart line has a numeric Affiliate `itemId` (live or cached live). One link: `https://affil.walmart.com/cart/addToCart?items=ITEMID\|QTY,ITEMID\|QTY` ([GM add to cart](https://walmart.io/docs/affiliates/v1/gm-add-to-cart), item field `addToCartUrl`). If `WALMART_PUBLISHER_ID` is set, that URL is wrapped with the Impact template from [`productTrackingUrl`](https://walmart.io/apidocs/affiliates/reviews): `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u=…`. If it is unset, the unwrapped link still opens the cart. This is a shopper handoff, not an API cart write — Grocery Gitter does not report the cart as filled. Any line without a Walmart item id (demo catalog, or a Flipp flyer id) falls back to **Search at Walmart**. |
+| **Walmart** | `walmart_cart` → **Add N items to Walmart cart** | When at least one Walmart line has a numeric item id (live or cached live). One link: `https://www.walmart.com/sc/cart/addToCart?items=ITEMID\|QTY,ITEMID`. Quantity 1 is the bare item id. `offers` is used only when a line already has an offer id and no item id. If the shopper's nearest Walmart is known, the link adds `storeId` (the fulfillment store id, or the store number when that is all the locator returned) and `ap` when the locator returned an accessPointId. If `WALMART_PUBLISHER_ID` is set, that URL is wrapped with the Impact template from [`productTrackingUrl`](https://walmart.io/apidocs/affiliates/reviews): `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u=…`. If it is unset, the unwrapped link still opens the cart. This is a shopper handoff, not an API cart write — Grocery Gitter does not report the cart as filled. Lines without a numeric item id (demo catalog, or a Flipp flyer id) are left off the link and named in the button detail. If none of the lines have an item id, the card stays on **Search at Walmart**. |
 | **Target** | `search_deeplink` | Public search URL. Not a cart fill — authenticated cart APIs need partner access. Grocery Gitter does not invent that API. |
 | **Publix / H-E-B / Meijer / Albertsons family / Ahold / club / Amazon** | `search_deeplink` | Public search URLs with honest copy (club membership; no third-party cart-write). |
 | **Aldi / unknown banners** | `coming_soon` | No fake checkout. |
@@ -504,7 +627,7 @@ Each grocery item is assigned to **one** store using the [matching and unit-pric
 
 `GET /api/price-alerts/status` — `{ webPush: { enabled, publicKey? }, nativePush: { enabled } }`. `publicKey` is present only when Web Push is on. It is not a secret. The private key is never returned.
 
-`PUT /api/price-alerts/watches` — body `{ deviceId, listId, listName?, zip?, enabled, items }`. Each item is `{ productId, name, brand?, watch?: "inherit"|"on"|"off", baselinePrice, baselineStore?, targetPrice? }`. `baselinePrice` is the price when the shopper saved the item. `productId` is the browse id (`upc:…`).
+`PUT /api/price-alerts/watches` — body `{ deviceId, listId, listName?, zip?, enabled, items }`. `listId` is the on-device list id, or the share token while a shared list is open (8–128 characters). Each item is `{ productId, name, brand?, watch?: "inherit"|"on"|"off", baselinePrice, baselineStore?, targetPrice? }`. `baselinePrice` is the price when the shopper saved the item. `productId` is the browse id (`upc:…`).
 
 `GET /api/price-alerts?deviceId=` — `{ unread, alerts }`. Each alert has `itemName`, `storeName`, `oldPrice`, `newPrice`, and `savings`.
 
@@ -571,9 +694,14 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `npm test` | Unit tests for the optimizer and scraper |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
 | `npm run seed` | Insert 10 mock products into local MongoDB |
-| `npm run build` | Compile to `dist/` |
+| `npm run build` | Compile the API to `dist/` (Railway). Does not build iOS or Android. |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run cap:sync` | Copy `public/` into the iOS and Android projects |
+| `npm run cap:open:ios` | Open the Xcode project |
+| `npm run cap:open:android` | Open the Android Studio project |
+| `npm run cap:run:ios` | Build and run on an iOS simulator or device |
+| `npm run cap:run:android` | Build and run on an Android emulator or device |
 
 ## Product schema
 

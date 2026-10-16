@@ -2,6 +2,8 @@ import type { OptimizeResult, PickedItem, PriceSource, StoreGroup } from "./opti
 import {
   readWalmartPublisherId,
   walmartAddToCartUrl,
+  type WalmartAddToCartOptions,
+  type WalmartCartLine,
 } from "./pricing/walmartCartLink";
 import type { WalmartNearbyStore } from "./pricing/walmartProvider";
 import type { StorePricingReport } from "./pricing/types";
@@ -78,7 +80,10 @@ export type HandoffOptions = {
    */
   krogerCartOAuthConfigured?: boolean;
   pricingByStore?: StorePricingReport[];
-  /** Nearest Walmart for this request's ZIP. Display only; prices stay catalog. */
+  /**
+   * Nearest Walmart for this request's ZIP. Labels the card and sets
+   * add-to-cart storeId / ap when the locator sent them. Prices stay catalog.
+   */
   walmartStore?: WalmartNearbyStore;
 };
 
@@ -160,21 +165,30 @@ export function formatTripSummary(
     .join(" + ");
 }
 
-function identifierOf(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
+function flyerOrSeed(item: { priceSource?: PriceSource }): boolean {
+  return item.priceSource === "weekly_ad" || item.priceSource === "seed";
+}
+
+function identifierOf(
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string {
+  if (flyerOrSeed(item)) {
+    return item.name.trim();
+  }
   return (item.upc || item.productId || item.name).trim();
 }
 
 export function krogerSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
   const query = new URLSearchParams({ query: identifierOf(item) });
   return `${KROGER_SEARCH}?${query.toString()}`;
 }
 
 export function walmartSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
-  const productId = item.productId?.trim();
+  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
   if (productId) {
     return `https://www.walmart.com/ip/${encodeURIComponent(productId)}`;
   }
@@ -183,9 +197,9 @@ export function walmartSearchUrl(
 }
 
 export function targetSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
-  const productId = item.productId?.trim();
+  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
   if (productId) {
     return `https://www.target.com/p/-/A-${encodeURIComponent(productId)}`;
   }
@@ -195,14 +209,19 @@ export function targetSearchUrl(
   return `${TARGET_SEARCH}?${query.toString()}`;
 }
 
-function searchQuery(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
+function searchQuery(
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string {
+  if (flyerOrSeed(item)) {
+    return item.name.trim();
+  }
   return (item.upc || item.productId || item.name).trim();
 }
 
 /** Public storefront search — not a cart fill. */
 export function partnerSearchUrl(
   storeName: string,
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string | undefined {
   const q = encodeURIComponent(searchQuery(item));
   switch (retailerKey(storeName)) {
@@ -314,7 +333,45 @@ function walmartCartItemId(item: HandoffItem): string | undefined {
   return /^\d+$/.test(id) ? id : undefined;
 }
 
-function walmartAction(items: HandoffItem[]): StoreHandoffAction {
+function formatNameList(names: string[]): string {
+  if (names.length <= 1) {
+    return names[0] ?? "";
+  }
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]}`;
+  }
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * Walmart shows an error modal and sends the shopper home when any item in
+ * the link cannot be added. Lines without a numeric item id stay off the
+ * link, and the button copy names them.
+ */
+function skippedWalmartNote(names: string[]): string {
+  if (names.length === 0) {
+    return "";
+  }
+  const noun = names.length === 1 ? "item" : "items";
+  return ` Skipped ${names.length} ${noun} (${formatNameList(names)}) with no Walmart item id. Walmart shows an error and sends the shopper to the home page if any item in the link cannot be added, so those lines are left off.`;
+}
+
+function walmartCartOptions(store: WalmartNearbyStore | undefined): WalmartAddToCartOptions {
+  if (!store) {
+    return {};
+  }
+  const storeId = store.fulfillmentStoreId?.trim() || store.storeId.trim();
+  const accessPointId = store.accessPointId?.trim();
+  return {
+    ...(storeId ? { storeId } : {}),
+    ...(accessPointId ? { accessPointId } : {}),
+  };
+}
+
+function walmartAction(
+  items: HandoffItem[],
+  store?: WalmartNearbyStore
+): StoreHandoffAction {
   const firstUrl = items.find((item) => item.url)?.url;
   const searchAction: StoreHandoffAction = {
     type: "search_deeplink",
@@ -325,23 +382,32 @@ function walmartAction(items: HandoffItem[]): StoreHandoffAction {
       "Search deep link, not a cart fill. Authenticated Walmart cart APIs need partner access; Grocery Gitter does not invent a cart write.",
   };
 
-  const itemIds = items.map(walmartCartItemId);
-  if (items.length === 0 || itemIds.some((id) => !id)) {
+  const cartLines: WalmartCartLine[] = [];
+  const cartItems: HandoffItem[] = [];
+  const skippedNames: string[] = [];
+  for (const item of items) {
+    const itemId = walmartCartItemId(item);
+    if (!itemId) {
+      skippedNames.push(item.name);
+      continue;
+    }
+    cartItems.push(item);
+    cartLines.push({ itemId, quantity: item.quantity });
+  }
+  if (cartLines.length === 0) {
     return searchAction;
   }
 
   const url = walmartAddToCartUrl(
-    items.map((item, index) => ({
-      itemId: itemIds[index] as string,
-      quantity: item.quantity,
-    })),
-    readWalmartPublisherId()
+    cartLines,
+    readWalmartPublisherId(),
+    walmartCartOptions(store)
   );
   if (!url) {
     return searchAction;
   }
 
-  const count = itemCountOf(items);
+  const count = itemCountOf(cartItems);
   const publisherId = readWalmartPublisherId();
   const attribution = publisherId
     ? "The link includes your Impact publisher id (WALMART_PUBLISHER_ID) so a qualifying Walmart.com purchase can earn commission."
@@ -353,7 +419,7 @@ function walmartAction(items: HandoffItem[]): StoreHandoffAction {
     url,
     status: "ready",
     ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-    detail: `Opens walmart.com with these item ids and quantities in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.`,
+    detail: `Opens walmart.com with these item ids and quantities in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
   };
 }
 
@@ -412,7 +478,7 @@ export function buildStoreHandoff(
   if (retailer === "kroger") {
     action = krogerAction(items, Boolean(options.krogerCartOAuthConfigured));
   } else if (retailer === "walmart") {
-    action = walmartAction(items);
+    action = walmartAction(items, options.walmartStore);
   } else if (retailer === "target") {
     action = targetAction(items);
   } else if (retailer === "aldi") {
