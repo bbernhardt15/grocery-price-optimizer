@@ -79,6 +79,10 @@
           <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
             <span aria-hidden="true" id="theme-glyph">◐</span>
           </button>
+          <button id="alerts-toggle" type="button" class="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts">
+            Alerts
+            <span id="alerts-badge" class="count-pill" hidden>0</span>
+          </button>
           <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
             My list
             <span id="list-count" class="count-pill">0</span>
@@ -172,6 +176,11 @@
             <h2>My list</h2>
             <button type="button" class="text-btn" id="list-close">Close</button>
           </div>
+          <label class="check-row list-alert-toggle">
+            <input id="list-alerts" type="checkbox" />
+            <span>Alert me when prices on this list drop</span>
+          </label>
+          <p class="muted sub-note">Compares the best price across stores with the price when you saved each item. Watch one item on its own, or set a target under today's price.</p>
           <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device until you share.</p>
           <ul id="list-items" class="list-items"></ul>
           <section id="share-box" class="share-box" aria-label="Share this list">
@@ -232,6 +241,20 @@
 
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
     <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
+    <dialog id="alerts-dialog" class="sheet" aria-labelledby="alerts-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="alerts-title">Price alerts</h2>
+          <button type="button" class="text-btn" id="alerts-close">Close</button>
+        </div>
+        <p id="alerts-empty" class="muted">No price drops yet. Turn on alerts for My list. Grocery Gitter checks the saved catalog each time prices refresh.</p>
+        <ul id="alerts-list" class="alert-list"></ul>
+        <div id="push-row" hidden>
+          <button type="button" class="ghost" id="push-btn">Notify this browser</button>
+          <p id="push-note" class="muted">Alerts stay in this panel even if you skip notifications.</p>
+        </div>
+      </div>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>

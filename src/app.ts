@@ -7,6 +7,7 @@ import krogerCartRouter from "./routes/krogerCart";
 import instacartShoppingListRouter from "./routes/instacartShoppingList";
 import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
+import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
 
 const app = express();
@@ -61,6 +62,18 @@ app.get("/api", (_req, res) => {
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":
         "Creates an Instacart Developer Platform shopping list (POST /idp/v1/products/products_link) and returns productsLinkUrl. Hidden in the UI when the key or base URL is unset.",
+      "GET /api/price-alerts/status":
+        "Whether browser notifications are on. Web Push is off until VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set. nativePush stays false until a phone transport is registered.",
+      "PUT /api/price-alerts/watches":
+        "Saves one shopping list's price-drop opt-in: list switch, optional per-item watch, the price when the item was saved, and an optional target. listId is the device list or a shared-list token.",
+      "GET /api/price-alerts":
+        "In-app alerts for a device: item, store, old price, new price, and savings. unread is the badge count.",
+      "POST /api/price-alerts/seen":
+        "Clears the badge for this device.",
+      "POST /api/price-alerts/push":
+        "Stores a Web Push subscription. 503 when VAPID keys are unset.",
+      "DELETE /api/price-alerts/push":
+        "Removes a Web Push subscription for this device.",
       "POST /api/lists":
         "Creates a shared shopping list, or resumes the one tied to a saved owner token. Returns the share token and owner token. There is no list of other people's lists.",
       "GET /api/lists/:shareToken":
@@ -81,6 +94,7 @@ app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
+app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
