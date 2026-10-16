@@ -126,6 +126,20 @@ Local demo, no keys:
 npm run ingest:demo
 ```
 
+## Share a list
+
+A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
+
+Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
+
+Anyone with the link can open the same list, add items, change quantities, and check items off. The page keeps up by listening for live updates, and falls back to checking every few seconds. If two people edit the same item, the later edit wins and the other item is left alone. When a name was entered, the row says who added it and who checked it off.
+
+The person who created the link can **Make view-only** or **Revoke link**. A view-only link can still be opened, but only that person can change it. A revoked link stops working. Sharing again makes a new link. One list never includes another list, and the link is not a guessable id.
+
+A shared list holds at most 100 items. Edits are rate-limited. The database stores hashes of the secrets, not the secrets themselves.
+
+Share links use the hosted origin from `CAPACITOR_API_URL` / `apiUrl()`. That helper reads `GroceryGitterNative.resolveApiOrigin`, the same origin the native shell uses for API calls. On the website the link is this site's origin. In the bundled app it is `CAPACITOR_API_URL`, or the production Railway origin when that variable is unset, so the link is not `capacitor://localhost` or `https://localhost`.
+
 ## Phone and tablet apps (Capacitor)
 
 The shopper UI stays a static SPA in `public/` (no frontend bundler). The website and the installed PWA are unchanged: the manifest, icons, and network-first service worker still install from the browser, and `/api` stays on the same origin.

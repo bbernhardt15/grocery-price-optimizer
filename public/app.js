@@ -15,6 +15,15 @@ import {
   themeGlyph,
   themeIsDark,
 } from "./shopper/theme.js";
+import {
+  attributionLine,
+  deliverShare,
+  isShareCancel,
+  listTokenFromPath,
+  mergeSnapshot,
+  sharePageUrl,
+  visibleItems,
+} from "./shopper/shareList.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -50,6 +59,10 @@ const coverageDialog = $("coverage-dialog");
 const ZIP_KEY = "gg-zip";
 const LIST_KEY = "gg-list";
 const SUBS_KEY = "gg-subs";
+const SHARE_KEY = "gg-share";
+const OWNER_KEY = "gg-owner";
+const NAME_KEY = "gg-display-name";
+const PERSONAL_KEY = "gg-list-personal";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 function isNative() {
@@ -126,6 +139,18 @@ let listLoading = false;
 let suggestions = [];
 /** Query the current suggestion rows belong to. */
 let suggestionQuery = "";
+/** @type {{ shareToken: string, mode?: string, role?: string, canEdit: boolean, seq: number, revoked: boolean, title?: string } | null} */
+let shareState = null;
+let applyingRemote = false;
+let shareBusy = false;
+/** @type {Map<string, Record<string, any>>} */
+const pendingWrites = new Map();
+let pushTimer = 0;
+let pushChain = Promise.resolve();
+let pollTimer = 0;
+/** @type {EventSource | null} */
+let listEvents = null;
+let syncGeneration = 0;
 
 const money = formatMoney;
 
@@ -150,6 +175,73 @@ function toast(message) {
   window.setTimeout(() => toastEl.classList.remove("show"), 1600);
 }
 
+function apiFetch(path, init) {
+  return globalThis.fetch(apiUrl(path), init);
+}
+
+function readStoredJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function readDisplayName() {
+  const typed = $("display-name")?.value;
+  const value = String(typed ?? localStorage.getItem(NAME_KEY) ?? "").trim().slice(0, 40);
+  return value;
+}
+
+function readOwned() {
+  const owned = readStoredJson(OWNER_KEY);
+  if (!owned?.ownerToken || !owned?.shareToken) return null;
+  return owned;
+}
+
+function rememberOwner(shareToken, ownerToken) {
+  localStorage.setItem(OWNER_KEY, JSON.stringify({ shareToken, ownerToken }));
+}
+
+function rememberSession(state) {
+  if (!state?.shareToken) {
+    localStorage.removeItem(SHARE_KEY);
+    return;
+  }
+  localStorage.setItem(SHARE_KEY, JSON.stringify({ shareToken: state.shareToken }));
+  if (state.role === "owner") {
+    const owned = readOwned();
+    if (owned?.ownerToken) rememberOwner(state.shareToken, owned.ownerToken);
+  }
+}
+
+function ownerHeaders(token) {
+  const owned = readOwned();
+  if (owned?.ownerToken && owned.shareToken === token) return { "x-list-owner": owned.ownerToken };
+  return {};
+}
+
+function listIsLocked() {
+  return Boolean(shareState?.shareToken && !shareState.canEdit);
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  if (!copied) throw new Error("Could not copy the link.");
+}
+
 function sourceLabel(source) {
   if (source === "live") return "Live";
   if (source === "partner_feed") return "Partner";
@@ -164,7 +256,18 @@ function bestOffer(product, store) {
 }
 
 function saveList() {
-  const rows = [...list.values()].map((entry) => ({ id: entry.product.id, quantity: entry.quantity }));
+  const rows = [...list.values()].map((entry) => ({
+    id: entry.product.id,
+    itemId: entry.itemId || entry.product.id,
+    quantity: entry.quantity,
+    checked: Boolean(entry.checked),
+    addedBy: entry.addedBy,
+    checkedBy: entry.checkedBy,
+    writtenAt: entry.writtenAt || 0,
+    name: entry.product.name,
+    brand: entry.product.brand,
+    sizeLabel: entry.product.sizeLabel,
+  }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
 }
 
@@ -247,6 +350,7 @@ function renderEstimate() {
     barSave.hidden = true;
   }
   renderListRows();
+  renderShareChrome();
 }
 
 function savingsBlock(total, subject) {
@@ -266,25 +370,34 @@ function savingsBlock(total, subject) {
 }
 
 function renderListRows() {
+  const locked = listIsLocked();
   listItemsEl.innerHTML = [...list.values()]
     .map((entry) => {
-      const offer = bestOffer(entry.product);
+      const offer = entry.product.offers?.length ? bestOffer(entry.product) : null;
       const gap = (entry.product.gaps ?? []).find((item) => item.substitute);
       const sub = gap?.substitute
         ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
         : "";
-      return `<li class="list-row">
-        <img src="${escapeHtml(mediaUrl(entry.product.imageUrls?.[0] || ""))}" alt="" />
+      const price = offer ? `<p class="muted">${money(offer.price)} at ${escapeHtml(offer.storeName)}</p>` : "";
+      const credit = attributionLine(entry);
+      const itemId = entry.itemId || entry.product.id;
+      const image = mediaUrl(entry.product.imageUrls?.[0] || "");
+      return `<li class="list-row${entry.checked ? " done" : ""}">
+        <img src="${escapeHtml(image)}" alt="" />
         <div>
-          <strong>${escapeHtml(entry.product.name)}</strong>
-          <p class="muted">${escapeHtml(entry.product.brand)} · ${escapeHtml(entry.product.sizeLabel || "")}</p>
-          <p class="muted">${money(offer.price)} at ${escapeHtml(offer.storeName)}</p>
+          <label class="got-it">
+            <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(entry.product.name)}" />
+            <strong>${escapeHtml(entry.product.name)}</strong>
+          </label>
+          <p class="muted">${escapeHtml(entry.product.brand || "")}${entry.product.sizeLabel ? ` · ${escapeHtml(entry.product.sizeLabel)}` : ""}</p>
+          ${price}
+          ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
           ${sub}
         </div>
         <div class="stepper">
-          <button type="button" data-list-dec="${escapeHtml(entry.product.id)}" aria-label="Decrease ${escapeHtml(entry.product.name)}">−</button>
+          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>−</button>
           <output>${entry.quantity}</output>
-          <button type="button" data-list-inc="${escapeHtml(entry.product.id)}" aria-label="Increase ${escapeHtml(entry.product.name)}">+</button>
+          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>+</button>
         </div>
       </li>`;
     })
@@ -294,11 +407,21 @@ function renderListRows() {
 function setQuantity(id, quantity) {
   const entry = list.get(id);
   if (!entry) return;
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
   if (quantity < 1) {
+    entry.writtenAt = Date.now();
+    entry.itemId = entry.itemId || id;
+    queueWrite(entry, true);
     list.delete(id);
     toast("Removed from list");
   } else {
     entry.quantity = Math.min(99, quantity);
+    entry.writtenAt = Date.now();
+    entry.itemId = entry.itemId || entry.product.id;
+    queueWrite(entry, false);
   }
   saveList();
   renderEstimate();
@@ -306,13 +429,27 @@ function setQuantity(id, quantity) {
 }
 
 function addProduct(product, quantity = 1) {
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
   const existing = list.get(product.id);
   const next = Math.min(99, (existing?.quantity ?? 0) + quantity);
-  list.set(product.id, { product, quantity: existing ? next : Math.max(1, quantity) });
+  const entry = {
+    product,
+    quantity: existing ? next : Math.max(1, quantity),
+    itemId: existing?.itemId || product.id,
+    checked: existing?.checked ?? false,
+    addedBy: existing?.addedBy || readDisplayName() || undefined,
+    checkedBy: existing?.checkedBy,
+    writtenAt: Date.now(),
+  };
+  list.set(product.id, entry);
   productsById.set(product.id, product);
   saveList();
   renderEstimate();
   syncCards();
+  queueWrite(entry, false);
   const card = gridEl.querySelector(`[data-product-id="${CSS.escape(product.id)}"]`);
   if (card) {
     card.classList.remove("just-added");
@@ -930,6 +1067,488 @@ function applyTheme(theme) {
   void syncSystemBars(dark);
 }
 
+function queueWrite(entry, deleted = false) {
+  if (applyingRemote || !shareState?.shareToken || !shareState.canEdit || shareState.revoked) return;
+  const write = toWrite(entry, deleted);
+  pendingWrites.set(write.itemId, write);
+  window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => {
+    pushChain = pushChain.then(() => flushWrites()).catch(() => {});
+  }, 250);
+}
+
+function toWrite(entry, deleted = false) {
+  return {
+    itemId: entry.itemId || entry.product.id,
+    catalogId: entry.product.id,
+    name: entry.product.name,
+    brand: entry.product.brand || undefined,
+    sizeLabel: entry.product.sizeLabel || undefined,
+    quantity: Math.max(1, Number(entry.quantity) || 1),
+    checked: Boolean(entry.checked),
+    writtenAt: entry.writtenAt || Date.now(),
+    deleted: Boolean(deleted),
+  };
+}
+
+function stubFromItem(item) {
+  return {
+    id: item.catalogId || item.itemId || item.id,
+    name: item.name || "Item",
+    brand: item.brand || "",
+    sizeLabel: item.sizeLabel || "",
+    imageUrls: [],
+    offers: [],
+    gaps: [],
+  };
+}
+
+function localSnapshot() {
+  const byId = new Map();
+  for (const entry of list.values()) {
+    const item = toWrite(entry, false);
+    byId.set(item.itemId, item);
+  }
+  for (const write of pendingWrites.values()) {
+    const current = byId.get(write.itemId);
+    if (!current || Number(write.writtenAt) >= Number(current.writtenAt)) byId.set(write.itemId, write);
+  }
+  return [...byId.values()];
+}
+
+function applyServerList(body) {
+  if (!body?.shareToken || !Array.isArray(body.items)) return;
+  const previousProducts = new Map(
+    [...list.values()].map((entry) => [entry.itemId || entry.product.id, entry.product])
+  );
+  const remoteById = new Map(body.items.map((item) => [item.itemId, item]));
+  for (const [id, write] of [...pendingWrites]) {
+    const remote = remoteById.get(id);
+    if (remote && Number(remote.writtenAt) >= Number(write.writtenAt)) pendingWrites.delete(id);
+  }
+  const merged = visibleItems(mergeSnapshot(localSnapshot(), body.items, new Set(pendingWrites.keys())));
+  shareState = {
+    shareToken: body.shareToken,
+    mode: body.mode,
+    role: body.role,
+    canEdit: Boolean(body.canEdit),
+    seq: Number(body.seq) || 0,
+    revoked: Boolean(body.revoked),
+    title: body.title || "Shopping list",
+  };
+  rememberSession(shareState);
+  applyingRemote = true;
+  list.clear();
+  for (const item of merged) {
+    const known = previousProducts.get(item.itemId);
+    const product = known?.offers?.length ? known : productsById.get(item.catalogId || item.itemId)?.offers?.length
+      ? productsById.get(item.catalogId || item.itemId)
+      : stubFromItem(item);
+    const entry = {
+      product,
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      itemId: item.itemId,
+      checked: Boolean(item.checked),
+      addedBy: item.addedBy,
+      checkedBy: item.checkedBy,
+      writtenAt: Number(item.writtenAt) || 0,
+    };
+    list.set(entry.itemId, entry);
+    productsById.set(product.id, product);
+  }
+  applyingRemote = false;
+  saveList();
+  renderEstimate();
+  syncCards();
+  void hydrateSharedProducts();
+}
+
+async function hydrateSharedProducts() {
+  const ids = [...new Set([...list.values()].map((entry) => entry.product?.id).filter(Boolean))];
+  await Promise.all(
+    ids.map(async (id) => {
+      const known = productsById.get(id);
+      if (known?.offers?.length) return;
+      try {
+        const response = await apiFetch(`/api/catalog/products/${encodeURIComponent(id)}`);
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!body.product?.id) return;
+        productsById.set(body.product.id, body.product);
+        const entry = list.get(body.product.id) || [...list.values()].find((row) => row.product?.id === body.product.id);
+        if (entry) entry.product = body.product;
+      } catch {
+        /* the shared name still shows if the catalog misses */
+      }
+    })
+  );
+  renderEstimate();
+  syncCards();
+}
+
+async function flushWrites() {
+  if (!shareState?.shareToken || !shareState.canEdit || pendingWrites.size === 0) return;
+  const writes = [...pendingWrites.values()];
+  const token = shareState.shareToken;
+  pendingWrites.clear();
+  let response;
+  try {
+    response = await apiFetch(`/api/lists/${encodeURIComponent(token)}/items`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", ...ownerHeaders(token) },
+      body: JSON.stringify({ displayName: readDisplayName() || undefined, items: writes }),
+    });
+  } catch {
+    for (const write of writes) pendingWrites.set(write.itemId, write);
+    toast("Could not reach the shared list.");
+    return;
+  }
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 410) {
+    handleRevoked(token);
+    return;
+  }
+  if (response.status === 403) {
+    shareState.canEdit = false;
+    shareState.mode = "view";
+    toast(body.error || "This list is view-only.");
+    renderEstimate();
+    void pullList();
+    return;
+  }
+  if (response.status === 429 || response.status === 409) {
+    for (const write of writes) {
+      const newer = pendingWrites.get(write.itemId);
+      if (!newer || write.writtenAt > newer.writtenAt) pendingWrites.set(write.itemId, write);
+    }
+    toast(body.error || "Could not update the shared list.");
+    window.setTimeout(() => {
+      pushChain = pushChain.then(() => flushWrites()).catch(() => {});
+    }, 2000);
+    return;
+  }
+  if (!response.ok) {
+    for (const write of writes) {
+      const newer = pendingWrites.get(write.itemId);
+      if (!newer || write.writtenAt > newer.writtenAt) pendingWrites.set(write.itemId, write);
+    }
+    toast(body.error || "Could not update the shared list.");
+    return;
+  }
+  applyServerList(body);
+}
+
+function stopSync() {
+  syncGeneration += 1;
+  window.clearInterval(pollTimer);
+  pollTimer = 0;
+  const source = listEvents;
+  listEvents = null;
+  source?.close();
+}
+
+function startPolling(generation) {
+  window.clearInterval(pollTimer);
+  pollTimer = window.setInterval(() => {
+    if (generation !== syncGeneration || document.hidden) return;
+    void pullList();
+  }, 4000);
+}
+
+function startSync() {
+  stopSync();
+  if (!shareState?.shareToken || shareState.revoked) return;
+  const generation = syncGeneration;
+  const token = shareState.shareToken;
+  if (typeof EventSource === "function") {
+    try {
+      const source = new EventSource(apiUrl(`/api/lists/${encodeURIComponent(token)}/events`));
+      if (generation !== syncGeneration) {
+        source.close();
+        return;
+      }
+      listEvents = source;
+      source.addEventListener("list", () => {
+        if (generation === syncGeneration) void pullList();
+      });
+      source.onerror = () => {
+        if (generation !== syncGeneration) return;
+        source.close();
+        if (listEvents === source) listEvents = null;
+        startPolling(generation);
+      };
+      return;
+    } catch {
+      startPolling(generation);
+      return;
+    }
+  }
+  startPolling(generation);
+}
+
+async function pullList() {
+  if (!shareState?.shareToken || shareState.revoked) return;
+  const token = shareState.shareToken;
+  let response;
+  try {
+    response = await apiFetch(`/api/lists/${encodeURIComponent(token)}?since=${shareState.seq || 0}`, {
+      headers: ownerHeaders(token),
+    });
+  } catch {
+    return;
+  }
+  if (response.status === 410) {
+    handleRevoked(token);
+    return;
+  }
+  if (!response.ok) return;
+  const body = await response.json().catch(() => ({}));
+  if (body.changed === false) {
+    shareState.mode = body.mode ?? shareState.mode;
+    shareState.canEdit = body.canEdit ?? shareState.canEdit;
+    shareState.role = body.role ?? shareState.role;
+    shareState.revoked = Boolean(body.revoked);
+    renderShareChrome();
+    return;
+  }
+  applyServerList(body);
+}
+
+function handleRevoked(token) {
+  stopSync();
+  const owner = readOwned()?.shareToken === token;
+  shareState = {
+    shareToken: token,
+    revoked: true,
+    canEdit: false,
+    role: owner ? "owner" : "guest",
+    mode: "view",
+    seq: shareState?.seq || 0,
+    title: shareState?.title || "Shopping list",
+  };
+  rememberSession(shareState);
+  toast("This link was turned off.");
+  renderShareChrome();
+}
+
+async function openSharedList(token, { mergeLocal = false } = {}) {
+  const savedShare = readStoredJson(SHARE_KEY)?.shareToken;
+  if (!mergeLocal && savedShare !== token) {
+    const current = localStorage.getItem(LIST_KEY);
+    if (current && current !== "[]" && !localStorage.getItem(PERSONAL_KEY)) {
+      localStorage.setItem(PERSONAL_KEY, current);
+    }
+  } else {
+    for (const entry of list.values()) {
+      entry.itemId = entry.itemId || entry.product.id;
+      if (!entry.writtenAt) entry.writtenAt = 1;
+      pendingWrites.set(entry.itemId, toWrite(entry, false));
+    }
+  }
+  let response;
+  try {
+    response = await apiFetch(`/api/lists/${encodeURIComponent(token)}`, { headers: ownerHeaders(token) });
+  } catch {
+    toast("Could not open that shared list.");
+    return;
+  }
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 410) {
+    handleRevoked(token);
+    openList(true);
+    return;
+  }
+  if (!response.ok) {
+    toast(body.error || "That shared list could not be opened.");
+    return;
+  }
+  applyServerList(body);
+  if (shareState?.canEdit) await flushWrites();
+  startSync();
+  openList(true);
+}
+
+async function postList(extra = {}) {
+  const owned = readOwned();
+  const resuming = Boolean(extra.ownerToken || extra.shareToken || owned?.ownerToken);
+  for (const entry of list.values()) {
+    entry.itemId = entry.itemId || entry.product.id;
+    entry.writtenAt = entry.writtenAt || (resuming ? 1 : Date.now());
+    pendingWrites.set(entry.itemId, toWrite(entry, false));
+  }
+  const response = await apiFetch("/api/lists", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ownerToken: extra.ownerToken || owned?.ownerToken,
+      shareToken: extra.shareToken || owned?.shareToken,
+      displayName: readDisplayName() || undefined,
+      title: "Shopping list",
+      items: [...list.values()].map((entry) => toWrite(entry, false)),
+      rotate: Boolean(extra.rotate),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    toast(body.error || "Could not share this list.");
+    return null;
+  }
+  if (body.ownerToken && body.shareToken) rememberOwner(body.shareToken, body.ownerToken);
+  applyServerList(body.list);
+  if (shareState?.canEdit) await flushWrites();
+  startSync();
+  return body.shareToken || null;
+}
+
+async function postSettings(body) {
+  if (!shareState?.shareToken) return null;
+  const owned = readOwned();
+  const response = await apiFetch(`/api/lists/${encodeURIComponent(shareState.shareToken)}/settings`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...ownerHeaders(shareState.shareToken) },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    toast(payload.error || "Could not update the link.");
+    return null;
+  }
+  if (payload.shareToken && owned?.ownerToken) rememberOwner(payload.shareToken, owned.ownerToken);
+  applyServerList(payload.list);
+  startSync();
+  return payload;
+}
+
+function renderShareChrome() {
+  const status = $("share-status");
+  const viewBtn = $("share-viewonly");
+  const revokeBtn = $("share-revoke");
+  const ownBtn = $("share-own");
+  const shareBtn = $("share-btn");
+  if (!status || !shareBtn) return;
+  const shared = Boolean(shareState?.shareToken);
+  const owner = Boolean(shared && (shareState.role === "owner" || readOwned()?.shareToken === shareState.shareToken));
+  if (!shared) {
+    status.textContent = "Share a link so someone else can shop this list with you.";
+  } else if (shareState.revoked) {
+    status.textContent = owner ? "This link is off. Share again to make a new one." : "This link was turned off.";
+  } else if (shareState.mode === "view") {
+    status.textContent = owner ? "Anyone with the link can look. Only you can change it." : "This shared list is view-only.";
+  } else {
+    status.textContent = owner ? "Anyone with the link can change this list." : "You're editing a shared list.";
+  }
+  if (viewBtn) {
+    viewBtn.hidden = !owner || shareState.revoked;
+    viewBtn.textContent = shareState?.mode === "view" ? "Allow editing" : "Make view-only";
+  }
+  if (revokeBtn) revokeBtn.hidden = !owner || shareState.revoked;
+  if (ownBtn) ownBtn.hidden = !(localStorage.getItem(PERSONAL_KEY) && shared && !owner);
+  shareBtn.disabled = shareBusy;
+  shareBtn.textContent = shareState?.revoked && owner ? "Share a new link" : "Share list";
+  if (listEmptyEl) {
+    listEmptyEl.textContent = listIsLocked()
+      ? "This list is view-only."
+      : shared
+        ? "Changes here show up for everyone on the link."
+        : "Check items while you browse. Quantities stay on this device until you share.";
+  }
+}
+
+async function onShareClick() {
+  if (shareBusy) return;
+  shareBusy = true;
+  renderShareChrome();
+  try {
+    await flushWrites();
+    let token = shareState?.shareToken;
+    const owned = readOwned();
+    const ownerHere = shareState?.role === "owner" || owned?.shareToken === token;
+    if (shareState?.revoked && ownerHere) {
+      token = await postList({ rotate: true, ownerToken: owned?.ownerToken, shareToken: token });
+    } else if (!token) {
+      token = await postList(owned?.ownerToken && !owned.shareToken ? { rotate: true } : {});
+    }
+    if (!token) return;
+    const url = sharePageUrl(token, { apiOrigin: apiOrigin(), locationHref: window.location.href });
+    try {
+      const how = await deliverShare(
+        {
+          title: "Grocery Gitter list",
+          text: "Shop this list with me",
+          url,
+          dialogTitle: "Share list",
+        },
+        {
+          capacitorShare: window.Capacitor?.Plugins?.Share,
+          navigatorShare: typeof navigator.share === "function" ? (data) => navigator.share(data) : undefined,
+          copy: copyText,
+        }
+      );
+      toast(how === "copy" ? "Link copied." : "Choose who to send the list to.");
+    } catch (error) {
+      if (isShareCancel(error)) return;
+      await copyText(url);
+      toast("Link copied.");
+    }
+  } catch (error) {
+    toast(error instanceof Error ? error.message : "Could not share the list.");
+  } finally {
+    shareBusy = false;
+    renderShareChrome();
+  }
+}
+
+async function useOwnList() {
+  stopSync();
+  pendingWrites.clear();
+  shareState = null;
+  localStorage.removeItem(SHARE_KEY);
+  const personal = localStorage.getItem(PERSONAL_KEY);
+  if (personal) {
+    localStorage.setItem(LIST_KEY, personal);
+    localStorage.removeItem(PERSONAL_KEY);
+  }
+  list.clear();
+  if (window.location.pathname.startsWith("/list/")) {
+    history.pushState({}, "", "/");
+  }
+  await restoreList();
+  const owned = readOwned();
+  if (owned?.shareToken) await openSharedList(owned.shareToken, { mergeLocal: true });
+  else renderEstimate();
+}
+
+function toggleChecked(itemId, checked) {
+  const entry = list.get(itemId);
+  if (!entry) return;
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    renderEstimate();
+    return;
+  }
+  entry.checked = checked;
+  entry.checkedBy = checked ? readDisplayName() || undefined : undefined;
+  entry.writtenAt = Date.now();
+  entry.itemId = entry.itemId || itemId;
+  saveList();
+  renderEstimate();
+  queueWrite(entry, false);
+}
+
+function rememberLocalRow(row) {
+  const product = stubFromItem(row);
+  const itemId = row.itemId || row.id || product.id;
+  list.set(itemId, {
+    product,
+    quantity: Math.max(1, Number(row.quantity) || 1),
+    itemId,
+    checked: Boolean(row.checked),
+    addedBy: row.addedBy,
+    checkedBy: row.checkedBy,
+    writtenAt: Number(row.writtenAt) || 0,
+  });
+}
+
 async function restoreList() {
   let saved = [];
   try {
@@ -939,17 +1558,27 @@ async function restoreList() {
   }
   await Promise.all(
     saved.map(async (row) => {
-      if (!row?.id) return;
+      if (!row?.id && !row?.itemId) return;
+      const id = row.id || row.itemId;
       try {
-        const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.id)}`));
-        if (!response.ok) return;
-        const body = await response.json();
-        if (body.product?.id) {
-          productsById.set(body.product.id, body.product);
-          list.set(body.product.id, { product: body.product, quantity: Math.max(1, Number(row.quantity) || 1) });
+        const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`));
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.product?.id) {
+          if (row.name) rememberLocalRow(row);
+          return;
         }
+        productsById.set(body.product.id, body.product);
+        list.set(body.product.id, {
+          product: body.product,
+          quantity: Math.max(1, Number(row.quantity) || 1),
+          itemId: row.itemId || body.product.id,
+          checked: Boolean(row.checked),
+          addedBy: row.addedBy,
+          checkedBy: row.checkedBy,
+          writtenAt: Number(row.writtenAt) || 0,
+        });
       } catch {
-        /* ignore a stale local id */
+        if (row.name) rememberLocalRow(row);
       }
     })
   );
@@ -957,6 +1586,10 @@ async function restoreList() {
 }
 
 async function addSample() {
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
   const response = await fetch(apiUrl("/api/catalog/browse?limit=48"));
   const body = await response.json();
   const wanted = [
@@ -1037,6 +1670,12 @@ document.addEventListener("click", (event) => {
   if (target.closest(".instacart-cta")) {
     void openInstacart(target.closest(".instacart-cta"));
   }
+});
+
+listItemsEl.addEventListener("change", (event) => {
+  const box = event.target;
+  if (!(box instanceof HTMLInputElement) || !box.dataset.listCheck) return;
+  toggleChecked(box.dataset.listCheck, box.checked);
 });
 
 gridEl.addEventListener("change", (event) => {
@@ -1130,6 +1769,19 @@ $("list-close").addEventListener("click", () => openList(false));
 $("coverage-open").addEventListener("click", openCoverage);
 planBtn.addEventListener("click", () => void planTrip());
 $("sample-btn").addEventListener("click", () => void addSample());
+$("share-btn")?.addEventListener("click", () => void onShareClick());
+$("share-viewonly")?.addEventListener("click", () => {
+  if (!shareState) return;
+  void postSettings({ mode: shareState.mode === "view" ? "edit" : "view" });
+});
+$("share-revoke")?.addEventListener("click", () => {
+  if (!window.confirm("Turn off this link? People who have it will lose access.")) return;
+  void postSettings({ revoke: true });
+});
+$("share-own")?.addEventListener("click", () => void useOwnList());
+$("display-name")?.addEventListener("change", () => {
+  localStorage.setItem(NAME_KEY, readDisplayName());
+});
 allowSubsEl.addEventListener("change", () => {
   localStorage.setItem(SUBS_KEY, allowSubsEl.checked ? "1" : "0");
   renderEstimate();
@@ -1164,19 +1816,32 @@ async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
+  const nameEl = $("display-name");
+  if (nameEl) nameEl.value = localStorage.getItem(NAME_KEY) || "";
+  const urlToken = listTokenFromPath(window.location.pathname);
   let savedRows = [];
   try {
     savedRows = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
   } catch {
     savedRows = [];
   }
-  listLoading = Array.isArray(savedRows) && savedRows.some((row) => row?.id);
+  listLoading = !urlToken && Array.isArray(savedRows) && savedRows.some((row) => row?.id || row?.itemId);
   renderEstimate();
   const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
   const deptBody = await deptResponse.json();
   departments = deptBody.departments ?? [];
   renderDepartments();
-  await restoreList();
+  const savedShare = readStoredJson(SHARE_KEY)?.shareToken;
+  const ownedShare = readOwned()?.shareToken;
+  if (urlToken) {
+    const sameList = savedShare === urlToken || ownedShare === urlToken;
+    if (sameList) await restoreList();
+    await openSharedList(urlToken, { mergeLocal: sameList });
+  } else {
+    await restoreList();
+    const resumeToken = savedShare || ownedShare;
+    if (resumeToken) await openSharedList(resumeToken, { mergeLocal: true });
+  }
   listLoading = false;
   renderEstimate();
   await loadPage(true);
