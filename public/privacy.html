@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1c221e" />
+    <title>Privacy policy — Grocery Gitter</title>
+    <link rel="stylesheet" href="/legal.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="/">Grocery Gitter</a>
+        <nav class="nav" aria-label="Legal">
+          <a href="/privacy" aria-current="page">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </header>
+      <h1>Privacy policy</h1>
+      <p class="updated">Last updated October 16, 2026.</p>
+      <p>
+        Grocery Gitter helps you browse groceries, compare prices, and split a shopping trip across stores.
+        It is operated by [LEGAL NAME]. Email [CONTACT EMAIL]. Mailing address: [MAILING ADDRESS].
+      </p>
+
+      <h2>No account</h2>
+      <p>
+        There is no Grocery Gitter account. The app does not ask for an email address, a phone number, or a
+        password of ours. You do not sign in to Grocery Gitter. If you share a list, you can type an optional
+        display name. That name is not an account.
+      </p>
+
+      <h2>Saved on this device</h2>
+      <p>
+        A few things stay in local storage on the phone, tablet, or browser. They are not a Grocery Gitter
+        account:
+      </p>
+      <ul>
+        <li>Your ZIP code.</li>
+        <li>My list, until you share it: the items you checked, including the name, brand, size, and quantity, plus any price-alert setting on those items.</li>
+        <li>Whether you allow substitutes in the trip plan.</li>
+        <li>Whether you turned on price alerts for the list.</li>
+        <li>Your theme: light, dark, or match this device.</li>
+        <li>A random id this browser creates for price alerts. It is not a hardware id and not an advertising id.</li>
+        <li>The optional display name, if you typed one.</li>
+        <li>If you shared a list, the share link and the owner secret for that list.</li>
+      </ul>
+      <p>
+        Clearing site data for Grocery Gitter, or deleting the app, removes them from this device. It does not
+        remove a shared list or a price watch already saved on the server.
+      </p>
+
+      <h2>What is sent when you shop</h2>
+      <p>
+        Browsing, search, and Plan the trip send a request to Grocery Gitter’s server over HTTPS. That request
+        can include the ZIP code, the words you searched, and — when you plan a trip — each item’s name, brand,
+        quantity, catalog id, and UPC when we have one, plus whether you allowed substitutes.
+      </p>
+      <p>
+        The server uses that request to look up prices and return a trip. That request is not stored as your
+        shopping list. A list is stored on the server when you share it. A price watch is stored when you turn
+        alerts on, or when you watch one item on its own. Both are described below.
+      </p>
+      <p>
+        The 5-digit ZIP is saved in our database, without your name or a device id. The record is a hit count,
+        the last time that ZIP was used, and sometimes the Kroger store id we resolved for it. The catalog job
+        uses a short list of recent shopper ZIPs (currently up to 12, plus a few cities we seed ourselves) so
+        prices can be refreshed near places people actually shop. Email [CONTACT EMAIL] with the ZIP if you
+        want that record removed.
+      </p>
+      <p>
+        Shelf answers may be cached for a few hours, keyed by department, search words, and ZIP. That cache is
+        product data, not a profile of you.
+      </p>
+      <p>
+        The ZIP is something you type. Grocery Gitter does not request GPS or other device location permission.
+        The same ZIP can also be saved on a price watch, as described under price alerts.
+      </p>
+
+      <h2>Shared lists</h2>
+      <p>
+        My list starts on this device. When you tap Share list, Grocery Gitter stores a copy on the server so
+        someone with the link can open it.
+      </p>
+      <p>That copy includes:</p>
+      <ul>
+        <li>Each item: the name, and when we have them the brand, size, quantity, catalog id, and whether it is checked. An item someone removes is kept as a deletion marker so the other phones can catch up. A list holds up to 100 items, and up to 100 of those markers.</li>
+        <li>An optional display name, up to 40 characters, on an item you add or check, if you typed one under “Your name on this list.” If you leave that blank, no name is stored.</li>
+        <li>A title. If you do not set one, it is “Shopping list.”</li>
+        <li>Whether the link is editable or view-only.</li>
+        <li>Timestamps for the list and for each item.</li>
+        <li>SHA-256 hashes of the share secret and of the owner secret. The raw secrets are not stored. They stay in this browser and in the link you send. When a link is replaced, the server also keeps up to 10 earlier share hashes so the old link can be recognized and refused.</li>
+      </ul>
+      <p>
+        Anyone with the current link can read the list. They can edit it unless you made the link view-only.
+        The owner secret is what lets you revoke the link or share a new one.
+      </p>
+      <p>
+        Revoke link marks the list revoked and leaves the items, display names, and timestamps in place.
+        Someone who opens the old link sees “This link was turned off.” You can still open the list from the
+        browser that holds the owner secret, and you can share a new link. Sharing a new link turns the old
+        address off the same way. Revoking or replacing a link does not delete the list.
+      </p>
+      <p>
+        The database does not expire a shared list, and the app has no button that deletes the server copy.
+        Email [CONTACT EMAIL] if you want that list removed.
+      </p>
+
+      <h2>Kroger sign-in</h2>
+      <p>
+        Add to Kroger cart is optional. When it is turned on and you use it, you sign in on Kroger’s own site.
+        On the iOS and Android apps that page opens in the system browser. We never see your Kroger password.
+      </p>
+      <p>
+        Kroger returns a short authorization code. We exchange it for an access token and, when Kroger sends
+        one, a refresh token. Those tokens are encrypted with AES-256-GCM and kept in an HttpOnly cookie named
+        <code>kroger_shopper</code> (SameSite=Lax, and Secure on the production site). The cookie is not written
+        to our database. It lasts about 7 days when a refresh token is present, and about 40 minutes otherwise.
+        We use the token only to ask Kroger to add items — UPC, quantity, and pickup or delivery — to your
+        Kroger cart.
+      </p>
+      <p>
+        While you approve that cart, the item UPCs, quantities, names, and store location travel in a signed
+        link that expires after 15 minutes. A copy may sit in the memory of the server that started the login,
+        for that same window. It is not a saved list.
+      </p>
+
+      <h2>Retailer handoffs</h2>
+      <p>
+        Opening a store leaves Grocery Gitter. On the phone apps those links open in the system browser.
+        The retailer’s own privacy policy applies once you are on their site.
+      </p>
+      <ul>
+        <li><strong>Kroger.</strong> A search link, or the cart write above. The nearby-store lookup sends your ZIP to Kroger’s locations API. Product search sends product words or a UPC.</li>
+        <li><strong>Walmart.</strong> A search link or an add-to-cart link. When Walmart keys are set, product search and the nearest-store name and address go through Walmart’s affiliate API. We do not sign you into Walmart. Prices are Walmart’s website catalog, not a private store account.</li>
+        <li><strong>Target.</strong> A search on target.com. If a licensed Target feed is configured on the server, the search and ZIP are sent to that feed. There is no Target login in this app.</li>
+        <li><strong>Weekly ads.</strong> When that option is on, Aldi and other mapped banners send the ZIP and a search term to Flipp. There is no retailer login.</li>
+        <li><strong>Instacart.</strong> Only if you tap that button and the integration is turned on. We then send Instacart the item names, quantities, and any brand, size, unit, or UPC we have, plus the ZIP, and open the shopping-list link Instacart returns.</li>
+      </ul>
+
+      <h2>Price alerts</h2>
+      <p>
+        Price alerts are optional. They start when you check “Alert me when prices on this list drop,” or when
+        you watch one item on its own. This browser then sends a watch to the server.
+      </p>
+      <p>A watch stores:</p>
+      <ul>
+        <li>The random id created on this device, the list id, and the list name.</li>
+        <li>The 5-digit ZIP, when you have entered one.</li>
+        <li>Each item that has a saved price: the product id, name, brand, whether that item is watched, the baseline price and the store from when you saved it, and a target price if you set one.</li>
+        <li>Whether the list-level alert checkbox is on.</li>
+      </ul>
+      <p>
+        Turning that checkbox off saves the watch as disabled. The watch stays, including the items and the ZIP
+        last sent with it. An item you set to watch on its own can still be checked after the list checkbox is
+        off. Switching to a different list disables the previous watch and clears that watch’s items; the watch
+        row itself stays. None of these steps deletes past alerts.
+      </p>
+      <p>
+        When a watched price drops, the server stores an alert record: the item, the store, the old and new
+        price, the savings, the baseline price, any target price, and whether you have opened it. Opening the
+        price-alerts panel marks those alerts seen. It does not delete them. The panel loads the latest 40.
+        The app does not expire or delete alert history.
+      </p>
+
+      <h2>Browser notifications</h2>
+      <p>
+        Notifications are a separate choice, and only when the server is configured with VAPID keys. If you tap
+        “Notify this browser” and allow notifications, we store the Web Push subscription: the endpoint, and
+        the p256dh and auth keys the browser provides, together with the same random device id. We use that
+        subscription only to send a price-drop notification.
+      </p>
+      <p>
+        Turning the alert checkbox off does not remove the subscription. The shopper screen has no control
+        that deletes it. The server deletes a subscription when the browser’s push service reports that it is
+        gone. The iOS and Android shells do not register a phone push token. Email [CONTACT EMAIL] if you want
+        the watch, the alert records, or a push subscription removed. Nothing in the app deletes them on a timer.
+      </p>
+
+      <h2>Analytics</h2>
+      <p>
+        Grocery Gitter does not include a third-party analytics or advertising SDK. There is no advertising
+        identifier and no crash-reporting product in the app. The shopper screen does not call a separate
+        nutrition-catalog search.
+      </p>
+      <p>
+        The server writes operational logs, for example when a store lookup fails or the catalog job is
+        running. The host that runs the site may keep ordinary request logs: IP address, time, and the path
+        that was requested. Those logs are for operating the service.
+      </p>
+
+      <h2>We do not sell data</h2>
+      <div class="card">
+        <p>
+          We do not sell personal information. We do not share it for advertising or with data brokers.
+          Information described above is used to show prices, remember a ZIP for the catalog refresh, keep a
+          list you chose to share, watch prices you asked us to watch, and complete a store handoff you asked for.
+        </p>
+      </div>
+
+      <h2>Children</h2>
+      <p>
+        Grocery Gitter is a shopping tool for adults. We do not knowingly collect information from children
+        under 13. If you believe a child used the app, email [CONTACT EMAIL].
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>You can browse without a ZIP. Nearby-store and weekly-ad prices will be limited, and Plan the trip asks for one.</li>
+        <li>You can skip sharing. An unshared list stays on this device.</li>
+        <li>Revoke link turns that link off. It does not delete the stored list.</li>
+        <li>You can leave price alerts off. Turning the checkbox off disables the watch. It does not delete the watch or past alerts.</li>
+        <li>You can skip “Notify this browser.” Alerts still show in the panel.</li>
+        <li>You can skip Kroger cart login and Instacart. Search links still open the store.</li>
+        <li>You can clear on-device data in the browser, or delete the app. That does not erase a shared list, a price watch, or alert records already on the server.</li>
+        <li>Email [CONTACT EMAIL] to ask us to delete a ZIP record, a shared list, a price watch, alert records, or a push subscription. Include the ZIP, and for a list include the link or say you are the person who shared it.</li>
+      </ul>
+
+      <h2>Changes</h2>
+      <p>If this policy changes, the new version will be posted on this page with a new date.</p>
+
+      <footer class="legal">
+        <p><a href="/">Back to Grocery Gitter</a> · <a href="/terms">Terms</a></p>
+      </footer>
+    </div>
+    <script src="/native-config.js"></script>
+    <script src="/native-shell.js"></script>
+    <script>
+      document.addEventListener("click", function (event) {
+        var el = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+        if (!el || !window.GroceryGitterNative || !window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+        var legal = window.GroceryGitterNative.bundledLegalPath(new URL(el.href).pathname);
+        if (!legal) return;
+        event.preventDefault();
+        window.location.href = legal;
+      });
+    </script>
+  </body>
+</html>
