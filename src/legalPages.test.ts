@@ -36,7 +36,7 @@ describe("public privacy and terms", () => {
       const html = await bodyOf(path);
       assert.equal(html.includes("Browse the aisle"), false, path);
     }
-    const privacy = await bodyOf("/privacy");
+    const privacy = (await bodyOf("/privacy")).replace(/\s+/g, " ");
     assert.match(privacy, /Privacy policy/);
     assert.match(privacy, /ZIP/);
     assert.match(privacy, /this device/);
@@ -61,7 +61,7 @@ describe("public privacy and terms", () => {
     assert.match(privacy, /\[LEGAL NAME\]/);
     assert.match(privacy, /\[MAILING ADDRESS\]/);
 
-    const terms = await bodyOf("/terms");
+    const terms = (await bodyOf("/terms")).replace(/\s+/g, " ");
     assert.match(terms, /Terms of use/);
     assert.match(terms, /do not sell the groceries/);
     assert.match(terms, /hashed share secrets/);
