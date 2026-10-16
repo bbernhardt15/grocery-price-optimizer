@@ -37,7 +37,7 @@ type Taxon = {
 };
 
 const GROCERY_PATH =
-  /grocery|food|produce|dairy|meat|seafood|bakery|deli|frozen|snack|beverage|breakfast|cereal|baby|household|cleaning|paper|personal|beauty|health|pet|pantry|coffee|juice/i;
+  /grocery|food|produce|dairy|meat|seafood|bakery|deli|frozen|snack|beverage|breakfast|cereal|household|cleaning|paper|personal|beauty|health|pet|pantry|coffee|juice/i;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -100,7 +100,7 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
   return reported;
 }
 
-export const WALMART_TAXONOMY_VERSION = 2;
+export const WALMART_TAXONOMY_VERSION = 3;
 
 function isGrocery(node: Taxon): boolean {
   const mapped = mapToDepartment([node.path, node.name], node.name);
