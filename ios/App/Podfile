@@ -1,0 +1,9 @@
+# Capacitor 8 links Grocery Gitter's plugins through Swift Package Manager
+# (ios/App/CapApp-SPM). This Podfile stays empty of Capacitor pods so
+# `pod install` can create App.xcworkspace for the Codemagic iOS workflow
+# without compiling a second copy of those plugins.
+platform :ios, '15.0'
+use_frameworks!
+
+target 'App' do
+end

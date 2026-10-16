@@ -1,6 +1,7 @@
 /**
- * Pure helpers for shared lists. The page passes `apiUrl` from the Capacitor
- * shell (`window.apiUrl`) so links and API calls are not stuck on capacitor://.
+ * Pure helpers for shared lists. Share links use the hosted origin from
+ * `apiUrl()` / `GroceryGitterNative.resolveApiOrigin` (`CAPACITOR_API_URL`
+ * in the bundled app, empty on the website so the link stays on this site).
  */
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
@@ -10,55 +11,19 @@ export function listTokenFromPath(pathname) {
   return match && TOKEN_PATTERN.test(match[1]) ? match[1] : null;
 }
 
-function globalApiUrl() {
-  const value = globalThis.apiUrl;
-  if (typeof value === "string" || typeof value === "function") {
-    return value;
-  }
-  return undefined;
-}
-
-function configuredBase(configured) {
-  if (typeof configured === "function") {
-    return configured;
-  }
-  if (typeof configured !== "string") {
-    return undefined;
-  }
-  const trimmed = configured.trim().replace(/\/$/, "");
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
-}
-
 /**
- * Resolve a site path. A string `apiUrl` is the hosted origin. A function
- * `apiUrl` receives the path and returns the URL the shell should call.
- * With no apiUrl, same-origin relative paths are unchanged.
+ * Absolute link a friend can open.
+ * `apiOrigin` is the string `apiUrl()` prefixes (https origin, or empty for
+ * same-origin). A bundled WebView origin is never copied into the link.
  */
-export function apiUrl(path, env = {}) {
-  const configured = Object.prototype.hasOwnProperty.call(env, "apiUrl") ? env.apiUrl : globalApiUrl();
-  const base = configuredBase(configured);
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  if (typeof base === "function") {
-    return base(suffix);
-  }
-  if (typeof base === "string") {
-    return `${base}${suffix}`;
-  }
-  return suffix;
-}
-
-/** Absolute link a friend can open. Uses apiUrl before the WebView origin. */
 export function sharePageUrl(token, env = {}) {
   const path = `/list/${encodeURIComponent(token)}`;
-  const resolved = apiUrl(path, env);
-  if (/^[a-z][a-z0-9+.-]*:/i.test(resolved)) {
-    return resolved;
+  const origin = String(env.apiOrigin || "").trim().replace(/\/$/, "");
+  if (/^https:\/\//i.test(origin)) {
+    return `${origin}${path}`;
   }
   const href = env.locationHref || (typeof location !== "undefined" ? location.href : "http://localhost/");
-  return new URL(resolved, href).href;
+  return new URL(path, href).href;
 }
 
 export function shareTransport(env = {}) {

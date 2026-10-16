@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
-  FLIPP_CONSUMER_SEARCH,
+  FLIPP_FLYERS,
   FLIPP_FLYERKIT_BASE,
   clearFlippSearchCache,
+  weeklyAdNameMatches,
 } from "./flipp/client";
 import {
   FlippDealsProvider,
@@ -66,63 +67,89 @@ describe("FlippDealsProvider", () => {
     assert.equal(calls, 0);
   });
 
-  it("searches the consumer flyer endpoint when FLIPP_ENABLED and maps Aldi weekly-ad prices", async () => {
+  it("reads the Aldi circular for the ZIP instead of a merchant AND query", async () => {
     process.env.FLIPP_ENABLED = "true";
     const calls: string[] = [];
     globalThis.fetch = async (input) => {
-      calls.push(String(input));
-      return Response.json({
-        items: [
-          flippItem(),
-          flippItem({
-            name: "Vital Farms 12 ct. Grade A large eggs",
-            current_price: null,
-            pre_price_text: "BOGO 25% Off",
-            merchant_name: "Target",
-            merchant_id: 2040,
-          }),
-        ],
-      });
+      const url = String(input);
+      calls.push(url);
+      if (url.startsWith(`${FLIPP_FLYERS}?`)) {
+        return Response.json({
+          flyers: [{ id: 8136201, merchant: "ALDI", merchant_id: 2353, name: "Weekly Ad" }],
+        });
+      }
+      if (url.startsWith(`${FLIPP_FLYERS}/8136201`)) {
+        return Response.json({
+          items: [
+            flippItem({ current_price: null, price: "2.99" }),
+            flippItem({
+              name: "Fresh Antibiotic Free Family Pack Boneless Skinless Chicken Thighs",
+              price: "2.49",
+              current_price: null,
+              flyer_item_id: 88,
+              post_price_text: "Per Lb.",
+            }),
+            flippItem({
+              name: "Milk-Bone Comfort Chews",
+              price: "10.49",
+              current_price: null,
+              flyer_item_id: 89,
+            }),
+            flippItem({
+              name: "Vital Farms eggs",
+              current_price: null,
+              price: null,
+              pre_price_text: "BOGO 25% Off",
+              flyer_item_id: 90,
+            }),
+          ],
+        });
+      }
+      return Response.json({ items: [] });
     };
 
     const products = await new FlippDealsProvider("Aldi").searchProducts("milk", {
-      zipCode: "45202",
+      zipCode: "45202-1234",
     });
 
     assert.equal(products.length, 1);
     assert.equal(products[0].storeName, "Aldi");
     assert.equal(products[0].price, 2.99);
     assert.equal(products[0].priceSource, "weekly_ad");
+    assert.equal(products[0].onSale, true);
     assert.equal(products[0].locationId, "45202");
     assert.equal(products[0].productId, "1039529649");
     assert.equal(products[0].unit, "gal");
-    assert.ok(calls[0].startsWith(`${FLIPP_CONSUMER_SEARCH}?`));
     assert.match(calls[0], /postal_code=45202/);
-    assert.match(calls[0], /q=ALDI\+AND\+milk/);
+    assert.equal(calls.some((url) => url.includes("AND")), false);
+    assert.equal(weeklyAdNameMatches("Milk-Bone Comfort Chews", "milk"), false);
   });
 
-  it("maps Target flyer hits and skips items without a numeric price", async () => {
+  it("maps Target circular hits and skips items without a numeric price", async () => {
     process.env.FLIPP_ENABLED = "true";
     globalThis.fetch = async (input) => {
       const url = String(input);
-      if (url.includes("Target+AND+eggs")) {
+      if (url.startsWith(`${FLIPP_FLYERS}?`)) {
+        return Response.json({
+          flyers: [{ id: 55, merchant: "Target", merchant_id: 2040, name: "Weekly Circular" }],
+        });
+      }
+      if (url.startsWith(`${FLIPP_FLYERS}/55`)) {
         return Response.json({
           items: [
-            flippItem({
+            {
               name: "Good & Gather Large Eggs",
-              current_price: 1.79,
-              merchant_name: "Target",
-              merchant_id: 2040,
-              flyer_item_id: 55,
+              price: "1.79",
+              id: 55,
               post_price_text: "dozen",
-            }),
-            flippItem({
+              cutout_image_url: "http://f.wishabi.net/page_items/eggs.jpg",
+            },
+            {
               name: "Vital Farms eggs",
-              current_price: null,
+              price: null,
               pre_price_text: "BOGO 25% Off",
-              merchant_name: "Target",
-              merchant_id: 2040,
-            }),
+              id: 56,
+            },
           ],
         });
       }
@@ -131,12 +158,13 @@ describe("FlippDealsProvider", () => {
 
     const products = await new FlippDealsProvider("Target").searchProducts(
       "eggs",
-      { zipCode: "45202" }
+      { zipCode: "30303" }
     );
     assert.equal(products.length, 1);
     assert.equal(products[0].storeName, "Target");
     assert.equal(products[0].price, 1.79);
     assert.equal(products[0].priceSource, "weekly_ad");
+    assert.equal(products[0].imageUrls?.[0], "https://f.wishabi.net/page_items/eggs.jpg");
   });
 
   it("prefers documented FlyerKit when a token is set", async () => {

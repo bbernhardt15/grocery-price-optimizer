@@ -36,7 +36,7 @@ app.get("/api", (_req, res) => {
       "GET /api/search-catalog":
         "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "GET /api/catalog/browse":
-        "Browse the unified catalog by department, search, sort, and filters. Groups offers by UPC. Demo catalog when retailer keys are absent.",
+        "Browse the unified catalog by department, search, sort, and filters. Groups offers by UPC. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
       "GET /api/catalog/suggest":
         "Typeahead over the cached and demo catalog. Does not call retailer APIs.",
       "GET /api/catalog/departments":
@@ -46,7 +46,9 @@ app.get("/api", (_req, res) => {
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, today's hit rate, and how many masters gained both store ids today. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+      "GET /api/admin/catalog/match-queue":
+        "Dry run of the next cross-store lookup batch. Does not call Walmart or Kroger and does not mark masters. Same admin token as status.",
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":

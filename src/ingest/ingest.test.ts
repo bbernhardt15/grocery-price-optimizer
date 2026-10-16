@@ -6,15 +6,17 @@ import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import app from "../app";
 import { browseCatalog } from "../catalog/service";
-import { krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "../catalog/normalize";
+import { krogerProductIdForLookup, upcKey, walmartLookupCodes, walmartUpcForLookup } from "../catalog/normalize";
 import type { RawCatalogRecord } from "../catalog/types";
 import { MemoryBudgetStore, MongoBudgetStore } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "./maintenance";
 import { CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { noteCatalogDemand } from "./demand";
+import { matchProgress, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
-import { catalogMatchSample, catalogSample, catalogStatus } from "./status";
+import { catalogMatchQueue, catalogMatchSample, catalogSample, catalogStatus } from "./status";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import { recordsFromWalmartPage } from "./walmartWalk";
 
@@ -497,6 +499,17 @@ describe("catalog ingestion", () => {
       body: JSON.stringify({ confirm: "drop-shadow-local-keys" }),
     });
     assert.equal(unauthenticated.status, 401);
+    const queueDenied = await fetch(`${origin}/api/admin/catalog/match-queue`);
+    assert.equal(queueDenied.status, 401);
+    const queue = await fetch(`${origin}/api/admin/catalog/match-queue`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    assert.equal(queue.status, 200);
+    const queueBody = (await queue.json()) as { dryRun: boolean; queue: { walmart: number; kroger: number }; hitRate: { walmart: number | null } };
+    assert.equal(queueBody.dryRun, true);
+    assert.equal(typeof queueBody.queue.walmart, "number");
+    assert.equal(typeof queueBody.queue.kroger, "number");
+    assert.equal(queueBody.hitRate.walmart === null || typeof queueBody.hitRate.walmart === "number", true);
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
@@ -1046,12 +1059,14 @@ describe("catalog ingestion", () => {
     });
     await CatalogMaster.updateMany(
       { key: { $nin: [key, "less-common-kroger"] } },
-      { $set: { matchWalmartAt: new Date("2026-01-01T00:00:00.000Z") } }
+      { $set: { matchWalmartAt: new Date("2026-09-29T15:00:00.000Z"), matchWalmartVariant: 0 } }
     );
     const seen: string[] = [];
     const config = ingestConfig();
     config.walmartDailyBudget = 20;
     config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 1;
+    config.matchLookupShare = 1;
     const client = {
       taxonomy: async () => ({ categories: [] }),
       page: async () => ({ items: [] }),
@@ -1119,7 +1134,7 @@ describe("catalog ingestion", () => {
     });
     await CatalogMaster.updateMany(
       { key: { $ne: key } },
-      { $set: { matchKrogerAt: new Date("2026-01-01T00:00:00.000Z") } }
+      { $set: { matchKrogerAt: new Date("2026-09-29T15:00:00.000Z"), matchKrogerVariant: 0 } }
     );
     const seen: Array<{ productId: string; locationId?: string }> = [];
     const config = ingestConfig();
@@ -1184,5 +1199,354 @@ describe("catalog ingestion", () => {
     assert.equal(row?.krogerProductId, productId);
     assert.equal(row?.walmartItemId, "4242");
     assert.equal(await CatalogMaster.countDocuments({ walmartItemId: "4242" }), 1);
+  });
+
+  it("batches Kroger-only UPCs into one Walmart items call", async () => {
+    const cokeUpc = "0004900004256";
+    const millsKroger = "0001600027528";
+    const cokeKey = upcKey(cokeUpc);
+    const millsWalmart = walmartUpcForLookup(millsKroger);
+    const millsKey = upcKey(millsWalmart ?? "");
+    assert.ok(cokeKey);
+    assert.ok(millsKey);
+    assert.ok(millsWalmart);
+    const now = new Date("2026-09-29T16:00:00.000Z");
+    await CatalogMaster.deleteMany({ key: { $in: [cokeKey, millsKey] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: [cokeKey, millsKey] } });
+    await CatalogMaster.create({
+      key: cokeKey,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      upc: cokeUpc,
+      krogerProductId: cokeUpc,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: millsKey,
+      name: "Cheerios",
+      brand: "General Mills",
+      departmentId: "breakfast",
+      upc: millsKroger,
+      krogerProductId: millsKroger,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany(
+      { key: { $nin: [cokeKey, millsKey] } },
+      { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } }
+    );
+    const seen: string[][] = [];
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 20;
+    config.matchLookupShare = 1;
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [] }),
+        page: async () => ({ items: [] }),
+        lookupUpcs: async (upcs: string[]) => {
+          seen.push(upcs);
+          return {
+            items: [
+              { itemId: 4242, name: "Coca-Cola Classic", brandName: "Coca-Cola", salePrice: 1.18, upc: "049000042566" },
+              { itemId: 5151, name: "Cheerios", brandName: "General Mills", salePrice: 3.48, upc: millsWalmart },
+            ],
+          };
+        },
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.equal(slice.calls, 1);
+    assert.equal(seen.length, 1);
+    assert.ok(seen[0]?.includes("049000042566"));
+    assert.ok(seen[0]?.includes(millsWalmart));
+    const coke = await CatalogMaster.findOne({ key: cokeKey });
+    const mills = await CatalogMaster.findOne({ key: millsKey });
+    assert.equal(coke?.walmartItemId, "4242");
+    assert.equal(mills?.walmartItemId, "5151");
+    assert.equal(coke?.krogerProductId, cokeUpc);
+    assert.ok(coke?.mergedAt);
+    const progress = await matchProgress(now);
+    assert.ok(progress.hitRate.walmartHits >= 2);
+    assert.ok(progress.mergedToday >= 2);
+  });
+
+  it("retries a Walmart miss on the next GTIN variant, then waits out the cooldown", async () => {
+    const krogerUpc = "0004900004256";
+    const key = upcKey(krogerUpc);
+    assert.ok(key);
+    const codes = walmartLookupCodes(krogerUpc);
+    assert.deepEqual(codes, ["049000042566", "0049000042566", "00049000042566"]);
+    let clock = Date.parse("2026-09-29T17:00:00.000Z");
+    const now = () => new Date(clock);
+    await CatalogMaster.deleteMany({ key });
+    await CatalogMaster.create({
+      key,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      upc: krogerUpc,
+      krogerProductId: krogerUpc,
+      lastSeenAt: now(),
+      status: "active",
+    });
+    await CatalogMaster.updateMany(
+      { key: { $ne: key } },
+      { $set: { matchWalmartAt: now(), matchWalmartVariant: 0 } }
+    );
+    const seen: string[] = [];
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 1;
+    config.matchLookupShare = 1;
+    config.matchRetryDays = 14;
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const client = {
+      taxonomy: async () => ({ categories: [] }),
+      page: async () => ({ items: [] }),
+      lookupUpc: async (upc: string) => {
+        seen.push(upc);
+        return { items: [] };
+      },
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await stepWalmart({
+        client,
+        maxCalls: 1,
+        store: new MemoryBudgetStore(),
+        sleep: async () => undefined,
+        config,
+        now,
+      });
+      clock += 60_000;
+    }
+    assert.deepEqual(seen, codes);
+    const resting = await CatalogMaster.findOne({ key });
+    assert.equal(resting?.walmartItemId ?? "", "");
+    assert.ok(resting?.matchWalmartAt);
+    await stepWalmart({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now,
+    });
+    assert.equal(seen.length, 3);
+    clock = (resting?.matchWalmartAt?.getTime() ?? clock) + 14 * 86_400_000 + 60_000;
+    await stepWalmart({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now,
+    });
+    assert.equal(seen[3], codes[0]);
+  });
+
+  it("does not mark a master tried when Walmart answers 429", async () => {
+    const krogerUpc = "0001111041700";
+    const key = upcKey(krogerUpc);
+    assert.ok(key);
+    const now = new Date("2026-09-29T18:00:00.000Z");
+    await CatalogMaster.deleteMany({ key });
+    await CatalogMaster.create({
+      key,
+      name: "Store Cola",
+      brand: "Store",
+      departmentId: "beverages",
+      upc: krogerUpc,
+      krogerProductId: krogerUpc,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany(
+      { key: { $ne: key } },
+      { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } }
+    );
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 1;
+    const error = new Error("Walmart Affiliate API failed (429)");
+    (error as Error & { status: number }).status = 429;
+    await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [] }),
+        page: async () => ({ items: [] }),
+        lookupUpc: async () => {
+          throw error;
+        },
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    const row = await CatalogMaster.findOne({ key });
+    assert.equal(row?.matchWalmartAt, undefined);
+    const checkpoint = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { cooldownUntil?: string; rateStrikes?: number };
+    }>();
+    assert.equal(checkpoint?.checkpoint?.rateStrikes, 1);
+    assert.equal(checkpoint?.checkpoint?.cooldownUntil, "2026-09-29T18:15:00.000Z");
+  });
+
+  it("looks up a saved-list item before a staple nobody asked for", async () => {
+    const now = new Date("2026-09-29T19:00:00.000Z");
+    const listKey = "list-only-paprika";
+    const stapleKey = "staple-only-milk";
+    await CatalogMaster.deleteMany({ key: { $in: [listKey, stapleKey] } });
+    await CatalogOffer.deleteMany({ productKey: stapleKey });
+    await CatalogMaster.create({
+      key: listKey,
+      name: "Paprika Tin",
+      brand: "Store",
+      departmentId: "other",
+      upc: "0009991112223",
+      krogerProductId: "0009991112223",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: stapleKey,
+      name: "Whole Milk",
+      brand: "Dairy",
+      departmentId: "dairy-eggs",
+      upc: "0008881112223",
+      krogerProductId: "0008881112223",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: stapleKey,
+      storeName: "Kroger",
+      locationId: "1",
+      zip: "45202",
+      price: 2,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await noteCatalogDemand({ kind: "list", lines: ["2x Paprika Tin"] });
+    await CatalogMaster.updateMany(
+      { key: { $nin: [listKey, stapleKey] } },
+      { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } }
+    );
+    await CatalogMaster.updateMany(
+      { key: { $in: [listKey, stapleKey] } },
+      { $unset: { matchWalmartAt: 1, matchWalmartVariant: 1 } }
+    );
+    const [picked] = await nextWalmartLookups(now, 1);
+    assert.equal(picked?.key, listKey);
+    assert.equal(picked?.priority, "list");
+    const preview = await catalogMatchQueue(now);
+    assert.equal(preview.dryRun, true);
+    assert.equal(preview.walmart[0]?.key, listKey);
+    const untouched = await CatalogMaster.findOne({ key: listKey });
+    assert.equal(untouched?.matchWalmartAt, undefined);
+  });
+
+  it("looks up a recent search before a staple nobody searched", async () => {
+    const now = new Date("2026-09-29T19:30:00.000Z");
+    const searchKey = "search-only-sesame";
+    const stapleKey = "search-staple-bread";
+    await CatalogMaster.deleteMany({ key: { $in: [searchKey, stapleKey] } });
+    await CatalogMaster.create({
+      key: searchKey,
+      name: "Toasted Sesame Oil",
+      brand: "Store",
+      departmentId: "other",
+      upc: "0009992223334",
+      krogerProductId: "0009992223334",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: stapleKey,
+      name: "Sliced Bread",
+      brand: "Bakery",
+      departmentId: "bakery",
+      upc: "0008882223334",
+      krogerProductId: "0008882223334",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await noteCatalogDemand({ kind: "search", lines: ["sesame oil"] });
+    await CatalogMaster.updateMany(
+      { key: { $nin: [searchKey, stapleKey] } },
+      { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } }
+    );
+    await CatalogMaster.updateMany(
+      { key: { $in: [searchKey, stapleKey] } },
+      { $unset: { matchWalmartAt: 1, matchWalmartVariant: 1 } }
+    );
+    const [picked] = await nextWalmartLookups(now, 1);
+    assert.equal(picked?.key, searchKey);
+    assert.equal(picked?.priority, "search");
+  });
+
+  it("spends the configured share of a tick on lookups and keeps crawling with the rest", async () => {
+    const now = new Date("2026-09-29T20:00:00.000Z");
+    const upcs = ["0004900004256", "0001600027528", "0003700031802"];
+    const keys = upcs.map((upc) => upcKey(upc));
+    assert.ok(keys.every((key) => key));
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    for (const [index, upc] of upcs.entries()) {
+      await CatalogMaster.create({
+        key: keys[index],
+        name: `Share Item ${index}`,
+        brand: "Store",
+        departmentId: "pantry",
+        upc,
+        krogerProductId: upc,
+        lastSeenAt: now,
+        status: "active",
+      });
+    }
+    await CatalogMaster.updateMany(
+      { key: { $nin: keys } },
+      { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } }
+    );
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    let lookups = 0;
+    let pages = 0;
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 1;
+    config.matchLookupShare = 0.5;
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [{ id: "pantry", name: "Pantry", path: "Food/Pantry", children: [] }] }),
+        page: async () => {
+          pages += 1;
+          return { items: [], nextPageExist: false };
+        },
+        lookupUpc: async () => {
+          lookups += 1;
+          return { items: [] };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.equal(slice.calls, 4);
+    assert.equal(lookups, 2);
+    assert.equal(pages, 1);
   });
 });

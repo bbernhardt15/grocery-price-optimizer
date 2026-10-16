@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import {
-  apiUrl,
   attributionLine,
   deliverShare,
   isShareCancel,
@@ -12,7 +12,17 @@ import {
   visibleItems,
 } from "../../public/shopper/shareList.js";
 
+const require = createRequire(import.meta.url);
+const { resolveApiOrigin } = require("../../public/native-shell.js") as {
+  resolveApiOrigin: (input: {
+    native?: boolean;
+    location?: { protocol?: string; hostname?: string };
+    configured?: string;
+  }) => string;
+};
+
 const TOKEN = "A".repeat(43);
+const PRODUCTION = "https://grocery-price-optimizer-production.up.railway.app";
 
 describe("share links and apiUrl", () => {
   it("reads a list token from /list/:token and ignores other paths", () => {
@@ -23,22 +33,35 @@ describe("share links and apiUrl", () => {
     assert.equal(listTokenFromPath(`/aisle/${TOKEN}`), null);
   });
 
-  it("builds the share link from apiUrl so a Capacitor origin is not copied", () => {
-    const hosted = sharePageUrl(TOKEN, {
-      apiUrl: "https://grocery.example/",
-      locationHref: "capacitor://localhost/index.html",
+  it("builds the share link from the hosted origin apiUrl() uses", () => {
+    const bundled = resolveApiOrigin({
+      native: true,
+      location: { protocol: "capacitor:", hostname: "localhost" },
+      configured: "",
     });
-    assert.equal(hosted, `https://grocery.example/list/${TOKEN}`);
-
-    const fromFunction = sharePageUrl(TOKEN, {
-      apiUrl: (path: string) => `https://grocery.example${path}`,
-      locationHref: "https://localhost/index.html",
-    });
-    assert.equal(fromFunction, `https://grocery.example/list/${TOKEN}`);
-
-    assert.equal(apiUrl("/api/lists", { apiUrl: "https://grocery.example" }), "https://grocery.example/api/lists");
     assert.equal(
-      sharePageUrl(TOKEN, { apiUrl: "", locationHref: "https://shop.example/aisle" }),
+      sharePageUrl(TOKEN, { apiOrigin: bundled, locationHref: "capacitor://localhost/index.html" }),
+      `${PRODUCTION}/list/${TOKEN}`
+    );
+
+    const staging = resolveApiOrigin({
+      native: true,
+      location: { protocol: "https:", hostname: "localhost" },
+      configured: "https://staging.example/",
+    });
+    assert.equal(
+      sharePageUrl(TOKEN, { apiOrigin: staging, locationHref: "https://localhost/index.html" }),
+      `https://staging.example/list/${TOKEN}`
+    );
+
+    const website = resolveApiOrigin({
+      native: false,
+      location: { protocol: "https:", hostname: "shop.example" },
+      configured: PRODUCTION,
+    });
+    assert.equal(website, "");
+    assert.equal(
+      sharePageUrl(TOKEN, { apiOrigin: website, locationHref: "https://shop.example/aisle" }),
       `https://shop.example/list/${TOKEN}`
     );
   });

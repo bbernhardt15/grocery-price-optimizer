@@ -2,8 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import type { PipelineStage } from "mongoose";
 import { DEPARTMENTS, departmentById, mapToDepartment } from "../catalog/departments";
 import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
-import { estimateStorageBytes, ingestConfig } from "./config";
+import { estimateStorageBytes, ingestConfig, lookupCallsForTick } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
+import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
 
 export function presentIngestError(entry: unknown): IngestErrorDetail | { message: string } {
@@ -140,7 +141,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -160,6 +161,7 @@ export async function catalogStatus() {
     masterKeyCensus(),
     CatalogMaster.countDocuments({ matchWalmartAt: { $type: "date" } }),
     CatalogMaster.countDocuments({ matchKrogerAt: { $type: "date" } }),
+    matchProgress(now),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -185,7 +187,13 @@ export async function catalogStatus() {
       merged: masters.merged,
       walmartLookups,
       krogerLookups,
-      note: "One UPC lookup per master, inside the existing daily budgets. Nothing is deleted.",
+      queue: progress.queue,
+      hitRate: progress.hitRate,
+      mergedToday: progress.mergedToday,
+      lookupShare: progress.lookupShare,
+      retryDays: progress.retryDays,
+      walmartBatch: progress.walmartBatch,
+      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. A miss is tried again after the cooldown. Nothing is deleted.",
     },
     caps: {
       maxProducts: config.maxProducts,
@@ -319,6 +327,39 @@ async function sampleMasters(match: Record<string, unknown>, limit: number): Pro
     { $sample: { size: limit } },
     { $project: { name: 1, upc: 1, key: 1, walmartItemId: 1, krogerProductId: 1 } },
   ]);
+}
+
+function presentPick(pick: LookupPick) {
+  return {
+    key: pick.key,
+    name: pick.name,
+    code: pick.code,
+    variants: pick.codes,
+    variantIndex: pick.variantIndex,
+    priority: pick.priority,
+  };
+}
+
+/**
+ * The next lookup batch, without calling Walmart or Kroger and without
+ * marking any master tried.
+ */
+export async function catalogMatchQueue(now = new Date()) {
+  const config = ingestConfig();
+  const calls = lookupCallsForTick(config.batchCalls, config.matchLookupShare);
+  const progress = await matchProgress(now);
+  const [walmart, kroger] = await Promise.all([
+    nextWalmartLookups(now, calls * config.walmartLookupBatch, { dryRun: true }),
+    nextKrogerLookups(now, calls, { dryRun: true }),
+  ]);
+  return {
+    dryRun: true as const,
+    callsPerTick: calls,
+    ...progress,
+    note: "Dry run. No retailer call is made and no master is marked.",
+    walmart: walmart.map(presentPick),
+    kroger: kroger.map(presentPick),
+  };
 }
 
 /** A few normalized keys from each side, so production can confirm they line up. */

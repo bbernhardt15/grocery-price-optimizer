@@ -11,6 +11,18 @@ function intEnv(name: string, fallback: number, min: number, max: number): numbe
   return Math.min(max, Math.max(min, Math.floor(raw)));
 }
 
+function floatEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
 function boolEnv(name: string, fallback = false): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
   if (!raw) {
@@ -57,7 +69,21 @@ export type IngestConfig = {
   seedZips: string[];
   shopperZipLimit: number;
   browseScan: number;
+  /** Fraction of each Walmart or Kroger tick spent on cross-store lookups. */
+  matchLookupShare: number;
+  /** Days before a no-hit lookup is tried again. */
+  matchRetryDays: number;
+  /** UPCs per Walmart GET /items call. The Affiliate ids list allows 20. */
+  walmartLookupBatch: number;
 };
+
+/** How many calls in one tick are cross-store lookups. At least one when the share is above zero. */
+export function lookupCallsForTick(maxCalls: number, share: number): number {
+  if (!(share > 0) || maxCalls < 1) {
+    return 0;
+  }
+  return Math.min(maxCalls, Math.max(1, Math.round(maxCalls * share)));
+}
 
 export function ingestConfig(): IngestConfig {
   const enabled = boolEnv("CATALOG_INGEST_ENABLED");
@@ -93,6 +119,9 @@ export function ingestConfig(): IngestConfig {
     seedZips: parseZipList(process.env.CATALOG_SEED_ZIPS, DEFAULT_SEED_ZIPS),
     shopperZipLimit: intEnv("CATALOG_SHOPPER_ZIP_LIMIT", 12, 1, 100),
     browseScan: intEnv("CATALOG_BROWSE_SCAN", 1500, 50, 5000),
+    matchLookupShare: floatEnv("CATALOG_MATCH_LOOKUP_SHARE", 0.5, 0, 1),
+    matchRetryDays: intEnv("CATALOG_MATCH_RETRY_DAYS", 14, 1, 365),
+    walmartLookupBatch: intEnv("WALMART_LOOKUP_BATCH", 20, 1, 20),
   };
 }
 

@@ -164,6 +164,8 @@ describe("WalmartPricingProvider", () => {
     assert.equal(first?.city, "HOUSTON");
     assert.equal(first?.state, "TX");
     assert.equal(first?.zip, "77063");
+    assert.equal(first?.accessPointId, undefined);
+    assert.equal(first?.fulfillmentStoreId, undefined);
     assert.equal(second, first);
     assert.equal(products[0].productId, "554433");
     assert.equal(products[0].locationId, "2066");
@@ -174,6 +176,39 @@ describe("WalmartPricingProvider", () => {
     assert.match(storeCalls[0], /\/stores\?zip=77063$/);
     assert.equal(searchCalls.length, 1);
     assert.doesNotMatch(searchCalls[0], /store/i);
+  });
+
+  it("captures accessPointId and fulfillmentStoreId when the locator sends them", async () => {
+    installWalmartKeys();
+    globalThis.fetch = async () =>
+      Response.json([
+        {
+          no: 2066,
+          name: "WM Supercenter",
+          streetAddress: "2727 DUNVALE RD",
+          city: "HOUSTON",
+          stateProvCode: "TX",
+          zip: "77063",
+          accessPoints: [
+            {
+              accessPointId: "delivery-point",
+              fulfillmentStoreId: "9999",
+              accessType: "DELIVERY_ADDRESS",
+            },
+            {
+              id: "6168c2e3-fc36-4827-98e6-d717d10af1d6",
+              fulfillmentStoreId: "2066",
+              accessType: "PICKUP_CURBSIDE",
+            },
+          ],
+        },
+      ]);
+
+    const provider = new WalmartPricingProvider();
+    const store = await provider.getNearestStore("77063");
+    assert.equal(store?.storeId, "2066");
+    assert.equal(store?.accessPointId, "6168c2e3-fc36-4827-98e6-d717d10af1d6");
+    assert.equal(store?.fulfillmentStoreId, "2066");
   });
 
   it("skips the store locator for a bad ZIP and does not cache a failed HTTP response", async () => {
@@ -212,5 +247,19 @@ describe("WalmartPricingProvider", () => {
     assert.match(calls[0], /\/items\?/);
     assert.match(calls[0], /upc=049000042566/);
     assert.match(calls[0], /publisherId=impact-123/);
+  });
+
+  it("sends several UPCs in one Affiliate /items call", async () => {
+    installWalmartKeys();
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return Response.json({ items: [] });
+    };
+    const provider = new WalmartPricingProvider();
+    await provider.lookupByUpcs(["049000042566", "016000275287", "not-a-code", "049000042566"]);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/items\?/);
+    assert.match(decodeURIComponent(calls[0]), /upc=049000042566,016000275287/);
   });
 });

@@ -16,9 +16,12 @@ import { parseGroceryUnit } from "../pricing/parseGroceryUnit";
 import { targetPricingProvider } from "../pricing/targetProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { rawFromCatalogProduct } from "./providers/fromCatalogProduct";
+import { fetchWeeklyAdRecords } from "./providers/flippBrowse";
+import { flippConfigured } from "../pricing/flipp/client";
 import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
 import { ingestConfig } from "../ingest/config";
+import { noteCatalogDemand } from "../ingest/demand";
 import { readStoredById, readStoredRecords } from "../ingest/readStore";
 import { upsertCatalogRecords } from "../ingest/upsert";
 
@@ -62,7 +65,7 @@ function ttlMs(envName: string, fallbackMinutes: number): number {
 }
 
 function flippEnabled(): boolean {
-  return process.env.FLIPP_ENABLED?.trim().toLowerCase() === "true" || Boolean(process.env.FLIPP_ACCESS_TOKEN?.trim());
+  return flippConfigured();
 }
 
 export function coverageFlags(): CoverageFlags {
@@ -89,6 +92,10 @@ function providerSignature(): string {
 function liveConfigured(): boolean {
   const flags = coverageFlags();
   return flags.kroger || flags.walmart || flags.targetPartner || flags.partnerStores.length > 0;
+}
+
+function scopeNeedsFeed(scope: { departmentId?: string; query?: string }): boolean {
+  return Boolean(scope.departmentId) || Boolean(scope.query && scope.query.trim().length >= 2);
 }
 
 function catalogSourceOf(products: BrowseProduct[]): "demo" | "mixed" | "live" {
@@ -329,6 +336,9 @@ async function loadScope(
 ): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
   const query = scope.query?.trim();
   const departmentId = scope.departmentId?.trim();
+  if (query && query.length >= 2) {
+    await noteCatalogDemand({ kind: "search", lines: [query] });
+  }
   const demo = demoRecordsFor({
     ...(departmentId ? { departmentId } : {}),
     ...(query ? { query } : {}),
@@ -343,17 +353,27 @@ async function loadScope(
     if (stored.records.length > 0) {
       const stores = new Set(stored.storeNames.map((store) => store.toLowerCase()));
       const supplement = demo.filter((record) => !stores.has(record.storeName.toLowerCase()));
+      const warnings = [...stored.warnings];
+      const weekly = scopeNeedsFeed(scope)
+        ? await fetchWeeklyAdRecords({
+            ...(zipCode ? { zipCode } : {}),
+            ...(query ? { query } : {}),
+            ...(departmentId ? { departmentId } : {}),
+            warnings,
+          })
+        : [];
       return {
-        products: groupOffersByUpc([...supplement, ...stored.records]),
-        warnings: stored.warnings,
+        products: groupOffersByUpc([...supplement, ...stored.records, ...weekly]),
+        warnings,
         cached: true,
         fromDatabase: true,
       };
     }
   }
 
-  const wantsLive = liveConfigured() && (Boolean(departmentId) || Boolean(query && query.length >= 2));
-  if (!wantsLive) {
+  const wantsLive = liveConfigured() && scopeNeedsFeed({ departmentId, query });
+  const wantsWeekly = flippEnabled() && scopeNeedsFeed({ departmentId, query });
+  if (!wantsLive && !wantsWeekly) {
     return { products: groupOffersByUpc(demo), warnings: [], cached: false, fromDatabase: false };
   }
 
@@ -371,10 +391,20 @@ async function loadScope(
 
   const warnings: string[] = [];
   const locationId = await krogerLocation(zipCode);
-  const live = query
-    ? await searchFeed(query, zipCode, locationId, warnings)
-    : await departmentFeed(departmentId ?? "", zipCode, locationId, warnings);
-  const products = groupOffersByUpc([...demo, ...live]);
+  const live = wantsLive
+    ? query
+      ? await searchFeed(query, zipCode, locationId, warnings)
+      : await departmentFeed(departmentId ?? "", zipCode, locationId, warnings)
+    : [];
+  const weekly = wantsWeekly
+    ? await fetchWeeklyAdRecords({
+        ...(zipCode ? { zipCode } : {}),
+        ...(query ? { query } : {}),
+        ...(departmentId ? { departmentId } : {}),
+        warnings,
+      })
+    : [];
+  const products = groupOffersByUpc([...demo, ...live, ...weekly]);
   const ttl = query ? ttlMs("CATALOG_SEARCH_TTL_MINUTES", 60) : ttlMs("CATALOG_DEPT_TTL_MINUTES", 360);
   await writeCache(cacheKey, products, warnings, ttl);
   await persistLive(live);
