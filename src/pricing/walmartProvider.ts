@@ -395,16 +395,32 @@ export class WalmartPricingProvider implements StorePricingProvider {
   }
 
   /**
-   * Affiliate Product Lookup by UPC: GET /items?upc={12-digit UPC-A}.
-   * Not charged here. Catalog ingest charges the call on the Walmart budget.
+   * Affiliate Product Lookup by UPC: GET /items?upc={code}.
+   * Several 12–14 digit codes go in one call, comma-separated, same as `ids`
+   * (the documented list length is 20). Not charged here. Catalog ingest
+   * charges the call on the Walmart budget.
    */
   async lookupByUpc(upc: string): Promise<unknown> {
-    const code = upc.trim();
-    if (!/^\d{12,14}$/.test(code)) {
+    return this.lookupByUpcs(upc.split(/[\s,]+/));
+  }
+
+  async lookupByUpcs(upcs: string[]): Promise<unknown> {
+    const codes: string[] = [];
+    for (const raw of upcs) {
+      const code = raw.trim();
+      if (!/^\d{12,14}$/.test(code) || codes.includes(code)) {
+        continue;
+      }
+      codes.push(code);
+      if (codes.length >= 20) {
+        break;
+      }
+    }
+    if (codes.length === 0) {
       return { items: [] };
     }
     const credentials = this.credentialsOrThrow();
-    const params = new URLSearchParams({ upc: code });
+    const params = new URLSearchParams({ upc: codes.join(",") });
     if (credentials.publisherId) {
       params.set("publisherId", credentials.publisherId);
     }

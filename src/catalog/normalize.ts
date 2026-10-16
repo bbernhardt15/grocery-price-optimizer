@@ -76,6 +76,50 @@ function hasStandardCheckDigit(digits: string): boolean {
 }
 
 /**
+ * UPC-E (8 digits, or 7 when the number system 0 was dropped) expanded to
+ * UPC-A. The check digit has to match the expanded code, so a plain EAN-8
+ * stays an EAN-8.
+ */
+export function expandUpcE(upc: string | undefined | null): string | null {
+  if (!upc) {
+    return null;
+  }
+  const digits = upc.replace(/\D/g, "");
+  if (digits.length === 8 && (digits[0] === "0" || digits[0] === "1")) {
+    const expanded = upcAFromUpcE(digits[0], digits.slice(1, 7));
+    return expanded?.endsWith(digits[7]) ? expanded : null;
+  }
+  if (digits.length === 7) {
+    const expanded = upcAFromUpcE("0", digits.slice(0, 6));
+    return expanded?.endsWith(digits[6]) ? expanded : null;
+  }
+  return null;
+}
+
+/** Number system + 6 UPC-E data digits → 12-digit UPC-A, including the check digit. */
+function upcAFromUpcE(numberSystem: string, middle: string): string | null {
+  if ((numberSystem !== "0" && numberSystem !== "1") || !/^\d{6}$/.test(middle)) {
+    return null;
+  }
+  const digit = middle.split("");
+  const last = digit[5];
+  let body: string;
+  if (last === "0" || last === "1" || last === "2") {
+    body = `${numberSystem}${digit[0]}${digit[1]}${last}0000${digit[2]}${digit[3]}${digit[4]}`;
+  } else if (last === "3") {
+    body = `${numberSystem}${digit[0]}${digit[1]}${digit[2]}00000${digit[3]}${digit[4]}`;
+  } else if (last === "4") {
+    body = `${numberSystem}${digit[0]}${digit[1]}${digit[2]}${digit[3]}00000${digit[4]}`;
+  } else {
+    body = `${numberSystem}${digit[0]}${digit[1]}${digit[2]}${digit[3]}${digit[4]}0000${last}`;
+  }
+  if (body.length !== 11) {
+    return null;
+  }
+  return `${body}${gtinCheckDigit(body)}`;
+}
+
+/**
  * Digits with a valid GS1 check digit removed.
  * A JSON number drops leading zeros (`049000042566` becomes `49000042566`).
  * When the shorter value is not itself a check-digit code, pad it back to
@@ -88,6 +132,10 @@ function digitsWithoutCheck(upc: string | undefined | null): string | null {
     return null;
   }
   let digits = upc.replace(/\D/g, "");
+  const expanded = expandUpcE(digits);
+  if (expanded) {
+    digits = expanded;
+  }
   if (digits.length < 8 || digits.length > 14) {
     return null;
   }
@@ -149,6 +197,48 @@ export function walmartUpcForLookup(upc: string | undefined | null): string | nu
   }
   const upcBody = body.padStart(11, "0");
   return `${upcBody}${gtinCheckDigit(upcBody)}`;
+}
+
+function pushCode(out: string[], code: string | null | undefined, pattern: RegExp): void {
+  const digits = code?.replace(/\D/g, "") ?? "";
+  if (!pattern.test(digits) || out.includes(digits)) {
+    return;
+  }
+  out.push(digits);
+}
+
+/**
+ * Codes to ask Walmart about, primary first.
+ * UPC-E is expanded. The 12-digit UPC-A is then padded to EAN-13 and GTIN-14
+ * (a leading zero does not change the check digit).
+ */
+export function walmartLookupCodes(upc: string | undefined | null): string[] {
+  const out: string[] = [];
+  const primary = walmartUpcForLookup(upc);
+  pushCode(out, primary, /^\d{12}$/);
+  if (primary && primary.length === 12) {
+    pushCode(out, `0${primary}`, /^\d{13}$/);
+    pushCode(out, `00${primary}`, /^\d{14}$/);
+  }
+  return out;
+}
+
+/**
+ * Codes to ask Kroger about, primary first.
+ * The 13-digit product id (no check digit) is followed by a 14-digit pad and,
+ * when the id has a leading zero, the 12-digit form.
+ */
+export function krogerLookupCodes(upc: string | undefined | null): string[] {
+  const out: string[] = [];
+  const primary = krogerProductIdForLookup(upc);
+  pushCode(out, primary, /^\d{8,14}$/);
+  if (primary && primary.length < 14) {
+    pushCode(out, primary.padStart(14, "0"), /^\d{14}$/);
+  }
+  if (primary && primary.length === 13 && primary.startsWith("0")) {
+    pushCode(out, primary.slice(1), /^\d{12}$/);
+  }
+  return out;
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

@@ -9,6 +9,7 @@ import type { WalmartNearbyStore } from "../pricing/walmartProvider";
 import { enrichOptimizeResult } from "../storeHandoff";
 import { loadKnownProducts } from "../catalog/service";
 import { pinnedRowsForSelections, type BrowseSelection } from "../catalog/pinSelections";
+import { noteCatalogDemand } from "../ingest/demand";
 import { noteShopperZip } from "../ingest/runner";
 
 const router = Router();
@@ -200,6 +201,12 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       void noteShopperZip(zipCode).catch(() => undefined);
       locationId = await krogerService.getClosestStoreLocation(zipCode);
     }
+    await noteCatalogDemand({
+      kind: "list",
+      lines: groceryList,
+      upcs: parsed.selections?.map((item) => item.upc),
+      catalogIds: parsed.selections?.map((item) => item.catalogId),
+    });
 
     const productsResult = await resolveCatalogProducts(
       groceryList,
