@@ -9,6 +9,8 @@ export type WalmartCatalogClient = {
   page(path: string): Promise<unknown>;
   /** Affiliate GET /items?upc=. Optional so tests that only page stay quiet. */
   lookupUpc?(upc: string): Promise<unknown>;
+  /** One Affiliate call for several UPCs (comma-separated, up to 20). */
+  lookupUpcs?(upcs: string[]): Promise<unknown>;
 };
 
 export type KrogerPageQuery = {
@@ -34,6 +36,7 @@ export function walmartAffiliateClient(): WalmartCatalogClient {
     taxonomy: () => walmartPricingProvider.getJson("/taxonomy"),
     page: (path) => walmartPricingProvider.getJson(path),
     lookupUpc: (upc) => walmartPricingProvider.lookupByUpc(upc),
+    lookupUpcs: (upcs) => walmartPricingProvider.lookupByUpcs(upcs),
   };
 }
 

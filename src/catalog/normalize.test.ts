@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "./normalize";
+import { expandUpcE, gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -59,6 +59,26 @@ describe("upcKey", () => {
     assert.equal(upcKey(pgWalmart), upcKey(pgKroger));
     assert.equal(upcKey(pgWalmart.padStart(14, "0")), upcKey(pgKroger));
     assert.equal(walmartUpcForLookup(pgKroger), pgWalmart);
+  });
+
+  it("expands UPC-E to the same key as UPC-A and lists leading-zero pads", () => {
+    const middle = "123456";
+    const expanded = expandUpcE(`0${middle}5`);
+    assert.equal(expanded, "012345000065");
+    assert.equal(upcKey(expanded), upcKey("012345000065"));
+    assert.equal(upcKey(`0${middle}5`), upcKey("012345000065"));
+    assert.equal(upcKey("1234567"), null);
+    const codes = walmartLookupCodes("012345000065");
+    assert.deepEqual(codes, ["012345000065", "0012345000065", "00012345000065"]);
+    assert.deepEqual(walmartLookupCodes(`0${middle}5`), codes);
+    const kroger = krogerLookupCodes("012345000065");
+    assert.equal(kroger[0], "0001234500006");
+    assert.ok(kroger.includes("00001234500006"));
+    assert.ok(kroger.includes("001234500006"));
+    const zeroBody = "01200000345";
+    const zeroCheck = String(gtinCheckDigit(zeroBody));
+    assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);
+    assert.equal(upcKey(`0123450${zeroCheck}`), upcKey(`${zeroBody}${zeroCheck}`));
   });
 });
 

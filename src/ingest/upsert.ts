@@ -12,6 +12,7 @@ type CatalogMasterLean = {
   categoryPaths?: string[];
   walmartItemId?: string;
   krogerProductId?: string;
+  mergedAt?: Date;
 };
 
 export function freshnessStatus(lastSeenAt: Date, now: Date, staleDays: number, discontinueDays: number): CatalogStatus {
@@ -163,6 +164,8 @@ export async function upsertCatalogRecords(
       storeName.toLowerCase() === "kroger"
         ? record.productId?.trim() || record.retailerItemId?.trim() || existing?.krogerProductId
         : existing?.krogerProductId;
+    const hadBoth = Boolean(existing?.walmartItemId?.trim() && existing?.krogerProductId?.trim());
+    const bothNow = Boolean(walmartItemId?.trim() && krogerProductId?.trim());
     await CatalogMaster.updateOne(
       { key },
       {
@@ -178,6 +181,7 @@ export async function upsertCatalogRecords(
           ...(record.size?.trim() ? { size: record.size.trim() } : {}),
           ...(walmartItemId ? { walmartItemId } : {}),
           ...(krogerProductId ? { krogerProductId } : {}),
+          ...(bothNow && !hadBoth && !existing?.mergedAt ? { mergedAt: seenAt } : {}),
           lastSeenAt: seenAt,
           status: "active",
         },

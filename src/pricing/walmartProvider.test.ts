@@ -248,4 +248,18 @@ describe("WalmartPricingProvider", () => {
     assert.match(calls[0], /upc=049000042566/);
     assert.match(calls[0], /publisherId=impact-123/);
   });
+
+  it("sends several UPCs in one Affiliate /items call", async () => {
+    installWalmartKeys();
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return Response.json({ items: [] });
+    };
+    const provider = new WalmartPricingProvider();
+    await provider.lookupByUpcs(["049000042566", "016000275287", "not-a-code", "049000042566"]);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/items\?/);
+    assert.match(decodeURIComponent(calls[0]), /upc=049000042566,016000275287/);
+  });
 });

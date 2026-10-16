@@ -21,6 +21,7 @@ import { flippConfigured } from "../pricing/flipp/client";
 import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
 import { ingestConfig } from "../ingest/config";
+import { noteCatalogDemand } from "../ingest/demand";
 import { readStoredById, readStoredRecords } from "../ingest/readStore";
 import { upsertCatalogRecords } from "../ingest/upsert";
 
@@ -335,6 +336,9 @@ async function loadScope(
 ): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
   const query = scope.query?.trim();
   const departmentId = scope.departmentId?.trim();
+  if (query && query.length >= 2) {
+    await noteCatalogDemand({ kind: "search", lines: [query] });
+  }
   const demo = demoRecordsFor({
     ...(departmentId ? { departmentId } : {}),
     ...(query ? { query } : {}),

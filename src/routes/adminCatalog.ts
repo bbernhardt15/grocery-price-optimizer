@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
-import { adminAuthorized, adminTokenConfigured, catalogMatchSample, catalogSample, catalogStatus } from "../ingest/status";
+import { adminAuthorized, adminTokenConfigured, catalogMatchQueue, catalogMatchSample, catalogSample, catalogStatus } from "../ingest/status";
 
 const router = Router();
 
@@ -47,6 +47,18 @@ router.get("/admin/catalog/sample", async (req: Request, res: Response) => {
       return;
     }
     res.json(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/match-queue", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  try {
+    res.json(await catalogMatchQueue());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
