@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=polish-1" />
+    <link rel="stylesheet" href="/styles.css?v=polish-2" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -85,7 +85,7 @@
           </button>
         </div>
       </header>
-      <p id="zip-hint" class="sr-only">Five-digit ZIP, saved on this device. Used for store prices and the trip plan.</p>
+      <p id="zip-hint" class="zip-hint">5-digit US ZIP, saved on this device. Target, Aldi, and other weekly ads use this ZIP’s circular, not a national shelf. ZIP+4 is ok.</p>
 
       <div class="body">
         <aside class="rail" aria-label="Departments and filters">
@@ -211,6 +211,8 @@
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
     <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js?v=polish-1"></script>
+    <script src="/native-config.js?v=polish-2"></script>
+    <script src="/native-shell.js?v=polish-2"></script>
+    <script type="module" src="/app.js?v=polish-2"></script>
   </body>
 </html>

@@ -165,21 +165,30 @@ export function formatTripSummary(
     .join(" + ");
 }
 
-function identifierOf(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
+function flyerOrSeed(item: { priceSource?: PriceSource }): boolean {
+  return item.priceSource === "weekly_ad" || item.priceSource === "seed";
+}
+
+function identifierOf(
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string {
+  if (flyerOrSeed(item)) {
+    return item.name.trim();
+  }
   return (item.upc || item.productId || item.name).trim();
 }
 
 export function krogerSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
   const query = new URLSearchParams({ query: identifierOf(item) });
   return `${KROGER_SEARCH}?${query.toString()}`;
 }
 
 export function walmartSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
-  const productId = item.productId?.trim();
+  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
   if (productId) {
     return `https://www.walmart.com/ip/${encodeURIComponent(productId)}`;
   }
@@ -188,9 +197,9 @@ export function walmartSearchUrl(
 }
 
 export function targetSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
-  const productId = item.productId?.trim();
+  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
   if (productId) {
     return `https://www.target.com/p/-/A-${encodeURIComponent(productId)}`;
   }
@@ -200,14 +209,19 @@ export function targetSearchUrl(
   return `${TARGET_SEARCH}?${query.toString()}`;
 }
 
-function searchQuery(item: Pick<PickedItem, "productId" | "upc" | "name">): string {
+function searchQuery(
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string {
+  if (flyerOrSeed(item)) {
+    return item.name.trim();
+  }
   return (item.upc || item.productId || item.name).trim();
 }
 
 /** Public storefront search — not a cart fill. */
 export function partnerSearchUrl(
   storeName: string,
-  item: Pick<PickedItem, "productId" | "upc" | "name">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string | undefined {
   const q = encodeURIComponent(searchQuery(item));
   switch (retailerKey(storeName)) {

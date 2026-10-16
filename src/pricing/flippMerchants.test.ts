@@ -30,5 +30,12 @@ describe("Flipp merchant mapping", () => {
     assert.equal(canonicalGroceryStoreName("Harris Teeter"), "Kroger");
     assert.equal(mappingForStore("Target")?.flyerKitSlug, "target");
     assert.equal(mappingForStore("Costco")?.merchantIds.includes(2519), true);
+    assert.equal(groceryStoreNameForFlippMerchant("Food Lion", 2100), "Food Lion");
+    assert.equal(groceryStoreNameForFlippMerchant("H-E-B", 2467), "H-E-B");
+    assert.equal(groceryStoreNameForFlippMerchant("Safeway", 5667), "Safeway");
+    assert.equal(groceryStoreNameForFlippMerchant("Giant Eagle", 2130), "Giant Eagle");
+    assert.equal(groceryStoreNameForFlippMerchant("Safeway Liquor", 4623), undefined);
+    assert.equal(flippItemMatchesStore("Safeway", "Safeway Liquor", 4623), false);
+    assert.equal(mappingForStore("Kroger")?.merchantIds.includes(3883), true);
   });
 });

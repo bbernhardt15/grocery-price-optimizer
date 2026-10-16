@@ -51,8 +51,23 @@ describe("pricing providers registry", () => {
     assert.equal(providerForStore("Aldi")?.isConfigured(), true);
     assert.equal(providerForStore("Walmart")?.isConfigured(), true);
     assert.equal(providerForStore("Target")?.isConfigured(), true);
+    assert.equal(providerForStore("Food Lion")?.isConfigured(), true);
+    assert.equal(providerForStore("H-E-B")?.isConfigured(), true);
     assert.doesNotMatch(providerForStore("Walmart")?.setupHint() ?? "", /FLIPP_ENABLED=true/);
     assert.doesNotMatch(providerForStore("Aldi")?.setupHint() ?? "", /FLIPP_ACCESS_TOKEN/);
+    assert.deepEqual(competingStoreNames([]), [
+      "Kroger",
+      "Walmart",
+      "Target",
+      "Aldi",
+      "Publix",
+      "Meijer",
+      "Food Lion",
+      "H-E-B",
+      "Safeway",
+      "Giant Eagle",
+      "Costco",
+    ]);
   });
 
   it("adds licensed partner banners to the default trip only when keys exist", () => {

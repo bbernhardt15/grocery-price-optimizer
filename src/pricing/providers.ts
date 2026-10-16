@@ -4,8 +4,13 @@ import { targetPricingProvider } from "./targetProvider";
 import type { StorePricingProvider } from "./types";
 import { walmartPricingProvider } from "./walmartProvider";
 import { FallbackPricingProvider } from "./fallbackProvider";
+import { flippConfigured } from "./flipp/client";
 import { flippProviderForStore } from "./flipp/flippProvider";
-import { canonicalGroceryStoreName, mappingForStore } from "./flipp/merchants";
+import {
+  FLIPP_MERCHANT_MAPPINGS,
+  canonicalGroceryStoreName,
+  mappingForStore,
+} from "./flipp/merchants";
 
 export const DEFAULT_COMPETING_STORES = [
   "Kroger",
@@ -72,9 +77,12 @@ export function providerForStore(
 
 export function competingStoreNames(stores: string[] = []): string[] {
   const requested = stores.map((store) => store.trim()).filter(Boolean);
+  const weeklyAdStores = flippConfigured()
+    ? FLIPP_MERCHANT_MAPPINGS.map((mapping) => mapping.storeName)
+    : [];
   const source =
     requested.length === 0
-      ? [...DEFAULT_COMPETING_STORES, ...partnerStoreNamesFromEnv()]
+      ? [...DEFAULT_COMPETING_STORES, ...weeklyAdStores, ...partnerStoreNamesFromEnv()]
       : requested;
 
   const seen = new Set<string>();

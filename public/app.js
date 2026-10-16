@@ -52,6 +52,56 @@ const LIST_KEY = "gg-list";
 const SUBS_KEY = "gg-subs";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
+function isNative() {
+  return window.Capacitor?.isNativePlatform?.() === true;
+}
+
+function apiOrigin() {
+  return window.GroceryGitterNative.resolveApiOrigin({
+    native: isNative(),
+    location: window.location,
+    configured: window.GROCERY_GITTER_API_ORIGIN,
+  });
+}
+
+function apiUrl(path) {
+  const origin = apiOrigin();
+  return origin ? `${origin}${path}` : path;
+}
+
+function mediaUrl(url) {
+  return window.GroceryGitterNative.resolveMediaUrl(url, apiOrigin());
+}
+
+async function openExternal(url) {
+  const browser = window.Capacitor?.Plugins?.Browser;
+  if (isNative() && browser?.open) {
+    await browser.open({ url });
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+async function syncSystemBars(dark) {
+  const systemBars = window.Capacitor?.Plugins?.SystemBars;
+  if (!isNative() || !systemBars?.setStyle) return;
+  try {
+    await systemBars.setStyle({ style: dark ? "DARK" : "LIGHT" });
+  } catch {
+    /* status bar styling is native-only */
+  }
+}
+
+async function hideSplash() {
+  const splash = window.Capacitor?.Plugins?.SplashScreen;
+  if (!isNative() || !splash?.hide) return;
+  try {
+    await splash.hide();
+  } catch {
+    /* splash already hidden */
+  }
+}
+
 /** @type {Map<string, { product: Record<string, any>, quantity: number }>} */
 const list = new Map();
 /** @type {Map<string, Record<string, any>>} */
@@ -224,7 +274,7 @@ function renderListRows() {
         ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
         : "";
       return `<li class="list-row">
-        <img src="${escapeHtml(entry.product.imageUrls?.[0] || "")}" alt="" />
+        <img src="${escapeHtml(mediaUrl(entry.product.imageUrls?.[0] || ""))}" alt="" />
         <div>
           <strong>${escapeHtml(entry.product.name)}</strong>
           <p class="muted">${escapeHtml(entry.product.brand)} · ${escapeHtml(entry.product.sizeLabel || "")}</p>
@@ -321,7 +371,7 @@ function cardHtml(product) {
   const qty = list.get(product.id)?.quantity ?? 1;
   return `<article class="card" data-product-id="${escapeHtml(product.id)}">
     <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
-      <img src="${escapeHtml(product.imageUrls?.[0] || "")}" alt="" />
+      <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
       ${sale ? '<span class="badge">Sale</span>' : ""}
       ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(sourceLabel(offer.priceSource))}</span>`}
     </button>
@@ -396,7 +446,7 @@ async function loadPage(reset) {
   const params = filterQuery();
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
-    const response = await fetch(`/api/catalog/browse?${params.toString()}`);
+    const response = await fetch(apiUrl(`/api/catalog/browse?${params.toString()}`));
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     coverage = body.coverage ?? coverage;
@@ -414,15 +464,23 @@ async function loadPage(reset) {
     const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
     resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     const demo = catalogSource === "demo";
-    coverageBannerEl.textContent = demo
-      ? "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse."
-      : catalogSource === "database"
-        ? "Prices from Grocery Gitter’s saved catalog. Aldi and Target stay on the demo shelf until a feed exists."
-        : catalogSource === "mixed"
-          ? "Live samples are mixed with the demo catalog. Stores without a catalog API stay labeled Demo."
-          : "Live catalog sample. This is not a full store assortment.";
-    if (body.warnings?.length) {
-      showCatalogError(body.warnings.join(" "));
+    const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
+    const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
+    const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
+    if (!zipOk && weeklyAds) {
+      coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
+    } else if (demo) {
+      coverageBannerEl.textContent = "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.";
+    } else if (catalogSource === "database") {
+      coverageBannerEl.textContent = "Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.";
+    } else if (catalogSource === "mixed") {
+      coverageBannerEl.textContent = "Live samples are mixed with the demo catalog. Weekly-ad prices are labeled Weekly ad, not a live shelf.";
+    } else {
+      coverageBannerEl.textContent = "Live catalog sample. This is not a full store assortment.";
+    }
+    const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
+    if (hardWarnings.length) {
+      showCatalogError(hardWarnings.join(" "));
     }
   } catch (error) {
     showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
@@ -490,7 +548,7 @@ function renderSuggestionRows(q) {
       const price = suggestionPriceLabel(item.bestPrice, item.bestStore, money);
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
       const thumb = item.imageUrl
-        ? `<img src="${escapeHtml(item.imageUrl)}" alt="" />`
+        ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
         : "";
       return `<li role="presentation"><button type="button" class="suggest-option" role="option" data-suggest="${index}" id="suggest-${index}" aria-selected="${index === activeSuggest}">
         ${thumb}
@@ -542,7 +600,7 @@ async function loadSuggestions(text) {
     if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
   }, 200);
   try {
-    const response = await fetch(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+    const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`), { signal: controller.signal });
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
@@ -586,7 +644,7 @@ function openProduct(product) {
   const offers = [...product.offers].sort((a, b) => a.price - b.price);
   const gaps = product.gaps ?? [];
   productDialog.innerHTML = `<div class="sheet-body">
-    <img class="hero" src="${escapeHtml(product.imageUrls?.[0] || "")}" alt="" />
+    <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
     <h2 id="dialog-title">${escapeHtml(product.name)}</h2>
     <p class="muted">${escapeHtml(product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
@@ -627,7 +685,7 @@ function openProduct(product) {
     button.addEventListener("click", async () => {
       const id = button.getAttribute("data-add-sub");
       const known = productsById.get(id);
-      const productToAdd = known || (await fetch(`/api/catalog/products/${encodeURIComponent(id)}`).then((r) => r.json())).product;
+      const productToAdd = known || (await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`)).then((r) => r.json())).product;
       if (productToAdd?.id) {
         productsById.set(productToAdd.id, productToAdd);
         addProduct(productToAdd, 1);
@@ -657,7 +715,20 @@ function pricingClass(pricing) {
   const source = pricing?.source;
   if (source === "live" || source === "cached_live" || source === "partner_feed") return "badge-live";
   if (source === "weekly_ad" || source === "cached_weekly_ad") return "badge-ad";
+  if (source === "unavailable") return "badge-demo";
   return "badge-demo";
+}
+
+function checkedStoresHtml(payload, shown) {
+  const reports = payload.pricingByStore ?? [];
+  const shownNames = new Set(shown.map((store) => store.storeName));
+  const extras = reports.filter((report) => !shownNames.has(report.storeName));
+  if (!extras.length) return "";
+  return `<h3>Also checked</h3><ul class="offer-list">${extras
+    .map(
+      (report) => `<li><span><strong>${escapeHtml(report.storeName)}</strong> · ${escapeHtml(report.label || "Unavailable")}<br /><span class="muted">${escapeHtml(report.detail || "")}</span></span></li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderTrip(payload) {
@@ -682,6 +753,7 @@ function renderTrip(payload) {
       ${stores.map(renderStore).join("")}
     </div>
     ${(payload.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(payload.unavailable.join(", "))}</p>` : ""}
+    ${checkedStoresHtml(payload, stores)}
   `;
   const whole = $("instacart-whole");
   if (instacartEnabled && stores.length) {
@@ -723,6 +795,7 @@ function renderStore(store) {
         <h3>${escapeHtml(store.storeName)}</h3>
         ${nearby}
         <span class="${pricingClass(store.pricing)}">${escapeHtml(store.pricing?.label || "Prices")}</span>
+        ${store.pricing?.detail ? `<p class="muted">${escapeHtml(store.pricing.detail)}</p>` : ""}
       </div>
       <strong>${money(store.subtotal)}</strong>
     </header>
@@ -752,9 +825,9 @@ async function planTrip() {
   planBtn.disabled = true;
   planBtn.textContent = "Planning…";
   try {
-    const status = await fetch("/api/instacart/status").then((response) => response.json().catch(() => ({ enabled: false })));
+    const status = await fetch(apiUrl("/api/instacart/status")).then((response) => response.json().catch(() => ({ enabled: false })));
     instacartEnabled = Boolean(status.enabled);
-    const response = await fetch("/api/optimize-list", {
+    const response = await fetch(apiUrl("/api/optimize-list"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items, zipCode: zip, allowSubstitutes: allowSubsEl.checked }),
@@ -793,7 +866,7 @@ async function openInstacart(button) {
   }
   button.disabled = true;
   try {
-    const response = await fetch("/api/instacart/shopping-list", {
+    const response = await fetch(apiUrl("/api/instacart/shopping-list"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -804,7 +877,7 @@ async function openInstacart(button) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !body.productsLinkUrl) throw new Error(body.error || "Instacart did not return a link.");
-    window.open(body.productsLinkUrl, "_blank", "noopener");
+    await openExternal(body.productsLinkUrl);
   } catch (error) {
     planErrorEl.hidden = false;
     planErrorEl.textContent = error instanceof Error ? error.message : "Could not open Instacart.";
@@ -819,7 +892,7 @@ async function startKroger(storeName, button) {
   if (!store) return;
   button.disabled = true;
   try {
-    const response = await fetch("/api/kroger/cart/start", {
+    const response = await fetch(apiUrl("/api/kroger/cart/start"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
@@ -827,6 +900,10 @@ async function startKroger(storeName, button) {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
     if (body.authorizeUrl) {
+      if (isNative()) {
+        await openExternal(body.authorizeUrl);
+        return;
+      }
       window.location.assign(body.authorizeUrl);
       return;
     }
@@ -850,6 +927,7 @@ function applyTheme(theme) {
   const glyph = $("theme-glyph");
   if (glyph) glyph.textContent = themeGlyph(choice);
   $("theme-btn")?.setAttribute("aria-label", themeButtonLabel(choice, systemDark));
+  void syncSystemBars(dark);
 }
 
 async function restoreList() {
@@ -863,7 +941,7 @@ async function restoreList() {
     saved.map(async (row) => {
       if (!row?.id) return;
       try {
-        const response = await fetch(`/api/catalog/products/${encodeURIComponent(row.id)}`);
+        const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.id)}`));
         if (!response.ok) return;
         const body = await response.json();
         if (body.product?.id) {
@@ -879,7 +957,7 @@ async function restoreList() {
 }
 
 async function addSample() {
-  const response = await fetch("/api/catalog/browse?limit=48");
+  const response = await fetch(apiUrl("/api/catalog/browse?limit=48"));
   const body = await response.json();
   const wanted = [
     { name: "Bananas", brand: "Fresh" },
@@ -900,6 +978,12 @@ async function addSample() {
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+  const anchor = target.closest("a[href]");
+  if (anchor && isNative() && window.GroceryGitterNative.isExternalNavigation(anchor.href, window.location.href)) {
+    event.preventDefault();
+    void openExternal(anchor.href);
+    return;
+  }
   if (!target.closest(".search") && !suggestPanel.hidden) closeSuggestions();
   const dept = target.closest("[data-dept]");
   if (dept) {
@@ -1088,7 +1172,7 @@ async function boot() {
   }
   listLoading = Array.isArray(savedRows) && savedRows.some((row) => row?.id);
   renderEstimate();
-  const deptResponse = await fetch("/api/catalog/departments");
+  const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
   const deptBody = await deptResponse.json();
   departments = deptBody.departments ?? [];
   renderDepartments();
@@ -1096,9 +1180,11 @@ async function boot() {
   listLoading = false;
   renderEstimate();
   await loadPage(true);
-  if ("serviceWorker" in navigator) {
+  if (!isNative() && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
 }
 
-void boot();
+void boot().finally(() => {
+  void hideSplash();
+});

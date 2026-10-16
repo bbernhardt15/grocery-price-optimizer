@@ -37,13 +37,13 @@ Offers that share a UPC (leading zeros ignored) become one product. Package size
 | --- | --- | --- |
 | **Walmart** | Affiliate `GET /taxonomy` plus the first page of `GET /paginated/items?category=`. If that is empty, a few search terms via `GET /search`. Prices are **walmart.com catalog**, not the nearest store's shelf. Not the full assortment. Cached 6 hours. | Demo catalog, badged **Demo** |
 | **Kroger** | **No category browse.** Each department runs two seeded `filter.term` searches. Hits are classified with the `categories` field when Products returns one, otherwise the product name. A sample of the aisle, not the full Kroger catalog. Nearest store when a ZIP is set. | Demo catalog |
-| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. Flipp weekly ads are **not** used as a browse shelf. | Demo catalog. Weekly ads still apply only inside trip planning |
-| **Aldi** | No catalog API. | Demo catalog only. Flipp can still price circular items on the trip plan, labeled **Weekly ad** |
+| **Target** | No public taxonomy. A licensed `TARGET_PARTNER_*` feed is searched with the same seed terms and labeled partner, not a full catalog. With `FLIPP_ENABLED` and a ZIP, browse/search also show this week's circular, labeled **Weekly ad**. | Demo catalog until Flipp or a partner feed is set |
+| **Aldi** | No catalog API. With `FLIPP_ENABLED` and a ZIP, browse/search show circular items labeled **Weekly ad**. | Demo catalog. Trip planning uses the same circular when a ZIP is set |
 | **Partner banners** | Search-by-term stub when that feed's env vars are set. Unconfigured banners are omitted. | Not shown as a live catalog |
 
 Demo UPCs are synthetic (`009999…`) so they do not merge with a real retailer code. Live rows win over a demo row for the same store and UPC. Department and search responses are cached in memory and in Mongo (`CatalogCache`, TTL index). Override with `CATALOG_DEPT_TTL_MINUTES` (default 360) and `CATALOG_SEARCH_TTL_MINUTES` (default 60).
 
-When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target stay on the demo shelf. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
+When `CATALOG_INGEST_ENABLED` or `CATALOG_DB_FIRST` is on and Mongo already has catalog rows, browse, typeahead, filters, sort, substitutes, and the trip optimizer read that database first. A live provider call runs only when the database has nothing for that shelf or line, and the result is written back. Aldi and Target are not ingested. When Flipp is on, browse still merges that ZIP's weekly-ad items on top of the saved catalog and does not delete or rewrite ingest rows. The one-page Walmart sample and the two-term Kroger sample above are the fallback while the database is empty.
 
 ## Catalog ingestion
 
@@ -58,7 +58,7 @@ Checked 2026-09-25.
 | **Walmart Affiliate** | `GET /taxonomy`, then `GET /paginated/items?category=&count=25`. The next page is the response `nextPage` (URL or cursor). Stop when `nextPage` is empty or `nextPageExist` is false. Only grocery leaves are walked (electronics and similar paths are skipped). UPC is read from `upc` or `gtin` (string or number) so a row can share a Kroger master. | The public Affiliate introduction and taxonomy pages do **not** publish a numeric daily quota. Marketplace rate-limit tables are a different API and are not used here. HTTP **429** is the throttle. Search documents `numItems` max 25, so each catalog page asks for 25. | **500 calls/day**, at least **10 seconds** apart, and that gap is kept across scheduler ticks. The 500 figure is a hard ledger for the crawler only. Shopper searches are not charged and are not blocked. |
 | **Kroger Products** | No category browse. `GET /v1/products` with `filter.term`, optional `filter.brand`, `filter.locationId`, `filter.start`, and `filter.limit`. A full page advances `filter.start`. A short page ends the term. `filter.start` is a skip count: the first page omits it (checkpoint `start` 0). Kroger accepts a sent value only from **1 to 250** (PRODUCT-2021). The crawl stops at 250 and, for a broad term, continues with `filter.brand` or a narrower term instead of sending 300. A **400** ends that term (it is not retried). Three 400s in a row on the same `locationId` skip that store. | **10,000 product calls/day**. **1,600 location calls/day**. Locations documents `filter.limit` max **200**; this job asks for **50**. | **4,000 product calls/day** (6,000 left for shoppers and on-demand refresh), **200 location calls/day**, at least **500 ms** apart. |
 | **Kroger prices** | Stored per `locationId`. The product master is written once, keyed by UPC with leading zeros stripped (UPC-A, EAN-13, and GTIN-14 of the same code share one master). The offer key is product + store + location, so six seed stores are six offers. | — | Seed ZIPs `45103` (Brandon), `10001`, `60601`, `75201`, `90012`, `30303`, plus up to 12 ZIPs that real shoppers have used (`hits` > 0). Seeds are not written into the shopper-ZIP list. A new shopper ZIP is priced on the next tick (inserted in front of the Kroger walk). A finished cycle starts again after `CATALOG_REFRESH_HOURS` (24). Ingest never substitutes the demo location id `01400441` when a ZIP lookup fails. |
-| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf only. Flipp weekly ads stay on the trip plan. |
+| **Target, Aldi, other banners** | No catalog ingestion. | — | Demo shelf, plus Flipp weekly ads on browse and the trip when `FLIPP_ENABLED` and a ZIP are set. |
 
 A Walmart **429** keeps the same category and `nextPage`, sets status to paused, and waits 15 minutes, then 30. The response's Retry-After header, any rate-limit headers, and the body are stored on that error. One successful page does not clear the strike count; three clean pages in a row do. A third 429 stops Walmart ingest until the next UTC midnight, or for six hours when that is longer. The next tick does not call Walmart until that time, then it resumes the same page. Other 5xx responses still use a short backoff (1s, 2s, 4s, … capped at 60s) and, after 5 failures, skip that category. A Kroger **400** is logged with provider, status, term, brand, start, limit, locationId, and ZIP (no secrets) and that term is skipped. `runs[].calls` counts each HTTP call once. `budget.*.used` / `budget.*.limit` is the daily ledger. Read the ledger for the cap; the run counter is only a progress total. Shopper searches never touch this ledger.
 
@@ -93,6 +93,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - `ADMIN_TOKEN` set to a long random string.
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
+   - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
    - `CATALOG_INGEST_ENABLED=true`
@@ -122,35 +123,117 @@ Local demo, no keys:
 npm run ingest:demo
 ```
 
-## Phone and tablet apps (later)
+## Phone and tablet apps (Capacitor)
 
-This PR does **not** add Xcode or Android Studio projects. The UI is a static SPA in `public/` (no frontend build), with a web manifest, icons, and a network-first service worker so it can be installed as a PWA.
+The shopper UI stays a static SPA in `public/` (no frontend bundler). The website and the installed PWA are unchanged: the manifest, icons, and network-first service worker still install from the browser, and `/api` stays on the same origin.
 
-Recommended store path when you are ready:
+Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` is still only the TypeScript server (`tsc` → `dist/`), and `npm start` still serves `public/` from Express.
 
-1. Keep secrets on the Express server. The native shell should load the deployed site, not embed API keys.
-2. Add Capacitor in a follow-up (not this PR):
+The native WebView loads those copied files. It then calls the HTTPS API at `CAPACITOR_API_URL`, or `https://grocery-price-optimizer-production.up.railway.app` when that variable is unset. Retailer secrets stay on the server. Express already enables CORS, so the WebView origin (`capacitor://localhost` on iOS, `https://localhost` on Android) can call the API.
+
+Kroger, Walmart, Target, and Instacart handoffs open in the system browser (`@capacitor/browser`). The Kroger redirect URI stays the Railway HTTPS callback. There is no custom inbound URL scheme: checkout returns to that HTTPS page, not into the app.
+
+### Prerequisites
+
+- **Node.js 20+** (same as the API)
+- **iOS:** a Mac with current Xcode and the iOS 15+ simulator runtime. The Xcode project’s deployment target is iOS 15. A paid Apple Developer account is only needed for a physical device or App Store upload. Capacitor 8 uses Swift Package Manager, so CocoaPods is not required.
+- **Android:** Android Studio, with Android SDK 36 (the project’s compile SDK) and an emulator or a device with USB debugging. Minimum device SDK is 24.
+
+`npm install` on a machine where you will run the native apps. The Capacitor packages are dev dependencies, so a production Railway install can omit them.
+
+### First-time setup
 
 ```bash
-npm install @capacitor/core @capacitor/ios @capacitor/android
-npm install -D @capacitor/cli
-npx cap init "Grocery Gitter" com.grocerygitter.app --web-dir public
+npm install
+npm run cap:sync
 ```
 
-3. Point the WebView at production so Railway stays the API and the UI updates with the site:
+The copies of the website inside `ios/` and `android/` are generated by that command and are not committed. Open Xcode or Android Studio after syncing.
 
-```ts
-// capacitor.config.ts
-const config = {
-  appId: "com.grocerygitter.app",
-  appName: "Grocery Gitter",
-  webDir: "public",
-  server: { url: "https://grocery-price-optimizer-production.up.railway.app", cleartext: false },
-};
+`npm run cap:sync` reads `.env` when that file exists. Optional variables (see `.env.example`):
+
+| Variable | Effect |
+| --- | --- |
+| `CAPACITOR_API_URL` | HTTPS origin written into the native copies of `public/native-config.js`. Unset uses the Railway production URL above. `http://` is rejected. |
+| `CAPACITOR_SERVER_URL` | Live reload. The WebView loads this URL instead of the copied files, and API calls stay on that origin. Use `http://<your-LAN-ip>:3000` while `npm run dev` is running. Unset it and sync again before a store build. |
+
+### Sync after web changes
+
+Edit `public/` (HTML, CSS, `app.js`). Then:
+
+```bash
+npm run cap:sync
 ```
 
-4. Open Kroger, Walmart, Target, and Instacart handoffs in the system browser (`@capacitor/browser`) so OAuth cookies and add-to-cart links work. The Kroger redirect URI stays the Railway HTTPS callback.
-5. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
+That refreshes both native projects. One platform at a time:
+
+```bash
+npm run cap:sync:ios
+npm run cap:sync:android
+```
+
+Railway deploys the same `public/` files on the next web deploy. You do not run Capacitor on Railway.
+
+### Open and run
+
+iOS simulator or device (Mac):
+
+```bash
+npm run cap:open:ios
+```
+
+In Xcode, select an iPhone simulator (or a connected iPhone), then Product → Run (⌘R).
+
+From the terminal, with Xcode’s simulators installed:
+
+```bash
+npm run cap:run:ios
+```
+
+Android emulator or device:
+
+```bash
+npm run cap:open:android
+```
+
+In Android Studio, select a device or emulator and press Run.
+
+From the terminal, with a device or emulator already running:
+
+```bash
+npm run cap:run:android
+```
+
+Live reload against the local API (example):
+
+```bash
+npm run dev
+CAPACITOR_SERVER_URL=http://192.168.1.20:3000 npm run cap:sync
+npm run cap:run:android
+```
+
+Use your computer’s LAN address. `http://localhost` on a phone is the phone, not your computer. Android’s emulator can use `http://10.0.2.2:3000`.
+
+### What the shell already handles
+
+- **Safe areas.** `viewport-fit=cover` was already set. The top bar, side edges, bottom list bar, and sheets pad with `env(safe-area-inset-*)`, and with Capacitor’s `--safe-area-inset-*` variables on older Android WebViews. The iOS web view is edge-to-edge (`contentInset: never`).
+- **Status bar.** Capacitor SystemBars follows the light or dark theme (dark icons on the cream bar, light icons on the dark theme).
+- **Splash.** Green `#0e7a45` launch screen, hidden when the page boots (and auto-hidden if the page never boots).
+- **Deep links that already exist.** Walmart add-to-cart, Kroger and Target search, and Instacart open outside the WebView. Kroger shopper login does too, so the Railway OAuth callback is unchanged.
+- **Service worker.** Registered on the website only, so the native shell does not cache a second copy of the UI.
+
+### App Store / Play Store prep
+
+Checklist only. This repo does not submit either store.
+
+- [ ] Replace the default Capacitor icons: iOS `ios/App/App/Assets.xcassets/AppIcon.appiconset`, Android `android/app/src/main/res/mipmap-*`. Include a 1024×1024 App Store icon with no transparency.
+- [ ] Replace the splash artwork (iOS launch storyboard / `Splash.imageset`, Android `drawable*/splash.png`) and keep the green background `#0e7a45`.
+- [ ] Privacy: the app stores the shopping list and ZIP in on-device `localStorage`. There is no Grocery Gitter account. Say that in App Store privacy nutrition labels and the Play Data safety form. Retailer login (Kroger, Instacart) happens in the system browser on the retailer’s site.
+- [ ] Signing: Apple Developer account, distribution certificate, and provisioning profile for `app.grocerygitter`. Android upload keystore (`android/key.properties`, a `.jks` or `.keystore` — both are gitignored) and Play App Signing.
+- [ ] Create the App Store Connect app and the Play Console app with bundle / application id `app.grocerygitter` and name Grocery Gitter.
+- [ ] Screenshots, description, support URL, and age rating. Point support at the public Railway site.
+- [ ] Confirm a release build was synced **without** `CAPACITOR_SERVER_URL`, so the binary bundles `public/` and calls only the HTTPS API.
+- [ ] Confirm Kroger’s registered redirect URI is still the Railway `https://…/api/kroger/oauth/callback`, not an app URL scheme.
 
 ## What it includes
 
@@ -208,8 +291,8 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | --- | --- | --- | --- |
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
 | **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address, plus `accessPointId` / `fulfillmentStoreId` when the locator sends them. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store does not change the price. It is passed on the add-to-cart link as `storeId` (and `ap` when an access point id is present). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
-| **Target** | **No public product API.** This app does **not** call RedSky. If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. |
-| **Aldi** (and Publix-like banners) | No retailer product API. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. | Demo catalog | Weekly-ad / circular prices near the ZIP when Flipp is enabled |
+| **Target** | **No public product API.** This app does **not** call RedSky, Target Circle, or RedCard pricing (those are account-specific and not a shelf feed). If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. Otherwise the weekly circular. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. Circular rows stay **Weekly ad**. |
+| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
 
 Configured **partner feeds** (Publix, Meijer, H-E-B, Instacart-style banners, Datasembly-class shelf file) use the same optimize path when `SHELF_FEED_*` / `INSTACART_PARTNER_*` / `PUBLIX_PARTNER_*` / `HEB_PARTNER_*` / `MEIJER_PARTNER_*` are set. Hits are labeled **Partner feed**, not a fake retailer API. See [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). Licensed shelf feeds beat Flipp weekly ads for the same banner. Unconfigured partner banners are not added to the default trip.
 
@@ -224,11 +307,32 @@ Banners without a public grocery API (Aldi, Target when the partner feed is abse
 | Path | When | What it calls | Honesty / risk |
 | --- | --- | --- | --- |
 | **FlyerKit v4.0** (preferred) | `FLIPP_ACCESS_TOKEN` is set | Documented `GET https://api.flipp.com/flyerkit/v4.0/publications/{merchant_identifier}/products?access_token=&locale=en-US&postal_code=&keywords=` ([FlyerKit docs](https://api.flipp.com/flyerkit/v4.0/documentation)). Tokens are issued by a Flipp technical contact (typically merchant-scoped). | Legitimate partner API. |
-| **Consumer flyer search** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com: `GET https://backflipp.wishabi.com/flipp/items/search?locale=en-us&postal_code={ZIP}&q={merchant AND term}`. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
+| **Consumer circular** | `FLIPP_ENABLED=true` | Unofficial JSON used by flipp.com. Grocery Gitter loads `GET https://backflipp.wishabi.com/flipp/flyers?postal_code={ZIP}` and then each matching flyer. A `merchant AND term` search returns an empty `items` list, so the grocery words are matched on the circular locally. **No HTML scrape, no retailer login.** | Not a public contract. Flipp terms may restrict automated access. Production must set `FLIPP_ENABLED=true` explicitly. Prefer FlyerKit if Flipp issues a token. |
 
-Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. Request extra banners via `stores` on optimize-list; the default trip still considers Kroger, Walmart, Target, and Aldi.
+**ZIP.** Weekly ads require a 5-digit US ZIP. `45202-1234` is accepted and sent as `45202`. The price is whatever flyer Flipp publishes for that postal code. It is not a store-locator aisle price, and a banner can appear in the circular even when the nearest store is far away. With no ZIP, browse keeps the demo catalog and says so; the trip labels that store **Unavailable** or **Demo catalog** instead of pretending a circular was checked.
 
-Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric `current_price` (BOGO / “% off” only) are skipped so we do not invent a price.
+Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. When Flipp is on, those banners join the default trip. Pass `stores` to limit the list. Food Lion is merchant `2100`, H-E-B `2467`, US Safeway `5667` (not Safeway Liquor), Giant Eagle `2130`.
+
+Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric price (BOGO / “% off” only) are skipped so we do not invent a price. A flyer id is not a Target TCIN or a Walmart item id; those handoffs stay search links.
+
+### Verify weekly ads (Railway)
+
+On the **web** service (the one that serves `/api`, not the ingest worker):
+
+1. Variables: `FLIPP_ENABLED` = `true`. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp has issued a FlyerKit token. Do not set fake `TARGET_PARTNER_*` keys.
+2. Redeploy the web service. No catalog ingest change and no database delete.
+3. From PowerShell, using your public HTTPS host:
+
+```powershell
+$base = "https://<your-service>.up.railway.app"
+Invoke-RestMethod "$base/api/catalog/coverage"
+Invoke-RestMethod "$base/api/catalog/browse?q=chicken&zip=45202"
+Invoke-RestMethod "$base/api/catalog/browse?department=meat-seafood&zip=75201"
+```
+
+Coverage for Target and Aldi should say **Weekly ad only**, and Food Lion, H-E-B, Safeway, Giant Eagle, Publix, Meijer, and Costco should say **Weekly ad**. A chicken or meat response should include `priceSource` `weekly_ad` when that ZIP's circular actually lists the item. An empty circular for a staple is honest: the offer stays demo or the trip store says **Unavailable**. Browse without `zip` returns a warning that a 5-digit ZIP is required.
+
+`Invoke-RestMethod "$base/api/catalog/browse?q=milk"` (no ZIP) should not invent Aldi or Target shelf prices.
 
 This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 
@@ -542,9 +646,14 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | `npm test` | Unit tests for the optimizer and scraper |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
 | `npm run seed` | Insert 10 mock products into local MongoDB |
-| `npm run build` | Compile to `dist/` |
+| `npm run build` | Compile the API to `dist/` (Railway). Does not build iOS or Android. |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run cap:sync` | Copy `public/` into the iOS and Android projects |
+| `npm run cap:open:ios` | Open the Xcode project |
+| `npm run cap:open:android` | Open the Android Studio project |
+| `npm run cap:run:ios` | Build and run on an iOS simulator or device |
+| `npm run cap:run:android` | Build and run on an Android emulator or device |
 
 ## Product schema
 

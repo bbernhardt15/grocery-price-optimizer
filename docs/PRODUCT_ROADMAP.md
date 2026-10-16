@@ -62,7 +62,7 @@ Give Aldi, Target-without-partner-feed, Publix-like banners, and other mapped ci
 | --- | --- |
 | Provider | `FlippDealsProvider` behind `StorePricingProvider`. Dedicated retailer APIs and licensed partner feeds still run first (Kroger Products, Walmart Affiliate, Target partner feed, `SHELF_FEED_*` / named banner stubs). |
 | Official path | FlyerKit v4.0 with `FLIPP_ACCESS_TOKEN` from a Flipp technical contact. |
-| Opt-in path | Consumer flyer search `backflipp.wishabi.com/flipp/items/search` only when `FLIPP_ENABLED=true`. Unofficial; ToS-sensitive; ZIP required. |
+| Opt-in path | Consumer circular `backflipp.wishabi.com/flipp/flyers?postal_code=` only when `FLIPP_ENABLED=true`. Unofficial; ToS-sensitive; 5-digit ZIP required. A merchant AND term search is not used (it returns no items). |
 | Mapping | Flipp merchants → Grocery Gitter `storeName` (Aldi, Target, Walmart, Kroger family as secondary, Publix, Meijer, …). |
 | Label | `priceSource: "weekly_ad"` → dashboard **Weekly ad**. Never claim full-shelf live prices. BOGO rows with no numeric price are skipped. |
 | Cart | Unchanged: no fake “added to cart.” Aldi handoff stays `coming_soon`. |
