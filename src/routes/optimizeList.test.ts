@@ -925,7 +925,14 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Walmart.handoff.action.label, "Add 1 item to Walmart cart");
       const walmartCart = new URL(byStore.Walmart.handoff.action.url ?? "");
       assert.match(walmartCart.pathname, /\/c\/impact-1\/568844\/9383$/);
-      assert.match(walmartCart.searchParams.get("u") ?? "", /items=554433%7C1|items=554433\|1/);
+      const walmartDestination = new URL(walmartCart.searchParams.get("u") ?? "");
+      assert.equal(
+        walmartDestination.origin + walmartDestination.pathname,
+        "https://www.walmart.com/sc/cart/addToCart"
+      );
+      assert.equal(walmartDestination.searchParams.get("items"), "554433");
+      assert.equal(walmartDestination.searchParams.get("storeId"), "2066");
+      assert.equal(walmartDestination.searchParams.get("ap"), null);
 
       assert.equal(byStore.Target.items[0].query, "Pasture Eggs");
       assert.equal(byStore.Target.items[0].price, 1.45);

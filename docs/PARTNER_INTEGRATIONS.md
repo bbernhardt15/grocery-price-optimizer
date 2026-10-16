@@ -49,7 +49,7 @@ Goal: shopper can actually buy the split trip.
 | **Kroger Cart API** | Only path with a documented write (`PUT /v1/cart/add`) after **shopper** OAuth. Redirect URI must be unlocked. |
 | **Instacart Connect / Platform** | Best multi-banner **fulfillment** bet (Aldi, many regionals). Sales-led. Prices often include **markup**. Cart create only if the contract says so. |
 | **Instacart Developer Platform shopping list** | **Not a price feed.** Self-serve (when applications are open) `POST /idp/v1/products/products_link` link. Shopper picks a retailer and checks out on Instacart. See the section below. Env: `INSTACART_API_KEY`, `INSTACART_API_BASE_URL`. |
-| **Walmart add-to-cart URL** | Shopper handoff when every Walmart line has an Affiliate item id. Opens walmart.com with those items in the cart. Impact-wrapped only when `WALMART_PUBLISHER_ID` is set. Not an API cart-write, and not reported as filled. |
+| **Walmart add-to-cart URL** | Shopper handoff for Walmart lines that have a numeric item id. Opens `https://www.walmart.com/sc/cart/addToCart` with those items. Lines without an item id are left off the link. Impact-wrapped only when `WALMART_PUBLISHER_ID` is set. Not an API cart-write, and not reported as filled. |
 | **Retailer site search deep links** | Default handoff for Target, Publix, H-E-B, Meijer, Albertsons family, Ahold banners, club stores, and Walmart lines that lack an item id. **Not** a cart fill. |
 | **Amazon / club apps** | Cart-write for third parties is effectively **unavailable**. Membership and app-only prices. |
 
