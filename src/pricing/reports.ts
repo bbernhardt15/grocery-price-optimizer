@@ -176,8 +176,9 @@ export function finalizeStoreReport(
     source === "mixed" ||
     source === "partner_feed";
   const isKroger = acc.storeName.trim().toLowerCase() === "kroger";
+  const zipNeeded = errors.some((message) => /5-digit US ZIP/i.test(message));
   const error =
-    errors[0] && (acc.attempted || isKroger) ? errors[0] : undefined;
+    errors[0] && (acc.attempted || isKroger || zipNeeded) ? errors[0] : undefined;
   const partner = acc.feedKind === "partner_feed";
 
   let detail: string;
@@ -196,7 +197,10 @@ export function finalizeStoreReport(
   } else if (source === "mixed") {
     detail = mixedDetail(acc);
   } else if (source === "seed") {
-    detail = acc.configured
+    const zipNeeded = errors.some((message) => /5-digit US ZIP/i.test(message));
+    detail = zipNeeded
+      ? `${errors.find((message) => /5-digit US ZIP/i.test(message))} Demo catalog prices are shown until a ZIP is set. Weekly ads are not a full shelf catalog.`
+      : acc.configured
       ? `No live shelf or weekly-ad ${acc.storeName} prices matched these items; demo catalog prices are shown instead. Weekly ads are not a full shelf catalog.`
       : setupHint ||
         `${acc.storeName} prices are from the seeded demo catalog, not a live shelf feed.`;
@@ -233,7 +237,7 @@ export function pricingWarningFromReports(
       continue;
     }
     const isKroger = report.storeName.trim().toLowerCase() === "kroger";
-    if (report.attempted || isKroger) {
+    if (report.attempted || isKroger || /5-digit US ZIP/i.test(report.error)) {
       parts.push(`${report.storeName}: ${report.error}`);
     }
   }

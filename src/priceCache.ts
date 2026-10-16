@@ -369,6 +369,11 @@ export async function resolveCatalogProducts(
             `Weekly-ad ${storeName} pricing failed for "${line.name}": ${message}`
           );
         }
+      } else if (flipp?.isConfigured() && !zip) {
+        acc.configured = true;
+        acc.errors.push(
+          `${storeName} weekly-ad prices need a 5-digit US ZIP. ZIP+4 is accepted; only the first five digits are used. The circular is whatever Flipp publishes for that ZIP, not a live shelf price.`
+        );
       } else if (!dedicated && flipp && !flipp.isConfigured()) {
         acc.errors.push(flipp.setupHint());
       } else if (!dedicated && !flipp) {

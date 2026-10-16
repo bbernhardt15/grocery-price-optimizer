@@ -12,6 +12,19 @@ export type CoverageFlags = {
 
 const DEFAULT_STORES = ["Aldi", "Kroger", "Target", "Walmart"] as const;
 
+const WEEKLY_AD_BANNERS = [
+  "Publix",
+  "Meijer",
+  "Food Lion",
+  "H-E-B",
+  "Safeway",
+  "Giant Eagle",
+  "Costco",
+] as const;
+
+const WEEKLY_AD_ZIP =
+  "A 5-digit US ZIP is required (ZIP+4 is shortened to five digits). Prices are the circular Flipp publishes for that ZIP, not a national shelf and not an in-aisle price.";
+
 function coverage(
   storeName: string,
   mode: StoreCatalogMode,
@@ -89,8 +102,8 @@ export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
           false,
           flags.flipp ? "Weekly ad only" : "Demo catalog",
           flags.flipp
-            ? "Flipp can price Target items that are printed in the weekly ad during trip planning. Weekly ads are not a browsable catalog, so department shelves stay on the demo catalog."
-            : "Target has no public product catalog API. Department shelves stay on the demo catalog until a licensed partner feed is configured. RedSky is not used."
+            ? `Target has no public shelf API. RedSky, Target Circle offers, and RedCard discounts are not used. Browse, search, and the trip plan show this week's Target circular when Flipp has one for the ZIP, labeled Weekly ad. Items that are not on the flyer stay on the demo catalog. ${WEEKLY_AD_ZIP}`
+            : "Target has no public product catalog API. Department shelves stay on the demo catalog until a licensed partner feed or Flipp weekly ads are configured. RedSky is not used."
         ),
     coverage(
       "Aldi",
@@ -98,10 +111,34 @@ export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
       false,
       flags.flipp ? "Weekly ad only" : "Demo catalog",
       flags.flipp
-        ? "Aldi has no product catalog API. Flipp weekly ads can fill trip-plan prices for items on the circular, but browse shelves stay on the demo catalog. Weekly ad is not a full assortment."
+        ? `Aldi has no product catalog API and no third-party cart. Browse, search, and the trip plan show Aldi circular prices when Flipp has a flyer for the ZIP, labeled Weekly ad. Many staples are never in the ad; those stay on the demo catalog or Unavailable. ${WEEKLY_AD_ZIP}`
         : "Aldi has no product catalog API. Browse shows the demo catalog only. Nothing here is a live Aldi shelf."
     ),
   ];
+
+  if (flags.flipp) {
+    for (const storeName of WEEKLY_AD_BANNERS) {
+      if (rows.some((row) => row.storeName.toLowerCase() === storeName.toLowerCase())) {
+        continue;
+      }
+      if (flags.partnerStores.some((name) => name.toLowerCase() === storeName.toLowerCase())) {
+        continue;
+      }
+      const club =
+        storeName === "Costco"
+          ? " Warehouse prices can require a membership, and there is no third-party cart write."
+          : " There is no public cart-write API for this banner.";
+      rows.push(
+        coverage(
+          storeName,
+          "weekly_ad_only",
+          false,
+          "Weekly ad",
+          `${storeName} has no public grocery price API. When this ZIP has a current circular, browse and search show those items labeled Weekly ad, and the default trip includes the banner.${club} ${WEEKLY_AD_ZIP}`
+        )
+      );
+    }
+  }
 
   for (const storeName of flags.partnerStores) {
     if (DEFAULT_STORES.some((name) => name.toLowerCase() === storeName.toLowerCase())) {
