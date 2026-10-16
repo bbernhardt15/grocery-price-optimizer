@@ -1,3 +1,4 @@
+import { detectPriceDrops, type DetectResult } from "../alerts/detect";
 import { mapToDepartment } from "../catalog/departments";
 import { CatalogMaster, CatalogOffer, IngestCheckpoint } from "./models";
 
@@ -75,4 +76,23 @@ export async function recategorizeCatalog(): Promise<{ examined: number; updated
     updated += 1;
   }
   return { examined: rows.length, updated };
+}
+
+/**
+ * Compare opted-in saved lists with catalog offers. The ingest tick calls
+ * this after prices refresh, so price alerts do not need their own service.
+ * A failure is logged and does not stop the crawl.
+ */
+export async function scanPriceDropAlerts(now = new Date()): Promise<DetectResult> {
+  try {
+    const result = await detectPriceDrops(now);
+    if (result.created > 0) {
+      console.log(`Price-drop alerts: ${result.created} new (${result.pushed} sent by web push).`);
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Price-drop scan failed: ${message}`);
+    return { examined: 0, created: 0, pushed: 0 };
+  }
 }

@@ -6,6 +6,7 @@ import {
   suggestionFacts,
   suggestionPriceLabel,
 } from "./shopper/typeahead.js";
+import { itemWatched, nextItemWatch, parseTargetPrice } from "./shopper/priceAlerts.js";
 import {
   nextTheme,
   parseThemeChoice,
@@ -51,7 +52,12 @@ const suggestStatus = $("suggest-status");
 const planBtn = $("plan-btn");
 const planErrorEl = $("plan-error");
 const allowSubsEl = $("allow-subs");
+const listAlertsEl = $("list-alerts");
 const listPanel = $("list-panel");
+const alertsDialog = $("alerts-dialog");
+const alertsListEl = $("alerts-list");
+const alertsEmptyEl = $("alerts-empty");
+const alertsToggle = $("alerts-toggle");
 const toastEl = $("toast");
 const productDialog = $("product-dialog");
 const coverageDialog = $("coverage-dialog");
@@ -59,6 +65,12 @@ const coverageDialog = $("coverage-dialog");
 const ZIP_KEY = "gg-zip";
 const LIST_KEY = "gg-list";
 const SUBS_KEY = "gg-subs";
+const ALERTS_KEY = "gg-list-alerts";
+const DEVICE_KEY = "gg-device";
+const LIST_ID_KEY = "gg-list-id";
+const PUSH_KEY = "gg-push";
+const SYNC_FLAG = "gg-watch-synced";
+const WATCH_LIST_KEY = "gg-watch-list";
 const SHARE_KEY = "gg-share";
 const OWNER_KEY = "gg-owner";
 const NAME_KEY = "gg-display-name";
@@ -135,6 +147,12 @@ let suggestLoadingTimer = 0;
 let suggestAbort = null;
 let activeSuggest = -1;
 let listLoading = false;
+let listReady = false;
+let watchTimer = 0;
+let unreadAlerts = 0;
+/** @type {Array<Record<string, any>>} */
+let priceAlerts = [];
+let pushPublicKey = "";
 /** @type {Array<Record<string, any>>} */
 let suggestions = [];
 /** Query the current suggestion rows belong to. */
@@ -255,6 +273,50 @@ function bestOffer(product, store) {
   return [...(pool.length ? pool : product.offers)].sort((a, b) => a.price - b.price)[0];
 }
 
+function randomId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `gg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function deviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
+
+function savedListId() {
+  let id = localStorage.getItem(LIST_ID_KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(LIST_ID_KEY, id);
+  }
+  return id;
+}
+
+function activeListId() {
+  if (shareState?.shareToken && !shareState.revoked) return shareState.shareToken;
+  return savedListId();
+}
+
+function alertFields(source, product) {
+  const offer = product?.offers?.length ? bestOffer(product) : null;
+  const stored = Number(source?.baselinePrice);
+  return {
+    baselinePrice: stored > 0 ? stored : offer?.price ?? null,
+    baselineStore: source?.baselineStore || offer?.storeName || "",
+    watch: source?.watch === "on" || source?.watch === "off" ? source.watch : "inherit",
+    targetPrice: Number(source?.targetPrice) > 0 ? Number(source.targetPrice) : null,
+  };
+}
+
+function findListEntry(id) {
+  if (!id) return null;
+  return list.get(id) || [...list.values()].find((entry) => entry.product?.id === id || entry.itemId === id) || null;
+}
+
 function saveList() {
   const rows = [...list.values()].map((entry) => ({
     id: entry.product.id,
@@ -267,8 +329,81 @@ function saveList() {
     name: entry.product.name,
     brand: entry.product.brand,
     sizeLabel: entry.product.sizeLabel,
+    baselinePrice: entry.baselinePrice,
+    baselineStore: entry.baselineStore,
+    watch: entry.watch || "inherit",
+    targetPrice: entry.targetPrice ?? null,
   }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
+  scheduleWatchSync();
+}
+
+function scheduleWatchSync() {
+  if (!listReady) return;
+  window.clearTimeout(watchTimer);
+  watchTimer = window.setTimeout(() => void syncWatch(), 400);
+}
+
+async function syncWatch() {
+  const listOn = Boolean(listAlertsEl?.checked);
+  const items = [];
+  for (const entry of list.values()) {
+    if (!(Number(entry.baselinePrice) > 0)) continue;
+    items.push({
+      productId: entry.product.id,
+      name: entry.product.name,
+      brand: entry.product.brand || "",
+      watch: entry.watch || "inherit",
+      baselinePrice: entry.baselinePrice,
+      baselineStore: entry.baselineStore || "",
+      targetPrice: entry.targetPrice ?? null,
+    });
+  }
+  const active = listOn || items.some((item) => item.watch === "on");
+  if (!active && localStorage.getItem(SYNC_FLAG) !== "1") return;
+  const zip = normalizeZip(zipEl.value);
+  const listId = activeListId();
+  const previous = localStorage.getItem(WATCH_LIST_KEY);
+  let retired = !previous || previous === listId;
+  if (previous && previous !== listId) {
+    try {
+      const off = await fetch(apiUrl("/api/price-alerts/watches"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deviceId: deviceId(),
+          listId: previous,
+          listName: "My list",
+          zip: "",
+          enabled: false,
+          items: [],
+        }),
+      });
+      retired = off.ok;
+    } catch {
+      retired = false;
+    }
+  }
+  try {
+    const response = await fetch(apiUrl("/api/price-alerts/watches"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId: deviceId(),
+        listId,
+        listName: shareState?.title || "My list",
+        zip: ZIP_PATTERN.test(zip) ? zip.slice(0, 5) : "",
+        enabled: listOn,
+        items,
+      }),
+    });
+    if (response.ok) {
+      localStorage.setItem(SYNC_FLAG, "1");
+      if (retired) localStorage.setItem(WATCH_LIST_KEY, listId);
+    }
+  } catch {
+    /* the list stays on this device; the next change tries again */
+  }
 }
 
 function quotesForProduct(product, allowSubs) {
@@ -378,6 +513,8 @@ function renderListRows() {
       const sub = gap?.substitute
         ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
         : "";
+      const watched = itemWatched(Boolean(listAlertsEl?.checked), entry.watch || "inherit");
+      const targetValue = entry.targetPrice ? String(entry.targetPrice) : "";
       const price = offer ? `<p class="muted">${money(offer.price)} at ${escapeHtml(offer.storeName)}</p>` : "";
       const credit = attributionLine(entry);
       const itemId = entry.itemId || entry.product.id;
@@ -393,6 +530,15 @@ function renderListRows() {
           ${price}
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
           ${sub}
+          <div class="alert-controls">
+            <label class="check-row item-watch">
+              <input type="checkbox" data-watch="${escapeHtml(entry.product.id)}" ${watched ? "checked" : ""} />
+              Watch price
+            </label>
+            <label class="target-price">Target $
+              <input data-target="${escapeHtml(entry.product.id)}" inputmode="decimal" value="${escapeHtml(targetValue)}" placeholder="optional" aria-label="Target price for ${escapeHtml(entry.product.name)}" />
+            </label>
+          </div>
         </div>
         <div class="stepper">
           <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>−</button>
@@ -433,7 +579,7 @@ function addProduct(product, quantity = 1) {
     toast("This list is view-only.");
     return;
   }
-  const existing = list.get(product.id);
+  const existing = list.get(product.id) || findListEntry(product.id);
   const next = Math.min(99, (existing?.quantity ?? 0) + quantity);
   const entry = {
     product,
@@ -443,8 +589,13 @@ function addProduct(product, quantity = 1) {
     addedBy: existing?.addedBy || readDisplayName() || undefined,
     checkedBy: existing?.checkedBy,
     writtenAt: Date.now(),
+    ...alertFields(existing, product),
   };
-  list.set(product.id, entry);
+  const key = existing?.itemId || product.id;
+  for (const [storedId, stored] of [...list]) {
+    if (storedId !== key && (stored === existing || stored.product?.id === product.id)) list.delete(storedId);
+  }
+  list.set(key, entry);
   productsById.set(product.id, product);
   saveList();
   renderEstimate();
@@ -1121,6 +1272,17 @@ function applyServerList(body) {
   const previousProducts = new Map(
     [...list.values()].map((entry) => [entry.itemId || entry.product.id, entry.product])
   );
+  const previousAlerts = new Map();
+  for (const entry of list.values()) {
+    const prefs = {
+      baselinePrice: entry.baselinePrice,
+      baselineStore: entry.baselineStore,
+      watch: entry.watch,
+      targetPrice: entry.targetPrice,
+    };
+    if (entry.itemId) previousAlerts.set(entry.itemId, prefs);
+    if (entry.product?.id) previousAlerts.set(entry.product.id, prefs);
+  }
   const remoteById = new Map(body.items.map((item) => [item.itemId, item]));
   for (const [id, write] of [...pendingWrites]) {
     const remote = remoteById.get(id);
@@ -1144,6 +1306,7 @@ function applyServerList(body) {
     const product = known?.offers?.length ? known : productsById.get(item.catalogId || item.itemId)?.offers?.length
       ? productsById.get(item.catalogId || item.itemId)
       : stubFromItem(item);
+    const prefs = previousAlerts.get(item.itemId) || previousAlerts.get(item.catalogId) || previousAlerts.get(product.id);
     const entry = {
       product,
       quantity: Math.max(1, Number(item.quantity) || 1),
@@ -1152,6 +1315,7 @@ function applyServerList(body) {
       addedBy: item.addedBy,
       checkedBy: item.checkedBy,
       writtenAt: Number(item.writtenAt) || 0,
+      ...alertFields(prefs, product),
     };
     list.set(entry.itemId, entry);
     productsById.set(product.id, product);
@@ -1176,12 +1340,16 @@ async function hydrateSharedProducts() {
         if (!body.product?.id) return;
         productsById.set(body.product.id, body.product);
         const entry = list.get(body.product.id) || [...list.values()].find((row) => row.product?.id === body.product.id);
-        if (entry) entry.product = body.product;
+        if (entry) {
+          entry.product = body.product;
+          if (!(Number(entry.baselinePrice) > 0)) Object.assign(entry, alertFields(entry, body.product));
+        }
       } catch {
         /* the shared name still shows if the catalog misses */
       }
     })
   );
+  saveList();
   renderEstimate();
   syncCards();
 }
@@ -1329,6 +1497,7 @@ function handleRevoked(token) {
   rememberSession(shareState);
   toast("This link was turned off.");
   renderShareChrome();
+  scheduleWatchSync();
 }
 
 async function openSharedList(token, { mergeLocal = false } = {}) {
@@ -1516,6 +1685,7 @@ async function useOwnList() {
   const owned = readOwned();
   if (owned?.shareToken) await openSharedList(owned.shareToken, { mergeLocal: true });
   else renderEstimate();
+  scheduleWatchSync();
 }
 
 function toggleChecked(itemId, checked) {
@@ -1546,6 +1716,7 @@ function rememberLocalRow(row) {
     addedBy: row.addedBy,
     checkedBy: row.checkedBy,
     writtenAt: Number(row.writtenAt) || 0,
+    ...alertFields(row, product),
   });
 }
 
@@ -1568,14 +1739,16 @@ async function restoreList() {
           return;
         }
         productsById.set(body.product.id, body.product);
-        list.set(body.product.id, {
+        const itemId = row.itemId || body.product.id;
+        list.set(itemId, {
           product: body.product,
           quantity: Math.max(1, Number(row.quantity) || 1),
-          itemId: row.itemId || body.product.id,
+          itemId,
           checked: Boolean(row.checked),
           addedBy: row.addedBy,
           checkedBy: row.checkedBy,
           writtenAt: Number(row.writtenAt) || 0,
+          ...alertFields(row, body.product),
         });
       } catch {
         if (row.name) rememberLocalRow(row);
@@ -1786,10 +1959,37 @@ allowSubsEl.addEventListener("change", () => {
   localStorage.setItem(SUBS_KEY, allowSubsEl.checked ? "1" : "0");
   renderEstimate();
 });
+listAlertsEl?.addEventListener("change", () => {
+  localStorage.setItem(ALERTS_KEY, listAlertsEl.checked ? "1" : "0");
+  renderListRows();
+  saveList();
+});
+listItemsEl.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.dataset.watch) {
+    const entry = findListEntry(target.dataset.watch);
+    if (!entry) return;
+    entry.watch = nextItemWatch(Boolean(listAlertsEl?.checked), target.checked);
+    saveList();
+    return;
+  }
+  if (target.dataset.target) {
+    const entry = findListEntry(target.dataset.target);
+    if (!entry) return;
+    entry.targetPrice = parseTargetPrice(target.value);
+    saveList();
+  }
+});
+alertsToggle?.addEventListener("click", () => void openAlerts(!alertsDialog?.open));
+$("alerts-close")?.addEventListener("click", () => openAlerts(false));
+alertsDialog?.addEventListener("close", () => alertsToggle?.setAttribute("aria-expanded", "false"));
+$("push-btn")?.addEventListener("click", () => void enablePush());
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
   if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
+  scheduleWatchSync();
   void loadPage(true);
 });
 $("theme-btn").addEventListener("click", () => {
@@ -1812,10 +2012,145 @@ const observer = new IntersectionObserver((entries) => {
 });
 observer.observe(sentinelEl);
 
+function paintAlertBadge() {
+  const badge = $("alerts-badge");
+  if (!badge || !alertsToggle) return;
+  if (unreadAlerts > 0) {
+    badge.hidden = false;
+    badge.textContent = unreadAlerts > 9 ? "9+" : String(unreadAlerts);
+    alertsToggle.setAttribute("aria-label", `Price alerts, ${unreadAlerts} new`);
+  } else {
+    badge.hidden = true;
+    badge.textContent = "0";
+    alertsToggle.setAttribute("aria-label", "Price alerts");
+  }
+}
+
+function paintAlertList() {
+  if (!alertsListEl || !alertsEmptyEl) return;
+  alertsEmptyEl.hidden = priceAlerts.length > 0;
+  alertsListEl.innerHTML = priceAlerts
+    .map((alert) => {
+      const target = alert.hitTarget ? `<p class="muted">Under your target</p>` : "";
+      return `<li class="alert-row">
+        <div>
+          <strong>${escapeHtml(alert.itemName)}</strong>
+          <p class="muted">${escapeHtml(alert.storeName)}</p>
+          ${target}
+        </div>
+        <div class="alert-prices">
+          <p><span class="muted">Old</span> ${money(alert.oldPrice)}</p>
+          <p><span class="muted">New</span> <strong>${money(alert.newPrice)}</strong></p>
+          <p class="savings-badge">Save ${money(alert.savings)}</p>
+        </div>
+      </li>`;
+    })
+    .join("");
+}
+
+async function refreshAlerts() {
+  try {
+    const response = await fetch(apiUrl(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`));
+    if (!response.ok) return;
+    const body = await response.json();
+    priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
+    unreadAlerts = Number(body.unread) || 0;
+    paintAlertBadge();
+    if (alertsDialog?.open) paintAlertList();
+  } catch {
+    /* the badge updates on the next pass */
+  }
+}
+
+async function openAlerts(show) {
+  if (!alertsDialog || !alertsToggle) return;
+  alertsToggle.setAttribute("aria-expanded", show ? "true" : "false");
+  if (!show) {
+    if (alertsDialog.open) alertsDialog.close();
+    return;
+  }
+  await refreshAlerts();
+  paintAlertList();
+  if (!alertsDialog.open) alertsDialog.showModal();
+  const unseen = priceAlerts.filter((alert) => !alert.seen).map((alert) => alert.id);
+  if (unseen.length === 0) return;
+  try {
+    await fetch(apiUrl("/api/price-alerts/seen"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: deviceId(), ids: unseen }),
+    });
+    priceAlerts = priceAlerts.map((alert) => ({ ...alert, seen: true }));
+    unreadAlerts = 0;
+    paintAlertBadge();
+  } catch {
+    /* the badge clears the next time the panel opens */
+  }
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output;
+}
+
+async function loadPushStatus() {
+  const row = $("push-row");
+  try {
+    const response = await fetch(apiUrl("/api/price-alerts/status"));
+    if (!response.ok) return;
+    const body = await response.json();
+    pushPublicKey = body.webPush?.publicKey || "";
+    if (row) row.hidden = !body.webPush?.enabled;
+    const button = $("push-btn");
+    if (button && localStorage.getItem(PUSH_KEY) === "1") button.textContent = "Notifications on";
+  } catch {
+    if (row) row.hidden = true;
+  }
+}
+
+async function enablePush() {
+  const note = $("push-note");
+  const button = $("push-btn");
+  if (!pushPublicKey || !("serviceWorker" in navigator) || !("PushManager" in window) || typeof Notification === "undefined") {
+    if (note) note.textContent = "This browser cannot receive notifications. Alerts still show in this panel.";
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    if (note) note.textContent = "Notifications stay off until you allow them. Alerts still show in this panel.";
+    return;
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
+    });
+    const json = subscription.toJSON();
+    const response = await fetch(apiUrl("/api/price-alerts/push"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: deviceId(), subscription: json }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not save this device.");
+    localStorage.setItem(PUSH_KEY, "1");
+    if (button) button.textContent = "Notifications on";
+    if (note) note.textContent = "This browser will get a notification when a price drops.";
+  } catch (error) {
+    if (note) note.textContent = error instanceof Error ? error.message : "Could not turn on notifications.";
+  }
+}
+
 async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
+  if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
   const nameEl = $("display-name");
   if (nameEl) nameEl.value = localStorage.getItem(NAME_KEY) || "";
   const urlToken = listTokenFromPath(window.location.pathname);
@@ -1843,11 +2178,20 @@ async function boot() {
     if (resumeToken) await openSharedList(resumeToken, { mergeLocal: true });
   }
   listLoading = false;
+  listReady = true;
   renderEstimate();
+  saveList();
+  await refreshAlerts();
+  await loadPushStatus();
   await loadPage(true);
+  if (new URLSearchParams(location.search).get("alerts") === "1") void openAlerts(true);
   if (!isNative() && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data?.type === "price-alerts") void openAlerts(true);
+    });
   }
+  window.setInterval(() => void refreshAlerts(), 60_000);
 }
 
 void boot().finally(() => {

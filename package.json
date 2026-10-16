@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/lists/**/*.test.ts",
+    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/alerts/**/*.test.ts src/lists/**/*.test.ts",
     "ingest": "tsx src/ingest/cli.ts",
     "ingest:demo": "tsx src/ingest/cli.ts --demo",
     "scrape": "tsx src/scrape-grocery.ts",
@@ -33,7 +33,8 @@
     "mongodb-memory-server": "^10.1.4",
     "mongoose": "^8.24.4",
     "puppeteer": "^25.10.0",
-    "puppeteer-core": "^25.10.0"
+    "puppeteer-core": "^25.10.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.2",
