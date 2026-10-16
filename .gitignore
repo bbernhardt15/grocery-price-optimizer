@@ -1,3 +1,17 @@
 node_modules/
 .env
 dist/
+
+# Capacitor native build output and signing material
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcworkspace/xcuserdata/
