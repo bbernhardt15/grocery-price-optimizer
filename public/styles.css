@@ -127,6 +127,12 @@ img { max-width: 100%; display: block; }
   display: inline-grid; place-items: center; min-width: 1.4rem; height: 1.4rem; margin-left: 6px;
   border-radius: 999px; background: var(--accent-ink); color: var(--accent); font-size: 0.8rem;
 }
+.count-pill[hidden] { display: none; }
+.alerts-toggle {
+  min-height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); padding: 0 12px; font-weight: 700;
+}
+.alerts-toggle .count-pill { background: var(--sale); color: var(--sale-ink); }
 
 .body {
   display: grid;
@@ -233,6 +239,25 @@ img { max-width: 100%; display: block; }
   display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; align-items: center;
 }
 .list-row img { width: 52px; height: 52px; object-fit: cover; border-radius: 10px; background: var(--bg-accent); }
+.list-alert-toggle { align-items: flex-start; }
+.list-alert-toggle span { flex: 1; line-height: 1.35; }
+.alert-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.item-watch { min-height: 32px; font-size: 0.82rem; }
+.target-price { display: flex; align-items: center; gap: 4px; font-size: 0.82rem; color: var(--muted); }
+.target-price input {
+  width: 84px; min-height: 36px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); padding: 0 8px;
+}
+.alert-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: min(50dvh, 420px); overflow: auto; }
+.alert-row {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px;
+}
+.alert-prices { text-align: right; }
+.alert-prices p { margin: 0; }
+.alert-row .savings-badge { margin-top: 4px; }
+#push-row { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+#push-row[hidden] { display: none; }
 .savings { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
 .savings-label { margin: 0; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .savings-total { margin: 0; font-family: var(--display); font-size: 2rem; }

@@ -27,6 +27,7 @@ import {
   sanitizeKrogerParam,
 } from "./krogerTerms";
 import { markKrogerLookup, markWalmartLookup, nextKrogerLookup, nextWalmartLookup } from "./crossLookup";
+import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import {
@@ -1051,6 +1052,7 @@ export async function runDemoIngest(now = new Date()): Promise<SliceResult> {
     { status: "completed", calls: 0, upserted: saved.offers, finished: true, cycle: true }
   );
   await markStaleCatalog(now);
+  await scanPriceDropAlerts(now);
   return { provider: "demo", calls: 0, upserted: saved.offers, paused: null };
 }
 
@@ -1103,6 +1105,8 @@ export async function runIngestTick(options?: {
       const done = await IngestCheckpoint.findOne({ provider: "demo", status: "completed" }).lean();
       if (!done) {
         slices.push(await runDemoIngest(options?.now?.() ?? new Date()));
+      } else {
+        await scanPriceDropAlerts(options?.now?.() ?? new Date());
       }
       return { locked: true, slices };
     }
@@ -1132,6 +1136,7 @@ export async function runIngestTick(options?: {
       );
     }
     await markStaleCatalog(options?.now?.() ?? new Date());
+    await scanPriceDropAlerts(options?.now?.() ?? new Date());
     return { locked: true, slices };
   } finally {
     await releaseIngestLock(owner);

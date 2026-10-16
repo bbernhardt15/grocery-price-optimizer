@@ -13,6 +13,7 @@ Open `/` and shop by department instead of typing a list first.
 - **Search** — debounced typeahead over the cached catalog, with the match highlighted and brand, department, size, and price when the shelf has them. Arrow keys, Enter, and Escape work. Submitting search refreshes from configured providers (cached)
 - **Sort / filter** — relevance, lowest price, lowest unit price, name, on sale first; department, store, brand, size class, price range, on sale, store brand
 - **My list** — saved in the browser, with a live estimated total and a savings meter versus the most expensive store that can fill the list
+- **Price alerts** — opt in on My list, or on a single item. A badge and an Alerts panel show when the best price drops. See [Price drop alerts](#price-drop-alerts)
 - **Theme** — light, dark, or match this device. The choice is remembered in the browser and applied before the first paint so dark mode does not flash pure black
 - **Substitutes** — when a UPC is missing at a store, the closest same-department item is labeled **Substitute**, never as an exact match. **Allow substitutes in the trip plan** lets that item compete on price
 - **Plan the trip** — `POST /api/optimize-list` with the selected `catalogId`s. Checkout handoffs are unchanged (Kroger, Walmart add-to-cart, Instacart when configured)
@@ -93,6 +94,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - `ADMIN_TOKEN` set to a long random string.
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
+   - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
    - `CATALOG_INGEST_ENABLED=true`
@@ -121,6 +123,18 @@ Local demo, no keys:
 ```bash
 npm run ingest:demo
 ```
+
+## Price drop alerts
+
+Turn on **Alert me when prices on this list drop** in My list. Every item on that list is watched. You can also watch a single item while the list switch is off, or turn one item off while the list is on. An optional target on an item is included when you set it under the price you saved.
+
+The price that matters is the best in-stock price across stores in the saved catalog (`CatalogOffer`). A Kroger row only counts for the list's ZIP. A Walmart row with no ZIP is the catalog price and still counts. The check runs at the end of each catalog ingest pass, including the demo load, so it does not need its own service. The same drop is stored once. A later lower price can alert again. A price that goes back up and returns to a price you were already told about does not alert again.
+
+The Alerts panel lists the item, the store, the old price, the new price, and the savings. The badge is the number you have not opened yet.
+
+Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification). `VAPID_SUBJECT` is a `mailto:` or `https:` URL; it defaults to `mailto:price-alerts@grocerygitter.app`. Generate a pair with `npx web-push generate-vapid-keys`. If the keys are unset, alerts still show in the app and `POST /api/price-alerts/push` returns 503.
+
+Phone push (Capacitor, APNs, or FCM) is not sent yet. Alerts are stored the same way, and a native transport can register later without a new collection. `GET /api/price-alerts/status` reports `nativePush.enabled: false` until that exists.
 
 ## Phone and tablet apps (later)
 
@@ -151,6 +165,7 @@ const config = {
 
 4. Open Kroger, Walmart, Target, and Instacart handoffs in the system browser (`@capacitor/browser`) so OAuth cookies and add-to-cart links work. The Kroger redirect URI stays the Railway HTTPS callback.
 5. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
+6. Price alerts already show in the web view. When you add a native shell, register a push transport on the server (`registerNativePushTransport` in `src/alerts/push.ts`) and store the device token on `PushSubscription` with `channel: "native"`. Web Push keeps working beside it. Do not add a second alert scanner.
 
 ## What it includes
 
@@ -484,6 +499,20 @@ Response shape:
 ```
 
 Each grocery item is assigned to **one** store using the [matching and unit-price rules](#matching-and-unit-price): the product itself beats a flavor or ingredient, then the closest requested size or the lower unit price. Matching still splits the name into keywords (ignoring FatSecret serving annotations like `(28g)` and package sizes) and requires those whole words in product `name` (so `"milk"` matches `"Whole Milk"` and `"egg"` matches `"Eggs"`). If nothing matches the full FatSecret name (e.g. `"Honey Nut Cheerios Cereal"`), the lookup retries without generic trailing words (`"Honey Nut Cheerios"`) and then the first two words (`"Honey Nut"`). Picked items include `unitPriceText` (for example `"$3.50/gal"`) when a package size was parsed. Store `subtotal` and the list `total` use `itemTotal` (shelf price × quantity). `tripPlan.summary` is the shopper-facing split (`15 Kroger + 5 Walmart + 10 Target`). Items with no match appear in `unavailable`. When live pricing is down and **no** item can be priced from the local catalog, `POST /api/optimize-list` returns **503** with an actionable `error` instead of a silent `$0.00` empty trip. When some stores fail but others (or the demo catalog) still price the list, the response is **200** with `pricingWarning` and per-store `pricing` badges. When `zipCode` is sent, `locationId` is the Kroger store used for those prices.
+
+### Price drop alerts
+
+`GET /api/price-alerts/status` — `{ webPush: { enabled, publicKey? }, nativePush: { enabled } }`. `publicKey` is present only when Web Push is on. It is not a secret. The private key is never returned.
+
+`PUT /api/price-alerts/watches` — body `{ deviceId, listId, listName?, zip?, enabled, items }`. Each item is `{ productId, name, brand?, watch?: "inherit"|"on"|"off", baselinePrice, baselineStore?, targetPrice? }`. `baselinePrice` is the price when the shopper saved the item. `productId` is the browse id (`upc:…`).
+
+`GET /api/price-alerts?deviceId=` — `{ unread, alerts }`. Each alert has `itemName`, `storeName`, `oldPrice`, `newPrice`, and `savings`.
+
+`POST /api/price-alerts/seen` — `{ deviceId, ids? }` clears the badge.
+
+`POST /api/price-alerts/push` — `{ deviceId, subscription }` stores a browser push subscription. **503** when the VAPID keys are unset.
+
+`DELETE /api/price-alerts/push` — `{ deviceId, endpoint }` removes that subscription.
 
 ### `GET /api/kroger/auth-status`
 

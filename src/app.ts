@@ -7,6 +7,7 @@ import krogerCartRouter from "./routes/krogerCart";
 import instacartShoppingListRouter from "./routes/instacartShoppingList";
 import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
+import priceAlertsRouter from "./routes/priceAlerts";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -58,6 +59,18 @@ app.get("/api", (_req, res) => {
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":
         "Creates an Instacart Developer Platform shopping list (POST /idp/v1/products/products_link) and returns productsLinkUrl. Hidden in the UI when the key or base URL is unset.",
+      "GET /api/price-alerts/status":
+        "Whether browser notifications are on. Web Push is off until VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set. nativePush stays false until a phone transport is registered.",
+      "PUT /api/price-alerts/watches":
+        "Saves one shopping list's price-drop opt-in: list switch, optional per-item watch, the price when the item was saved, and an optional target.",
+      "GET /api/price-alerts":
+        "In-app alerts for a device: item, store, old price, new price, and savings. unread is the badge count.",
+      "POST /api/price-alerts/seen":
+        "Clears the badge for this device.",
+      "POST /api/price-alerts/push":
+        "Stores a Web Push subscription. 503 when VAPID keys are unset.",
+      "DELETE /api/price-alerts/push":
+        "Removes a Web Push subscription for this device.",
     },
   });
 });
@@ -68,6 +81,7 @@ app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
+app.use("/api", priceAlertsRouter);
 app.use(
   express.static(publicDir, {
     etag: false,
