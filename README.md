@@ -122,6 +122,20 @@ Local demo, no keys:
 npm run ingest:demo
 ```
 
+## Share a list
+
+A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
+
+Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when the app shell has it). Otherwise it copies the link.
+
+Anyone with the link can open the same list, add items, change quantities, and check items off. The page keeps up by listening for live updates, and falls back to checking every few seconds. If two people edit the same item, the later edit wins and the other item is left alone. When a name was entered, the row says who added it and who checked it off.
+
+The person who created the link can **Make view-only** or **Revoke link**. A view-only link can still be opened, but only that person can change it. A revoked link stops working. Sharing again makes a new link. One list never includes another list, and the link is not a guessable id.
+
+A shared list holds at most 100 items. Edits are rate-limited. The database stores hashes of the secrets, not the secrets themselves.
+
+In the Capacitor shell, set `window.apiUrl` to the hosted site (for example `https://grocery-price-optimizer-production.up.railway.app`) before the app script. Share links and API calls use that origin, so a `capacitor://` or `https://localhost` WebView does not hand someone a link that only works inside the app.
+
 ## Phone and tablet apps (later)
 
 This PR does **not** add Xcode or Android Studio projects. The UI is a static SPA in `public/` (no frontend build), with a web manifest, icons, and a network-first service worker so it can be installed as a PWA.
@@ -150,7 +164,8 @@ const config = {
 ```
 
 4. Open Kroger, Walmart, Target, and Instacart handoffs in the system browser (`@capacitor/browser`) so OAuth cookies and add-to-cart links work. The Kroger redirect URI stays the Railway HTTPS callback.
-5. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
+5. Install `@capacitor/share` so the share sheet can send a list link. If the WebView is not the hosted site, set `window.apiUrl` to that site before `app.js` loads. Shared links are `/list/<token>` on that origin.
+6. Android can ship the PWA first. iOS Add to Home Screen uses `/icons/apple-touch-icon.png` until the Capacitor shell exists.
 
 ## What it includes
 

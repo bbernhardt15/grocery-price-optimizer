@@ -7,6 +7,7 @@ import krogerCartRouter from "./routes/krogerCart";
 import instacartShoppingListRouter from "./routes/instacartShoppingList";
 import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
+import sharedListsRouter from "./routes/sharedLists";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -58,6 +59,16 @@ app.get("/api", (_req, res) => {
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":
         "Creates an Instacart Developer Platform shopping list (POST /idp/v1/products/products_link) and returns productsLinkUrl. Hidden in the UI when the key or base URL is unset.",
+      "POST /api/lists":
+        "Creates a shared shopping list, or resumes the one tied to a saved owner token. Returns the share token and owner token. There is no list of other people's lists.",
+      "GET /api/lists/:shareToken":
+        "Reads one shared list. ?since=seq returns changed:false when nothing is new. Owner header x-list-owner can still read a revoked link.",
+      "GET /api/lists/:shareToken/events":
+        "Server-sent events for one list. Polling the GET route is the fallback.",
+      "PATCH /api/lists/:shareToken/items":
+        "Edits items. Last write wins per item. View-only guests are refused. Rate limited.",
+      "POST /api/lists/:shareToken/settings":
+        "Owner only. mode view or edit, revoke, or rotate the link.",
     },
   });
 });
@@ -68,6 +79,7 @@ app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
+app.use("/api", sharedListsRouter);
 app.use(
   express.static(publicDir, {
     etag: false,
