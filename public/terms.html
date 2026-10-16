@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1c221e" />
+    <title>Terms — Grocery Gitter</title>
+    <link rel="stylesheet" href="/legal.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="/">Grocery Gitter</a>
+        <nav class="nav" aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms" aria-current="page">Terms</a>
+        </nav>
+      </header>
+      <h1>Terms of use</h1>
+      <p class="updated">Last updated October 16, 2026.</p>
+      <p>
+        These terms cover the Grocery Gitter website and the iOS and Android apps. The service is operated
+        by [LEGAL NAME]. Email [CONTACT EMAIL]. Mailing address: [MAILING ADDRESS].
+      </p>
+
+      <h2>What Grocery Gitter is</h2>
+      <p>
+        Grocery Gitter helps you compare grocery prices and split a list across stores. It is not a grocery
+        store. We do not sell the groceries, take payment for them, or deliver them. Checkout happens with
+        the retailer you choose — Kroger, Walmart, Target, Instacart, or another store the app links to.
+      </p>
+      <p>
+        There is no Grocery Gitter account and no fee to use the comparison. Retailers may charge their own
+        item, service, or delivery fees after you leave the app.
+      </p>
+
+      <h2>Prices can be wrong</h2>
+      <p>
+        A price may be a live shelf or catalog price, a weekly-ad price, a licensed partner feed, or a labeled
+        demo catalog price. It can be missing, stale, or different from the register. The badge on a trip
+        card says which kind you are looking at. Confirm the price and the product on the retailer’s site
+        before you pay.
+      </p>
+      <p>
+        Walmart figures are that site’s catalog, not a promise of the price at the nearest store. Weekly-ad
+        prices follow the circular for the ZIP you entered, not a national shelf.
+      </p>
+
+      <h2>Store handoffs</h2>
+      <p>
+        Buttons that open a retailer take you to that retailer’s site or app flow. Their terms and privacy
+        policy apply there. Kroger cart login, when it is offered, is Kroger’s login. We do not receive your
+        retailer password. A successful Kroger cart write means Kroger accepted the items; you still finish
+        pickup or delivery on Kroger.
+      </p>
+      <p>
+        Instacart is offered only when that integration is turned on, and only after you tap it. Grocery
+        Gitter does not place an Instacart order for you.
+      </p>
+
+      <h2>Your list and ZIP</h2>
+      <p>
+        My list and your ZIP stay on your device, as described in the <a href="/privacy">privacy policy</a>.
+        Planning a trip sends the list and ZIP to our server for that request. We do not keep the list as an
+        account. The 5-digit ZIP may be stored so the catalog can refresh prices near ZIPs people use.
+      </p>
+
+      <h2>Acceptable use</h2>
+      <p>Use Grocery Gitter for your own shopping. Do not:</p>
+      <ul>
+        <li>Break the law, or try to break into the service or a retailer’s systems.</li>
+        <li>Overload the site, or scrape it in a way that gets in the way of other shoppers.</li>
+        <li>Pretend the demo catalog or a weekly ad is a guarantee we did not make.</li>
+        <li>Misuse retailer credentials, including a Kroger login that is not yours.</li>
+      </ul>
+
+      <h2>The service can change</h2>
+      <p>
+        Stores, prices, and handoffs depend on outside APIs and on keys we are allowed to use. A store can
+        disappear from a trip, a cart button can fall back to a search link, and we can change or stop the
+        service. The apps load the same site, so the screen can change when the website changes.
+      </p>
+
+      <h2>No warranty</h2>
+      <p>
+        Grocery Gitter is provided as-is. We do not warrant that prices, stock, store hours, or handoffs are
+        complete, current, or error-free, or that the service will be uninterrupted.
+      </p>
+
+      <h2>Liability</h2>
+      <p>
+        To the extent the law allows, [LEGAL NAME] is not liable for indirect or consequential damages, or
+        for what a retailer charges you after you leave Grocery Gitter. These terms are governed by the laws
+        of [GOVERNING LAW], except where a shopper-protection law in your place requires something else.
+      </p>
+
+      <h2>Names</h2>
+      <p>
+        Grocery Gitter is our name. Kroger, Walmart, Target, Instacart, Aldi, and other store names are
+        trademarks of their owners. We are not those companies.
+      </p>
+
+      <h2>Changes to these terms</h2>
+      <p>
+        If these terms change, the new version will be posted on this page with a new date. Continuing to
+        use Grocery Gitter after that means you accept the update.
+      </p>
+
+      <h2>Contact</h2>
+      <p>Questions about these terms: [CONTACT EMAIL].</p>
+
+      <footer class="legal">
+        <p><a href="/">Back to Grocery Gitter</a> · <a href="/privacy">Privacy</a></p>
+      </footer>
+    </div>
+    <script src="/native-config.js"></script>
+    <script src="/native-shell.js"></script>
+    <script>
+      document.addEventListener("click", function (event) {
+        var el = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+        if (!el || !window.GroceryGitterNative || !window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+        var legal = window.GroceryGitterNative.bundledLegalPath(new URL(el.href).pathname);
+        if (!legal) return;
+        event.preventDefault();
+        window.location.href = legal;
+      });
+    </script>
+  </body>
+</html>

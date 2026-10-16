@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1c221e" />
+    <title>Privacy policy — Grocery Gitter</title>
+    <link rel="stylesheet" href="/legal.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="/">Grocery Gitter</a>
+        <nav class="nav" aria-label="Legal">
+          <a href="/privacy" aria-current="page">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </header>
+      <h1>Privacy policy</h1>
+      <p class="updated">Last updated October 16, 2026.</p>
+      <p>
+        Grocery Gitter helps you browse groceries, compare prices, and split a shopping trip across stores.
+        It is operated by [LEGAL NAME]. Email [CONTACT EMAIL]. Mailing address: [MAILING ADDRESS].
+      </p>
+
+      <h2>No account</h2>
+      <p>
+        There is no Grocery Gitter account. The app does not ask for your name, email address, phone number,
+        or a password of ours. You do not sign in to Grocery Gitter.
+      </p>
+
+      <h2>Saved on this device</h2>
+      <p>
+        A few things stay in local storage on the phone, tablet, or browser. They are not uploaded as a saved
+        account, and there is no server copy of “My list” tied to you:
+      </p>
+      <ul>
+        <li>Your ZIP code.</li>
+        <li>My list: the catalog id and quantity of each item you check. Product names are loaded again from the catalog when you reopen the app.</li>
+        <li>Whether you allow substitutes in the trip plan.</li>
+        <li>Your theme: light, dark, or match this device.</li>
+      </ul>
+      <p>Clearing site data for Grocery Gitter, or deleting the app, removes them.</p>
+
+      <h2>What is sent when you shop</h2>
+      <p>
+        Browsing, search, and Plan the trip send a request to Grocery Gitter’s server over HTTPS. That request
+        can include the ZIP code, the words you searched, and — when you plan a trip — each item’s name, brand,
+        quantity, catalog id, and UPC when we have one, plus whether you allowed substitutes.
+      </p>
+      <p>
+        The server uses that request to look up prices and return a trip. It does not save the shopping list
+        under an account.
+      </p>
+      <p>
+        The 5-digit ZIP is saved in our database, without your name or a device id. The record is a hit count,
+        the last time that ZIP was used, and sometimes the Kroger store id we resolved for it. The catalog job
+        uses a short list of recent shopper ZIPs (currently up to 12, plus a few cities we seed ourselves) so
+        prices can be refreshed near places people actually shop. Email [CONTACT EMAIL] with the ZIP if you
+        want that record removed.
+      </p>
+      <p>
+        Shelf answers may be cached for a few hours, keyed by department, search words, and ZIP. That cache is
+        product data, not a profile of you.
+      </p>
+      <p>
+        The ZIP is something you type. Grocery Gitter does not request GPS or other device location permission.
+      </p>
+
+      <h2>Kroger sign-in</h2>
+      <p>
+        Add to Kroger cart is optional. When it is turned on and you use it, you sign in on Kroger’s own site.
+        On the iOS and Android apps that page opens in the system browser. We never see your Kroger password.
+      </p>
+      <p>
+        Kroger returns a short authorization code. We exchange it for an access token and, when Kroger sends
+        one, a refresh token. Those tokens are encrypted with AES-256-GCM and kept in an HttpOnly cookie named
+        <code>kroger_shopper</code> (SameSite=Lax, and Secure on the production site). The cookie is not written
+        to our database. It lasts about 7 days when a refresh token is present, and about 40 minutes otherwise.
+        We use the token only to ask Kroger to add items — UPC, quantity, and pickup or delivery — to your
+        Kroger cart.
+      </p>
+      <p>
+        While you approve that cart, the item UPCs, quantities, names, and store location travel in a signed
+        link that expires after 15 minutes. A copy may sit in the memory of the server that started the login,
+        for that same window. It is not a saved list.
+      </p>
+
+      <h2>Retailer handoffs</h2>
+      <p>
+        Opening a store leaves Grocery Gitter. On the phone apps those links open in the system browser.
+        The retailer’s own privacy policy applies once you are on their site.
+      </p>
+      <ul>
+        <li><strong>Kroger.</strong> A search link, or the cart write above. The nearby-store lookup sends your ZIP to Kroger’s locations API. Product search sends product words or a UPC.</li>
+        <li><strong>Walmart.</strong> A search link or an add-to-cart link. When Walmart keys are set, product search and the nearest-store name and address go through Walmart’s affiliate API. We do not sign you into Walmart. Prices are Walmart’s website catalog, not a private store account.</li>
+        <li><strong>Target.</strong> A search on target.com. If a licensed Target feed is configured on the server, the search and ZIP are sent to that feed. There is no Target login in this app.</li>
+        <li><strong>Weekly ads.</strong> When that option is on, Aldi and other mapped banners send the ZIP and a search term to Flipp. There is no retailer login.</li>
+        <li><strong>Instacart.</strong> Only if you tap that button and the integration is turned on. We then send Instacart the item names, quantities, and any brand, size, unit, or UPC we have, plus the ZIP, and open the shopping-list link Instacart returns.</li>
+      </ul>
+
+      <h2>Analytics</h2>
+      <p>
+        Grocery Gitter does not include a third-party analytics or advertising SDK. There is no advertising
+        identifier and no crash-reporting product in the app. The shopper screen does not call a separate
+        nutrition-catalog search.
+      </p>
+      <p>
+        The server writes operational logs, for example when a store lookup fails or the catalog job is
+        running. The host that runs the site may keep ordinary request logs: IP address, time, and the path
+        that was requested. Those logs are for operating the service.
+      </p>
+
+      <h2>We do not sell data</h2>
+      <div class="card">
+        <p>
+          We do not sell personal information. We do not share it for advertising or with data brokers.
+          Information described above is used to show prices, remember a ZIP for the catalog refresh, and
+          complete a store handoff you asked for.
+        </p>
+      </div>
+
+      <h2>Children</h2>
+      <p>
+        Grocery Gitter is a shopping tool for adults. We do not knowingly collect information from children
+        under 13. If you believe a child used the app, email [CONTACT EMAIL].
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>You can browse without a ZIP. Nearby-store and weekly-ad prices will be limited, and Plan the trip asks for one.</li>
+        <li>You can skip Kroger cart login and Instacart. Search links still open the store.</li>
+        <li>You can clear on-device data in the browser, or delete the app.</li>
+        <li>You can ask us to delete a ZIP record by emailing [CONTACT EMAIL] with the ZIP.</li>
+      </ul>
+
+      <h2>Changes</h2>
+      <p>If this policy changes, the new version will be posted on this page with a new date.</p>
+
+      <footer class="legal">
+        <p><a href="/">Back to Grocery Gitter</a> · <a href="/terms">Terms</a></p>
+      </footer>
+    </div>
+    <script src="/native-config.js"></script>
+    <script src="/native-shell.js"></script>
+    <script>
+      document.addEventListener("click", function (event) {
+        var el = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+        if (!el || !window.GroceryGitterNative || !window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+        var legal = window.GroceryGitterNative.bundledLegalPath(new URL(el.href).pathname);
+        if (!legal) return;
+        event.preventDefault();
+        window.location.href = legal;
+      });
+    </script>
+  </body>
+</html>

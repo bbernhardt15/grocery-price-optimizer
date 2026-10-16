@@ -224,16 +224,9 @@ Use your computer’s LAN address. `http://localhost` on a phone is the phone, n
 
 ### App Store / Play Store prep
 
-Checklist only. This repo does not submit either store.
+Icons, splash screens, and the public privacy and terms pages are in the repo. The checklist of what you still do on a Mac and in the store consoles — bundle id, version numbers, screenshots, privacy answers, and signing — is [docs/APP_STORE.md](docs/APP_STORE.md). This repo does not submit either store.
 
-- [ ] Replace the default Capacitor icons: iOS `ios/App/App/Assets.xcassets/AppIcon.appiconset`, Android `android/app/src/main/res/mipmap-*`. Include a 1024×1024 App Store icon with no transparency.
-- [ ] Replace the splash artwork (iOS launch storyboard / `Splash.imageset`, Android `drawable*/splash.png`) and keep the green background `#0e7a45`.
-- [ ] Privacy: the app stores the shopping list and ZIP in on-device `localStorage`. There is no Grocery Gitter account. Say that in App Store privacy nutrition labels and the Play Data safety form. Retailer login (Kroger, Instacart) happens in the system browser on the retailer’s site.
-- [ ] Signing: Apple Developer account, distribution certificate, and provisioning profile for `app.grocerygitter`. Android upload keystore (`android/key.properties`, a `.jks` or `.keystore` — both are gitignored) and Play App Signing.
-- [ ] Create the App Store Connect app and the Play Console app with bundle / application id `app.grocerygitter` and name Grocery Gitter.
-- [ ] Screenshots, description, support URL, and age rating. Point support at the public Railway site.
-- [ ] Confirm a release build was synced **without** `CAPACITOR_SERVER_URL`, so the binary bundles `public/` and calls only the HTTPS API.
-- [ ] Confirm Kroger’s registered redirect URI is still the Railway `https://…/api/kroger/oauth/callback`, not an app URL scheme.
+The source mark is `assets/logo.svg` (dark canvas `#1c221e`). `npm run assets:generate` rebuilds the iOS, Android, and home-screen icons from it. Privacy is at `/privacy` and terms at `/terms`, linked from the page footer and from My list.
 
 ## What it includes
 

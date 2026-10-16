@@ -979,10 +979,18 @@ document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
   const anchor = target.closest("a[href]");
-  if (anchor && isNative() && window.GroceryGitterNative.isExternalNavigation(anchor.href, window.location.href)) {
-    event.preventDefault();
-    void openExternal(anchor.href);
-    return;
+  if (anchor && isNative()) {
+    const legal = window.GroceryGitterNative.bundledLegalPath(new URL(anchor.href).pathname);
+    if (legal) {
+      event.preventDefault();
+      window.location.href = legal;
+      return;
+    }
+    if (window.GroceryGitterNative.isExternalNavigation(anchor.href, window.location.href)) {
+      event.preventDefault();
+      void openExternal(anchor.href);
+      return;
+    }
   }
   if (!target.closest(".search") && !suggestPanel.hidden) closeSuggestions();
   const dept = target.closest("[data-dept]");
