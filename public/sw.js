@@ -1,4 +1,4 @@
-const CACHE = "grocery-gitter-shell-v1";
+const CACHE = "grocery-gitter-shell-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -23,14 +23,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok && url.pathname !== "/sw.js") {
+    (async () => {
+      try {
+        const response = await fetch(request);
+        if (response && response.ok && response.type === "basic" && url.pathname !== "/sw.js") {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
         }
         return response;
-      })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match("/")))
+      } catch {
+        const cached = (await caches.match(request)) || (await caches.match("/"));
+        if (cached) return cached;
+        return new Response("Grocery Gitter is offline.", {
+          status: 503,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+    })()
   );
 });

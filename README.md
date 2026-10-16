@@ -10,9 +10,10 @@ Open `/` and shop by department instead of typing a list first.
 
 - **Departments** — Produce, Dairy & Eggs, Meat & Seafood, Bakery, Deli, Pantry, Frozen, Snacks, Beverages, Breakfast, Baby, Household, Personal Care, Pet
 - **Product cards** — image (or a generated placeholder), name, size, best price and store, sale badge, checkbox, quantity stepper
-- **Search** — typeahead over the cached catalog; submitting search refreshes from configured providers (cached)
+- **Search** — debounced typeahead over the cached catalog, with the match highlighted and brand, department, size, and price when the shelf has them. Arrow keys, Enter, and Escape work. Submitting search refreshes from configured providers (cached)
 - **Sort / filter** — relevance, lowest price, lowest unit price, name, on sale first; department, store, brand, size class, price range, on sale, store brand
-- **My list** — saved in the browser, with a live estimated total and a savings meter versus buying everything at one store
+- **My list** — saved in the browser, with a live estimated total and a savings meter versus the most expensive store that can fill the list
+- **Theme** — light, dark, or match this device. The choice is remembered in the browser and applied before the first paint so dark mode does not flash pure black
 - **Substitutes** — when a UPC is missing at a store, the closest same-department item is labeled **Substitute**, never as an exact match. **Allow substitutes in the trip plan** lets that item compete on price
 - **Plan the trip** — `POST /api/optimize-list` with the selected `catalogId`s. Checkout handoffs are unchanged (Kroger, Walmart add-to-cart, Instacart when configured)
 - **ZIP** — remembered in `localStorage`
