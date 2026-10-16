@@ -136,7 +136,7 @@ Kroger, Walmart, Target, and Instacart handoffs open in the system browser (`@ca
 ### Prerequisites
 
 - **Node.js 20+** (same as the API)
-- **iOS:** a Mac with current Xcode and the iOS 15+ simulator runtime. The Xcode project’s deployment target is iOS 15. A paid Apple Developer account is only needed for a physical device or App Store upload. Capacitor 8 uses Swift Package Manager, so CocoaPods is not required.
+- **iOS:** a Mac with current Xcode and the iOS 15+ simulator runtime. The Xcode project’s deployment target is iOS 15. A paid Apple Developer account is only needed for a physical device or App Store upload. Capacitor 8 links plugins with Swift Package Manager (`ios/App/CapApp-SPM`), so CocoaPods is not required to run the simulator. `ios/App/Podfile` is there so the Codemagic Mac build can run `pod install` and open a workspace. To ship an iPhone build without a Mac, follow `docs/IOS_CLOUD_BUILD.md`.
 - **Android:** Android Studio, with Android SDK 36 (the project’s compile SDK) and an emulator or a device with USB debugging. Minimum device SDK is 24.
 
 `npm install` on a machine where you will run the native apps. The Capacitor packages are dev dependencies, so a production Railway install can omit them.
@@ -224,7 +224,7 @@ Use your computer’s LAN address. `http://localhost` on a phone is the phone, n
 
 ### App Store / Play Store prep
 
-Checklist only. This repo does not submit either store.
+Icons, screenshots, and privacy labels are still a checklist. `codemagic.yaml` builds a signed iOS app and sends it to TestFlight, and builds a signed Android App Bundle without uploading it to Play. The steps for someone without a Mac are in `docs/IOS_CLOUD_BUILD.md`.
 
 - [ ] Replace the default Capacitor icons: iOS `ios/App/App/Assets.xcassets/AppIcon.appiconset`, Android `android/app/src/main/res/mipmap-*`. Include a 1024×1024 App Store icon with no transparency.
 - [ ] Replace the splash artwork (iOS launch storyboard / `Splash.imageset`, Android `drawable*/splash.png`) and keep the green background `#0e7a45`.
