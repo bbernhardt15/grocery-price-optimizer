@@ -1908,4 +1908,68 @@ describe("catalog ingestion", () => {
     assert.equal((await CatalogOffer.findOne({ productKey: "other-b-complex" }))?.refreshExcluded, false);
     assert.equal(await CatalogMaster.countDocuments({ key: "other-b-complex" }), 1);
   });
+
+  it("clears refresh exclusion when allergy, pet food, training pants, and seeds leave Other", async () => {
+    const rows = [
+      {
+        key: "other-allergy",
+        name: "Benadryl Allergy Ultratabs",
+        categoryPaths: ["Health and Medicine"],
+        departmentId: "personal-care",
+      },
+      {
+        key: "other-dog-food",
+        name: "Iams ProActive Health Adult Dry Dog Food",
+        categoryPaths: ["Toys/Plush"],
+        departmentId: "pet",
+      },
+      {
+        key: "other-training-pants",
+        name: "Parent's Choice Training Pants",
+        categoryPaths: ["Clothing/Baby"],
+        departmentId: "baby",
+      },
+      {
+        key: "other-chia",
+        name: "Sanar Naturals Raw Black Chia Seeds, High Fiber, Omega-3",
+        categoryPaths: ["Health and Medicine"],
+        departmentId: "pantry",
+      },
+    ];
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: "Store",
+        departmentId: "other",
+        categoryPaths: row.categoryPaths,
+        walmartItemId: row.key,
+        lastSeenAt: new Date(),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 4,
+        lastSeenAt: new Date(),
+        status: "stale",
+        refreshExcluded: true,
+      });
+    }
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.ok(finished.clearedExclusions >= rows.length);
+    for (const row of rows) {
+      const master = await CatalogMaster.findOne({ key: row.key });
+      assert.equal(master?.departmentId, row.departmentId, row.key);
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, false, row.key);
+    }
+    await excludeNongroceryFromRefresh();
+    for (const row of rows) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, false, row.key);
+      assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+  });
 });

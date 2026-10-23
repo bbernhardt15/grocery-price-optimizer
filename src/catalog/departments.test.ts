@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { countHealthConsumableMoves, departmentName, mapToDepartment } from "./departments";
+import { countHealthConsumableMoves, countNameMoves, departmentName, mapToDepartment } from "./departments";
 
 describe("mapToDepartment", () => {
   it("maps Walmart-style category paths onto the shared tree", () => {
@@ -305,7 +305,7 @@ const OTHER_HEALTH_FIXTURE: {
   { name: "ArtNaturals Anti Aging Hyaluronic Acid Serum with Vitamin C and E Brightening Face Serum", categories: ["Apparel/Women"], expect: "body", departmentId: "personal-care", subcategory: "Body" },
   { name: "Amopé Radiant Skin Leg & Foot Daily Hydrating Serum, 3.5 oz", expect: "body", departmentId: "personal-care", subcategory: "Body" },
   { name: "Black & Beautiful Cocoa Butter Stick with Vitamin E, 1.1 oz", expect: "body", departmentId: "personal-care", subcategory: "Body" },
-  { name: "Tetra Goldfish Vitamin C Enriched Fish Food Flakes, 2.2 oz", expect: "stay", departmentId: "other" },
+  { name: "Tetra Goldfish Vitamin C Enriched Fish Food Flakes, 2.2 oz", expect: "stay", departmentId: "pet" },
   { name: "Zilla Vitamin Supplement Food Spray 8 Fluid Ounces", expect: "stay", departmentId: "other" },
   { name: "Horse Chestnut Extract Supplement Capsules", expect: "health", departmentId: "personal-care", subcategory: "Health" },
   { name: "Equate Weekly 7 Day Pill Planner, Large Pill Organizer", categories: LETTER_VITAMINS, expect: "stay", departmentId: "other" },
@@ -313,24 +313,24 @@ const OTHER_HEALTH_FIXTURE: {
   { name: "Gummy Bears", categories: ["Food/Candy"], expect: "stay", departmentId: "snacks" },
   { name: "Nordic Ware Microwave Omelet Pan Cooker", expect: "stay", departmentId: "other" },
   { name: "Holly Triangles Standard Holiday Card", expect: "stay", departmentId: "other" },
-  { name: "Badia Flax Seed, 1.5 oz Bag, Gluten-Free, Non-GMO, High in Omega-3", categories: ["Food/Pantry"], expect: "stay", departmentId: "pantry" },
-  { name: "Fish Oil Softgels for Dogs", expect: "stay", departmentId: "other" },
-  { name: "Hartz Multivitamin for Cats", categories: ["Vitamins"], expect: "stay", departmentId: "other" },
+  { name: "Badia Flax Seed, 1.5 oz Bag, Gluten-Free, Non-GMO, High in Omega-3", categories: ["Food/Pantry"], expect: "stay", departmentId: "pantry", subcategory: "Nuts & Seeds" },
+  { name: "Fish Oil Softgels for Dogs", expect: "stay", departmentId: "pet", subcategory: "Dog" },
+  { name: "Hartz Multivitamin for Cats", categories: ["Vitamins"], expect: "stay", departmentId: "pet", subcategory: "Cat" },
   { name: "Wardley Probiotic Turtle Sticks 3.7oz", expect: "stay", departmentId: "other" },
   { name: "Ensure Original Nutrition Shake", categories: ["Vitamins"], expect: "stay", departmentId: "beverages" },
   { name: "Similac Infant Formula with Vitamin D", categories: ["Vitamins"], expect: "stay", departmentId: "baby" },
   { name: "Turkesterone Supplement Similar to Ecdysterone for Testosterone Support", expect: "stay", departmentId: "other" },
   { name: "Handheld Massage Gun", categories: ["Health and Medicine/Massage"], expect: "stay", departmentId: "other" },
-  { name: "Parent's Choice Training Pants", categories: ["Clothing/Baby"], expect: "stay", departmentId: "other" },
+  { name: "Parent's Choice Training Pants", categories: ["Clothing/Baby"], expect: "stay", departmentId: "baby", subcategory: "Diapers" },
   { name: "Rolaids", categories: ["Baby/Health/Toddler Medicine"], expect: "stay", departmentId: "other" },
   { name: "Probiotics: A Step-By-Step Guide To Making Your Own Probiotics (Paperback)", categories: ["Books"], expect: "stay", departmentId: "other" },
   { name: "Melatonin for Sleep: Overcome Sleep Problems and Revitalize Your Body and Your Mind", expect: "stay", departmentId: "other" },
-  { name: "Equate Allergy Relief Diphenhydramine HCl 25mg Antihistamine Capsules, 24 Count", expect: "stay", departmentId: "other" },
-  { name: "GoodSense Glucose Tablets, Orange, 10 Ct", expect: "stay", departmentId: "other" },
-  { name: "Spring Valley Black Cohosh Menopause Complex Tablets, 60 Ct", expect: "stay", departmentId: "other" },
-  { name: "Centrum Ultra Womens 60ct", expect: "stay", departmentId: "other" },
+  { name: "Equate Allergy Relief Diphenhydramine HCl 25mg Antihistamine Capsules, 24 Count", expect: "stay", departmentId: "personal-care", subcategory: "Health" },
+  { name: "GoodSense Glucose Tablets, Orange, 10 Ct", expect: "stay", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Spring Valley Black Cohosh Menopause Complex Tablets, 60 Ct", expect: "stay", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Centrum Ultra Womens 60ct", expect: "health", departmentId: "personal-care", subcategory: "Health" },
   { name: "Clear Essence Complexion Soap with Alpha Hydroxy Acid, 5 oz", expect: "stay", departmentId: "other" },
-  { name: "Iams Dog Food", categories: ["Toys/Dog Toys"], expect: "stay", departmentId: "other" },
+  { name: "Iams Dog Food", categories: ["Toys/Dog Toys"], expect: "stay", departmentId: "pet", subcategory: "Dog" },
   { name: "Store Brand Item", categories: ["Health and Medicine/Vitamin B Complex"], expect: "stay", departmentId: "personal-care", subcategory: "Health" },
   { name: "Chobani Probiotic Yogurt", categories: ["Dairy"], expect: "stay", departmentId: "dairy-eggs" },
   { name: "King Oscar Sardines in Fish Oil", categories: ["Canned Goods"], expect: "stay", departmentId: "pantry" },
@@ -343,7 +343,7 @@ describe("health consumable names", () => {
     );
     const toHealth = OTHER_HEALTH_FIXTURE.filter((row) => row.expect === "health").length;
     const toBody = OTHER_HEALTH_FIXTURE.filter((row) => row.expect === "body").length;
-    assert.equal(toHealth, 24);
+    assert.equal(toHealth, 25);
     assert.equal(toBody, 3);
     assert.deepEqual(count, {
       examined: OTHER_HEALTH_FIXTURE.length,
@@ -363,6 +363,96 @@ describe("health consumable names", () => {
       if (row.expect === "body") {
         assert.match(mapped.reason ?? "", /skincare-serum/, row.name);
       }
+    }
+  });
+
+  it("moves the remaining Other misses and keeps the false friends", () => {
+    const cases: { name: string; categories?: string[]; departmentId: string; subcategory?: string; rule: string }[] = [
+      { name: "Equate Allergy Relief Diphenhydramine HCl 25mg Antihistamine Tablets", categories: ["Health and Medicine"], departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Zyrtec Cetirizine Hydrochloride Tablets, 30 ct", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Claritin Loratadine 24 Hour Tablets", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Allegra Fexofenadine Allergy Relief, 30 count", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Benadryl Allergy Ultratabs", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Benadryl Extra Strength Itch Stopping Cream", departmentId: "personal-care", subcategory: "Body", rule: "topical" },
+      { name: "GoodSense Glucose Tablets, Orange, 10 Ct", departmentId: "personal-care", subcategory: "Health", rule: "glucose" },
+      { name: "Relion Orange Glucose Tab 10 Ct", departmentId: "personal-care", subcategory: "Health", rule: "glucose" },
+      { name: "Allergy and Congestion Relief-D 12 Hour Tablets", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "Equate Antihistamine Allergy Tablets, 100 Count", departmentId: "personal-care", subcategory: "Health", rule: "allergy" },
+      { name: "GNC Calcium Citrate 500mg Soft Chews", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "BOOST GLUCOSE CONTROL Very Vanilla 8 fl. oz.", departmentId: "beverages", rule: "nutrition-drink" },
+      { name: "Glucose Gel 15g", departmentId: "personal-care", subcategory: "Health", rule: "glucose" },
+      { name: "Nature's Way Echinacea Complex Capsules, 100 Ct", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Saw Palmetto Extract Softgels, 450 mg", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Source Naturals Activated Quercetin Tablets, 100 Ct", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Doctor's Best High Absorption CoQ10 Softgels", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Turmeric Curcumin Capsules with BioPerine", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Ashwagandha Capsules, 60 ct", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Elderberry Gummies, 60 ct", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Potassium Gluconate 595 MG 100 Tablets", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Calcium Citrate Tablets, 200 ct", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Magnesium Citrate Capsules", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Zinc 50 mg Tablets", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "Ferrous Sulfate Tablets, 325 mg", departmentId: "personal-care", subcategory: "Health", rule: "herbal-mineral" },
+      { name: "BulkSupplements Pygeum Africanum Extract Capsules", departmentId: "personal-care", subcategory: "Health", rule: "supplement-brand" },
+      { name: "NOW Foods Magnesium Citrate Powder", departmentId: "personal-care", subcategory: "Health", rule: "supplement-brand" },
+      { name: "Huggies Pull-Ups Training Pants", categories: ["Clothing/Baby"], departmentId: "baby", subcategory: "Diapers", rule: "training-pants" },
+      { name: "Iams ProActive Health Adult Dry Dog Food", categories: ["Toys/Plush"], departmentId: "pet", subcategory: "Dog", rule: "pet-food" },
+      { name: "Purina Cat Treats", categories: ["Toys"], departmentId: "pet", subcategory: "Cat", rule: "pet-food" },
+      { name: "Tidy Cats Clumping Cat Litter", categories: ["Home Improvement"], departmentId: "pet", subcategory: "Cat", rule: "pet-litter" },
+      { name: "Zesty Paws Multivitamin for Dogs, 90 Soft Chews", categories: ["Toys"], departmentId: "pet", subcategory: "Dog", rule: "pet-vitamin" },
+      { name: "PediaSure Grow & Gain Kids Nutritional Shake, with Protein and Vitamins, Vanilla", departmentId: "beverages", rule: "nutrition-drink" },
+      { name: "Manitoba Harvest Hemp Hearts, High in Omega-3", categories: ["Jewelry"], departmentId: "pantry", subcategory: "Nuts & Seeds", rule: "seeds" },
+      { name: "Sanar Naturals Raw Black Chia Seeds, High Fiber, Omega-3", departmentId: "pantry", subcategory: "Nuts & Seeds", rule: "seeds" },
+    ];
+    const guards: { name: string; categories?: string[]; departmentId: string }[] = [
+      { name: "allergy-free cookies", categories: ["Food/Snacks"], departmentId: "snacks" },
+      { name: "Jolly Rancher Hard Candy", departmentId: "snacks" },
+      { name: "Holly Triangles Standard Holiday Card", departmentId: "other" },
+      { name: "Nordic Ware Microwave Omelet Pan", departmentId: "other" },
+      { name: "Nordic Naturals Ultimate Omega Softgels", departmentId: "personal-care" },
+      { name: "Iron Man Graphic T-Shirt", categories: ["Apparel"], departmentId: "other" },
+      { name: "Lodge Cast Iron Skillet", departmentId: "other" },
+      { name: "McCormick Ground Turmeric", categories: ["Food/Spices"], departmentId: "pantry" },
+      { name: "Elderberry cookies", departmentId: "snacks" },
+      { name: "Glucose Powder (Atomized) For Confectionary Use", departmentId: "other" },
+      { name: "Glucose Monitoring Logbook (Paperback)", departmentId: "other" },
+      { name: "Asutra Silk Eye Pillow With Organic Lavender & Flax Seeds", departmentId: "other" },
+      { name: "Diaper Pins, 4 count", categories: ["Baby/Diapering"], departmentId: "other" },
+      { name: "Litter-Robot 4 Automatic Self-Cleaning Litter Box", categories: ["Pets"], departmentId: "other" },
+      { name: "How to Build a Gift Basket (Paperback)", categories: ["Food/Food Gifts"], departmentId: "other" },
+      { name: "Vibrant Life Plush Dog Toy", categories: ["Toys/Dog Toys"], departmentId: "other" },
+      { name: "Goodnites Sleep Shorts", categories: ["Baby/Potty Training"], departmentId: "other" },
+    ];
+    const count = countNameMoves(cases.map((row) => ({ name: row.name, categories: row.categories })));
+    const expectedRules = cases.reduce<Record<string, number>>((totals, row) => {
+      totals[row.rule] = (totals[row.rule] ?? 0) + 1;
+      return totals;
+    }, {});
+    assert.equal(count.examined, cases.length);
+    assert.equal(count.stayed, 0);
+    assert.deepEqual(count.byRule, expectedRules);
+    assert.equal(expectedRules.allergy, 7);
+    assert.equal(expectedRules.topical, 1);
+    assert.equal(expectedRules.glucose, 3);
+    assert.equal(expectedRules["herbal-mineral"], 13);
+    assert.equal(expectedRules["supplement-brand"], 2);
+    assert.equal(expectedRules["training-pants"], 1);
+    assert.equal(expectedRules["pet-food"], 2);
+    assert.equal(expectedRules["pet-litter"], 1);
+    assert.equal(expectedRules["pet-vitamin"], 1);
+    assert.equal(expectedRules["nutrition-drink"], 2);
+    assert.equal(expectedRules.seeds, 2);
+    for (const row of cases) {
+      const mapped = mapToDepartment(row.categories, row.name);
+      assert.equal(mapped.departmentId, row.departmentId, row.name);
+      if (row.subcategory) {
+        assert.equal(mapped.subcategory, row.subcategory, row.name);
+      }
+      assert.match(mapped.reason ?? "", new RegExp(`name:${row.rule}→`), row.name);
+    }
+    for (const row of guards) {
+      const mapped = mapToDepartment(row.categories, row.name);
+      assert.equal(mapped.departmentId, row.departmentId, row.name);
     }
   });
 });
