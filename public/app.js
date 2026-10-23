@@ -26,6 +26,7 @@ import {
   visibleItems,
 } from "./shopper/shareList.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
+import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -429,6 +430,12 @@ async function syncWatch() {
         items,
       }),
     });
+    if (response.status === 402) {
+      const body = await response.json().catch(() => ({}));
+      toast(body.error || "Price alerts are part of Grocery Gitter Pro.");
+      openPaywall();
+      return;
+    }
     if (response.ok) {
       localStorage.setItem(SYNC_FLAG, "1");
       if (retired) localStorage.setItem(WATCH_LIST_KEY, listId);
@@ -1079,6 +1086,7 @@ function renderTrip(payload) {
       <div>
         <p>Trip plan</p>
         <p>${escapeHtml(payload.tripPlan?.summary || `${stores.length} stores`)}</p>
+        ${payload.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
         <div id="instacart-whole"></div>
       </div>
       <p class="trip-total">${money(payload.total)}</p>
@@ -1092,8 +1100,12 @@ function renderTrip(payload) {
     ${checkedStoresHtml(payload, stores)}
   `;
   const whole = $("instacart-whole");
-  if (instacartEnabled && stores.length) {
+  const cartLocked = payload.entitlement?.limited?.includes("cartHandoffs");
+  if (instacartEnabled && stores.length && !cartLocked) {
     whole.innerHTML = `<p>or shop the whole list on Instacart</p><button type="button" class="instacart-cta" data-instacart-scope="list"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`;
+  }
+  for (const button of tripEl.querySelectorAll("[data-open-paywall]")) {
+    button.addEventListener("click", () => openPaywall());
   }
   $("trip-back").onclick = () => {
     tripEl.hidden = true;
@@ -1111,8 +1123,11 @@ function renderStore(store) {
     })
     .join("");
   const action = store.handoff?.action;
+  const cartLocked = lastOptimize?.entitlement?.limited?.includes("cartHandoffs");
   let handoff = "";
-  if (action?.type === "coming_soon") {
+  if (action?.type === "coming_soon" && cartLocked) {
+    handoff = `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
+  } else if (action?.type === "coming_soon") {
     handoff = `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
   } else if (action?.type === "kroger_cart") {
     handoff = `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label)}</button>`;
@@ -1120,7 +1135,7 @@ function renderStore(store) {
     handoff = `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label)}</a>`;
   }
   const instacart =
-    instacartEnabled && action?.type !== "kroger_cart" && action?.type !== "walmart_cart"
+    instacartEnabled && !cartLocked && action?.type !== "kroger_cart" && action?.type !== "walmart_cart"
       ? `<button type="button" class="instacart-cta" data-instacart-scope="store" data-instacart-store="${escapeHtml(store.storeName)}"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`
       : "";
   const nearby = store.nearbyStore?.name
@@ -1203,7 +1218,7 @@ async function openInstacart(button) {
   }
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/instacart/shopping-list"), {
+    const response = await apiFetch("/api/instacart/shopping-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1213,6 +1228,7 @@ async function openInstacart(button) {
       }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok || !body.productsLinkUrl) throw new Error(body.error || "Instacart did not return a link.");
     await openExternal(body.productsLinkUrl);
   } catch (error) {
@@ -1235,6 +1251,7 @@ async function startKroger(storeName, button) {
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
     if (body.authorizeUrl) {
       if (isNative()) {
@@ -1608,6 +1625,7 @@ async function postList(extra = {}) {
     }),
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 402) openPaywall();
   if (!response.ok) {
     toast(body.error || "Could not share this list.");
     return null;
@@ -2048,6 +2066,9 @@ for (const button of document.querySelectorAll(".settings-open")) {
   button.addEventListener("click", openSettings);
 }
 $("settings-close")?.addEventListener("click", () => $("settings-dialog")?.close());
+$("open-paywall")?.addEventListener("click", () => openPaywall());
+$("paywall-close")?.addEventListener("click", () => $("paywall-dialog")?.close());
+$("paywall-restore")?.addEventListener("click", () => void restorePurchases());
 $("delete-confirm")?.addEventListener("input", () => {
   const button = $("delete-data-btn");
   const confirmEl = $("delete-confirm");
@@ -2255,6 +2276,7 @@ function openSettings() {
   if (button) button.disabled = true;
   if (dialog && !dialog.open) dialog.showModal();
   confirmEl?.focus();
+  void loadBilling();
 }
 
 async function dropKrogerInSystemBrowser() {
@@ -2488,6 +2510,165 @@ async function mergeThisDevice() {
   });
 }
 
+let billingStatus = null;
+let purchasesConfigured = false;
+
+function paywallError(text) {
+  const el = $("paywall-error");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintPlan() {
+  const status = $("plan-status");
+  if (!status || !billingStatus) return;
+  if (!billingStatus.enforced) {
+    status.textContent = "Subscriptions are not turned on yet, so every feature stays available.";
+    return;
+  }
+  status.textContent = billingStatus.pro
+    ? "Grocery Gitter Pro is active on this account."
+    : "One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.";
+}
+
+function paintPaywall() {
+  const note = $("paywall-note");
+  const restore = $("paywall-restore");
+  const manage = $("paywall-manage");
+  const terms = $("paywall-terms");
+  const privacy = $("paywall-privacy");
+  const view = paywallView({
+    status: billingStatus,
+    platform: platformOf(window.Capacitor),
+    signedIn: Boolean(accountState?.id || readSessionToken()),
+  });
+  if (terms) terms.href = view.terms;
+  if (privacy) privacy.href = view.privacy;
+  if (manage) {
+    manage.hidden = !view.manageUrl;
+    if (view.manageUrl) manage.href = view.manageUrl;
+  }
+  if (restore) restore.hidden = !view.native;
+  const lines = [];
+  if (!view.enforced) lines.push("Subscriptions are not turned on yet, so every feature stays available.");
+  if (view.showWebNote) lines.push(view.webNote);
+  if (view.needsSignIn) lines.push("Sign in from Settings, then subscribe.");
+  if (view.unconfigured) lines.push("Subscriptions are not configured in this build yet.");
+  if (view.pro) lines.push("Grocery Gitter Pro is active on this account.");
+  if (note) note.textContent = lines.join(" ");
+  return view;
+}
+
+async function loadBilling() {
+  try {
+    const response = await apiFetch("/api/billing/status");
+    if (!response.ok) return;
+    billingStatus = await response.json();
+    paintPlan();
+  } catch {
+    /* the trip still works; Settings can try again */
+  }
+}
+
+function purchasesPlugin() {
+  return window.Capacitor?.Plugins?.Purchases || null;
+}
+
+async function configurePurchases(view) {
+  const plugin = purchasesPlugin();
+  if (!plugin?.configure || !view.canPurchase) return null;
+  const appUserID = accountState?.id;
+  if (!appUserID) return null;
+  const apiKey = sdkKeyFor(billingStatus, view.native ? platformOf(window.Capacitor) : "web");
+  if (!purchasesConfigured) {
+    await plugin.configure({ apiKey, appUserID });
+    purchasesConfigured = true;
+  } else if (plugin.logIn) {
+    await plugin.logIn({ appUserID });
+  }
+  return plugin;
+}
+
+async function refreshEntitlement() {
+  const response = await apiFetch("/api/billing/refresh", { method: "POST" });
+  if (!response.ok) return;
+  await loadBilling();
+  paintPaywall();
+}
+
+async function loadOfferings() {
+  const view = paintPaywall();
+  const box = $("paywall-packages");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!view.canPurchase) return;
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.getOfferings) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    const offerings = await plugin.getOfferings();
+    const choices = packageChoices(offerings);
+    if (!choices.length) {
+      paywallError("No subscription is available yet.");
+      return;
+    }
+    for (const choice of choices) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost";
+      button.textContent = choice.price ? `${choice.title} · ${choice.price}` : choice.title;
+      button.addEventListener("click", () => void purchasePackage(plugin, choice.raw));
+      box.appendChild(button);
+    }
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not load subscriptions.");
+  }
+}
+
+async function purchasePackage(plugin, aPackage) {
+  paywallError("");
+  try {
+    await plugin.purchasePackage({ aPackage });
+    await refreshEntitlement();
+    toast("Grocery Gitter Pro is active.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The purchase did not finish.";
+    if (!/cancel/i.test(message)) paywallError(message);
+  }
+}
+
+async function restorePurchases() {
+  const view = paintPaywall();
+  if (!view.canPurchase) {
+    paywallError(view.showWebNote ? view.webNote : "Sign in from Settings, then restore purchases.");
+    return;
+  }
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.restorePurchases) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    await plugin.restorePurchases();
+    await refreshEntitlement();
+    toast(billingStatus?.pro ? "Purchases restored." : "No active subscription was found.");
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not restore purchases.");
+  }
+}
+
+function openPaywall() {
+  const dialog = $("paywall-dialog");
+  paintPaywall();
+  if (dialog && !dialog.open) dialog.showModal();
+  void loadOfferings();
+}
+
 async function loadAccount() {
   const box = $("account-box");
   try {
@@ -2715,6 +2896,7 @@ async function boot() {
   renderEstimate();
   saveList();
   await loadAccount();
+  await loadBilling();
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);

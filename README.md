@@ -181,6 +181,8 @@ Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the 
 
 A shopper can share the list on this device without an account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item. Sign-in is optional and stays hidden until it is configured. See [Optional accounts](docs/ACCOUNTS.md).
 
+Subscriptions stay off until `REVENUECAT_WEBHOOK_SECRET` is set. Until then every feature stays available. See [Subscriptions](docs/SUBSCRIPTIONS.md).
+
 Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
 
 Anyone with the link can open the same list, add items, change quantities, and check items off. The page keeps up by listening for live updates, and falls back to checking every few seconds. If two people edit the same item, the later edit wins and the other item is left alone. When a name was entered, the row says who added it and who checked it off.

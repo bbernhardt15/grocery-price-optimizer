@@ -4,6 +4,7 @@ import { requestAuth } from "../auth/middleware";
 import { nativePushConfigured } from "../alerts/push";
 import { vapidConfig, webPushConfigured } from "../alerts/vapid";
 import { parsePublicId, parsePushSubscription, parseWatchBody } from "../alerts/watchInput";
+import { blockUnlessFeature } from "../billing/middleware";
 
 const router = Router();
 
@@ -49,6 +50,10 @@ router.put("/price-alerts/watches", asyncRoute(async (req: Request, res: Respons
     res.status(400).json({
       error: "Send deviceId, listId, enabled, and items with a product id, name, and the price when you saved each one.",
     });
+    return;
+  }
+  const turningOn = watch.enabled || watch.items.some((item) => item.watch === "on");
+  if (turningOn && (await blockUnlessFeature(req, res, "priceAlerts", "Price alerts are part of Grocery Gitter Pro."))) {
     return;
   }
   const accountId = requestAuth(res)?.accountId;

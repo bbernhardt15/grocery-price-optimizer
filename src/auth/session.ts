@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
+import { isProAccount } from "../billing/entitlement";
 import { Account, AuthSession } from "./models";
 import { sha256 } from "./seal";
 
@@ -73,11 +74,14 @@ export async function accountSummary(accountId: string) {
   if (!account) return null;
   const { AuthIdentity } = await import("./models");
   const identities = await AuthIdentity.find({ accountId }).select("provider").lean();
+  const pro = isProAccount(account);
   return {
     id: String(account._id),
     email: account.email || "",
     displayName: account.displayName || "",
     providers: identities.map((row) => row.provider),
     krogerLinked: Boolean(account.krogerSealed),
+    entitlement: pro ? ("pro" as const) : ("free" as const),
+    pro,
   };
 }

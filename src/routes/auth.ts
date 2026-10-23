@@ -15,7 +15,10 @@ import { consumeMagicLink, issueMagicLink, normalizeEmailAddress, publicOrigin }
 import { findOrCreateAccount, type VerifiedIdentity } from "../auth/identity";
 import { normalizePem, signEs256Jwt } from "../auth/jwt";
 import { krogerCookie, requestAuth } from "../auth/middleware";
-import { Account } from "../auth/models";
+import { Account, SavedList } from "../auth/models";
+import { accessFor } from "../billing/access";
+import { paywallBody } from "../billing/http";
+import { withinCap } from "../billing/limits";
 import { mergeDeviceIntoAccount, parseMergeBody } from "../auth/merge";
 import { ProviderError, verifyAppleIdentity, verifyGoogleIdentity } from "../auth/providers";
 import { parseSavedListWrite, readSavedList, writeSavedList } from "../auth/savedList";
@@ -421,6 +424,15 @@ router.put("/me/list", async (req, res) => {
     return;
   }
   try {
+    const access = await accessFor(res);
+    const cap = access.limits.savedLists;
+    if (cap !== 0) {
+      const count = await SavedList.countDocuments({ accountId: auth.accountId });
+      if (count === 0 && !withinCap(count, cap)) {
+        res.status(402).json(paywallBody("A saved list is part of Grocery Gitter Pro.", "savedLists"));
+        return;
+      }
+    }
     res.json({ list: await writeSavedList(auth.accountId, parsed) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "list sync failed";
