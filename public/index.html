@@ -76,6 +76,7 @@
             <span>ZIP</span>
             <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" aria-describedby="zip-hint" />
           </label>
+          <button type="button" class="settings-btn settings-open">Settings</button>
           <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
             <span aria-hidden="true" id="theme-glyph">◐</span>
           </button>
@@ -167,6 +168,7 @@
             <nav aria-label="Legal">
               <a href="/privacy">Privacy</a>
               <a href="/terms">Terms</a>
+              <button type="button" class="linkish settings-open">Settings</button>
             </nav>
           </footer>
         </main>
@@ -222,6 +224,7 @@
           <nav class="panel-legal" aria-label="App information">
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
+            <button type="button" class="linkish settings-open">Settings</button>
           </nav>
         </aside>
       </div>
@@ -253,6 +256,27 @@
           <button type="button" class="ghost" id="push-btn">Notify this browser</button>
           <p id="push-note" class="muted">Alerts stay in this panel even if you skip notifications.</p>
         </div>
+      </div>
+    </dialog>
+    <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="settings-title">Settings</h2>
+          <button type="button" class="text-btn" id="settings-close">Close</button>
+        </div>
+        <section class="delete-box" aria-labelledby="delete-data-title">
+          <h3 id="delete-data-title">Delete my data</h3>
+          <p class="muted">
+            This removes the list on this device, shared lists you created, price alerts, and notifications.
+            It also signs this browser out of Kroger. You cannot undo it.
+          </p>
+          <label>
+            Type DELETE to confirm
+            <input id="delete-confirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+          </label>
+          <button type="button" class="danger" id="delete-data-btn" disabled>Delete my data</button>
+          <p id="delete-error" class="status" role="alert" hidden></p>
+        </section>
       </div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

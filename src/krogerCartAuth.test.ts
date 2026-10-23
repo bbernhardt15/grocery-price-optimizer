@@ -11,6 +11,9 @@ import {
   readCartModality,
   readKrogerOAuthConfig,
   refreshShopperToken,
+  clearShopperCookieHeader,
+  revokeSealedShopperCookie,
+  revokeShopperToken,
   sealShopperToken,
   signCartState,
   toCartLines,
@@ -244,6 +247,57 @@ describe("exchangeAuthorizationCode", () => {
 
     const token = await refreshShopperToken(config, "refresh-1");
     assert.equal(token.accessToken, "shopper-2");
+  });
+
+  it("treats a Kroger invalid_token revoke as already gone", async () => {
+    const seen: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      assert.match(url, /\/connect\/oauth2\/revoke$/);
+      const params = new URLSearchParams(String(init?.body));
+      seen.push(`${params.get("token_type_hint")}:${params.get("token")}`);
+      assert.match(new Headers(init?.headers).get("Authorization") ?? "", /^Basic /);
+      return Response.json({ error: "invalid_token" }, { status: 400 });
+    };
+    assert.equal(await revokeShopperToken(config, "refresh-1", "refresh_token"), true);
+    assert.deepEqual(seen, ["refresh_token:refresh-1"]);
+  });
+
+  it("reports revoke failure without throwing when Kroger is unreachable", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+    assert.equal(await revokeShopperToken(config, "access-1", "access_token"), false);
+  });
+
+  it("revokes the refresh token and the access token from a sealed cookie", async () => {
+    process.env.KROGER_CLIENT_ID = config.clientId;
+    process.env.KROGER_CLIENT_SECRET = config.clientSecret;
+    process.env.KROGER_REDIRECT_URI = config.redirectUri;
+    const sealed = sealShopperToken(config.clientSecret, {
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      expiresAtMs: Date.now() + 60_000,
+    });
+    const hints: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      hints.push(new URLSearchParams(String(init?.body)).get("token_type_hint") ?? "");
+      return new Response(null, { status: 200 });
+    };
+    const result = await revokeSealedShopperCookie(sealed);
+    assert.equal(result.hadToken, true);
+    assert.equal(result.revoked, true);
+    assert.deepEqual(hints.sort(), ["access_token", "refresh_token"]);
+  });
+});
+
+describe("Kroger shopper cookie clearing", () => {
+  it("drops the cookie and adds Secure only in production", () => {
+    assert.equal(
+      clearShopperCookieHeader("test"),
+      "kroger_shopper=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    );
+    assert.match(clearShopperCookieHeader("production"), /; Secure$/);
   });
 });
 
