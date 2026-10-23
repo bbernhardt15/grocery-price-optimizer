@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { STORE_HANDOFF_CONFIG } from "./storeHandoffConfig";
+import { FLIPP_MERCHANT_MAPPINGS } from "./pricing/flipp/merchants";
 import type { StoreGroup } from "./optimizeGroceryList";
 import {
   buildStoreHandoff,
@@ -8,6 +11,7 @@ import {
   krogerSearchUrl,
   targetSearchUrl,
   walmartSearchUrl,
+  aldiSearchUrl,
   partnerSearchUrl,
   KROGER_CART_START_PATH,
 } from "./storeHandoff";
@@ -131,8 +135,9 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.subtotal, 5.78);
     assert.equal(handoff.items[0].upc, "0001111041700");
     assert.equal(handoff.items[0].locationId, "01400441");
-    assert.equal(handoff.action.type, "search_deeplink");
-    assert.equal(handoff.action.label, "Open at Kroger");
+    assert.equal(handoff.action.type, "shop_list");
+    assert.equal(handoff.tier, "cart");
+    assert.equal(handoff.action.label, "Shop this list at Kroger");
     assert.equal(handoff.action.status, "ready");
     assert.equal(handoff.action.url, krogerSearchUrl(krogerMilk));
     assert.match(handoff.action.detail ?? "", /authorization-code/i);
@@ -149,7 +154,7 @@ describe("buildStoreHandoff", () => {
     });
 
     assert.equal(handoff.action.type, "kroger_cart");
-    assert.equal(handoff.action.label, "Add to Kroger cart");
+    assert.equal(handoff.action.label, "Send to Kroger cart");
     assert.equal(handoff.action.status, "needs_shopper_login");
     assert.equal(handoff.action.url, KROGER_CART_START_PATH);
     assert.equal(handoff.action.fallbackUrl, krogerSearchUrl(krogerMilk));
@@ -167,7 +172,7 @@ describe("buildStoreHandoff", () => {
       krogerCartOAuthConfigured: true,
     });
 
-    assert.equal(handoff.action.type, "search_deeplink");
+    assert.equal(handoff.action.type, "shop_list");
     assert.match(handoff.action.detail ?? "", /UPC/i);
   });
 
@@ -177,8 +182,8 @@ describe("buildStoreHandoff", () => {
       items: [walmartBread],
       subtotal: 1.28,
     });
-    assert.equal(walmart.action.type, "search_deeplink");
-    assert.equal(walmart.action.label, "Search at Walmart");
+    assert.equal(walmart.action.type, "shop_list");
+    assert.equal(walmart.action.label, "Shop this list at Walmart");
     assert.equal(walmart.action.url, walmartSearchUrl(walmartBread));
     assert.match(walmart.action.detail ?? "", /not a cart fill/i);
     assert.match(walmart.action.detail ?? "", /partner/i);
@@ -188,8 +193,9 @@ describe("buildStoreHandoff", () => {
       items: [targetEggs],
       subtotal: 1.99,
     });
-    assert.equal(target.action.type, "search_deeplink");
-    assert.equal(target.action.label, "Search at Target");
+    assert.equal(target.action.type, "shop_list");
+    assert.equal(target.tier, "link");
+    assert.equal(target.action.label, "Shop this list at Target");
     assert.match(target.action.detail ?? "", /not a cart fill/i);
     assert.match(target.action.detail ?? "", /partner/i);
   });
@@ -225,7 +231,7 @@ describe("buildStoreHandoff", () => {
     }
 
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Add 3 items to Walmart cart");
+    assert.equal(handoff.action.label, "Open Walmart cart");
     assert.equal(handoff.action.status, "ready");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
@@ -258,7 +264,7 @@ describe("buildStoreHandoff", () => {
       process.env.WALMART_PUBLISHER_ID = previous;
     }
 
-    assert.equal(handoff.action.label, "Add 1 item to Walmart cart");
+    assert.equal(handoff.action.label, "Open Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin, "https://goto.walmart.com");
     assert.match(url.pathname, /^\/c\/impact-42\/568844\/9383$/);
@@ -340,7 +346,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 2,
     });
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Add 2 items to Walmart cart");
+    assert.equal(handoff.action.label, "Open Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
     assert.equal(url.searchParams.get("items"), "554433|2");
@@ -371,22 +377,25 @@ describe("buildStoreHandoff", () => {
       ],
       subtotal: 1.28,
     });
-    assert.equal(handoff.action.type, "search_deeplink");
-    assert.equal(handoff.action.label, "Search at Walmart");
+    assert.equal(handoff.action.type, "shop_list");
+    assert.equal(handoff.action.label, "Shop this list at Walmart");
   });
 
-  it("marks Aldi as coming soon", () => {
+  it("gives Aldi a checklist with a verified search link", () => {
     const handoff = buildStoreHandoff({
       storeName: "Aldi",
       items: [aldiBananas],
       subtotal: 1.47,
     });
     assert.equal(handoff.itemCount, 3);
-    assert.equal(handoff.action.type, "coming_soon");
-    assert.equal(handoff.action.label, "Coming soon");
-    assert.equal(handoff.action.status, "coming_soon");
-    assert.equal(handoff.action.url, undefined);
-    assert.match(handoff.action.detail ?? "", /partner API/i);
+    assert.equal(handoff.tier, "link");
+    assert.equal(handoff.action.type, "shop_list");
+    assert.equal(handoff.action.label, "Shop this list at Aldi");
+    assert.equal(handoff.action.status, "ready");
+    assert.equal(aldiSearchUrl(aldiBananas), "https://www.aldi.us/store/aldi/search?q=Bananas");
+    assert.equal(handoff.items[0].url, aldiSearchUrl(aldiBananas));
+    assert.equal(handoff.items[0].openLabel, "Open in Aldi");
+    assert.match(handoff.action.detail ?? "", /not a cart fill/i);
   });
 
   it("uses public search deeplinks for partner banners and never fakes a cart fill", () => {
@@ -408,8 +417,8 @@ describe("buildStoreHandoff", () => {
       items: [milk],
       subtotal: 3.19,
     });
-    assert.equal(publix.action.type, "search_deeplink");
-    assert.equal(publix.action.label, "Search at Publix");
+    assert.equal(publix.action.type, "shop_list");
+    assert.equal(publix.action.label, "Shop this list at Publix");
     assert.equal(publix.action.status, "ready");
     assert.equal(
       partnerSearchUrl("Publix", milk),
@@ -423,11 +432,12 @@ describe("buildStoreHandoff", () => {
       items: [{ ...milk, storeName: "Costco", brand: "Kirkland" }],
       subtotal: 3.19,
     });
-    assert.equal(costco.action.type, "search_deeplink");
+    assert.equal(costco.action.type, "shop_list");
+    assert.equal(costco.tier, "link");
+    assert.equal(costco.priceLabel, "Weekly ad, not shelf price");
     assert.match(costco.action.detail ?? "", /membership/i);
     assert.match(costco.action.detail ?? "", /cart-write is not available/i);
     assert.match(costco.action.detail ?? "", /weekly ad, not a shelf price/i);
-    assert.equal(costco.action.type, "search_deeplink");
   });
 
   it("sends circular banners to the store site and never a cart", () => {
@@ -465,12 +475,16 @@ describe("buildStoreHandoff", () => {
         items: [{ ...milk, storeName }],
         subtotal: 3.19,
       });
-      assert.equal(handoff.action.type, "search_deeplink", storeName);
+      assert.equal(handoff.action.type, "shop_list", storeName);
+      assert.equal(handoff.tier, "link", storeName);
+      assert.equal(handoff.priceLabel, "Weekly ad, not shelf price", storeName);
+      assert.equal(handoff.action.label, `Shop this list at ${storeName}`, storeName);
       assert.notEqual(handoff.action.type, "kroger_cart");
       assert.notEqual(handoff.action.type, "walmart_cart");
       assert.match(handoff.action.detail ?? "", /not a cart fill/i, storeName);
       assert.match(handoff.action.detail ?? "", /weekly ad, not a shelf price/i, storeName);
       assert.match(handoff.action.url ?? "", /Whole%20Milk/, storeName);
+      assert.equal(handoff.items[0].openLabel, `Open in ${storeName}`, storeName);
       assert.equal((handoff.action.url ?? "").includes("999001"), false, storeName);
     }
   });
@@ -494,9 +508,10 @@ describe("enrichOptimizeResult", () => {
     assert.equal(enriched.tripPlan.itemCount, 4);
     assert.equal(enriched.tripPlan.storeCount, 3);
     assert.equal(enriched.stores[0].items[0].name, "Gallon of Milk");
-    assert.equal(enriched.stores[0].handoff.action.type, "search_deeplink");
-    assert.equal(enriched.stores[1].handoff.action.label, "Search at Target");
-    assert.equal(enriched.stores[2].handoff.action.label, "Search at Walmart");
+    assert.equal(enriched.stores[0].handoff.action.type, "shop_list");
+    assert.equal(enriched.stores[1].handoff.action.label, "Shop this list at Target");
+    assert.equal(enriched.stores[2].handoff.action.label, "Shop this list at Walmart");
+    assert.equal(enriched.capabilities.krogerCart, false);
     assert.equal(enriched.stores[2].nearbyStore, undefined);
   });
 
@@ -524,5 +539,45 @@ describe("enrichOptimizeResult", () => {
     assert.equal(enriched.stores[0].nearbyStore, undefined);
     assert.equal(enriched.stores[1].nearbyStore?.name, "WM Supercenter");
     assert.equal(enriched.stores[1].nearbyStore?.storeId, "2066");
+  });
+});
+
+describe("Flipp merchants have a handoff tier", () => {
+  it("uses link when merchants.json has a search URL, and never invents a cart", () => {
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      const row = STORE_HANDOFF_CONFIG.find((config) => config.storeName === mapping.storeName);
+      assert.ok(row, mapping.storeName);
+      if (mapping.searchUrl) {
+        assert.equal(row.tier, "link", mapping.storeName);
+        const url = partnerSearchUrl(mapping.storeName, {
+          name: "Milk",
+          priceSource: "weekly_ad",
+        });
+        assert.equal(url, mapping.searchUrl.replaceAll("{q}", "Milk"), mapping.storeName);
+        const handoff = buildStoreHandoff({
+          storeName: mapping.storeName,
+          items: [{ ...aldiBananas, storeName: mapping.storeName, priceSource: "weekly_ad" }],
+          subtotal: 1.47,
+        });
+        assert.equal(handoff.priceLabel, "Weekly ad, not shelf price", mapping.storeName);
+        assert.equal(handoff.action.type, "shop_list", mapping.storeName);
+      } else {
+        assert.ok(row.tier === "cart" || row.tier === "link", mapping.storeName);
+      }
+    }
+  });
+});
+
+describe("store handoff doc", () => {
+  it("lists every configured store, its tier, and the shelf-price research", () => {
+    const doc = readFileSync(new URL("../docs/STORE_HANDOFFS.md", import.meta.url), "utf8");
+    for (const row of STORE_HANDOFF_CONFIG) {
+      const name = row.storeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      assert.match(doc, new RegExp(`\\| ${name} \\|`));
+      assert.match(doc, new RegExp(`\\| ${name} \\|[^\\n]*\\| ${row.tier} \\|`));
+    }
+    assert.match(doc, /Datasembly/);
+    assert.match(doc, /Instacart Developer Platform/);
+    assert.match(doc, /do not scrape/i);
   });
 });

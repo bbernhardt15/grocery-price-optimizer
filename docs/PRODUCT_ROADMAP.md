@@ -27,7 +27,7 @@ Customer-visible slice:
 2. Each store group in the API includes a **handoff** object: item identities (name, brand, quantity, price, `productId` / `upc` / `locationId` when known) plus an `action` of `kroger_cart` | `walmart_cart` | `search_deeplink` | `coming_soon`.
 3. **Kroger (always-available path):** “Open at Kroger” search/product deep links using `productId`/UPC when the Products API returned them, otherwise the item name. Shopper completes add-to-cart on kroger.com.
 4. **Walmart:** when at least one assigned line has a numeric item id, **Add N items to Walmart cart** opens one `www.walmart.com/sc/cart/addToCart` link (Impact-wrapped when `WALMART_PUBLISHER_ID` is set). Lines without an item id are left off that link. If none qualify, the card uses a public search deep link. **Target:** public search deep link. Authenticated cart-write APIs are not invented.
-5. **Aldi / others:** `coming_soon` — no fake checkout.
+5. **Aldi and other non-cart banners:** **Shop this list at {store}**. Link-tier stores (Aldi, Target, Publix, H-E-B, Meijer, and the other verified search URLs) include **Open in {store}**. Banners with no verified link are a checklist only. See [`STORE_HANDOFFS.md`](STORE_HANDOFFS.md). No fake checkout.
 
 ---
 
@@ -40,7 +40,7 @@ Price the same verified items at more than Kroger so the 15/5/10 split reflects 
 | **Kroger** | Official Locations + Products APIs (`product.compact`) | Working (unchanged) | `KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET` |
 | **Walmart** | Official [Affiliate Marketing API](https://walmart.io/apidocs/affiliates/affiliate-marketing-api) `GET /search` with RSA headers | Adapter shipped; live when keys are set. Prices are **walmart.com catalog**, not in-aisle local shelf (the search API has no store-price filter). [`GET /stores?zip=`](https://walmart.io/apidocs/affiliates/stores) labels the nearest store name and address (cached per ZIP) and does not change the price. When that response includes them, `fulfillmentStoreId` and `accessPointId` are sent on the add-to-cart link as `storeId` and `ap`. | `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`. `WALMART_PUBLISHER_ID` optional (Impact attribution). |
 | **Target** | **No public product/price API.** RedSky is an internal storefront endpoint and is **not** used. | Adapter shipped for a licensed partner feed (`GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=`). Until those keys exist, Target can use Flipp weekly ads (if enabled) or the demo catalog. | `TARGET_PARTNER_BASE_URL`, `TARGET_PARTNER_API_KEY` |
-| **Aldi** | None (retailer). Flipp weekly-ad optional. | Demo catalog / `coming_soon` handoff until Flipp is enabled | `FLIPP_ENABLED` / `FLIPP_ACCESS_TOKEN` |
+| **Aldi** | None (retailer). Flipp weekly-ad optional. | Demo catalog or weekly ad. Handoff is **Shop this list at Aldi** with `https://www.aldi.us/store/aldi/search?q=` | `FLIPP_ENABLED` / `FLIPP_ACCESS_TOKEN` |
 
 Pipeline:
 
@@ -65,7 +65,7 @@ Give Aldi, Target-without-partner-feed, Publix-like banners, and other mapped ci
 | Opt-in path | Consumer circular `backflipp.wishabi.com/flipp/flyers?postal_code=` only when `FLIPP_ENABLED=true`. Unofficial; ToS-sensitive; 5-digit ZIP required. A merchant AND term search is not used (it returns no items). |
 | Mapping | Flipp merchants → Grocery Gitter `storeName` (Aldi, Target, Walmart, Kroger family as secondary, Publix, Meijer, …). |
 | Label | `priceSource: "weekly_ad"` → dashboard **Weekly ad**. Never claim full-shelf live prices. BOGO rows with no numeric price are skipped. |
-| Cart | Unchanged: no fake “added to cart.” Aldi handoff stays `coming_soon`. |
+| Cart | Unchanged: no fake “added to cart.” Aldi stays a search checklist, not a cart write. |
 
 ---
 
@@ -88,7 +88,7 @@ Code: `PartnerFeedProvider` in `src/pricing/partnerFeed.ts` implements `GET {bas
 
 Configured partner banners join the default competitor list. Unconfigured banners are omitted from that extra list (Flipp-mapped Publix-like banners can still appear when you pass `stores`). Dashboard label for licensed stub hits: **Partner feed**. Licensed shelf feeds beat Flipp weekly ads for the same banner.
 
-Handoff for those banners is public **search deep links** (or Aldi **Coming soon**). Cart fill stays Kroger shopper OAuth only.
+Handoff for those banners is the link tier (a store-site search link) or a checklist, per `src/storeHandoffConfig.ts`. Aldi is **Shop this list at Aldi** with a search link. Cart fill stays Kroger shopper OAuth and the Walmart add-to-cart URL.
 
 ---
 
@@ -101,7 +101,7 @@ Where a retailer actually allows it, fill the shopper’s cart after they author
 | **Kroger** | Authorization-code OAuth, `cart.basic:write` (or `cart.basic:rw`), redirect URI registered on the Kroger developer app **and** set as `KROGER_REDIRECT_URI` (must match the Railway/production HTTPS URL exactly) | **Implemented.** Dashboard shows **Add to Kroger cart** when that env is set and items have UPC/`productId`. Shopper logs in at Kroger, callback exchanges the code, then `PUT https://api.kroger.com/v1/cart/add` with `{ upc, quantity, modality }`. Success HTML/JSON only on HTTP 2xx. Cancelled login, missing scopes, or API rejection fall back to **Open at Kroger** search links — never a fake “added to cart”. Client-credentials tokens used for Products/Locations are **not** used for cart writes. |
 | **Walmart** | Documented add-to-cart URL (not a cart-write API) | **Implemented as a handoff link.** When at least one Walmart line has a numeric item id, the card shows **Add N items to Walmart cart** → `https://www.walmart.com/sc/cart/addToCart?items=ITEMID\|QTY,ITEMID`. Quantity 1 is the bare item id. The nearest store adds `storeId` and, when the locator sent one, `ap`. `WALMART_PUBLISHER_ID` wraps that destination with `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&u=…`. Unset publisher id still opens the cart, unattributed. Lines without a Walmart item id are named as skipped. If every line lacks one, the card stays on **Search at Walmart**. Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. |
 | **Target** | Partner / RedCard / shopper OAuth | **Not implemented.** Same: do not invent a cart API. Search deep links only. |
-| **Aldi** | Instacart Connect, if licensed | Stay `coming_soon` until a real cart API exists. Price stub is `INSTACART_PARTNER_*`. |
+| **Aldi** | Instacart Connect, if licensed | Checklist plus Aldi search until a real cart API exists. Price stub is `INSTACART_PARTNER_*`. |
 | **Publix / H-E-B / Meijer / Albertsons / Ahold** | Partner cart or Instacart | Search deep links until a contract includes cart-write. |
 | **Costco / Sam’s / Amazon Fresh / Whole Foods** | Effectively no third-party cart-write | Search + membership copy only. See the partner playbook. |
 

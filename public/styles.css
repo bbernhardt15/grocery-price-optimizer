@@ -404,6 +404,37 @@ img { max-width: 100%; display: block; }
 .instacart-cta img { width: 22px; height: 22px; }
 .store-handoff { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .handoff-detail, .store-nearby { color: var(--muted); font-size: 0.85rem; }
+.store-total { margin: 0; text-align: right; display: flex; flex-direction: column; gap: 2px; }
+.store-total span { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.store-total strong { font-family: var(--display); font-size: 1.4rem; }
+.trip-compare, .lock-note, .offline-note { margin: 0; }
+.lock-note { background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 8px 12px; }
+.offline-note { background: var(--bg-accent); border-radius: 12px; padding: 8px 12px; }
+.trip-actions, .export-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.export-row .ghost, .export-row .instacart-cta { min-height: 40px; font-size: 0.9rem; }
+.trip-item { align-items: center; flex-wrap: wrap; }
+.check-line { display: flex; gap: 8px; align-items: flex-start; }
+.check-line input { width: 1.1rem; height: 1.1rem; margin-top: 2px; }
+.item-name { display: block; }
+.item-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
+.move { display: flex; flex-direction: column; gap: 2px; font-size: 0.75rem; color: var(--muted); min-width: 9rem; }
+.move select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 0 8px; }
+.checklist-sheet { width: min(640px, calc(100% - 24px)); }
+.check-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.check-row-line {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
+}
+.print-root { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  .print-root, .print-root * { visibility: visible; }
+  .print-root {
+    display: block; position: absolute; left: 0; top: 0; width: 100%;
+    padding: 16px; color: #111; background: #fff;
+  }
+  .print-root pre { white-space: pre-wrap; font: 16px/1.4 sans-serif; }
+}
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;

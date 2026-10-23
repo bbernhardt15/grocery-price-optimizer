@@ -11,8 +11,12 @@ type HandoffCarrier = {
 };
 
 function withoutUrl<T extends object>(item: T): T {
-  const copy = { ...item } as T & { url?: unknown };
+  const copy = { ...item } as T & { url?: unknown; openLabel?: unknown; offers?: Array<object> };
   delete copy.url;
+  delete copy.openLabel;
+  if (Array.isArray(copy.offers)) {
+    copy.offers = copy.offers.map((offer) => withoutUrl(offer));
+  }
   return copy;
 }
 

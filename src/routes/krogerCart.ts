@@ -361,7 +361,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     res.status(400).send(
       htmlPage(
         "Kroger cart session expired",
-        `<p class="status error">Start again from <strong>Add to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`
+        `<p class="status error">Start again from <strong>Send to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`
       )
     );
     return;

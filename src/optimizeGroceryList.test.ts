@@ -47,6 +47,10 @@ describe("optimizeGroceryList", () => {
 
     assert.equal(result.total, 6.75);
     assert.deepEqual(result.unavailable, []);
+    const milk = result.stores.find((store) => store.storeName === "Aldi")?.items.find((item) => item.query === "milk");
+    assert.equal(milk?.lineId, "0:milk");
+    assert.deepEqual(milk?.offers?.map((offer) => offer.storeName).sort(), ["Aldi", "Walmart"]);
+    assert.equal(typeof milk?.department, "string");
   });
 
   it("only considers stores in the provided list", () => {
@@ -445,6 +449,7 @@ describe("optimizeSingleStore", () => {
     assert.equal(full.stores.length, 1);
     assert.equal(full.stores[0]?.storeName, "Aldi");
     assert.equal(full.stores[0]?.items.length, 4);
+    assert.equal(full.stores[0]?.items[0]?.lineId, "0:milk");
     assert.equal(full.total, 7.76);
 
     const tie = optimizeSingleStore(["milk", "bread"], ["Aldi", "Walmart"], catalog);
