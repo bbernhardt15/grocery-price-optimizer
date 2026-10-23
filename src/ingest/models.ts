@@ -142,6 +142,23 @@ const refreshDaySchema = new Schema({
   kroger: { type: Number, default: 0 },
 });
 
+const maintenanceJobSchema = new Schema(
+  {
+    kind: { type: String, required: true, unique: true },
+    jobId: { type: String, default: "" },
+    status: { type: String, enum: ["idle", "running", "completed", "error"], default: "idle" },
+    examined: { type: Number, default: 0 },
+    updated: { type: Number, default: 0 },
+    clearedExclusions: { type: Number, default: 0 },
+    total: { type: Number, default: 0 },
+    cursor: { type: String, default: "" },
+    error: { type: String, default: "" },
+    startedAt: { type: Date },
+    finishedAt: { type: Date },
+  },
+  { timestamps: true }
+);
+
 export type CatalogStatus = "active" | "stale" | "discontinued";
 
 export type CatalogMasterDoc = {
@@ -194,3 +211,4 @@ export const ShopperZip = mongoose.model("ShopperZip", shopperZipSchema);
 export const CatalogDemand = mongoose.model("CatalogDemand", catalogDemandSchema);
 export const CatalogMatchDay = mongoose.model("CatalogMatchDay", matchDaySchema);
 export const CatalogRefreshDay = mongoose.model("CatalogRefreshDay", refreshDaySchema);
+export const CatalogMaintenanceJob = mongoose.model("CatalogMaintenanceJob", maintenanceJobSchema);
