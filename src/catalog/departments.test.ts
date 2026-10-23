@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { departmentName, mapToDepartment } from "./departments";
+import { countHealthConsumableMoves, departmentName, mapToDepartment } from "./departments";
 
 describe("mapToDepartment", () => {
   it("maps Walmart-style category paths onto the shared tree", () => {
@@ -260,3 +260,110 @@ describe("mapToDepartment", () => {
     );
   });
 });
+
+const NATURE_MADE =
+  "Nature Made Super B-Complex With Vitamin C & Folic Acid Twin Pack Tablets 100 ct Vitamins 2 ct";
+
+const LETTER_VITAMINS = ["Health and Medicine/Letter Vitamins/Vitamin B Complex"];
+
+/**
+ * Production-like Other rows. The name rule's move count is toHealth + toBody.
+ * A Letter Vitamins path with a name that does not match still changes
+ * department on recategorize; that row is stayed here because the reason
+ * is the path, and keyword search totals count it only when the name hits.
+ */
+const OTHER_HEALTH_FIXTURE: {
+  name: string;
+  categories?: string[];
+  expect: "health" | "body" | "stay";
+  departmentId: string;
+  subcategory?: string;
+}[] = [
+  { name: NATURE_MADE, categories: LETTER_VITAMINS, expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Letter Vitamins"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Vitamin B Complex"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Health and Medicine"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Jewelry/Necklaces"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Books/Diet"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, categories: ["Clothing/Baby"], expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: NATURE_MADE, expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Centrum Specialist Super B Complex Vitamins Heart Health Tablets, 60 Ct", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "One A Day Kids: Scooby-Doo! Gummies Children's Multivitamin/Multimineral Supplement, 50 Ct", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Nature's Bounty Fish Oil Softgels, 100 ct", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Nordic Naturals Ultimate Omega Softgels", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Garden of Life Vitamin Code Men Capsules", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "OLLY Sleep Gummies", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Vitafusion Men's Multivitamin Gummies", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Equate Digestive Care Probiotic Capsules, 28 Count", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Parent's Choice Blue Raspberry Pediatric Electrolyte Drink, 1 L", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Spring Valley Children's Probiotic Gummies, 30 count", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Gevity Vitamins Horny Goat Weed Supplement, 120 Capsules", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Nature Made Melatonin Tablets, 180ct", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Thera Tears Nutrition Omega-3 Supplement Easy Swallow Capsules, 90 Count", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Alfa Vitamins Biotin 5000 Mcg, 100 Tablets", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "McNeil Rolaids Antacid/Calcium Supplement, 30 ea", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "ArtNaturals Anti Aging Hyaluronic Acid Serum with Vitamin C and E Brightening Face Serum", categories: ["Apparel/Women"], expect: "body", departmentId: "personal-care", subcategory: "Body" },
+  { name: "Amopé Radiant Skin Leg & Foot Daily Hydrating Serum, 3.5 oz", expect: "body", departmentId: "personal-care", subcategory: "Body" },
+  { name: "Black & Beautiful Cocoa Butter Stick with Vitamin E, 1.1 oz", expect: "body", departmentId: "personal-care", subcategory: "Body" },
+  { name: "Tetra Goldfish Vitamin C Enriched Fish Food Flakes, 2.2 oz", expect: "stay", departmentId: "other" },
+  { name: "Zilla Vitamin Supplement Food Spray 8 Fluid Ounces", expect: "stay", departmentId: "other" },
+  { name: "Horse Chestnut Extract Supplement Capsules", expect: "health", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Equate Weekly 7 Day Pill Planner, Large Pill Organizer", categories: LETTER_VITAMINS, expect: "stay", departmentId: "other" },
+  { name: "Restored Livefine Automatic Pill Dispenser Electronic Medication Organizer", expect: "stay", departmentId: "other" },
+  { name: "Gummy Bears", categories: ["Food/Candy"], expect: "stay", departmentId: "snacks" },
+  { name: "Nordic Ware Microwave Omelet Pan Cooker", expect: "stay", departmentId: "other" },
+  { name: "Holly Triangles Standard Holiday Card", expect: "stay", departmentId: "other" },
+  { name: "Badia Flax Seed, 1.5 oz Bag, Gluten-Free, Non-GMO, High in Omega-3", categories: ["Food/Pantry"], expect: "stay", departmentId: "pantry" },
+  { name: "Fish Oil Softgels for Dogs", expect: "stay", departmentId: "other" },
+  { name: "Hartz Multivitamin for Cats", categories: ["Vitamins"], expect: "stay", departmentId: "other" },
+  { name: "Wardley Probiotic Turtle Sticks 3.7oz", expect: "stay", departmentId: "other" },
+  { name: "Ensure Original Nutrition Shake", categories: ["Vitamins"], expect: "stay", departmentId: "beverages" },
+  { name: "Similac Infant Formula with Vitamin D", categories: ["Vitamins"], expect: "stay", departmentId: "baby" },
+  { name: "Turkesterone Supplement Similar to Ecdysterone for Testosterone Support", expect: "stay", departmentId: "other" },
+  { name: "Handheld Massage Gun", categories: ["Health and Medicine/Massage"], expect: "stay", departmentId: "other" },
+  { name: "Parent's Choice Training Pants", categories: ["Clothing/Baby"], expect: "stay", departmentId: "other" },
+  { name: "Rolaids", categories: ["Baby/Health/Toddler Medicine"], expect: "stay", departmentId: "other" },
+  { name: "Probiotics: A Step-By-Step Guide To Making Your Own Probiotics (Paperback)", categories: ["Books"], expect: "stay", departmentId: "other" },
+  { name: "Melatonin for Sleep: Overcome Sleep Problems and Revitalize Your Body and Your Mind", expect: "stay", departmentId: "other" },
+  { name: "Equate Allergy Relief Diphenhydramine HCl 25mg Antihistamine Capsules, 24 Count", expect: "stay", departmentId: "other" },
+  { name: "GoodSense Glucose Tablets, Orange, 10 Ct", expect: "stay", departmentId: "other" },
+  { name: "Spring Valley Black Cohosh Menopause Complex Tablets, 60 Ct", expect: "stay", departmentId: "other" },
+  { name: "Centrum Ultra Womens 60ct", expect: "stay", departmentId: "other" },
+  { name: "Clear Essence Complexion Soap with Alpha Hydroxy Acid, 5 oz", expect: "stay", departmentId: "other" },
+  { name: "Iams Dog Food", categories: ["Toys/Dog Toys"], expect: "stay", departmentId: "other" },
+  { name: "Store Brand Item", categories: ["Health and Medicine/Vitamin B Complex"], expect: "stay", departmentId: "personal-care", subcategory: "Health" },
+  { name: "Chobani Probiotic Yogurt", categories: ["Dairy"], expect: "stay", departmentId: "dairy-eggs" },
+  { name: "King Oscar Sardines in Fish Oil", categories: ["Canned Goods"], expect: "stay", departmentId: "pantry" },
+];
+
+describe("health consumable names", () => {
+  it("moves vitamin names to personal care even when the path says Letter Vitamins or general merchandise", () => {
+    const count = countHealthConsumableMoves(
+      OTHER_HEALTH_FIXTURE.map((row) => ({ name: row.name, categories: row.categories }))
+    );
+    const toHealth = OTHER_HEALTH_FIXTURE.filter((row) => row.expect === "health").length;
+    const toBody = OTHER_HEALTH_FIXTURE.filter((row) => row.expect === "body").length;
+    assert.equal(toHealth, 24);
+    assert.equal(toBody, 3);
+    assert.deepEqual(count, {
+      examined: OTHER_HEALTH_FIXTURE.length,
+      toHealth,
+      toBody,
+      stayed: OTHER_HEALTH_FIXTURE.length - toHealth - toBody,
+    });
+    for (const row of OTHER_HEALTH_FIXTURE) {
+      const mapped = mapToDepartment(row.categories, row.name);
+      assert.equal(mapped.departmentId, row.departmentId, row.name);
+      if (row.subcategory) {
+        assert.equal(mapped.subcategory, row.subcategory, row.name);
+      }
+      if (row.expect === "health") {
+        assert.match(mapped.reason ?? "", /health-consumable/, row.name);
+      }
+      if (row.expect === "body") {
+        assert.match(mapped.reason ?? "", /skincare-serum/, row.name);
+      }
+    }
+  });
+});
+
