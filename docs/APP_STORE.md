@@ -72,7 +72,9 @@ Also upload a large iPhone size if you do not want the biggest phones to use a s
 
 ## Privacy answers, from the code
 
-There is no Grocery Gitter account, no analytics SDK, no advertising identifier, no crash-reporting SDK, and no GPS permission. The iOS app does not declare a location usage string. Android asks only for `INTERNET`.
+There is no Grocery Gitter account, no analytics SDK, no advertising identifier, and no GPS permission. The iOS app does not declare a location usage string. Android asks only for `INTERNET`.
+
+Crash reporting is Sentry, and only when `SENTRY_DSN` is set. With that variable unset, the app does not initialize Sentry and does not send crash reports. The store answers below assume the build you ship has the DSN set. If you leave it unset, answer “No” for crash data and crash logs.
 
 What the app actually handles:
 
@@ -84,8 +86,9 @@ What the app actually handles:
 - **Kroger tokens.** After the shopper signs in on Kroger’s site, the access token (and refresh token, when Kroger sends one) is encrypted with AES-256-GCM and kept in an HttpOnly cookie named `kroger_shopper`. It is not written to the database. About 7 days with a refresh token, otherwise about 40 minutes.
 - **Retailer handoffs.** Kroger, Walmart, Target, weekly-ad (Flipp), and Instacart, as spelled out on `/privacy`. Instacart runs only when the shopper taps it. Kroger and Instacart login pages open in the system browser.
 - **Analytics.** None in the app. The host may keep ordinary request logs (IP address, time, path).
+- **Crash reports.** When `SENTRY_DSN` is set, the website, the server, and the iOS and Android shells send Sentry an error message, stack trace, release git sha, OS or browser, and the page or API path. They do not send an email, a name, the grocery list, a Kroger token, the `kroger_shopper` cookie, other cookies, or Authorization headers. Reports are not tied to the random price-alert id. Sentry holds them. They are not MongoDB rows. With `SENTRY_DSN` unset, nothing is sent.
 - **Sale of data.** No.
-- **Deletion.** Settings → **Delete my data**, then type `DELETE`. The control is on the top bar, in My list, and in the footer, on the website and in the Capacitor shells. It removes this device’s saved list and preferences, price watches, alert records, and push subscriptions for this device, shared lists this device created (the link stops working), and the Kroger cookie after a revoke call. On iOS and Android it also opens the system browser to `/api/kroger/logout`, because that cookie is set there during Kroger login, not in the WebView. Doing it again is safe and deletes nothing further. ZIP hit counts (`ShopperZip`) and search or list phrases used to prioritize catalog refresh (`CatalogDemand`) are not tied to a device and are left in place. Host request logs are not deleted by the button. Email [CONTACT EMAIL] if the in-app control does not work, or to ask about a ZIP total or a search phrase.
+- **Deletion.** Settings → **Delete my data**, then type `DELETE`. The control is on the top bar, in My list, and in the footer, on the website and in the Capacitor shells. It removes this device’s saved list and preferences, price watches, alert records, and push subscriptions for this device, shared lists this device created (the link stops working), and the Kroger cookie after a revoke call. On iOS and Android it also opens the system browser to `/api/kroger/logout`, because that cookie is set there during Kroger login, not in the WebView. Doing it again is safe and deletes nothing further. ZIP hit counts (`ShopperZip`) and search or list phrases used to prioritize catalog refresh (`CatalogDemand`) are not tied to a device and are left in place. Host request logs are not deleted by the button. Crash reports in Sentry are not deleted by the button: they have no account id. Email [CONTACT EMAIL] if the in-app control does not work, to ask about a ZIP total or a search phrase, or to ask for a crash report to be removed. Include the approximate time and the platform (website, iPhone, or Android) so a matching Sentry event can be deleted. If that is not enough to find it, say so.
 
 The shopper UI does not call the FatSecret catalog route. Do not list that as data the app collects.
 
@@ -107,7 +110,8 @@ Data Not Linked to You:
 | Identifiers → User ID | No | The Kroger token stays in the cookie. The share secrets are not stored in the clear |
 | Purchases | No | Retailers charge the shopper on their own sites |
 | Usage Data → Product Interaction | Yes | Department and product requests. App Functionality |
-| Diagnostics → Other Diagnostic Data | Yes | Host request logs (IP, time, path), if you can read them. App Functionality. Not a crash SDK |
+| Diagnostics → Crash Data | Yes, when `SENTRY_DSN` is set | Sentry crash and error reports (stack, release git sha, OS or browser, page or API path). App Functionality. Not linked to identity. No email, token, or Kroger cookie. Answer No when the DSN is unset |
+| Diagnostics → Other Diagnostic Data | Yes | Host request logs (IP, time, path), if you can read them. App Functionality. Separate from Sentry |
 | Advertising Data | No | |
 
 Privacy Policy URL: the deployed `/privacy` link above. Support URL: the same site’s home page.
@@ -120,7 +124,7 @@ Export compliance: `Info.plist` sets `ITSAppUsesNonExemptEncryption` to false. T
 
 - Collect or share user data: **Yes**
 - All collected data encrypted in transit: **Yes** (HTTPS)
-- Users can ask for deletion: **Yes.** Settings → Delete my data (type DELETE). There is no Grocery Gitter account. The control deletes the device’s server rows, invalidates shared lists that device created, unsubscribes push, and drops the Kroger token. Revoke link by itself still does not delete a list, and turning alerts off still does not delete a watch. Aggregate ZIP totals and search phrases are not linked to the shopper. Email [CONTACT EMAIL] if the in-app control does not work
+- Users can ask for deletion: **Yes.** Settings → Delete my data (type DELETE). There is no Grocery Gitter account. The control deletes the device’s server rows, invalidates shared lists that device created, unsubscribes push, and drops the Kroger token. Revoke link by itself still does not delete a list, and turning alerts off still does not delete a watch. Aggregate ZIP totals and search phrases are not linked to the shopper. Crash reports are not linked to an account and are not removed by the button. Email [CONTACT EMAIL] if the in-app control does not work, or with the approximate time and whether it was the website, iPhone, or Android to ask for a crash report to be removed
 - Data sold: **No**
 - Data shared for advertising: **No**
 
@@ -133,8 +137,9 @@ Export compliance: `Info.plist` sets `ITSAppUsesNonExemptEncryption` to false. T
 | Financial info | No | No | Prices on a watch are product prices, not the shopper’s payment data |
 | App activity → In-app search history | Yes | Yes, the search is sent to the price source for that request | Not kept as a profile |
 | App activity → Other user-generated content | Yes | With other people who open the share link. Also with Instacart or Kroger only when the shopper uses that handoff | Shared lists are stored (items, timestamps, hashed secrets). Trip planning sends the list for that request. Alert records stay on our server |
-| App info → Diagnostics | Yes | No | Host request logs |
-| Device or other IDs | Yes | No | The random id created in the browser for watches, alerts, and an optional push subscription. Not an advertising id |
+| App info → Crash logs | Yes, when `SENTRY_DSN` is set | No | Sentry crash and error reports. Not linked to an account. No email, token, or Kroger cookie. Answer No when the DSN is unset |
+| App info → Diagnostics | Yes | No | Host request logs. Separate from crash logs |
+| Device or other IDs | Yes | No | The random id created in the browser for watches, alerts, and an optional push subscription. Not an advertising id. Not sent with crash reports |
 | Photos, audio, files, contacts, calendar, messages | No | No | |
 
 The Web Push endpoint and keys are stored only when VAPID is configured and the shopper opts in. Treat them as the device-id / app-functionality data above, used only to deliver a notification. They are removed by Delete my data, and when the push service says the subscription is gone.

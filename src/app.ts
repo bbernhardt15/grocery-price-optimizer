@@ -1,6 +1,9 @@
 import path from "node:path";
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import cors from "cors";
+import { observabilityResponse } from "./observability/config";
+import { scrubString } from "./observability/scrub";
+import { initSentry, setupSentryExpress } from "./observability/sentry";
 import optimizeListRouter from "./routes/optimizeList";
 import catalogRouter from "./routes/catalog";
 import krogerCartRouter from "./routes/krogerCart";
@@ -10,6 +13,8 @@ import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
 import deleteMyDataRouter from "./routes/deleteMyData";
+
+initSentry();
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -95,8 +100,14 @@ app.get("/api", (_req, res) => {
         "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals and catalog-demand phrases are not tied to a device and are left in place.",
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
+      "GET /api/observability":
+        "Crash-reporting config for the website and the native shells. enabled is false when SENTRY_DSN is unset, and the body then has no DSN. The auth token is never returned.",
     },
   });
+});
+
+app.get("/api/observability", (_req, res) => {
+  res.json(observabilityResponse());
 });
 
 app.use("/api", catalogRouter);
@@ -134,5 +145,37 @@ app.use((req, res) => {
 
   res.sendFile(path.join(publicDir, "index.html"));
 });
+
+setupSentryExpress(app);
+
+const onError: ErrorRequestHandler = (err, req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  const status = httpErrorStatus(err);
+  const safe = status >= 500 ? "Something went wrong" : "Request failed";
+  if (status >= 500) {
+    const message = err instanceof Error ? err.message : "Unhandled error";
+    console.error(`Request failed: ${scrubString(message)}`);
+  }
+  if (req.path.startsWith("/api")) {
+    res.status(status).json({ error: safe });
+    return;
+  }
+  res.status(status).type("html").send(`<!doctype html><title>Error</title><p>${safe}.</p>`);
+};
+
+app.use(onError);
+
+function httpErrorStatus(error: unknown): number {
+  if (typeof error === "object" && error) {
+    for (const key of ["status", "statusCode"] as const) {
+      const value = Number((error as Record<string, unknown>)[key]);
+      if (value >= 400 && value < 600) return value;
+    }
+  }
+  return 500;
+}
 
 export default app;

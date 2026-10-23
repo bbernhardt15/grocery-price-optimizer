@@ -16,15 +16,15 @@ dotenv.config();
 
 const require = createRequire(import.meta.url);
 const { resolveSyncApiUrl } = require("../public/native-shell.js");
+const { nativeConfigSource, nativeSentryFields } = require("./native-config.js");
+const { resolveRelease } = require("./release-env.js");
 
 const configPath = new URL("../public/native-config.js", import.meta.url);
 const original = readFileSync(configPath, "utf8");
 
 function nativeConfig(origin) {
-  return `// Written by npm run cap:sync into the native project copies only.
-// The website copy of this file stays an empty origin.
-window.GROCERY_GITTER_API_ORIGIN = ${JSON.stringify(origin)};
-`;
+  const release = resolveRelease(process.env) || "";
+  return nativeConfigSource(origin, nativeSentryFields(process.env, release));
 }
 
 let status = 1;

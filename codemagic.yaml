@@ -15,6 +15,18 @@
 #     CM_KEY_PASSWORD
 #   Optional, only if you uncomment Google Play publishing below:
 #     GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+#   Optional crash reporting. Leave every SENTRY_* variable unset and the
+#   workflows do not initialize Sentry or upload debug files.
+#     SENTRY_DSN
+#       Same DSN as the Railway web service. cap sync writes it into the shell.
+#     SENTRY_AUTH_TOKEN
+#       Secret. When set, npm run build uploads JS source maps and the steps
+#       below upload native debug files. Also set SENTRY_ORG and SENTRY_PROJECT.
+#     SENTRY_ORG
+#     SENTRY_PROJECT
+#     SENTRY_ENVIRONMENT
+#       Optional. The shell uses production when this is unset.
+#   The release is CM_COMMIT (the git sha) unless SENTRY_RELEASE is set.
 #
 # Integration name "app_store_connect":
 #   Team integrations > Developer Portal > the App Store Connect API key.
@@ -54,7 +66,11 @@ workflows:
       - name: Install npm dependencies
         script: npm ci
       - name: Compile the API
-        script: npm run build
+        script: |
+          if [ -z "${SENTRY_RELEASE:-}" ] && [ -n "${CM_COMMIT:-}" ]; then
+            export SENTRY_RELEASE="$CM_COMMIT"
+          fi
+          npm run build
       - name: Sync the iOS shell
         script: |
           case "${CAPACITOR_API_URL:-}" in
@@ -66,7 +82,10 @@ workflows:
               ;;
           esac
           unset CAPACITOR_SERVER_URL
-          npx cap sync ios
+          # cap:sync:ios bakes CAPACITOR_API_URL, the git sha, and SENTRY_DSN
+          # into the native copy of public/native-config.js. It does not rebuild
+          # public/sentry.js, so the source maps from npm run build still match.
+          npm run cap:sync:ios
       - name: Install CocoaPods dependencies
         working_directory: ios/App
         script: pod install
@@ -96,6 +115,25 @@ workflows:
             --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME" \
             --archive-flags="-destination 'generic/platform=iOS'"
+      - name: Upload iOS debug files to Sentry
+        script: |
+          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+            echo "Sentry debug file upload skipped (SENTRY_AUTH_TOKEN unset)."
+            exit 0
+          fi
+          if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+            echo "SENTRY_AUTH_TOKEN is set. Also set SENTRY_ORG and SENTRY_PROJECT in the grocery_gitter group."
+            exit 1
+          fi
+          if [ -z "${SENTRY_RELEASE:-}" ] && [ -n "${CM_COMMIT:-}" ]; then
+            export SENTRY_RELEASE="$CM_COMMIT"
+          fi
+          ARCHIVE="$CM_BUILD_DIR/build/ios/xcarchive"
+          if [ ! -d "$ARCHIVE" ]; then
+            echo "No xcarchive at $ARCHIVE. Sentry iOS debug file upload failed."
+            exit 1
+          fi
+          npx sentry-cli debug-files upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" "$ARCHIVE"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -129,7 +167,11 @@ workflows:
       - name: Install npm dependencies
         script: npm ci
       - name: Compile the API
-        script: npm run build
+        script: |
+          if [ -z "${SENTRY_RELEASE:-}" ] && [ -n "${CM_COMMIT:-}" ]; then
+            export SENTRY_RELEASE="$CM_COMMIT"
+          fi
+          npm run build
       - name: Sync the Android shell
         script: |
           case "${CAPACITOR_API_URL:-}" in
@@ -141,7 +183,8 @@ workflows:
               ;;
           esac
           unset CAPACITOR_SERVER_URL
-          npx cap sync android
+          # Same bake as iOS. Does not rebuild public/sentry.js.
+          npm run cap:sync:android
       - name: Decode the upload keystore
         script: |
           python3 - <<'PY'
@@ -192,6 +235,27 @@ workflows:
       - name: Build the release AAB
         working_directory: android
         script: ./gradlew bundleRelease -PversionCode="${BUILD_NUMBER:-1}"
+      - name: Upload Android debug files to Sentry
+        script: |
+          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+            echo "Sentry debug file upload skipped (SENTRY_AUTH_TOKEN unset)."
+            exit 0
+          fi
+          if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+            echo "SENTRY_AUTH_TOKEN is set. Also set SENTRY_ORG and SENTRY_PROJECT in the grocery_gitter group."
+            exit 1
+          fi
+          if [ -z "${SENTRY_RELEASE:-}" ] && [ -n "${CM_COMMIT:-}" ]; then
+            export SENTRY_RELEASE="$CM_COMMIT"
+          fi
+          OUT="$CM_BUILD_DIR/android/app/build/outputs"
+          if [ ! -d "$OUT" ]; then
+            echo "No Android build outputs at $OUT."
+            exit 1
+          fi
+          # Minify is off, so a ProGuard map is often absent. debug-files upload
+          # still picks up native symbols and a mapping file when one exists.
+          npx sentry-cli debug-files upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" "$OUT"
     artifacts:
       - android/app/build/outputs/bundle/**/*.aab
     # Google Play publishing is off. To turn it on, add this under the workflow
