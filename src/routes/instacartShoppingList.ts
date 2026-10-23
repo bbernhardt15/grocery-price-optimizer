@@ -6,6 +6,7 @@ import {
   sanitizeLinkback,
   type InstacartLineInput,
 } from "../instacartHandoff";
+import { blockUnlessFeature } from "../billing/middleware";
 
 const router = Router();
 const MAX_ITEMS = 80;
@@ -18,6 +19,9 @@ router.post("/instacart/shopping-list", async (req, res) => {
   const parsed = parseShoppingListBody(req.body);
   if ("error" in parsed) {
     res.status(400).json({ error: parsed.error });
+    return;
+  }
+  if (await blockUnlessFeature(req, res, "cartHandoffs", "Cart handoffs are part of Grocery Gitter Pro.")) {
     return;
   }
 

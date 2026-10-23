@@ -11,6 +11,8 @@ import { loadKnownProducts } from "../catalog/service";
 import { pinnedRowsForSelections, type BrowseSelection } from "../catalog/pinSelections";
 import { noteCatalogDemand } from "../ingest/demand";
 import { noteShopperZip } from "../ingest/runner";
+import { accessFor } from "../billing/access";
+import { entitlementPayload, lockCartHandoffs } from "../billing/applyPlan";
 
 const router = Router();
 
@@ -224,14 +226,17 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       productsResult.products.push(...pinned);
     }
     const walmartStore = await lookupWalmartStore(zipCode, stores);
-    const groupedByStore = enrichOptimizeResult(
-      optimizeGroceryList(groceryList, stores, productsResult.products),
+    const access = await accessFor(res);
+    let groupedByStore = enrichOptimizeResult(
+      optimizeGroceryList(groceryList, stores, productsResult.products, access.limits.multiStore ? "split" : "single"),
       {
         krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(),
         pricingByStore: productsResult.pricingByStore,
         ...(walmartStore ? { walmartStore } : {}),
       }
     );
+    if (!access.limits.cartHandoffs) groupedByStore = lockCartHandoffs(groupedByStore);
+    const entitlement = entitlementPayload(access);
 
     if (
       groupedByStore.stores.length === 0 &&
@@ -250,6 +255,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
 
     res.json({
       ...groupedByStore,
+      ...(entitlement ? { entitlement } : {}),
       pricingByStore: productsResult.pricingByStore,
       ...(productsResult.pricingError
         ? { pricingWarning: productsResult.pricingError }

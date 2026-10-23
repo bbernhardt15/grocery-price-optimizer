@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { demoBrowseProducts } from "./catalog/demoCatalog";
 import { pinnedRowsForSelections } from "./catalog/pinSelections";
-import { optimizeGroceryList, type CatalogProduct } from "./optimizeGroceryList";
+import { optimizeGroceryList, optimizeSingleStore, type CatalogProduct } from "./optimizeGroceryList";
 
 const catalog: CatalogProduct[] = [
   { name: "Whole Milk", brand: "Friendly Farms", storeName: "Aldi", price: 2.19, unit: "gal", normalizedUnit: "gal" },
@@ -440,5 +440,27 @@ describe("optimizeGroceryList", () => {
     assert.equal(pastaPick?.brand, "Reggano");
     assert.equal(pastaPick?.matchKind, "substitute");
     assert.equal(pastaPick?.price, 0.95);
+  });
+});
+
+describe("optimizeSingleStore", () => {
+  it("picks the store that fills the most lines, then the lower total", () => {
+    const full = optimizeSingleStore(["milk", "bread", "bananas", "butter"], ["Aldi", "Walmart", "Target"], catalog);
+    assert.equal(full.stores.length, 1);
+    assert.equal(full.stores[0]?.storeName, "Aldi");
+    assert.equal(full.stores[0]?.items.length, 4);
+    assert.equal(full.stores[0]?.items[0]?.lineId, "0:milk");
+    assert.equal(full.total, 7.76);
+
+    const tie = optimizeSingleStore(["milk", "bread"], ["Aldi", "Walmart"], catalog);
+    assert.equal(tie.stores[0]?.storeName, "Walmart");
+    assert.equal(tie.total, 3.76);
+  });
+
+  it("leaves every line unavailable when the catalog is empty", () => {
+    const result = optimizeSingleStore(["milk"], ["Aldi"], []);
+    assert.deepEqual(result.stores, []);
+    assert.deepEqual(result.unavailable, ["milk"]);
+    assert.equal(result.total, 0);
   });
 });

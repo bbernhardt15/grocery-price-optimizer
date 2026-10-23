@@ -1,6 +1,6 @@
 # Delete my data
 
-Grocery Gitter has no account. A shopper still needs a way to delete the data this device stored before the iOS app ships. Apple expects that control inside the app. The same control is on the website and in the Capacitor shells.
+A shopper can use Grocery Gitter with no account. Sign-in is optional. Either way, a shopper needs a way to delete the data this device stored. Apple expects that control inside the app. The same control is on the website and in the Capacitor shells.
 
 Open **Settings** (top bar, My list, or the footer). Choose **Delete my data**. Type `DELETE`. The app calls `DELETE /api/me/data`, clears this device, and loads a fresh start at `/`.
 
@@ -54,6 +54,28 @@ No `sessionStorage` keys are used. The Kroger cookie is HttpOnly, so the page ca
 
 A guest who only has the share link can delete their own device rows. They cannot delete the owner’s list.
 
+### Account, when this browser is signed in
+
+`DELETE /api/me/data` still requires `deviceId`. If the request also has a session (`Authorization: Bearer` or the `gg_session` cookie), the account is deleted after the device rows:
+
+| Collection | Delete action |
+| --- | --- |
+| `Account` | The document, including the sealed Kroger blob, the sealed share tokens, and the free or pro entitlement. |
+| `AuthIdentity` | Apple, Google, and email subjects for that account. |
+| `AuthSession` | Every session, not only this device. The response also clears `gg_session`. |
+| `MagicLink` | Unused links for that email address. |
+| `SavedList` | The synced list. |
+| `PriceWatch`, `PriceAlert`, `PushSubscription` | Rows with that `accountId`, including another device on the same account. |
+| `SharedList` | Lists tagged with that `accountId`. Collaborator watches of a sealed share token are deleted too. |
+
+Signing out (`POST /api/auth/logout`) clears this session only. It does not delete the account. A request with no session still deletes only this device, and the response includes `account.deleted: false`.
+
+Sentry crash reports are not part of this delete. They are sent only when `SENTRY_DSN` is set, and a report is not tied to an account or to `gg-device`. The button does not remove them. Email [CONTACT EMAIL] with the approximate time and whether it was the website, iPhone, or Android to ask for a matching report to be removed.
+
+Deleting the account does not cancel an App Store or Google Play subscription. The shopper cancels that in the store. A later RevenueCat event for the deleted account returns `stored: false`.
+
+The response adds `"account": { "deleted": true }` or `"deleted": false`. The `deleted` counts include rows removed with the account.
+
 A rotated (retired) share token can still identify the document when the owner secret matches. Watches are removed for the token the caller presented. A collaborator’s watch that still uses an older token, which this device no longer has, stays until that collaborator uses Delete my data. The old link no longer opens the list, because the document is gone.
 
 ### Kroger tokens
@@ -95,6 +117,7 @@ Host request logs (IP address, time, path), when the host keeps them, are outsid
     "sharedListsRefused": 0
   },
   "kroger": { "hadToken": false, "revoked": false, "cookieCleared": true },
+  "account": { "deleted": false },
   "notLinkedToYou": {
     "shopperZips": "ZIP totals have no device id and were left in place.",
     "catalogDemand": "Search and list phrases have no device id and were left in place."

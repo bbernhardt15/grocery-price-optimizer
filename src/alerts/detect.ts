@@ -114,6 +114,7 @@ export async function detectPriceDrops(now = new Date()): Promise<DetectResult> 
       try {
         await PriceAlert.create({
           deviceId: watch.deviceId,
+          ...(watch.accountId ? { accountId: watch.accountId } : {}),
           listId: watch.listId,
           listName: watch.listName,
           productId: item.productId,

@@ -107,6 +107,9 @@ export type OptimizeResult = {
   total: number;
 };
 
+/** split picks the cheapest store per item. single keeps the one store that fills the most, then the lowest total. */
+export type TripMode = "split" | "single";
+
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -282,19 +285,66 @@ function pickForLine(
  * the closest requested package size or the lower unit price. See
  * `productMatch.ts` for the full rule.
  */
-export function optimizeGroceryList(
+function catalogFor(stores: string[], products: CatalogProduct[]): CatalogProduct[] {
+  const storeFilter = allowedStores(stores);
+  if (storeFilter === null) return products;
+  return products.filter((product) => storeFilter.has(product.storeName.trim().toLowerCase()));
+}
+
+/**
+ * One store for the whole list. The store that can fill the most lines wins.
+ * A tie goes to the lower total, then the store name.
+ */
+export function optimizeSingleStore(
   groceryList: string[],
   stores: string[],
   products: CatalogProduct[]
 ): OptimizeResult {
   const items = parseGroceryList(groceryList);
-  const storeFilter = allowedStores(stores);
-  const catalog =
-    storeFilter === null
-      ? products
-      : products.filter((product) =>
-          storeFilter.has(product.storeName.trim().toLowerCase())
-        );
+  const catalog = catalogFor(stores, products);
+  const storeNames = [...new Set(catalog.map((product) => product.storeName))].sort((a, b) => a.localeCompare(b));
+  let best: { storeName: string; picks: PickedItem[]; unavailable: string[] } | null = null;
+
+  for (const storeName of storeNames) {
+    const shelf = catalog.filter((product) => product.storeName === storeName);
+    const picks: PickedItem[] = [];
+    const unavailable: string[] = [];
+    items.forEach((line, index) => {
+      const pick = pickForLine(line, shelf);
+      if (!pick) unavailable.push(line.name);
+      else picks.push({ ...pick, lineId: `${index}:${line.name.trim().toLowerCase()}` });
+    });
+    if (picks.length === 0) continue;
+    const total = roundMoney(picks.reduce((sum, item) => sum + item.itemTotal, 0));
+    const bestTotal = best ? roundMoney(best.picks.reduce((sum, item) => sum + item.itemTotal, 0)) : Number.POSITIVE_INFINITY;
+    const better =
+      !best ||
+      picks.length > best.picks.length ||
+      (picks.length === best.picks.length && total < bestTotal) ||
+      (picks.length === best.picks.length && total === bestTotal && storeName.localeCompare(best.storeName) < 0);
+    if (better) best = { storeName, picks, unavailable };
+  }
+
+  if (!best) {
+    return { stores: [], unavailable: items.map((line) => line.name), total: 0 };
+  }
+  const subtotal = roundMoney(best.picks.reduce((sum, item) => sum + item.itemTotal, 0));
+  return {
+    stores: [{ storeName: best.storeName, items: best.picks, subtotal }],
+    unavailable: best.unavailable,
+    total: subtotal,
+  };
+}
+
+export function optimizeGroceryList(
+  groceryList: string[],
+  stores: string[],
+  products: CatalogProduct[],
+  mode: TripMode = "split"
+): OptimizeResult {
+  if (mode === "single") return optimizeSingleStore(groceryList, stores, products);
+  const items = parseGroceryList(groceryList);
+  const catalog = catalogFor(stores, products);
 
   const picks: PickedItem[] = [];
   const unavailable: string[] = [];

@@ -464,3 +464,35 @@ export async function deleteOwnedSharedList(
   }
   return "deleted";
 }
+
+/**
+ * Attach a signed-in account, or the creating device, to a list the caller owns.
+ * A list already claimed by a different account is left alone.
+ */
+export async function tagOwnedSharedList(input: {
+  shareToken: string;
+  ownerToken: string;
+  accountId?: string;
+  ownerDeviceId?: string;
+}): Promise<"tagged" | "missing" | "refused"> {
+  if (!isShareToken(input.shareToken) || !isShareToken(input.ownerToken)) {
+    return "refused";
+  }
+  const hash = hashSecret(input.shareToken);
+  const doc = await SharedList.findOne({
+    $or: [{ shareTokenHash: hash }, { retiredHashes: hash }],
+  }).lean();
+  if (!doc) return "missing";
+  if (!secretMatches(input.ownerToken, String(doc.ownerTokenHash ?? ""))) return "refused";
+  const update: Record<string, string> = {};
+  const currentAccount = typeof doc.accountId === "string" ? doc.accountId : "";
+  if (input.accountId) {
+    if (currentAccount && currentAccount !== input.accountId) return "refused";
+    if (!currentAccount) update.accountId = input.accountId;
+  }
+  const currentDevice = typeof doc.ownerDeviceId === "string" ? doc.ownerDeviceId : "";
+  if (input.ownerDeviceId && !currentDevice) update.ownerDeviceId = input.ownerDeviceId;
+  if (Object.keys(update).length === 0) return "tagged";
+  await SharedList.updateOne({ _id: doc._id }, { $set: update });
+  return "tagged";
+}

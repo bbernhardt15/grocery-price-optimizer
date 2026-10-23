@@ -1417,4 +1417,41 @@ describe("POST /api/optimize-list", () => {
       clearPricingEnv();
     }
   });
+
+  it("keeps a free trip on one store and drops cart links when billing is enforced", async () => {
+    const previous = process.env.REVENUECAT_WEBHOOK_SECRET;
+    delete process.env.REVENUECAT_WEBHOOK_SECRET;
+    try {
+      const open = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      assert.equal(open.status, 200);
+      const openBody = open.json as { stores: Array<{ storeName: string }>; entitlement?: { plan: string } };
+      assert.ok(openBody.stores.length > 1);
+      assert.equal(openBody.entitlement, undefined);
+
+      process.env.REVENUECAT_WEBHOOK_SECRET = "webhook-secret";
+      const free = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      assert.equal(free.status, 200);
+      const body = free.json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ lineId?: string; url?: string; offers?: Array<{ url?: string }> }>;
+          handoff: { action: { type: string; label: string; url?: string } };
+        }>;
+        entitlement?: { plan: string; limited: string[] };
+      };
+      assert.equal(body.stores.length, 1);
+      assert.equal(body.entitlement?.plan, "free");
+      assert.ok(body.entitlement?.limited.includes("multiStoreSplit"));
+      assert.ok(body.entitlement?.limited.includes("cartHandoffs"));
+      assert.equal(body.stores[0].items[0].lineId?.startsWith("0:"), true);
+      assert.equal(body.stores[0].items[0].url, undefined);
+      assert.equal(body.stores[0].items[0].offers?.some((offer) => offer.url), false);
+      assert.equal(body.stores[0].handoff.action.type, "coming_soon");
+      assert.equal(body.stores[0].handoff.action.label, "Grocery Gitter Pro");
+      assert.equal(body.stores[0].handoff.action.url, undefined);
+    } finally {
+      if (previous === undefined) delete process.env.REVENUECAT_WEBHOOK_SECRET;
+      else process.env.REVENUECAT_WEBHOOK_SECRET = previous;
+    }
+  });
 });

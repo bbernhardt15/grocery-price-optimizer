@@ -1,4 +1,6 @@
 import { Router, Request, Response } from "express";
+import { requestAuth } from "../auth/middleware";
+import { Account } from "../auth/models";
 import {
   addItemsToKrogerCart,
   buildKrogerAuthorizeUrl,
@@ -20,6 +22,7 @@ import {
   type ShopperToken,
 } from "../krogerCartAuth";
 import { krogerSearchUrl } from "../storeHandoff";
+import { blockUnlessFeature } from "../billing/middleware";
 
 const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
@@ -136,6 +139,21 @@ function cookieValue(req: Request, name: string): string | undefined {
   return readRequestCookie(req.headers.cookie, name);
 }
 
+async function rememberAccountKroger(res: Response, config: KrogerOAuthConfig, token: ShopperToken): Promise<void> {
+  const auth = requestAuth(res);
+  if (!auth) return;
+  await Account.updateOne({ _id: auth.accountId }, { $set: { krogerSealed: sealShopperToken(config.clientSecret, token) } });
+}
+
+async function sealedShopper(req: Request, res: Response): Promise<string | undefined> {
+  const cookie = cookieValue(req, KROGER_SHOPPER_COOKIE);
+  if (cookie) return cookie;
+  const auth = requestAuth(res);
+  if (!auth) return undefined;
+  const account = await Account.findById(auth.accountId).select("krogerSealed").lean();
+  return account?.krogerSealed || undefined;
+}
+
 function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: ShopperToken): void {
   const sealed = sealShopperToken(config.clientSecret, token);
   const maxAge = token.refreshToken ? 7 * 24 * 60 * 60 : 2400;
@@ -205,6 +223,9 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     });
     return;
   }
+  if (await blockUnlessFeature(req, res, "cartHandoffs", "Cart handoffs are part of Grocery Gitter Pro.")) {
+    return;
+  }
 
   const config = readKrogerOAuthConfig();
   if (!config) {
@@ -234,14 +255,12 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const existing = await shopperTokenForRequest(
-    config,
-    cookieValue(req, KROGER_SHOPPER_COOKIE)
-  );
+  const existing = await shopperTokenForRequest(config, await sealedShopper(req, res));
   if (existing) {
     const result = await addItemsToKrogerCart(existing.accessToken, lines);
     if (result.ok) {
       appendShopperCookie(res, config, existing);
+      await rememberAccountKroger(res, config, existing);
       res.json({
         status: "added",
         added: result.added,
@@ -365,6 +384,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
   }
 
   appendShopperCookie(res, config, token);
+  await rememberAccountKroger(res, config, token);
 
   const result = await addItemsToKrogerCart(token.accessToken, pending.items);
 

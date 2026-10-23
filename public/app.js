@@ -38,6 +38,8 @@ import {
   tripFingerprint,
   writeCheck,
 } from "./shopper/tripPlan.js";
+import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
+import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -88,6 +90,8 @@ const SHARE_KEY = "gg-share";
 const OWNER_KEY = "gg-owner";
 const NAME_KEY = "gg-display-name";
 const PERSONAL_KEY = "gg-list-personal";
+const REMOVED_KEY = "gg-list-removed";
+const REVISION_KEY = "gg-list-revision";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 function isNative() {
@@ -185,6 +189,14 @@ let pollTimer = 0;
 /** @type {EventSource | null} */
 let listEvents = null;
 let syncGeneration = 0;
+/** @type {{ id: string, email?: string, displayName?: string, providers?: string[] } | null} */
+let accountState = null;
+/** @type {Record<string, any> | null} */
+let authStatus = null;
+let listRevision = 0;
+let listSyncTimer = 0;
+let applyingAccount = false;
+let arrivedWithSession = false;
 
 const money = formatMoney;
 
@@ -209,8 +221,19 @@ function toast(message) {
   window.setTimeout(() => toastEl.classList.remove("show"), 1600);
 }
 
-function apiFetch(path, init) {
-  return globalThis.fetch(apiUrl(path), init);
+function readSessionToken() {
+  return localStorage.getItem(SESSION_KEY) || "";
+}
+
+function apiFetch(path, init = {}) {
+  const headers = new Headers(init.headers || {});
+  const token = readSessionToken();
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return globalThis.fetch(apiUrl(path), {
+    ...init,
+    headers,
+    credentials: init.credentials ?? (apiOrigin() ? "omit" : "include"),
+  });
 }
 
 function readStoredJson(key) {
@@ -358,6 +381,7 @@ function saveList() {
   }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
   scheduleWatchSync();
+  scheduleAccountSync();
 }
 
 function scheduleWatchSync() {
@@ -390,7 +414,7 @@ async function syncWatch() {
   let retired = !previous || previous === listId;
   if (previous && previous !== listId) {
     try {
-      const off = await fetch(apiUrl("/api/price-alerts/watches"), {
+      const off = await apiFetch("/api/price-alerts/watches", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -408,7 +432,7 @@ async function syncWatch() {
     }
   }
   try {
-    const response = await fetch(apiUrl("/api/price-alerts/watches"), {
+    const response = await apiFetch("/api/price-alerts/watches", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -420,6 +444,12 @@ async function syncWatch() {
         items,
       }),
     });
+    if (response.status === 402) {
+      const body = await response.json().catch(() => ({}));
+      toast(body.error || "Price alerts are part of Grocery Gitter Pro.");
+      openPaywall();
+      return;
+    }
     if (response.ok) {
       localStorage.setItem(SYNC_FLAG, "1");
       if (retired) localStorage.setItem(WATCH_LIST_KEY, listId);
@@ -584,6 +614,7 @@ function setQuantity(id, quantity) {
     entry.writtenAt = Date.now();
     entry.itemId = entry.itemId || id;
     queueWrite(entry, true);
+    if (!shareState?.shareToken) noteRemoved(entry.itemId || id, entry.writtenAt);
     list.delete(id);
     toast("Removed from list");
   } else {
@@ -1073,7 +1104,8 @@ function tripId() {
 
 function currentTrip() {
   if (!lastOptimize) return null;
-  const edited = Boolean(tripEdits.lockedStore || Object.keys(tripEdits.moves || {}).length);
+  const edited =
+    !planLimited("multiStoreSplit") && Boolean(tripEdits.lockedStore || Object.keys(tripEdits.moves || {}).length);
   if (!edited) {
     return { stores: lastOptimize.stores ?? [], total: Number(lastOptimize.total) || 0 };
   }
@@ -1106,10 +1138,15 @@ function itemPriceLabel(item, store) {
   return store?.handoff?.priceLabel || store?.pricing?.label || priceSourceLabel(store?.pricing?.source);
 }
 
+function planLimited(feature) {
+  return Boolean(lastOptimize?.entitlement?.limited?.includes(feature));
+}
+
 function exportRow(scope, storeName, actionType) {
   const storeAttr = storeName ? ` data-export-store="${escapeHtml(storeName)}"` : "";
   const instacartScope = scope === "store" ? "store" : "list";
-  const showInstacart = instacartEnabled && actionType !== "kroger_cart" && actionType !== "walmart_cart";
+  const showInstacart =
+    instacartEnabled && !planLimited("cartHandoffs") && actionType !== "kroger_cart" && actionType !== "walmart_cart";
   const instacart = showInstacart
     ? `<button type="button" class="instacart-cta" data-instacart-scope="${instacartScope}"${storeName ? ` data-instacart-store="${escapeHtml(storeName)}"` : ""}><img src="/instacart-carrot.svg" alt="" />Add to Instacart</button>`
     : "";
@@ -1123,6 +1160,7 @@ function exportRow(scope, storeName, actionType) {
 }
 
 function moveControl(item) {
+  if (planLimited("multiStoreSplit")) return "";
   const offers = item.offers || [];
   if (offers.length < 2 || !item.lineId) return "";
   const options = offers
@@ -1139,6 +1177,9 @@ function moveControl(item) {
 function primaryAction(store) {
   const action = store.handoff?.action;
   if (!action) return "";
+  if (planLimited("cartHandoffs")) {
+    return `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
+  }
   if (action.type === "coming_soon") {
     return `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
   }
@@ -1174,12 +1215,13 @@ function paintTrip() {
       <div>
         <p>Trip plan</p>
         <p>${escapeHtml(summaryOf(stores))}</p>
+        ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
       </div>
       <p class="trip-total">${money(view.total)}</p>
     </div>
     <p class="trip-compare">${escapeHtml(comparison.note)}</p>
     ${offline ? `<p class="offline-note">You're offline. This trip is saved on this device, including what you've checked off.</p>` : ""}
-    ${tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
+    ${!planLimited("multiStoreSplit") && tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
     <div class="trip-actions">
       <button type="button" class="ghost" data-instore="trip">In-store mode</button>
       ${exportRow("trip")}
@@ -1227,8 +1269,9 @@ function renderStore(store, checks) {
   const nearby = store.nearbyStore?.name
     ? `<p class="store-nearby">Nearest store: ${escapeHtml(store.nearbyStore.name)}</p>`
     : "";
-  const lock =
-    tripEdits.lockedStore === store.storeName
+  const lock = planLimited("multiStoreSplit")
+    ? ""
+    : tripEdits.lockedStore === store.storeName
       ? `<button type="button" class="ghost" data-unlock-store>Unlock ${escapeHtml(store.storeName)}</button>`
       : `<button type="button" class="ghost" data-lock-store="${escapeHtml(store.storeName)}">Lock ${escapeHtml(store.storeName)} for this trip</button>`;
   return `<article class="store-card">
@@ -1252,6 +1295,7 @@ function renderStore(store, checks) {
 }
 
 function itemUrl(item) {
+  if (planLimited("cartHandoffs")) return "";
   if (item?.url) return item.url;
   const offer = (item?.offers || []).find((row) => row.storeName === item.storeName);
   return offer?.url || "";
@@ -1346,6 +1390,10 @@ async function shareTripLink(stores, title) {
     body: JSON.stringify({ title, items }),
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 402) {
+    openPaywall();
+    return;
+  }
   if (!response.ok || !body.shareToken) throw new Error(body.error || "Could not make a share link.");
   const url = sharePageUrl(body.shareToken, { apiOrigin: apiOrigin(), locationHref: window.location.href });
   const how = await deliverShare({ title, text: title, url, dialogTitle: "Share list" }, shareEnv());
@@ -1450,7 +1498,7 @@ async function openInstacart(button) {
   }
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/instacart/shopping-list"), {
+    const response = await apiFetch("/api/instacart/shopping-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1460,6 +1508,7 @@ async function openInstacart(button) {
       }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok || !body.productsLinkUrl) throw new Error(body.error || "Instacart did not return a link.");
     await openExternal(body.productsLinkUrl);
   } catch (error) {
@@ -1476,12 +1525,13 @@ async function startKroger(storeName, button) {
   if (!store) return;
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/kroger/cart/start"), {
+    const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
     if (body.authorizeUrl) {
       if (isNative()) {
@@ -1849,11 +1899,13 @@ async function postList(extra = {}) {
       shareToken: extra.shareToken || owned?.shareToken,
       displayName: readDisplayName() || undefined,
       title: "Shopping list",
+      deviceId: deviceId(),
       items: [...list.values()].map((entry) => toWrite(entry, false)),
       rotate: Boolean(extra.rotate),
     }),
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 402) openPaywall();
   if (!response.ok) {
     toast(body.error || "Could not share this list.");
     return null;
@@ -1982,6 +2034,7 @@ async function useOwnList() {
   if (owned?.shareToken) await openSharedList(owned.shareToken, { mergeLocal: true });
   else renderEstimate();
   scheduleWatchSync();
+  void syncAccountList();
 }
 
 function toggleChecked(itemId, checked) {
@@ -2144,7 +2197,15 @@ document.addEventListener("click", (event) => {
     void startKroger(target.closest("[data-kroger]").getAttribute("data-kroger"), target.closest("[data-kroger]"));
     return;
   }
+  if (target.closest("[data-open-paywall]")) {
+    openPaywall();
+    return;
+  }
   if (target.closest("[data-shop-list]")) {
+    if (planLimited("cartHandoffs")) {
+      openPaywall();
+      return;
+    }
     openChecklist(target.closest("[data-shop-list]").getAttribute("data-shop-list"));
     return;
   }
@@ -2157,6 +2218,10 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target.closest("[data-lock-store]")) {
+    if (planLimited("multiStoreSplit")) {
+      openPaywall();
+      return;
+    }
     tripEdits = { ...tripEdits, lockedStore: target.closest("[data-lock-store]").getAttribute("data-lock-store") };
     rememberTrip();
     paintTrip();
@@ -2177,6 +2242,10 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target.closest(".instacart-cta")) {
+    if (planLimited("cartHandoffs")) {
+      openPaywall();
+      return;
+    }
     void openInstacart(target.closest(".instacart-cta"));
   }
 });
@@ -2185,6 +2254,10 @@ document.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   if (target instanceof HTMLSelectElement && target.dataset.moveLine) {
+    if (planLimited("multiStoreSplit")) {
+      openPaywall();
+      return;
+    }
     const lineId = target.dataset.moveLine;
     const storeName = target.value;
     const moves = { ...tripEdits.moves };
@@ -2353,12 +2426,22 @@ for (const button of document.querySelectorAll(".settings-open")) {
   button.addEventListener("click", openSettings);
 }
 $("settings-close")?.addEventListener("click", () => $("settings-dialog")?.close());
+$("open-paywall")?.addEventListener("click", () => openPaywall());
+$("paywall-close")?.addEventListener("click", () => $("paywall-dialog")?.close());
+$("paywall-restore")?.addEventListener("click", () => void restorePurchases());
 $("delete-confirm")?.addEventListener("input", () => {
   const button = $("delete-data-btn");
   const confirmEl = $("delete-confirm");
   if (button && confirmEl) button.disabled = confirmEl.value !== "DELETE";
 });
 $("delete-data-btn")?.addEventListener("click", () => void deleteMyData());
+$("sign-in-apple")?.addEventListener("click", () => void signInWithApple());
+$("sign-in-google")?.addEventListener("click", () => void signInWithGoogle());
+$("sign-out")?.addEventListener("click", () => void signOut());
+$("magic-link-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void sendMagicLink();
+});
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -2424,7 +2507,7 @@ function paintAlertList() {
 
 async function refreshAlerts() {
   try {
-    const response = await fetch(apiUrl(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`));
+    const response = await apiFetch(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`);
     if (!response.ok) return;
     const body = await response.json();
     priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
@@ -2449,7 +2532,7 @@ async function openAlerts(show) {
   const unseen = priceAlerts.filter((alert) => !alert.seen).map((alert) => alert.id);
   if (unseen.length === 0) return;
   try {
-    await fetch(apiUrl("/api/price-alerts/seen"), {
+    await apiFetch("/api/price-alerts/seen", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), ids: unseen }),
@@ -2505,7 +2588,7 @@ async function enablePush() {
       applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
     });
     const json = subscription.toJSON();
-    const response = await fetch(apiUrl("/api/price-alerts/push"), {
+    const response = await apiFetch("/api/price-alerts/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), subscription: json }),
@@ -2553,6 +2636,7 @@ function openSettings() {
   if (button) button.disabled = true;
   if (dialog && !dialog.open) dialog.showModal();
   confirmEl?.focus();
+  void loadBilling();
 }
 
 async function dropKrogerInSystemBrowser() {
@@ -2584,7 +2668,11 @@ async function deleteMyData() {
     await unsubscribeLocalPush();
     const response = await fetch(apiUrl("/api/me/data"), {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(readSessionToken() ? { Authorization: `Bearer ${readSessionToken()}` } : {}),
+      },
       credentials: apiOrigin() ? "omit" : "include",
       body: JSON.stringify({ deviceId: device, lists }),
     });
@@ -2608,7 +2696,531 @@ async function deleteMyData() {
   }
 }
 
+function readRemoved() {
+  const rows = readStoredJson(REMOVED_KEY);
+  return Array.isArray(rows) ? rows.filter((row) => row && typeof row.id === "string") : [];
+}
+
+function noteRemoved(id, writtenAt) {
+  const rows = readRemoved().filter((row) => row.id !== id);
+  rows.push({ id, writtenAt: Number(writtenAt) || Date.now() });
+  localStorage.setItem(REMOVED_KEY, JSON.stringify(rows.slice(-100)));
+}
+
+function personalListPayload() {
+  const source = shareState?.shareToken ? readStoredJson(PERSONAL_KEY) : null;
+  const items = Array.isArray(source)
+    ? source
+    : [...list.values()].map((entry) => ({
+        id: entry.product.id,
+        itemId: entry.itemId || entry.product.id,
+        name: entry.product.name,
+        brand: entry.product.brand || "",
+        sizeLabel: entry.product.sizeLabel || "",
+        quantity: entry.quantity,
+        checked: Boolean(entry.checked),
+        addedBy: entry.addedBy,
+        checkedBy: entry.checkedBy,
+        writtenAt: entry.writtenAt || 0,
+        baselinePrice: entry.baselinePrice,
+        baselineStore: entry.baselineStore || "",
+        watch: entry.watch || "inherit",
+        targetPrice: entry.targetPrice ?? null,
+      }));
+  return {
+    listId: savedListId(),
+    listName: "My list",
+    zip: ZIP_PATTERN.test(normalizeZip(zipEl.value)) ? normalizeZip(zipEl.value).slice(0, 5) : "",
+    alertsEnabled: Boolean(listAlertsEl?.checked),
+    items: items.filter((item) => item?.id && item?.name).slice(0, 100),
+    removed: shareState?.shareToken ? [] : readRemoved(),
+    baseRevision: listRevision || null,
+  };
+}
+
+function authReturnTo() {
+  if (!isNative()) return "/";
+  return `${window.location.origin}/`;
+}
+
+function setAuthMessage(text) {
+  const el = $("auth-message");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintAccount() {
+  const signedIn = $("account-signed-in");
+  const signedOut = $("account-signed-out");
+  const who = $("account-who");
+  const apple = $("sign-in-apple");
+  const google = $("sign-in-google");
+  const email = $("magic-link-form");
+  if (apple) apple.hidden = !authStatus?.providers?.apple?.enabled;
+  if (google) google.hidden = !authStatus?.providers?.google?.enabled;
+  if (email) email.hidden = !authStatus?.providers?.email?.enabled;
+  if (accountState) {
+    if (signedOut) signedOut.hidden = true;
+    if (signedIn) signedIn.hidden = false;
+    const label = accountState.displayName || accountState.email || "Signed in";
+    if (who) who.textContent = `Signed in as ${label}. This list and your alerts sync to your other devices.`;
+  } else {
+    if (signedIn) signedIn.hidden = true;
+    if (signedOut) signedOut.hidden = false;
+  }
+}
+
+function applyAccountRows(items) {
+  applyingAccount = true;
+  list.clear();
+  for (const row of items ?? []) {
+    if (row?.name) rememberLocalRow(row);
+  }
+  localStorage.removeItem(REMOVED_KEY);
+  renderEstimate();
+  renderListRows();
+  saveList();
+  applyingAccount = false;
+}
+
+function scheduleAccountSync() {
+  if (applyingAccount || !accountState || shareState?.shareToken || !listReady) return;
+  window.clearTimeout(listSyncTimer);
+  listSyncTimer = window.setTimeout(() => void pushAccountList(), 500);
+}
+
+async function pushAccountList() {
+  if (!accountState || shareState?.shareToken || applyingAccount) return;
+  try {
+    const response = await apiFetch("/api/me/list", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(personalListPayload()),
+    });
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.list?.revision) {
+      listRevision = body.list.revision;
+      localStorage.setItem(REVISION_KEY, String(listRevision));
+    }
+    if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
+    localStorage.removeItem(REMOVED_KEY);
+  } catch {
+    /* the list stays on this device and tries again on the next edit */
+  }
+}
+
+function rememberServerList(server) {
+  if (!server) return;
+  listRevision = server.revision || listRevision;
+  if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
+  if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
+  if (server.alertsEnabled && listAlertsEl) {
+    listAlertsEl.checked = true;
+    localStorage.setItem(ALERTS_KEY, "1");
+  }
+}
+
+async function syncAccountList() {
+  if (!accountState || shareState?.shareToken) return;
+  try {
+    if (!listRevision) {
+      const response = await apiFetch("/api/me/list", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...personalListPayload(), baseRevision: null }),
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      rememberServerList(body.list);
+      applyAccountRows(body.list?.items ?? []);
+      return;
+    }
+    const response = await apiFetch("/api/me/list");
+    if (!response.ok) return;
+    const body = await response.json();
+    const server = body.list;
+    if (!server) {
+      if (list.size) await pushAccountList();
+      return;
+    }
+    if (server.revision > listRevision) {
+      rememberServerList(server);
+      applyAccountRows(server.items);
+      return;
+    }
+    if (list.size) await pushAccountList();
+  } catch {
+    /* guest data on this device is unchanged */
+  }
+}
+
+async function mergeThisDevice() {
+  if (!readSessionToken()) return;
+  const owned = readOwned();
+  await apiFetch("/api/auth/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+}
+
+let billingStatus = null;
+let purchasesConfigured = false;
+
+function paywallError(text) {
+  const el = $("paywall-error");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintPlan() {
+  const status = $("plan-status");
+  if (!status || !billingStatus) return;
+  if (!billingStatus.enforced) {
+    status.textContent = "Subscriptions are not turned on yet, so every feature stays available.";
+    return;
+  }
+  status.textContent = billingStatus.pro
+    ? "Grocery Gitter Pro is active on this account."
+    : "One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.";
+}
+
+function paintPaywall() {
+  const note = $("paywall-note");
+  const restore = $("paywall-restore");
+  const manage = $("paywall-manage");
+  const terms = $("paywall-terms");
+  const privacy = $("paywall-privacy");
+  const view = paywallView({
+    status: billingStatus,
+    platform: platformOf(window.Capacitor),
+    signedIn: Boolean(accountState?.id || readSessionToken()),
+  });
+  if (terms) terms.href = view.terms;
+  if (privacy) privacy.href = view.privacy;
+  if (manage) {
+    manage.hidden = !view.manageUrl;
+    if (view.manageUrl) manage.href = view.manageUrl;
+  }
+  if (restore) restore.hidden = !view.native;
+  const lines = [];
+  if (!view.enforced) lines.push("Subscriptions are not turned on yet, so every feature stays available.");
+  if (view.showWebNote) lines.push(view.webNote);
+  if (view.needsSignIn) lines.push("Sign in from Settings, then subscribe.");
+  if (view.unconfigured) lines.push("Subscriptions are not configured in this build yet.");
+  if (view.pro) lines.push("Grocery Gitter Pro is active on this account.");
+  if (note) note.textContent = lines.join(" ");
+  return view;
+}
+
+async function loadBilling() {
+  try {
+    const response = await apiFetch("/api/billing/status");
+    if (!response.ok) return;
+    billingStatus = await response.json();
+    paintPlan();
+  } catch {
+    /* the trip still works; Settings can try again */
+  }
+}
+
+function purchasesPlugin() {
+  return window.Capacitor?.Plugins?.Purchases || null;
+}
+
+async function configurePurchases(view) {
+  const plugin = purchasesPlugin();
+  if (!plugin?.configure || !view.canPurchase) return null;
+  const appUserID = accountState?.id;
+  if (!appUserID) return null;
+  const apiKey = sdkKeyFor(billingStatus, view.native ? platformOf(window.Capacitor) : "web");
+  if (!purchasesConfigured) {
+    await plugin.configure({ apiKey, appUserID });
+    purchasesConfigured = true;
+  } else if (plugin.logIn) {
+    await plugin.logIn({ appUserID });
+  }
+  return plugin;
+}
+
+async function refreshEntitlement() {
+  const response = await apiFetch("/api/billing/refresh", { method: "POST" });
+  if (!response.ok) return;
+  await loadBilling();
+  paintPaywall();
+}
+
+async function loadOfferings() {
+  const view = paintPaywall();
+  const box = $("paywall-packages");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!view.canPurchase) return;
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.getOfferings) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    const offerings = await plugin.getOfferings();
+    const choices = packageChoices(offerings);
+    if (!choices.length) {
+      paywallError("No subscription is available yet.");
+      return;
+    }
+    for (const choice of choices) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost";
+      button.textContent = choice.price ? `${choice.title} · ${choice.price}` : choice.title;
+      button.addEventListener("click", () => void purchasePackage(plugin, choice.raw));
+      box.appendChild(button);
+    }
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not load subscriptions.");
+  }
+}
+
+async function purchasePackage(plugin, aPackage) {
+  paywallError("");
+  try {
+    await plugin.purchasePackage({ aPackage });
+    await refreshEntitlement();
+    toast("Grocery Gitter Pro is active.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The purchase did not finish.";
+    if (!/cancel/i.test(message)) paywallError(message);
+  }
+}
+
+async function restorePurchases() {
+  const view = paintPaywall();
+  if (!view.canPurchase) {
+    paywallError(view.showWebNote ? view.webNote : "Sign in from Settings, then restore purchases.");
+    return;
+  }
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.restorePurchases) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    await plugin.restorePurchases();
+    await refreshEntitlement();
+    toast(billingStatus?.pro ? "Purchases restored." : "No active subscription was found.");
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not restore purchases.");
+  }
+}
+
+function openPaywall() {
+  const dialog = $("paywall-dialog");
+  paintPaywall();
+  if (dialog && !dialog.open) dialog.showModal();
+  void loadOfferings();
+}
+
+async function loadAccount() {
+  const box = $("account-box");
+  try {
+    const statusResponse = await apiFetch("/api/auth/status");
+    if (!statusResponse.ok) return;
+    authStatus = await statusResponse.json();
+    if (!authStatus?.enabled) {
+      if (box) box.hidden = true;
+      return;
+    }
+    if (box) box.hidden = false;
+    const meResponse = await apiFetch("/api/auth/me");
+    const me = await meResponse.json().catch(() => ({}));
+    accountState = me.account || null;
+    paintAccount();
+    if (accountState && (arrivedWithSession || localStorage.getItem("gg-merged") !== accountState.id)) {
+      await mergeThisDevice();
+      localStorage.setItem("gg-merged", accountState.id);
+    }
+    arrivedWithSession = false;
+    if (accountState) await syncAccountList();
+  } catch {
+    if (box) box.hidden = true;
+  }
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load sign-in."));
+    document.head.appendChild(script);
+  });
+}
+
+async function finishIdentity(path, extra) {
+  setAuthMessage("");
+  const owned = readOwned();
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...extra,
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not sign in.");
+  if (body.token) localStorage.setItem(SESSION_KEY, body.token);
+  accountState = body.account || null;
+  paintAccount();
+  await syncAccountList();
+  setAuthMessage("Signed in.");
+}
+
+async function signInWithApple() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.SignInWithApple;
+    if (isNative() && plugin?.authorize) {
+      const result = await plugin.authorize({
+        clientId: authStatus?.providers?.apple?.clientId,
+        redirectURI: `${apiOrigin() || window.location.origin}/api/auth/apple/callback`,
+        scopes: "email name",
+      });
+      const identityToken = result?.response?.identityToken || result?.identityToken;
+      const given = result?.response?.givenName || result?.givenName || "";
+      const family = result?.response?.familyName || result?.familyName || "";
+      if (identityToken) {
+        await finishIdentity("/api/auth/apple", {
+          identityToken,
+          displayName: [given, family].filter(Boolean).join(" "),
+        });
+        return;
+      }
+    }
+    if (!isNative() && authStatus?.providers?.apple?.clientId) {
+      await loadScript("https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js");
+      window.AppleID.auth.init({
+        clientId: authStatus.providers.apple.clientId,
+        scope: "name email",
+        redirectURI: `${window.location.origin}/api/auth/apple/callback`,
+        usePopup: true,
+      });
+      const result = await window.AppleID.auth.signIn();
+      const name = [result?.user?.name?.firstName, result?.user?.name?.lastName].filter(Boolean).join(" ");
+      await finishIdentity("/api/auth/apple", { identityToken: result.authorization.id_token, displayName: name });
+      return;
+    }
+    const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+    window.location.assign(apiUrl(`/api/auth/apple/start?${params.toString()}`));
+  } catch (error) {
+    if (error?.error === "popup_closed_by_user") return;
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Apple.");
+  }
+}
+
+async function signInWithGoogle() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.GoogleAuth;
+    if (isNative() && plugin?.signIn) {
+      const result = await plugin.signIn();
+      const idToken = result?.authentication?.idToken || result?.idToken;
+      if (idToken) {
+        await finishIdentity("/api/auth/google", { idToken, displayName: result?.displayName || result?.name });
+        return;
+      }
+    }
+    if (authStatus?.providers?.google?.redirect) {
+      const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+      window.location.assign(apiUrl(`/api/auth/google/start?${params.toString()}`));
+      return;
+    }
+    const clientId = authStatus?.providers?.google?.clientId;
+    if (!clientId) throw new Error("Google sign-in is not configured.");
+    await loadScript("https://accounts.google.com/gsi/client");
+    await new Promise((resolve, reject) => {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          finishIdentity("/api/auth/google", { idToken: response.credential })
+            .then(resolve)
+            .catch(reject);
+        },
+      });
+      window.google.accounts.id.prompt((notification) => {
+        if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+          reject(new Error("Google sign-in did not open. Try again."));
+        }
+      });
+    });
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Google.");
+  }
+}
+
+async function sendMagicLink() {
+  setAuthMessage("");
+  const email = $("magic-email")?.value?.trim() || "";
+  try {
+    const response = await apiFetch("/api/auth/email/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, return: "/" }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not send the email.");
+    setAuthMessage(
+      isNative()
+        ? "Check your email. The link opens Grocery Gitter in the browser and expires in 20 minutes."
+        : "Check your email for a sign-in link. It expires in 20 minutes."
+    );
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not send the email.");
+  }
+}
+
+async function signOut() {
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    /* the token on this device is still dropped */
+  }
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem("gg-merged");
+  accountState = null;
+  paintAccount();
+  setAuthMessage("Signed out. This device can keep shopping without an account.");
+}
+
+function adoptSessionFromUrl() {
+  const token = sessionFromSearch(window.location.search);
+  if (!token) return;
+  localStorage.setItem(SESSION_KEY, token);
+  arrivedWithSession = true;
+  const next = pathWithoutSession(window.location.pathname, window.location.search);
+  history.replaceState({}, "", next);
+}
+
 async function boot() {
+  adoptSessionFromUrl();
+  listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
@@ -2649,6 +3261,8 @@ async function boot() {
   listReady = true;
   renderEstimate();
   saveList();
+  await loadAccount();
+  await loadBilling();
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);
