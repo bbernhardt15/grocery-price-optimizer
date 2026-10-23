@@ -179,7 +179,7 @@ Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the 
 
 ## Share a list
 
-A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
+A shopper can share the list on this device without an account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item. Sign-in is optional and stays hidden until it is configured. See [Optional accounts](docs/ACCOUNTS.md).
 
 Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
 
@@ -522,7 +522,7 @@ When it is set, three places report:
 - **Website** (`@sentry/browser`, loaded by the Capacitor SDK on the web) — `public/sentry-loader.js` asks `GET /api/observability`. `enabled: false` means it stops. A DSN loads `public/sentry.js`, which `npm run build` writes. That file is not committed.
 - **iOS and Android** (`@sentry/capacitor`) — the same bundle starts the native crash SDK inside the WebView. `npm run cap:sync` writes the DSN and the git sha into the native copy of `public/native-config.js` only. The website copy of that file stays empty.
 
-Reports do not include email addresses, names, grocery-list bodies, Kroger tokens, the `kroger_shopper` cookie, other cookies, or Authorization headers. There is no account id on a crash report. `/privacy` explains what is sent and how to ask for a crash report to be deleted.
+Reports do not include email addresses, names, grocery-list bodies, Kroger tokens, the `kroger_shopper` cookie, other cookies, or Authorization headers. A crash report is not tied to an account, even when sign-in is on, and Delete my data does not remove it. `/privacy` explains what is sent and how to ask for a crash report to be deleted.
 
 The release is the first of `SENTRY_RELEASE`, `RAILWAY_GIT_COMMIT_SHA`, `CM_COMMIT`, `GITHUB_SHA`, `COMMIT_SHA`, `SOURCE_VERSION`, then `git rev-parse HEAD`.
 

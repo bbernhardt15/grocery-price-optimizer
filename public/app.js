@@ -25,6 +25,7 @@ import {
   sharePageUrl,
   visibleItems,
 } from "./shopper/shareList.js";
+import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,6 +76,8 @@ const SHARE_KEY = "gg-share";
 const OWNER_KEY = "gg-owner";
 const NAME_KEY = "gg-display-name";
 const PERSONAL_KEY = "gg-list-personal";
+const REMOVED_KEY = "gg-list-removed";
+const REVISION_KEY = "gg-list-revision";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 function isNative() {
@@ -171,6 +174,14 @@ let pollTimer = 0;
 /** @type {EventSource | null} */
 let listEvents = null;
 let syncGeneration = 0;
+/** @type {{ id: string, email?: string, displayName?: string, providers?: string[] } | null} */
+let accountState = null;
+/** @type {Record<string, any> | null} */
+let authStatus = null;
+let listRevision = 0;
+let listSyncTimer = 0;
+let applyingAccount = false;
+let arrivedWithSession = false;
 
 const money = formatMoney;
 
@@ -195,8 +206,19 @@ function toast(message) {
   window.setTimeout(() => toastEl.classList.remove("show"), 1600);
 }
 
-function apiFetch(path, init) {
-  return globalThis.fetch(apiUrl(path), init);
+function readSessionToken() {
+  return localStorage.getItem(SESSION_KEY) || "";
+}
+
+function apiFetch(path, init = {}) {
+  const headers = new Headers(init.headers || {});
+  const token = readSessionToken();
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return globalThis.fetch(apiUrl(path), {
+    ...init,
+    headers,
+    credentials: init.credentials ?? (apiOrigin() ? "omit" : "include"),
+  });
 }
 
 function readStoredJson(key) {
@@ -344,6 +366,7 @@ function saveList() {
   }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
   scheduleWatchSync();
+  scheduleAccountSync();
 }
 
 function scheduleWatchSync() {
@@ -376,7 +399,7 @@ async function syncWatch() {
   let retired = !previous || previous === listId;
   if (previous && previous !== listId) {
     try {
-      const off = await fetch(apiUrl("/api/price-alerts/watches"), {
+      const off = await apiFetch("/api/price-alerts/watches", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -394,7 +417,7 @@ async function syncWatch() {
     }
   }
   try {
-    const response = await fetch(apiUrl("/api/price-alerts/watches"), {
+    const response = await apiFetch("/api/price-alerts/watches", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -570,6 +593,7 @@ function setQuantity(id, quantity) {
     entry.writtenAt = Date.now();
     entry.itemId = entry.itemId || id;
     queueWrite(entry, true);
+    if (!shareState?.shareToken) noteRemoved(entry.itemId || id, entry.writtenAt);
     list.delete(id);
     toast("Removed from list");
   } else {
@@ -1205,7 +1229,7 @@ async function startKroger(storeName, button) {
   if (!store) return;
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/kroger/cart/start"), {
+    const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
@@ -1578,6 +1602,7 @@ async function postList(extra = {}) {
       shareToken: extra.shareToken || owned?.shareToken,
       displayName: readDisplayName() || undefined,
       title: "Shopping list",
+      deviceId: deviceId(),
       items: [...list.values()].map((entry) => toWrite(entry, false)),
       rotate: Boolean(extra.rotate),
     }),
@@ -1711,6 +1736,7 @@ async function useOwnList() {
   if (owned?.shareToken) await openSharedList(owned.shareToken, { mergeLocal: true });
   else renderEstimate();
   scheduleWatchSync();
+  void syncAccountList();
 }
 
 function toggleChecked(itemId, checked) {
@@ -2028,6 +2054,13 @@ $("delete-confirm")?.addEventListener("input", () => {
   if (button && confirmEl) button.disabled = confirmEl.value !== "DELETE";
 });
 $("delete-data-btn")?.addEventListener("click", () => void deleteMyData());
+$("sign-in-apple")?.addEventListener("click", () => void signInWithApple());
+$("sign-in-google")?.addEventListener("click", () => void signInWithGoogle());
+$("sign-out")?.addEventListener("click", () => void signOut());
+$("magic-link-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void sendMagicLink();
+});
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -2093,7 +2126,7 @@ function paintAlertList() {
 
 async function refreshAlerts() {
   try {
-    const response = await fetch(apiUrl(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`));
+    const response = await apiFetch(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`);
     if (!response.ok) return;
     const body = await response.json();
     priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
@@ -2118,7 +2151,7 @@ async function openAlerts(show) {
   const unseen = priceAlerts.filter((alert) => !alert.seen).map((alert) => alert.id);
   if (unseen.length === 0) return;
   try {
-    await fetch(apiUrl("/api/price-alerts/seen"), {
+    await apiFetch("/api/price-alerts/seen", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), ids: unseen }),
@@ -2174,7 +2207,7 @@ async function enablePush() {
       applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
     });
     const json = subscription.toJSON();
-    const response = await fetch(apiUrl("/api/price-alerts/push"), {
+    const response = await apiFetch("/api/price-alerts/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), subscription: json }),
@@ -2253,7 +2286,11 @@ async function deleteMyData() {
     await unsubscribeLocalPush();
     const response = await fetch(apiUrl("/api/me/data"), {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(readSessionToken() ? { Authorization: `Bearer ${readSessionToken()}` } : {}),
+      },
       credentials: apiOrigin() ? "omit" : "include",
       body: JSON.stringify({ deviceId: device, lists }),
     });
@@ -2277,7 +2314,372 @@ async function deleteMyData() {
   }
 }
 
+function readRemoved() {
+  const rows = readStoredJson(REMOVED_KEY);
+  return Array.isArray(rows) ? rows.filter((row) => row && typeof row.id === "string") : [];
+}
+
+function noteRemoved(id, writtenAt) {
+  const rows = readRemoved().filter((row) => row.id !== id);
+  rows.push({ id, writtenAt: Number(writtenAt) || Date.now() });
+  localStorage.setItem(REMOVED_KEY, JSON.stringify(rows.slice(-100)));
+}
+
+function personalListPayload() {
+  const source = shareState?.shareToken ? readStoredJson(PERSONAL_KEY) : null;
+  const items = Array.isArray(source)
+    ? source
+    : [...list.values()].map((entry) => ({
+        id: entry.product.id,
+        itemId: entry.itemId || entry.product.id,
+        name: entry.product.name,
+        brand: entry.product.brand || "",
+        sizeLabel: entry.product.sizeLabel || "",
+        quantity: entry.quantity,
+        checked: Boolean(entry.checked),
+        addedBy: entry.addedBy,
+        checkedBy: entry.checkedBy,
+        writtenAt: entry.writtenAt || 0,
+        baselinePrice: entry.baselinePrice,
+        baselineStore: entry.baselineStore || "",
+        watch: entry.watch || "inherit",
+        targetPrice: entry.targetPrice ?? null,
+      }));
+  return {
+    listId: savedListId(),
+    listName: "My list",
+    zip: ZIP_PATTERN.test(normalizeZip(zipEl.value)) ? normalizeZip(zipEl.value).slice(0, 5) : "",
+    alertsEnabled: Boolean(listAlertsEl?.checked),
+    items: items.filter((item) => item?.id && item?.name).slice(0, 100),
+    removed: shareState?.shareToken ? [] : readRemoved(),
+    baseRevision: listRevision || null,
+  };
+}
+
+function authReturnTo() {
+  if (!isNative()) return "/";
+  return `${window.location.origin}/`;
+}
+
+function setAuthMessage(text) {
+  const el = $("auth-message");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintAccount() {
+  const signedIn = $("account-signed-in");
+  const signedOut = $("account-signed-out");
+  const who = $("account-who");
+  const apple = $("sign-in-apple");
+  const google = $("sign-in-google");
+  const email = $("magic-link-form");
+  if (apple) apple.hidden = !authStatus?.providers?.apple?.enabled;
+  if (google) google.hidden = !authStatus?.providers?.google?.enabled;
+  if (email) email.hidden = !authStatus?.providers?.email?.enabled;
+  if (accountState) {
+    if (signedOut) signedOut.hidden = true;
+    if (signedIn) signedIn.hidden = false;
+    const label = accountState.displayName || accountState.email || "Signed in";
+    if (who) who.textContent = `Signed in as ${label}. This list and your alerts sync to your other devices.`;
+  } else {
+    if (signedIn) signedIn.hidden = true;
+    if (signedOut) signedOut.hidden = false;
+  }
+}
+
+function applyAccountRows(items) {
+  applyingAccount = true;
+  list.clear();
+  for (const row of items ?? []) {
+    if (row?.name) rememberLocalRow(row);
+  }
+  localStorage.removeItem(REMOVED_KEY);
+  renderEstimate();
+  renderListRows();
+  saveList();
+  applyingAccount = false;
+}
+
+function scheduleAccountSync() {
+  if (applyingAccount || !accountState || shareState?.shareToken || !listReady) return;
+  window.clearTimeout(listSyncTimer);
+  listSyncTimer = window.setTimeout(() => void pushAccountList(), 500);
+}
+
+async function pushAccountList() {
+  if (!accountState || shareState?.shareToken || applyingAccount) return;
+  try {
+    const response = await apiFetch("/api/me/list", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(personalListPayload()),
+    });
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.list?.revision) {
+      listRevision = body.list.revision;
+      localStorage.setItem(REVISION_KEY, String(listRevision));
+    }
+    if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
+    localStorage.removeItem(REMOVED_KEY);
+  } catch {
+    /* the list stays on this device and tries again on the next edit */
+  }
+}
+
+function rememberServerList(server) {
+  if (!server) return;
+  listRevision = server.revision || listRevision;
+  if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
+  if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
+  if (server.alertsEnabled && listAlertsEl) {
+    listAlertsEl.checked = true;
+    localStorage.setItem(ALERTS_KEY, "1");
+  }
+}
+
+async function syncAccountList() {
+  if (!accountState || shareState?.shareToken) return;
+  try {
+    if (!listRevision) {
+      const response = await apiFetch("/api/me/list", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...personalListPayload(), baseRevision: null }),
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      rememberServerList(body.list);
+      applyAccountRows(body.list?.items ?? []);
+      return;
+    }
+    const response = await apiFetch("/api/me/list");
+    if (!response.ok) return;
+    const body = await response.json();
+    const server = body.list;
+    if (!server) {
+      if (list.size) await pushAccountList();
+      return;
+    }
+    if (server.revision > listRevision) {
+      rememberServerList(server);
+      applyAccountRows(server.items);
+      return;
+    }
+    if (list.size) await pushAccountList();
+  } catch {
+    /* guest data on this device is unchanged */
+  }
+}
+
+async function mergeThisDevice() {
+  if (!readSessionToken()) return;
+  const owned = readOwned();
+  await apiFetch("/api/auth/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+}
+
+async function loadAccount() {
+  const box = $("account-box");
+  try {
+    const statusResponse = await apiFetch("/api/auth/status");
+    if (!statusResponse.ok) return;
+    authStatus = await statusResponse.json();
+    if (!authStatus?.enabled) {
+      if (box) box.hidden = true;
+      return;
+    }
+    if (box) box.hidden = false;
+    const meResponse = await apiFetch("/api/auth/me");
+    const me = await meResponse.json().catch(() => ({}));
+    accountState = me.account || null;
+    paintAccount();
+    if (accountState && (arrivedWithSession || localStorage.getItem("gg-merged") !== accountState.id)) {
+      await mergeThisDevice();
+      localStorage.setItem("gg-merged", accountState.id);
+    }
+    arrivedWithSession = false;
+    if (accountState) await syncAccountList();
+  } catch {
+    if (box) box.hidden = true;
+  }
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load sign-in."));
+    document.head.appendChild(script);
+  });
+}
+
+async function finishIdentity(path, extra) {
+  setAuthMessage("");
+  const owned = readOwned();
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...extra,
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not sign in.");
+  if (body.token) localStorage.setItem(SESSION_KEY, body.token);
+  accountState = body.account || null;
+  paintAccount();
+  await syncAccountList();
+  setAuthMessage("Signed in.");
+}
+
+async function signInWithApple() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.SignInWithApple;
+    if (isNative() && plugin?.authorize) {
+      const result = await plugin.authorize({
+        clientId: authStatus?.providers?.apple?.clientId,
+        redirectURI: `${apiOrigin() || window.location.origin}/api/auth/apple/callback`,
+        scopes: "email name",
+      });
+      const identityToken = result?.response?.identityToken || result?.identityToken;
+      const given = result?.response?.givenName || result?.givenName || "";
+      const family = result?.response?.familyName || result?.familyName || "";
+      if (identityToken) {
+        await finishIdentity("/api/auth/apple", {
+          identityToken,
+          displayName: [given, family].filter(Boolean).join(" "),
+        });
+        return;
+      }
+    }
+    if (!isNative() && authStatus?.providers?.apple?.clientId) {
+      await loadScript("https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js");
+      window.AppleID.auth.init({
+        clientId: authStatus.providers.apple.clientId,
+        scope: "name email",
+        redirectURI: `${window.location.origin}/api/auth/apple/callback`,
+        usePopup: true,
+      });
+      const result = await window.AppleID.auth.signIn();
+      const name = [result?.user?.name?.firstName, result?.user?.name?.lastName].filter(Boolean).join(" ");
+      await finishIdentity("/api/auth/apple", { identityToken: result.authorization.id_token, displayName: name });
+      return;
+    }
+    const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+    window.location.assign(apiUrl(`/api/auth/apple/start?${params.toString()}`));
+  } catch (error) {
+    if (error?.error === "popup_closed_by_user") return;
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Apple.");
+  }
+}
+
+async function signInWithGoogle() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.GoogleAuth;
+    if (isNative() && plugin?.signIn) {
+      const result = await plugin.signIn();
+      const idToken = result?.authentication?.idToken || result?.idToken;
+      if (idToken) {
+        await finishIdentity("/api/auth/google", { idToken, displayName: result?.displayName || result?.name });
+        return;
+      }
+    }
+    if (authStatus?.providers?.google?.redirect) {
+      const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+      window.location.assign(apiUrl(`/api/auth/google/start?${params.toString()}`));
+      return;
+    }
+    const clientId = authStatus?.providers?.google?.clientId;
+    if (!clientId) throw new Error("Google sign-in is not configured.");
+    await loadScript("https://accounts.google.com/gsi/client");
+    await new Promise((resolve, reject) => {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          finishIdentity("/api/auth/google", { idToken: response.credential })
+            .then(resolve)
+            .catch(reject);
+        },
+      });
+      window.google.accounts.id.prompt((notification) => {
+        if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+          reject(new Error("Google sign-in did not open. Try again."));
+        }
+      });
+    });
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Google.");
+  }
+}
+
+async function sendMagicLink() {
+  setAuthMessage("");
+  const email = $("magic-email")?.value?.trim() || "";
+  try {
+    const response = await apiFetch("/api/auth/email/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, return: "/" }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not send the email.");
+    setAuthMessage(
+      isNative()
+        ? "Check your email. The link opens Grocery Gitter in the browser and expires in 20 minutes."
+        : "Check your email for a sign-in link. It expires in 20 minutes."
+    );
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not send the email.");
+  }
+}
+
+async function signOut() {
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    /* the token on this device is still dropped */
+  }
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem("gg-merged");
+  accountState = null;
+  paintAccount();
+  setAuthMessage("Signed out. This device can keep shopping without an account.");
+}
+
+function adoptSessionFromUrl() {
+  const token = sessionFromSearch(window.location.search);
+  if (!token) return;
+  localStorage.setItem(SESSION_KEY, token);
+  arrivedWithSession = true;
+  const next = pathWithoutSession(window.location.pathname, window.location.search);
+  history.replaceState({}, "", next);
+}
+
 async function boot() {
+  adoptSessionFromUrl();
+  listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
@@ -2312,6 +2714,7 @@ async function boot() {
   listReady = true;
   renderEstimate();
   saveList();
+  await loadAccount();
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);

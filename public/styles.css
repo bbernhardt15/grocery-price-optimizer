@@ -88,7 +88,7 @@ img { max-width: 100%; display: block; }
 .brand-kicker { margin: 0; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .brand-title { margin: 0; font-family: var(--display); font-size: 1.25rem; }
 .search { position: relative; flex: 1 1 240px; min-width: 0; }
-.search input, .zip input, .filters select, .filters input, .sort select, .delete-box input {
+.search input, .zip input, .filters select, .filters input, .sort select, .delete-box input, .account-box input {
   width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--surface); padding: 0 12px;
 }
@@ -141,8 +141,14 @@ img { max-width: 100%; display: block; }
   color: var(--muted); background: none; border: 0; padding: 0; min-height: 44px;
   font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
 }
-.delete-box h3 { margin: 4px 0 0; font-size: 1.05rem; }
-.delete-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.delete-box h3, .account-box h3 { margin: 4px 0 0; font-size: 1.05rem; }
+.delete-box label, .account-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.account-box { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.account-actions, .magic-form { display: flex; flex-direction: column; gap: 8px; }
+.apple-btn {
+  min-height: 44px; border-radius: 12px; border: 0; background: #000; color: #fff;
+  padding: 0 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
 .danger {
   min-height: 44px; border-radius: 12px; border: 0; background: var(--sale); color: var(--sale-ink);
   padding: 0 14px; font: inherit; font-weight: 700; cursor: pointer;

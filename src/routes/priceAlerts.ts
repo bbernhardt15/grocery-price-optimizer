@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { PriceAlert, PriceWatch, PushSubscription } from "../alerts/models";
+import { requestAuth } from "../auth/middleware";
 import { nativePushConfigured } from "../alerts/push";
 import { vapidConfig, webPushConfigured } from "../alerts/vapid";
 import { parsePublicId, parsePushSubscription, parseWatchBody } from "../alerts/watchInput";
@@ -15,6 +16,11 @@ function asyncRoute(handler: (req: Request, res: Response) => Promise<void>) {
       }
     });
   };
+}
+
+function alertScope(deviceId: string, accountId: string | undefined): Record<string, unknown> {
+  if (!accountId) return { deviceId };
+  return { $or: [{ deviceId }, { accountId }] };
 }
 
 function deviceFrom(value: unknown, res: Response): string | null {
@@ -45,6 +51,7 @@ router.put("/price-alerts/watches", asyncRoute(async (req: Request, res: Respons
     });
     return;
   }
+  const accountId = requestAuth(res)?.accountId;
   await PriceWatch.findOneAndUpdate(
     { deviceId: watch.deviceId, listId: watch.listId },
     {
@@ -53,6 +60,7 @@ router.put("/price-alerts/watches", asyncRoute(async (req: Request, res: Respons
         zip: watch.zip,
         enabled: watch.enabled,
         items: watch.items,
+        ...(accountId ? { accountId } : {}),
       },
     },
     { upsert: true, new: true }
@@ -71,9 +79,10 @@ router.get("/price-alerts", asyncRoute(async (req: Request, res: Response) => {
   if (!deviceId) {
     return;
   }
+  const scope = alertScope(deviceId, requestAuth(res)?.accountId);
   const [alerts, unread] = await Promise.all([
-    PriceAlert.find({ deviceId }).sort({ createdAt: -1 }).limit(40).lean(),
-    PriceAlert.countDocuments({ deviceId, seenAt: null }),
+    PriceAlert.find(scope).sort({ createdAt: -1 }).limit(40).lean(),
+    PriceAlert.countDocuments({ ...scope, seenAt: null }),
   ]);
   res.json({
     unread,
@@ -100,7 +109,7 @@ router.post("/price-alerts/seen", asyncRoute(async (req: Request, res: Response)
   if (!deviceId) {
     return;
   }
-  const filter: { deviceId: string; seenAt: null; _id?: { $in: string[] } } = { deviceId, seenAt: null };
+  const filter: Record<string, unknown> = { ...alertScope(deviceId, requestAuth(res)?.accountId), seenAt: null };
   if (body?.ids != null) {
     if (!Array.isArray(body.ids) || body.ids.length > 100) {
       res.status(400).json({ error: "ids must be a list of alert ids." });
@@ -142,6 +151,7 @@ router.post("/price-alerts/push", asyncRoute(async (req: Request, res: Response)
     {
       $set: {
         deviceId,
+        ...(requestAuth(res)?.accountId ? { accountId: requestAuth(res)?.accountId } : {}),
         channel: "web",
         endpoint: subscription.endpoint,
         p256dh: subscription.p256dh,

@@ -1,9 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import { subscribeList } from "../lists/hub";
+import { requestAuth } from "../auth/middleware";
+import { parsePublicId } from "../alerts/watchInput";
 import {
   createOrResumeList,
   findPresentedToken,
   readSharedList,
+  tagOwnedSharedList,
   updateListSettings,
   writeSharedItems,
 } from "../lists/repository";
@@ -72,6 +75,16 @@ router.post("/lists", async (req, res) => {
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
+    }
+    const accountId = requestAuth(res)?.accountId;
+    const ownerDeviceId = parsePublicId(body.deviceId) ?? undefined;
+    if (accountId || ownerDeviceId) {
+      await tagOwnedSharedList({
+        shareToken: result.shareToken,
+        ownerToken: result.ownerToken,
+        ...(accountId ? { accountId } : {}),
+        ...(ownerDeviceId ? { ownerDeviceId } : {}),
+      });
     }
     res.status(result.created ? 201 : 200).json({
       shareToken: result.shareToken,

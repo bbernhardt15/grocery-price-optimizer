@@ -12,6 +12,8 @@ import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
+import authRouter from "./routes/auth";
+import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 
 initSentry();
@@ -21,6 +23,7 @@ const publicDir = path.join(__dirname, "..", "public");
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
   if (!req.path.startsWith("/api")) {
     const durable =
@@ -96,8 +99,20 @@ app.get("/api", (_req, res) => {
         "Edits items. Last write wins per item. View-only guests are refused. Rate limited.",
       "POST /api/lists/:shareToken/settings":
         "Owner only. mode view or edit, revoke, or rotate the link.",
+      "GET /api/auth/status":
+        "Which sign-in providers are configured. Enabled is false until AUTH_SECRET and at least one of Apple, Google, or email are set.",
+      "POST /api/auth/apple":
+        "Verifies a Sign in with Apple identity token, opens a session, and merges this device's list, watches, shared lists, and Kroger link.",
+      "POST /api/auth/google":
+        "Verifies a Google ID token and does the same merge.",
+      "POST /api/auth/email/start":
+        "Sends a one-time email link when RESEND_API_KEY and AUTH_EMAIL_FROM are set. 503 when they are not.",
+      "GET /api/auth/me":
+        "The signed-in account, or account null. Guest mode does not need this.",
+      "PUT /api/me/list":
+        "Saves the signed-in shopper's list. A newer revision from another device is merged per item.",
       "DELETE /api/me/data":
-        "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals and catalog-demand phrases are not tied to a device and are left in place.",
+        "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. When a session is sent, also deletes that account and the other devices on it. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals, catalog-demand phrases, and Sentry crash reports are not tied to a device or account and are left in place.",
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "GET /api/observability":
@@ -110,6 +125,8 @@ app.get("/api/observability", (_req, res) => {
   res.json(observabilityResponse());
 });
 
+app.use("/api", attachAccount);
+app.use("/api", authRouter);
 app.use("/api", catalogRouter);
 app.use("/api", browseCatalogRouter);
 app.use("/api", adminCatalogRouter);
