@@ -160,26 +160,32 @@ function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: Sh
 function pendingFromState(
   config: KrogerOAuthConfig,
   state: string | undefined
-): { items: KrogerCartLine[]; locationId?: string } | undefined {
+): { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect" } | undefined {
   if (!state) {
     return undefined;
   }
   const signed = verifyCartState(config, state);
   if (signed) {
     krogerCartSessions.takePending(state);
-    return { items: signed.items, locationId: signed.locationId };
+    return { items: signed.items, locationId: signed.locationId, purpose: signed.purpose };
   }
   const memory = krogerCartSessions.takePending(state);
   if (memory) {
-    return { items: memory.items, locationId: memory.locationId };
+    return { items: memory.items, locationId: memory.locationId, purpose: memory.purpose };
   }
   return undefined;
 }
 
-router.get("/kroger/auth-status", (_req, res) => {
+router.get("/kroger/auth-status", async (req, res) => {
   const config = readKrogerOAuthConfig();
+  let connected = false;
+  if (config) {
+    const token = await shopperTokenForRequest(config, cookieValue(req, KROGER_SHOPPER_COOKIE));
+    connected = Boolean(token);
+  }
   res.json({
     oauthConfigured: Boolean(config),
+    connected,
     cartScope: config?.scope ?? null,
     redirectUri: config?.redirectUri ?? null,
     modality: readCartModality(),
@@ -188,6 +194,33 @@ router.get("/kroger/auth-status", (_req, res) => {
      * add to a shopper cart. A registered redirect URI is required.
      */
     requiresShopperLogin: true,
+  });
+});
+
+/** Optional sign-in with no cart items. Nothing is added until a later cart start. */
+router.post("/kroger/connect", async (req, res) => {
+  const config = readKrogerOAuthConfig();
+  if (!config) {
+    res.status(501).json({
+      error:
+        "Kroger sign-in is not configured. Set KROGER_REDIRECT_URI to the exact URL registered on the Kroger developer app.",
+      oauthConfigured: false,
+    });
+    return;
+  }
+
+  const existing = await shopperTokenForRequest(config, cookieValue(req, KROGER_SHOPPER_COOKIE));
+  if (existing) {
+    res.json({ status: "connected", oauthConfigured: true });
+    return;
+  }
+
+  const state = signCartState(config, { items: [], purpose: "connect" });
+  krogerCartSessions.savePending(state, { items: [], purpose: "connect" });
+  res.json({
+    authorizeUrl: buildKrogerAuthorizeUrl(config, state),
+    status: "needs_shopper_login",
+    oauthConfigured: true,
   });
 });
 
@@ -359,6 +392,16 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
   }
 
   appendShopperCookie(res, config, token);
+
+  if (pending.purpose === "connect" || pending.items.length === 0) {
+    res.send(
+      htmlPage(
+        "Kroger is connected",
+        `<p class="status">You’re signed in with Kroger. Nothing was added to a cart. Return to ${PRODUCT_NAME} and plan a trip when you want items sent.</p>`
+      )
+    );
+    return;
+  }
 
   const result = await addItemsToKrogerCart(token.accessToken, pending.items);
 

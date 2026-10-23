@@ -25,6 +25,16 @@ import {
   sharePageUrl,
   visibleItems,
 } from "./shopper/shareList.js";
+import {
+  catalogEmptyKind,
+  emptyState,
+  emptyStateInner,
+  emptyStateMarkup,
+  networkKind,
+  searchEmpty,
+  tripStoreEmpty,
+} from "./shopper/emptyStates.js";
+import { mountWelcome } from "./shopper/onboardingUi.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -152,6 +162,7 @@ let watchTimer = 0;
 let unreadAlerts = 0;
 /** @type {Array<Record<string, any>>} */
 let priceAlerts = [];
+let alertsLoadError = "";
 let pushPublicKey = "";
 /** @type {Array<Record<string, any>>} */
 let suggestions = [];
@@ -161,6 +172,8 @@ let suggestionQuery = "";
 let shareState = null;
 let applyingRemote = false;
 let shareBusy = false;
+let shareProblem = "";
+let shareProblemToken = "";
 /** @type {Map<string, Record<string, any>>} */
 const pendingWrites = new Map();
 let pushTimer = 0;
@@ -185,6 +198,88 @@ function normalizeZip(value) {
   if (digits.length >= 9) return `${digits.slice(0, 5)}-${digits.slice(5, 9)}`;
   if (digits.length >= 5) return digits.slice(0, 5);
   return digits;
+}
+
+function fillEmpty(el, state, role) {
+  if (!el) return;
+  el.className = "empty-state";
+  if (role) el.setAttribute("role", role);
+  else el.removeAttribute("role");
+  el.innerHTML = emptyStateInner(state, escapeHtml);
+}
+
+function hasActiveFilters() {
+  return Boolean(
+    activeDepartment !== "all" ||
+      $("filter-store").value ||
+      $("filter-brand").value ||
+      $("filter-sub").value ||
+      ($("filter-size").value && $("filter-size").value !== "any") ||
+      $("filter-sale").checked ||
+      $("filter-store-brand").checked ||
+      $("filter-min").value.trim() ||
+      $("filter-max").value.trim()
+  );
+}
+
+function paintListEmpty() {
+  if (!listEmptyEl) return;
+  const show = list.size === 0 && !listLoading;
+  listEmptyEl.hidden = !show;
+  if (!show) return;
+  if (listIsLocked()) {
+    fillEmpty(listEmptyEl, {
+      title: "This list is view-only",
+      body: "You can look, but only the owner can add items.",
+      action: "Browse the aisle",
+      actionId: "browse",
+    });
+    return;
+  }
+  fillEmpty(listEmptyEl, emptyState("list"));
+}
+
+async function readDeviceCoords() {
+  const geo = window.Capacitor?.Plugins?.Geolocation;
+  if (geo?.requestPermissions) {
+    const perm = await geo.requestPermissions({ permissions: ["coarseLocation"] });
+    const state = perm?.coarseLocation || perm?.location;
+    if (state === "denied") {
+      const error = new Error("Location permission denied");
+      error.code = 1;
+      throw error;
+    }
+  }
+  if (geo?.getCurrentPosition) {
+    const pos = await geo.getCurrentPosition({ enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 });
+    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  }
+  if (!navigator.geolocation) throw new Error("Location is unavailable");
+  const pos = await new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false,
+      timeout: 12000,
+      maximumAge: 60000,
+    });
+  });
+  return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+}
+
+async function openAuthorize(url) {
+  if (isNative()) {
+    await openExternal(url);
+    return;
+  }
+  window.location.assign(url);
+}
+
+function applyZip(zip, { reload = true } = {}) {
+  const normalized = normalizeZip(zip);
+  zipEl.value = normalized;
+  if (!ZIP_PATTERN.test(normalized)) return;
+  localStorage.setItem(ZIP_KEY, normalized);
+  scheduleWatchSync();
+  if (reload) void loadPage(true);
 }
 
 function toast(message) {
@@ -440,7 +535,7 @@ function renderEstimate() {
   listCountEl.textContent = String(count);
   $("bar-count").textContent = count ? `My list · ${count}` : "My list";
   planBtn.disabled = list.size === 0 || listLoading;
-  listEmptyEl.hidden = list.size > 0 || listLoading;
+  paintListEmpty();
 
   const loadingNote = $("savings-loading");
   if (listLoading) {
@@ -748,10 +843,14 @@ async function loadPage(reset) {
     const html = items.map(cardHtml).join("");
     gridEl.innerHTML = reset ? html : gridEl.innerHTML + html;
     if (!items.length && reset) {
-      gridEl.innerHTML = '<p class="muted">Nothing in this aisle matches those filters.</p>';
+      const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
+      const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml);
+      resultCountEl.textContent = state.title;
+    } else {
+      const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
+      resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     }
-    const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
-    resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     const demo = catalogSource === "demo";
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
@@ -772,8 +871,16 @@ async function loadPage(reset) {
       showCatalogError(hardWarnings.join(" "));
     }
   } catch (error) {
-    showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
-    if (reset) gridEl.innerHTML = "";
+    const kind = networkKind(error, navigator.onLine);
+    if (reset && kind) {
+      showCatalogError("");
+      const state = emptyState(kind);
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
+      resultCountEl.textContent = state.title;
+    } else {
+      showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
+      if (reset) gridEl.innerHTML = "";
+    }
   } finally {
     loading = false;
     if (reset && nextCursor && sentinelEl.getBoundingClientRect().top < window.innerHeight + 40) {
@@ -906,6 +1013,12 @@ async function loadSuggestions(text) {
     window.clearTimeout(suggestLoadingTimer);
     if (searchEl.value.trim() !== requestQuery) return;
     suggestions = [];
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) {
+      const state = emptyState(kind);
+      showSuggestStatus(`${state.title}. ${state.body}`);
+      return;
+    }
     showSuggestStatus(`No matches for “${q}”. Press Enter to search the shelves.`);
   }
 }
@@ -1026,6 +1139,18 @@ function renderTrip(payload) {
   sentinelEl.hidden = true;
   tripEl.hidden = false;
   const stores = payload.stores ?? [];
+  if (tripStoreEmpty(payload)) {
+    tripEl.innerHTML = `
+      <button type="button" class="ghost" id="trip-back">Back to shelves</button>
+      ${emptyStateMarkup(emptyState("stores"), escapeHtml)}
+    `;
+    $("trip-back").onclick = () => {
+      tripEl.hidden = true;
+      gridEl.hidden = false;
+      sentinelEl.hidden = false;
+    };
+    return;
+  }
   tripEl.innerHTML = `
     <button type="button" class="ghost" id="trip-back">Back to shelves</button>
     <div class="trip-banner">
@@ -1128,7 +1253,13 @@ async function planTrip() {
     tripEl.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     planErrorEl.hidden = false;
-    planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) {
+      const state = emptyState(kind);
+      planErrorEl.textContent = `${state.title}. ${state.body}`;
+    } else {
+      planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
+    }
   } finally {
     planBtn.disabled = list.size === 0;
     planBtn.textContent = "Plan the trip";
@@ -1518,10 +1649,18 @@ async function openSharedList(token, { mergeLocal = false } = {}) {
   let response;
   try {
     response = await apiFetch(`/api/lists/${encodeURIComponent(token)}`, { headers: ownerHeaders(token) });
-  } catch {
-    toast("Could not open that shared list.");
+  } catch (error) {
+    const kind = networkKind(error, navigator.onLine) || "network";
+    shareProblem = kind;
+    shareProblemToken = token;
+    const state = emptyState(kind);
+    toast(`${state.title}. ${state.body}`);
+    renderShareChrome();
+    openList(true);
     return;
   }
+  shareProblem = "";
+  shareProblemToken = "";
   const body = await response.json().catch(() => ({}));
   if (response.status === 410) {
     handleRevoked(token);
@@ -1615,13 +1754,24 @@ function renderShareChrome() {
   if (ownBtn) ownBtn.hidden = !(localStorage.getItem(PERSONAL_KEY) && shared && !owner);
   shareBtn.disabled = shareBusy;
   shareBtn.textContent = shareState?.revoked && owner ? "Share a new link" : "Share list";
-  if (listEmptyEl) {
-    listEmptyEl.textContent = listIsLocked()
-      ? "This list is view-only."
-      : shared
-        ? "Changes here show up for everyone on the link."
-        : "Check items while you browse. Quantities stay on this device until you share.";
+  const shareEmpty = $("share-empty");
+  if (shareEmpty) {
+    if (shareProblem && !shared) {
+      const state = emptyState(shareProblem);
+      state.actionId = "retry-share";
+      fillEmpty(shareEmpty, state, "alert");
+      shareEmpty.hidden = false;
+    } else if (!shared) {
+      const state = emptyState("shared");
+      state.action = "";
+      state.bodyId = "share-empty-body";
+      fillEmpty(shareEmpty, state);
+      shareEmpty.hidden = false;
+    } else {
+      shareEmpty.hidden = true;
+    }
   }
+  paintListEmpty();
 }
 
 async function onShareClick() {
@@ -2037,7 +2187,18 @@ function paintAlertBadge() {
 
 function paintAlertList() {
   if (!alertsListEl || !alertsEmptyEl) return;
+  if (alertsLoadError && priceAlerts.length === 0) {
+    alertsEmptyEl.hidden = false;
+    const state = emptyState(alertsLoadError);
+    state.actionId = "retry-alerts";
+    fillEmpty(alertsEmptyEl, state, "alert");
+    alertsListEl.innerHTML = "";
+    return;
+  }
   alertsEmptyEl.hidden = priceAlerts.length > 0;
+  if (priceAlerts.length === 0) {
+    fillEmpty(alertsEmptyEl, emptyState(listAlertsEl?.checked ? "alertsOn" : "alerts"));
+  }
   alertsListEl.innerHTML = priceAlerts
     .map((alert) => {
       const target = alert.hitTarget ? `<p class="muted">Under your target</p>` : "";
@@ -2060,14 +2221,19 @@ function paintAlertList() {
 async function refreshAlerts() {
   try {
     const response = await fetch(apiUrl(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`));
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`Alerts failed (${response.status})`);
     const body = await response.json();
     priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
     unreadAlerts = Number(body.unread) || 0;
+    alertsLoadError = "";
     paintAlertBadge();
     if (alertsDialog?.open) paintAlertList();
-  } catch {
-    /* the badge updates on the next pass */
+  } catch (error) {
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) alertsLoadError = kind;
+    else if (priceAlerts.length === 0) alertsLoadError = "network";
+    paintAlertBadge();
+    if (alertsDialog?.open) paintAlertList();
   }
 }
 
@@ -2156,6 +2322,21 @@ async function enablePush() {
 }
 
 async function boot() {
+  try {
+    await bootApp();
+  } finally {
+    welcome.maybeAutoOpen();
+    const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
+    const onboard = $("onboarding");
+    if (wantsAlerts && onboard?.open) {
+      onboard.addEventListener("close", () => void openAlerts(true), { once: true });
+    } else if (wantsAlerts) {
+      void openAlerts(true);
+    }
+  }
+}
+
+async function bootApp() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
@@ -2171,9 +2352,20 @@ async function boot() {
   }
   listLoading = !urlToken && Array.isArray(savedRows) && savedRows.some((row) => row?.id || row?.itemId);
   renderEstimate();
-  const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
-  const deptBody = await deptResponse.json();
-  departments = deptBody.departments ?? [];
+  try {
+    const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
+    if (!deptResponse.ok) throw new Error(`Departments failed (${deptResponse.status})`);
+    const deptBody = await deptResponse.json();
+    departments = deptBody.departments ?? [];
+  } catch (error) {
+    departments = [];
+    const kind = networkKind(error, navigator.onLine) || "network";
+    const state = emptyState(kind);
+    if (gridEl) {
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
+      resultCountEl.textContent = state.title;
+    }
+  }
   renderDepartments();
   const savedShare = readStoredJson(SHARE_KEY)?.shareToken;
   const ownedShare = readOwned()?.shareToken;
@@ -2193,7 +2385,6 @@ async function boot() {
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);
-  if (new URLSearchParams(location.search).get("alerts") === "1") void openAlerts(true);
   if (!isNative() && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (event) => {
@@ -2202,6 +2393,61 @@ async function boot() {
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
 }
+
+document.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
+  if (!button) return;
+  const action = button.getAttribute("data-empty-action");
+  if (action === "browse") {
+    openList(false);
+    void openAlerts(false);
+    searchEl.focus();
+  } else if (action === "clear-search") {
+    query = "";
+    searchEl.value = "";
+    closeSuggestions();
+    void loadPage(true);
+    searchEl.focus();
+  } else if (action === "clear-filters") {
+    activeDepartment = "all";
+    query = "";
+    searchEl.value = "";
+    closeSuggestions();
+    renderDepartments();
+    $("filters-clear")?.click();
+  } else if (action === "retry") {
+    void loadPage(true);
+  } else if (action === "retry-alerts") {
+    void refreshAlerts().then(() => paintAlertList());
+  } else if (action === "retry-share") {
+    if (shareProblemToken) void openSharedList(shareProblemToken);
+  } else if (action === "edit-zip") {
+    $("trip-back")?.click();
+    zipEl.focus();
+  } else if (action === "enable-alerts") {
+    if (listAlertsEl && !listAlertsEl.checked) {
+      listAlertsEl.checked = true;
+      listAlertsEl.dispatchEvent(new Event("change"));
+    }
+    void openAlerts(false);
+    openList(true);
+    listAlertsEl?.focus();
+  }
+});
+
+const welcome = mountWelcome({
+  isNative,
+  apiUrl,
+  fetch: (...args) => globalThis.fetch(...args),
+  getZip: () => normalizeZip(zipEl.value),
+  setZip: (zip) => applyZip(zip),
+  focusZip: () => zipEl.focus(),
+  readCoords: readDeviceCoords,
+  openAuthorize,
+  toast,
+  themeLabel: () => themeButtonLabel(document.documentElement.dataset.theme || "system", window.matchMedia("(prefers-color-scheme: dark)").matches),
+  cycleTheme: () => applyTheme(nextTheme(document.documentElement.dataset.theme || "system")),
+});
 
 void boot().finally(() => {
   void hideSplash();

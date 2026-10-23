@@ -331,4 +331,69 @@ describe("Kroger cart handoff routes", () => {
     assert.match(body.error, /UPC not found/);
     assert.match(body.searchLinks[0].url, /kroger\.com\/search/);
   });
+
+  it("starts Kroger connect without cart items and does not call the Cart API", async () => {
+    const missing = await fetch(`${origin}/api/kroger/connect`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    assert.equal(missing.status, 501);
+
+    enableOAuth();
+    const response = await fetch(`${origin}/api/kroger/connect`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { status: string; authorizeUrl: string };
+    assert.equal(body.status, "needs_shopper_login");
+    const state = new URL(body.authorizeUrl).searchParams.get("state");
+    assert.ok(state);
+    const config = readKrogerOAuthConfig();
+    assert.ok(config);
+    const pending = verifyCartState(config, state);
+    assert.ok(pending);
+    assert.equal(pending.purpose, "connect");
+    assert.equal(pending.items.length, 0);
+
+    const calls: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = requestUrl(input);
+      if (url.startsWith(origin)) return originalFetch(input, init);
+      calls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "shopper-access", expires_in: 1800 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+    const callback = await fetch(
+      `${origin}/api/kroger/oauth/callback?code=auth-code&state=${encodeURIComponent(state)}`
+    );
+    assert.equal(callback.status, 200);
+    const html = await callback.text();
+    assert.match(html, /Kroger is connected/);
+    assert.doesNotMatch(html, /Added to your Kroger cart/);
+    assert.equal(calls.length, 1);
+    assert.match(callback.headers.get("set-cookie") ?? "", new RegExp(`${KROGER_SHOPPER_COOKIE}=`));
+  });
+
+  it("reports an existing shopper cookie as connected and skips a new login", async () => {
+    enableOAuth();
+    const sealed = sealShopperToken("secret", {
+      accessToken: "cookie-shopper",
+      expiresAtMs: Date.now() + 60_000,
+    });
+    const headers = { Accept: "application/json", Cookie: `${KROGER_SHOPPER_COOKIE}=${encodeURIComponent(sealed)}` };
+    const status = await fetch(`${origin}/api/kroger/auth-status`, { headers });
+    assert.equal(status.status, 200);
+    const statusBody = (await status.json()) as { oauthConfigured: boolean; connected: boolean };
+    assert.equal(statusBody.oauthConfigured, true);
+    assert.equal(statusBody.connected, true);
+
+    const response = await fetch(`${origin}/api/kroger/connect`, { method: "POST", headers });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { status: string; authorizeUrl?: string };
+    assert.equal(body.status, "connected");
+    assert.equal(body.authorizeUrl, undefined);
+  });
 });
