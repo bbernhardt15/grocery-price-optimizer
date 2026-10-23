@@ -517,7 +517,29 @@ export function mapToDepartment(
   const department = departmentById(departmentId) ?? DEPARTMENTS[DEPARTMENTS.length - 1];
   const sameDepartment = fromName?.departmentId === department.id ? fromName : undefined;
   const haystack = `${categoryText} ${name}`;
-  if (department.id === "baby" && !isBabyConsumable(labels, name)) {
+  // Baby/Health is nursery gear, not the Health and Medicine aisle. A named
+  // consumable (teething relief, Tylenol) can still land in personal care.
+  const genericBabyHealth = /^(?:personal care|health|medicine|pharmacy|toddler medicine)$/i.test(
+    specificSource.trim()
+  );
+  const namedHealthConsumable = fromName?.departmentId === "personal-care";
+  const babyNonConsumable = !isBabyConsumable(labels, name);
+  if (department.id === "baby" && babyNonConsumable) {
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      generalMerchandise: true,
+      reason: "baby:not diaper, wipe, formula, or baby food→other",
+    };
+  }
+  if (
+    department.id === "personal-care" &&
+    inBabyDepartment(labels) &&
+    babyNonConsumable &&
+    genericBabyHealth &&
+    !namedHealthConsumable
+  ) {
     return {
       departmentId: other.id,
       departmentName: other.name,
