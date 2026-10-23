@@ -56,6 +56,12 @@ describe("public privacy and terms", () => {
     assert.match(privacy, /kroger_shopper/);
     assert.match(privacy, /Instacart/);
     assert.match(privacy, /does not include a third-party analytics/);
+    assert.match(privacy, /SENTRY_DSN/);
+    assert.match(privacy, /do not send crash reports/);
+    assert.match(privacy, /does not include your email address/);
+    assert.match(privacy, /Authorization headers/);
+    assert.match(privacy, /not tied to an account/);
+    assert.match(privacy, /crash report/);
     assert.match(privacy, /do not sell personal information/i);
     assert.match(privacy, /\[CONTACT EMAIL\]/);
     assert.match(privacy, /\[LEGAL NAME\]/);
@@ -74,6 +80,7 @@ describe("public privacy and terms", () => {
     assert.match(terms, /Web Push endpoint and keys/);
     assert.match(terms, /\[GOVERNING LAW\]/);
     assert.match(terms, /\[CONTACT EMAIL\]/);
+    assert.match(terms, /crash report/);
     assert.match(terms, /href="\/privacy"/);
     assert.match(terms, /Delete my data/);
     assert.match(terms, /type DELETE/);

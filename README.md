@@ -73,7 +73,7 @@ On 2026-09-29 the catalog sat at the 40,000 product cap (pantry about half of th
 
 Grocery baby is diapers, wipes, training pants, pull-ups, infant or baby formula, and baby food. A bare `Baby` label does not keep a product in baby. Feeding gear (bottles, bottle brushes, pumps, sippy cups, plates, food makers, nursing covers, wipe warmers), nursery, travel, activities, resale, and shop-by-brand leaves map to Other and are not crawled. A bottle brush stays Other even when Walmart files it under Baby Wipes, because the name is gear. Baby carrots, baby spinach, and baby back ribs still follow the food name. Recategorize writes every department change, including a move to Other, and does not delete rows.
 
-Other is the general-merchandise aisle (`generalMerchandise: true` on that department). Shopper browse and search hide it unless the request asks for `department=other`. The department chips hide it too. Vitamins and supplements, digestive health, consumable first aid (isopropyl alcohol, bandages), OTC pain relievers, diabetic test strips, and teething pain relief map to personal care, subcategory Health. There is no separate health department. A product under Baby/Health stays Other unless the name itself is one of those consumables (teething relief, Tylenol). The Health and Medicine aisle is what maps vitamins and OTC medicine. Massage guns, shower chairs, air purifiers, sound machines, sleep masks, hot and cold packs, and testosterone boosters stay Other. Ensure and other nutrition shakes or powders map to beverages. Pet food, treats, litter, and bedding (including cedar bedding) map to pet. Pet toys, wheels, aquarium ornaments, and feeders stay Other. Food gifts, gift towers, and gift baskets map to pantry, subcategory Gifts. Swiffer dusters, janitorial cleaners, and food-service disposables such as Dixie cup lids map to household. Jewelry, office supplies, home improvement, apparel, electronics, toys, furniture, and the rest of Industrial & Scientific stay Other and are not crawled. Kroger category labels for those grocery aisles map to a grocery department. A Kroger id on a product that is still Other is almost certainly a miss: Kroger's catalog is groceries.
+Other is the general-merchandise aisle (`generalMerchandise: true` on that department). Shopper browse and search hide it unless the request asks for `department=other`. The department chips hide it too. Vitamins and supplements, digestive health, consumable first aid (isopropyl alcohol, bandages), OTC pain relievers, diabetic test strips, and teething pain relief map to personal care, subcategory Health. There is no separate health department. A product name moves to that same Health subcategory even when the stored path is Letter Vitamins, Vitamin B Complex, Health and Medicine, or general merchandise. The name match is vitamin, multivitamin, B-complex, supplement, probiotic, fish oil, melatonin, or electrolyte. Omega-3 counts when the name also has a dosage form, the word supplement, fish oil, or a supplement brand. Nature Made, Nature's Bounty, Centrum, One A Day, Olly, Vitafusion, Nordic Naturals, and Garden of Life count when the name also says tablets, capsules, softgels, gummies, caplets, or chewables. Pill organizers stay Other. A serum, including vitamin C serum, is personal care, subcategory Body. Books, testosterone, health devices, infant formula, nutrition shakes, and pet medicines stay on their own rules. Leaves named Letter Vitamins or Vitamin B Complex are crawled. Walmart taxonomy version 5 re-reads the tree so those leaves are picked up. A product under Baby/Health stays Other unless the name itself is one of those consumables (teething relief, Tylenol). The Health and Medicine aisle is what maps vitamins and OTC medicine. Massage guns, shower chairs, air purifiers, sound machines, sleep masks, hot and cold packs, and testosterone boosters stay Other. Ensure and other nutrition shakes or powders map to beverages. Pet food, treats, litter, and bedding (including cedar bedding) map to pet. Pet toys, wheels, aquarium ornaments, and feeders stay Other. Food gifts, gift towers, and gift baskets map to pantry, subcategory Gifts. Swiffer dusters, janitorial cleaners, and food-service disposables such as Dixie cup lids map to household. Jewelry, office supplies, home improvement, apparel, electronics, toys, furniture, and the rest of Industrial & Scientific stay Other and are not crawled. Kroger category labels for those grocery aisles map to a grocery department. A Kroger id on a product that is still Other is almost certainly a miss: Kroger's catalog is groceries.
 
 `GET /api/admin/catalog/other-breakdown` returns the top stored category paths in Other (Walmart `categoryPath` or Kroger `categories`), a count, and three example names, plus `withKrogerId`. `GET /api/admin/catalog/sample?department=baby&limit=50` returns a random compact sample (name, brand, stores, paths, stored department, the department the current rules would pick, and the rule). `GET /api/admin/catalog/match-sample` returns a few normalized keys from each store. `counts` on status includes `match` lookups, `refreshQueue` (Walmart and Kroger offers still waiting), and `refreshedToday`. `match.queue` is how many masters are still waiting on a cross-store lookup, `match.hitRate` is today's hits over attempts, and `match.mergedToday` is how many masters gained both store ids that UTC day.
 
@@ -101,6 +101,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
    - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only. Generate a pair with `npx web-push generate-vapid-keys` (steps under Price drop alerts).
+   - Optional crash reporting: `SENTRY_DSN`. Leave it unset and Sentry stays off. To symbolicate server stack traces, also set `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` on the service that runs `npm run build`. See [Crash reporting](#crash-reporting-sentry).
    - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
@@ -119,7 +120,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
      `curl -H "Authorization: Bearer $ADMIN_TOKEN" "https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/sample?department=baby&limit=50"`
    - Read a few normalized keys from each store (`krogerId` is 13 digits, `walmartUpc` is 12 with the check digit, `key` should match for the same product):  
      `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/match-sample`
-   - Remap departments from the category path already stored on each product, including Kroger rows. The POST returns a `jobId` immediately and walks the catalog in batches, so a proxy timeout does not stop it. Progress is `recategorize` on the status route (`examined`, `updated`, `clearedExclusions`, `total`). A second POST while it is running returns the same job. A restart resumes from the saved cursor. Every department change is written, including a move to Other. A product that leaves Other has `refreshExcluded` cleared on its offers. Nothing is deleted. Run this before exclude so vitamins, training pants, and the other grocery misses leave Other. If exclude already ran, this pass still clears those flags:  
+   - Remap departments from the category path already stored on each product, including Kroger rows. The POST returns a `jobId` immediately and walks the catalog in batches, so a proxy timeout does not stop it. Progress is `recategorize` on the status route (`examined`, `updated`, `clearedExclusions`, `total`). A second POST while it is running returns the same job. A restart resumes from the saved cursor. Every department change is written, including a move to Other. A product that leaves Other has `refreshExcluded` cleared on its offers, including a vitamin the name rule moves out of Other. Nothing is deleted. Run this before exclude so vitamins, training pants, and the other grocery misses leave Other. If exclude already ran, this pass still clears those flags:  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"recategorize-catalog"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/recategorize`
    - Optional, after recategorize finishes (`recategorize.status` is `completed`). Marks offers for products that are still Other under the current rules so refresh does not spend a call on jewelry, office supplies, and the rest of general merchandise. Offers for groceries that are still stored as Other, or that have already moved, have the flag cleared. Running it again leaves the same offers excluded. Nothing is deleted:  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"exclude-nongrocery-refresh"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/exclude-nongrocery-refresh`
@@ -194,7 +195,7 @@ Share links use the hosted origin from `CAPACITOR_API_URL` / `apiUrl()`. That he
 
 The shopper UI stays a static SPA in `public/` (no frontend bundler). The website and the installed PWA are unchanged: the manifest, icons, and network-first service worker still install from the browser, and `/api` stays on the same origin.
 
-Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` is still only the TypeScript server (`tsc` → `dist/`), and `npm start` still serves `public/` from Express.
+Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` compiles the TypeScript server (`tsc` → `dist/`), copies `src/pricing/flipp/merchants.json` next to the compiled Flipp module, and bundles the browser crash reporter. It does not build iOS or Android. `npm start` still serves `public/` from Express.
 
 The native WebView loads those copied files. It then calls the HTTPS API at `CAPACITOR_API_URL`, or `https://grocery-price-optimizer-production.up.railway.app` when that variable is unset. Retailer secrets stay on the server. Express already enables CORS, so the WebView origin (`capacitor://localhost` on iOS, `https://localhost` on Android) can call the API.
 
@@ -511,6 +512,41 @@ Routes:
 
 `src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=premier`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`.
 
+## Crash reporting (Sentry)
+
+Sentry is off until `SENTRY_DSN` is set. With that variable empty, the server does not call `Sentry.init`, the shopper page does not download the SDK, and source map upload does not run. No DSN means no crash reports.
+
+When it is set, three places report:
+
+- **Server** (`@sentry/node`) — the Express process and the catalog ingest worker. Unhandled startup failures and Express 5xx errors are reported. The release is the git sha.
+- **Website** (`@sentry/browser`, loaded by the Capacitor SDK on the web) — `public/sentry-loader.js` asks `GET /api/observability`. `enabled: false` means it stops. A DSN loads `public/sentry.js`, which `npm run build` writes. That file is not committed.
+- **iOS and Android** (`@sentry/capacitor`) — the same bundle starts the native crash SDK inside the WebView. `npm run cap:sync` writes the DSN and the git sha into the native copy of `public/native-config.js` only. The website copy of that file stays empty.
+
+Reports do not include email addresses, names, grocery-list bodies, Kroger tokens, the `kroger_shopper` cookie, other cookies, or Authorization headers. There is no account id on a crash report. `/privacy` explains what is sent and how to ask for a crash report to be deleted.
+
+The release is the first of `SENTRY_RELEASE`, `RAILWAY_GIT_COMMIT_SHA`, `CM_COMMIT`, `GITHUB_SHA`, `COMMIT_SHA`, `SOURCE_VERSION`, then `git rev-parse HEAD`.
+
+| Variable | Where | Required |
+| --- | --- | --- |
+| `SENTRY_DSN` | Railway web service, ingest worker, and the Codemagic `grocery_gitter` group | No. Unset keeps reporting off |
+| `SENTRY_ENVIRONMENT` | Same places | No. Falls back to `NODE_ENV` on the server and `production` in the native shell |
+| `SENTRY_RELEASE` | Same places | No. The git sha above is used |
+| `SENTRY_AUTH_TOKEN` | The build that should upload source maps (Railway web build and Codemagic). Mark it secret | No. Unset skips upload |
+| `SENTRY_ORG` | Same build | Required only when the auth token is set |
+| `SENTRY_PROJECT` | Same build. One Sentry project receives server, web, and native events for this DSN | Required only when the auth token is set |
+
+`npm run build` compiles the server, copies the Flipp merchant config into `dist/pricing/flipp`, bundles `public/sentry.js`, and, only when `SENTRY_AUTH_TOKEN` is set, uploads source maps for `dist/` and that bundle, then deletes `public/sentry.js.map` so the site does not serve it. A token without `SENTRY_ORG`, `SENTRY_PROJECT`, or a release sha fails the build. The token is read from the environment and is not put on the command line.
+
+Use one DSN for the server and the clients. The DSN is public in the browser. The auth token is not. Do not commit either value.
+
+### Codemagic
+
+Add the variables above to the `grocery_gitter` group. `SENTRY_DSN` is what the native shell bakes in at `cap sync`. `CM_COMMIT` is the release for that build, so the uploaded maps match the WebView bundle and the dSYMs.
+
+`codemagic.yaml` runs `npm run build` before `npm run cap:sync:ios` / `cap:sync:android`. The build uploads JavaScript source maps when the token is set and does not rebuild the bundle during sync, so the baked git sha matches those maps. After the IPA and the AAB it uploads native debug files, and skips that step with a log line when `SENTRY_AUTH_TOKEN` is unset. iOS symbols come from the xcarchive. Android minify is off, so there is often no ProGuard map. The debug-file upload still runs over the Android build outputs when the token is set.
+
+Leave the whole group of Sentry variables unset and both workflows behave as they did before.
+
 ## Run locally
 
 ```bash
@@ -724,11 +760,11 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 
 | Script | Description |
 | --- | --- |
-| `npm run dev` | TypeScript watch server (`tsx`) |
+| `npm run dev` | Build the browser crash reporter, then start the TypeScript watch server (`tsx`) |
 | `npm test` | Unit tests for the optimizer and scraper |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
 | `npm run seed` | Insert 10 mock products into local MongoDB |
-| `npm run build` | Compile the API to `dist/` (Railway). Does not build iOS or Android. |
+| `npm run build` | Compile the API to `dist/`, copy the Flipp merchant config, and bundle crash reporting (Railway). Does not build iOS or Android. |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run cap:sync` | Copy `public/` into the iOS and Android projects |
