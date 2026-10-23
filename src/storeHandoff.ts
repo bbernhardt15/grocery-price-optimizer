@@ -1,4 +1,4 @@
-import type { OptimizeResult, PickedItem, PriceSource, StoreGroup } from "./optimizeGroceryList";
+import type { ItemOffer, OptimizeResult, PickedItem, PriceSource, StoreGroup } from "./optimizeGroceryList";
 import {
   readWalmartPublisherId,
   walmartAddToCartUrl,
@@ -7,10 +7,18 @@ import {
 } from "./pricing/walmartCartLink";
 import type { WalmartNearbyStore } from "./pricing/walmartProvider";
 import type { StorePricingReport } from "./pricing/types";
+import {
+  handoffTierFor,
+  priceSourceLabel,
+  type HandoffTier,
+} from "./storeHandoffConfig";
+
+export type { HandoffTier } from "./storeHandoffConfig";
 
 export type HandoffActionType =
   | "kroger_cart"
   | "walmart_cart"
+  | "shop_list"
   | "search_deeplink"
   | "coming_soon";
 
@@ -30,6 +38,12 @@ export type HandoffItem = {
   locationId?: string;
   url?: string;
   priceSource?: PriceSource;
+  size?: string;
+  lineId?: string;
+  department?: string;
+  aisle?: string;
+  /** "Open in Target" when this item has a store link. */
+  openLabel?: string;
 };
 
 export type StoreHandoffAction = {
@@ -45,10 +59,22 @@ export type StoreHandoffAction = {
 
 export type StoreHandoff = {
   storeName: string;
+  /** Configured tier. The action may fall back to a checklist when cart write is unavailable. */
+  tier: HandoffTier;
+  /** Live shelf price, Weekly ad, Demo catalog, or another honest label. */
+  priceLabel: string;
   itemCount: number;
   subtotal: number;
   items: HandoffItem[];
   action: StoreHandoffAction;
+};
+
+/** What the shopper's device needs to rebuild cart links after a move. */
+export type TripCapabilities = {
+  krogerCart: boolean;
+  walmartPublisherId?: string;
+  walmartStoreId?: string;
+  walmartAccessPointId?: string;
 };
 
 export type TripPlan = {
@@ -70,6 +96,7 @@ export type EnrichedOptimizeResult = OptimizeResult & {
   stores: EnrichedStoreGroup[];
   tripPlan: TripPlan;
   pricingByStore?: StorePricingReport[];
+  capabilities: TripCapabilities;
 };
 
 export type HandoffOptions = {
@@ -218,6 +245,13 @@ function searchQuery(
   return (item.upc || item.productId || item.name).trim();
 }
 
+/** Aldi's public online shop (delivery or pickup). Verified: HTTP 200 with the query in the page URL. */
+export function aldiSearchUrl(
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string {
+  return `https://www.aldi.us/store/aldi/search?q=${encodeURIComponent(searchQuery(item))}`;
+}
+
 /** Public storefront search — not a cart fill. */
 export function partnerSearchUrl(
   storeName: string,
@@ -254,14 +288,22 @@ export function partnerSearchUrl(
   }
 }
 
-function itemSearchUrl(storeName: string, item: PickedItem): string | undefined {
-  switch (canonicalRetailer(storeName)) {
+function itemSearchUrl(
+  storeName: string,
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+): string | undefined {
+  if (handoffTierFor(storeName) === "list") {
+    return undefined;
+  }
+  switch (retailerKey(storeName)) {
     case "kroger":
       return krogerSearchUrl(item);
     case "walmart":
       return walmartSearchUrl(item);
     case "target":
       return targetSearchUrl(item);
+    case "aldi":
+      return aldiSearchUrl(item);
     default:
       return partnerSearchUrl(storeName, item);
   }
@@ -269,6 +311,7 @@ function itemSearchUrl(storeName: string, item: PickedItem): string | undefined 
 
 function toHandoffItem(storeName: string, item: PickedItem): HandoffItem {
   const url = itemSearchUrl(storeName, item);
+  const aisle = item.aisle;
   return {
     name: item.name,
     brand: item.brand,
@@ -277,8 +320,54 @@ function toHandoffItem(storeName: string, item: PickedItem): HandoffItem {
     ...(item.productId ? { productId: item.productId } : {}),
     ...(item.upc ? { upc: item.upc } : {}),
     ...(item.locationId ? { locationId: item.locationId } : {}),
-    ...(url ? { url } : {}),
+    ...(item.size ? { size: item.size } : {}),
+    ...(item.lineId ? { lineId: item.lineId } : {}),
+    ...(item.department ? { department: item.department } : {}),
+    ...(aisle ? { aisle } : {}),
+    ...(url ? { url, openLabel: `Open in ${storeName}` } : {}),
     ...(item.priceSource ? { priceSource: item.priceSource } : {}),
+  };
+}
+
+function withOfferLinks(item: PickedItem): PickedItem {
+  if (!item.offers?.length) {
+    return item;
+  }
+  const offers: ItemOffer[] = item.offers.map((offer) => {
+    const url = itemSearchUrl(offer.storeName, offer);
+    return url ? { ...offer, url } : offer;
+  });
+  return { ...item, offers };
+}
+
+function priceLabelFor(group: StoreGroup, pricing: StorePricingReport | undefined): string {
+  if (pricing?.source) {
+    return priceSourceLabel(pricing.source);
+  }
+  const sources = [
+    ...new Set(group.items.map((item) => item.priceSource).filter((source): source is PriceSource => Boolean(source))),
+  ];
+  if (sources.length === 1) {
+    return priceSourceLabel(sources[0]);
+  }
+  if (sources.length > 1) {
+    return "Mixed prices";
+  }
+  return "Price";
+}
+
+function shopListAction(
+  storeName: string,
+  items: HandoffItem[],
+  detail: string
+): StoreHandoffAction {
+  const firstUrl = items.find((item) => item.url)?.url;
+  return {
+    type: "shop_list",
+    label: `Shop this list at ${storeName}`,
+    status: "ready",
+    ...(firstUrl ? { url: firstUrl } : {}),
+    detail,
   };
 }
 
@@ -300,7 +389,7 @@ function krogerAction(
   if (oauthConfigured && withUpc.length > 0) {
     return {
       type: "kroger_cart",
-      label: "Add to Kroger cart",
+      label: "Send to Kroger cart",
       url: KROGER_CART_START_PATH,
       status: "needs_shopper_login",
       ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
@@ -309,15 +398,13 @@ function krogerAction(
     };
   }
 
-  return {
-    type: "search_deeplink",
-    label: "Open at Kroger",
-    url: firstUrl,
-    status: firstUrl ? "ready" : "unavailable",
-    detail: oauthConfigured
-      ? "Kroger Cart API needs a product UPC from the live Products API. This list only has search links until those IDs are present."
-      : "Opens Kroger search. Writing the shopper cart requires authorization-code OAuth (KROGER_REDIRECT_URI), not the client-credentials pricing token.",
-  };
+  return shopListAction(
+    "Kroger",
+    items,
+    oauthConfigured
+      ? "Kroger Cart API needs a product UPC from the live Products API. This checklist has an Open in Kroger link for each item until those IDs are present. Writing the shopper cart requires authorization-code OAuth."
+      : "Opens a checklist with an Open in Kroger link for each item. Writing the shopper cart requires authorization-code OAuth (KROGER_REDIRECT_URI), not the client-credentials pricing token."
+  );
 }
 
 /**
@@ -373,14 +460,14 @@ function walmartAction(
   store?: WalmartNearbyStore
 ): StoreHandoffAction {
   const firstUrl = items.find((item) => item.url)?.url;
-  const searchAction: StoreHandoffAction = {
-    type: "search_deeplink",
-    label: "Search at Walmart",
-    url: firstUrl,
-    status: firstUrl ? "ready" : "unavailable",
-    detail:
-      "Search deep link, not a cart fill. Authenticated Walmart cart APIs need partner access; Grocery Gitter does not invent a cart write.",
-  };
+  const searchAction: StoreHandoffAction = shopListAction(
+    "Walmart",
+    items,
+    "Checklist with an Open in Walmart link for each item, not a cart fill. Authenticated Walmart cart APIs need partner access; Grocery Gitter does not invent a cart write."
+  );
+  if (!firstUrl) {
+    searchAction.status = "unavailable";
+  }
 
   const cartLines: WalmartCartLine[] = [];
   const cartItems: HandoffItem[] = [];
@@ -415,40 +502,26 @@ function walmartAction(
 
   return {
     type: "walmart_cart",
-    label: `Add ${count} item${count === 1 ? "" : "s"} to Walmart cart`,
+    label: "Open Walmart cart",
     url,
     status: "ready",
     ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-    detail: `Opens walmart.com with these item ids and quantities in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
+    detail: `Opens walmart.com with ${count} item${count === 1 ? "" : "s"} in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
   };
 }
 
-function targetAction(items: HandoffItem[]): StoreHandoffAction {
-  const firstUrl = items.find((item) => item.url)?.url;
-  return {
-    type: "search_deeplink",
-    label: "Search at Target",
-    url: firstUrl,
-    status: firstUrl ? "ready" : "unavailable",
-    detail:
-      "Search deep link, not a cart fill. Target authenticated cart fill needs a partner API; Grocery Gitter does not invent one.",
-  };
-}
-
-function comingSoonAction(storeName: string): StoreHandoffAction {
-  return {
-    type: "coming_soon",
-    label: "Coming soon",
-    status: "coming_soon",
-    detail: `${storeName} online checkout is not wired yet. Authenticated cart fill needs a retailer partner API (see the Phase 3 table in docs/PRODUCT_ROADMAP.md).`,
-  };
+function targetAction(storeName: string, items: HandoffItem[]): StoreHandoffAction {
+  return shopListAction(
+    storeName,
+    items,
+    "Checklist with an Open in Target link for each item (search, or a product page when the id is a TCIN). Not a cart fill. Target authenticated cart fill needs a partner API; Grocery Gitter does not invent one."
+  );
 }
 
 function partnerSearchAction(
   storeName: string,
   items: HandoffItem[]
 ): StoreHandoffAction {
-  const firstUrl = items.find((item) => item.url)?.url;
   const key = retailerKey(storeName);
   const club =
     key === "costco" || key === "sams_club"
@@ -457,13 +530,19 @@ function partnerSearchAction(
         ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
         : " There is no public cart-write API for this banner.";
 
-  return {
-    type: "search_deeplink",
-    label: `Search at ${storeName}`,
-    url: firstUrl,
-    status: firstUrl ? "ready" : "unavailable",
-    detail: `Search deep link, not a cart fill.${club}`,
-  };
+  return shopListAction(
+    storeName,
+    items,
+    `Checklist with an Open in ${storeName} link for each item. Not a cart fill.${club}`
+  );
+}
+
+function listOnlyAction(storeName: string): StoreHandoffAction {
+  return shopListAction(
+    storeName,
+    [],
+    `${storeName} has prices in the trip, but no verified item link. The checklist is the handoff. Nothing here is a cart fill.`
+  );
 }
 
 export function buildStoreHandoff(
@@ -471,7 +550,9 @@ export function buildStoreHandoff(
   options: HandoffOptions = {}
 ): StoreHandoff {
   const itemCount = itemCountOf(group.items);
+  const tier = handoffTierFor(group.storeName);
   const items = group.items.map((item) => toHandoffItem(group.storeName, item));
+  const pricing = pricingForStore(group.storeName, options.pricingByStore);
   const retailer = canonicalRetailer(group.storeName);
 
   let action: StoreHandoffAction;
@@ -480,21 +561,34 @@ export function buildStoreHandoff(
   } else if (retailer === "walmart") {
     action = walmartAction(items, options.walmartStore);
   } else if (retailer === "target") {
-    action = targetAction(items);
-  } else if (retailer === "aldi") {
-    action = comingSoonAction(group.storeName);
-  } else if (items.some((item) => item.url)) {
-    action = partnerSearchAction(group.storeName, items);
+    action = targetAction(group.storeName, items);
+  } else if (tier === "list" || !items.some((item) => item.url)) {
+    action = listOnlyAction(group.storeName);
   } else {
-    action = comingSoonAction(group.storeName);
+    action = partnerSearchAction(group.storeName, items);
   }
 
   return {
     storeName: group.storeName,
+    tier,
+    priceLabel: priceLabelFor(group, pricing),
     itemCount,
     subtotal: group.subtotal,
     items,
     action,
+  };
+}
+
+function tripCapabilities(options: HandoffOptions): TripCapabilities {
+  const publisherId = readWalmartPublisherId();
+  const store = options.walmartStore;
+  const storeId = store?.fulfillmentStoreId?.trim() || store?.storeId?.trim();
+  const accessPointId = store?.accessPointId?.trim();
+  return {
+    krogerCart: Boolean(options.krogerCartOAuthConfigured),
+    ...(publisherId ? { walmartPublisherId: publisherId } : {}),
+    ...(storeId ? { walmartStoreId: storeId } : {}),
+    ...(accessPointId ? { walmartAccessPointId: accessPointId } : {}),
   };
 }
 
@@ -508,10 +602,14 @@ export function enrichOptimizeResult(
       group.storeName.trim().toLowerCase() === "walmart"
         ? options.walmartStore
         : undefined;
-    return {
+    const linked = {
       ...group,
-      itemCount: itemCountOf(group.items),
-      handoff: buildStoreHandoff(group, options),
+      items: group.items.map((item) => withOfferLinks(item)),
+    };
+    return {
+      ...linked,
+      itemCount: itemCountOf(linked.items),
+      handoff: buildStoreHandoff(linked, options),
       ...(pricing ? { pricing } : {}),
       ...(nearbyStore ? { nearbyStore } : {}),
     };
@@ -525,6 +623,7 @@ export function enrichOptimizeResult(
       storeCount: stores.length,
       itemCount: stores.reduce((sum, store) => sum + store.itemCount, 0),
     },
+    capabilities: tripCapabilities(options),
     ...(options.pricingByStore ? { pricingByStore: options.pricingByStore } : {}),
   };
 }

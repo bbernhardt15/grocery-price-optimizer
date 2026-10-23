@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=store-2" />
+    <link rel="stylesheet" href="/styles.css?v=handoff-1" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -240,6 +240,8 @@
     </div>
 
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
+    <dialog id="trip-dialog" class="sheet checklist-sheet" aria-labelledby="trip-dialog-title"></dialog>
+    <div id="print-root" class="print-root" hidden></div>
     <dialog id="coverage-dialog" class="sheet" aria-labelledby="coverage-title"></dialog>
     <dialog id="alerts-dialog" class="sheet" aria-labelledby="alerts-title">
       <div class="sheet-body">
@@ -258,6 +260,6 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
-    <script type="module" src="/app.js?v=store-2"></script>
+    <script type="module" src="/app.js?v=handoff-1"></script>
   </body>
 </html>

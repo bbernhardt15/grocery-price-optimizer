@@ -283,7 +283,7 @@ The source mark is `assets/logo.svg` (dark canvas `#1c221e`). `npm run assets:ge
 
 ## What it includes
 
-- **Browse app** — department shelves, search, filters, My list, savings meter, then **Plan the trip** (`15 Kroger + 5 Walmart + 10 Target`) with **Live prices** / **Partner feed** / **Weekly ad** / **Demo catalog** badges and the existing Open / Add to cart / Coming soon actions
+- **Browse app** — department shelves, search, filters, My list, savings meter, then **Plan the trip** (`15 Kroger + 5 Walmart + 10 Target`) with **Live shelf price** / **Weekly ad** labels and a cart, link, or list handoff per store
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `size` (optional retailer package text), `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks one product per item (the product itself, then the fair package price) and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart add-to-cart deep link or search, Target search)
@@ -338,7 +338,7 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
 | **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address, plus `accessPointId` / `fulfillmentStoreId` when the locator sends them. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store does not change the price. It is passed on the add-to-cart link as `storeId` (and `ap` when an access point id is present). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
 | **Target** | **No public product API.** This app does **not** call RedSky, Target Circle, or RedCard pricing (those are account-specific and not a shelf feed). If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. Otherwise the weekly circular. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. Circular rows stay **Weekly ad**. |
-| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
+| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff is **Shop this list** with a search link (Aldi, Publix, H-E-B, Meijer) or a checklist only. No fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
 
 Configured **partner feeds** (Publix, Meijer, H-E-B, Instacart-style banners, Datasembly-class shelf file) use the same optimize path when `SHELF_FEED_*` / `INSTACART_PARTNER_*` / `PUBLIX_PARTNER_*` / `HEB_PARTNER_*` / `MEIJER_PARTNER_*` are set. Hits are labeled **Partner feed**, not a fake retailer API. See [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). Licensed shelf feeds beat Flipp weekly ads for the same banner. Unconfigured partner banners are not added to the default trip.
 
@@ -386,19 +386,18 @@ This app does **not** scrape authenticated Aldi, Target, or Publix storefronts.
 
 See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md) for the 15/5/10 multi-cart vision.
 
-After optimize, each store group includes a `handoff` object: `storeName`, `itemCount`, `subtotal`, items with identity for checkout, and `action: { type, label, url?, status, detail?, fallbackUrl? }`.
+After optimize, each store group includes a `handoff` object: `storeName`, `tier` (`cart`, `link`, or `list`), `priceLabel`, `itemCount`, `subtotal`, items with identity for checkout, and `action: { type, label, url?, status, detail?, fallbackUrl? }`. Tiers, link formats, and shelf-price sources are listed in [`docs/STORE_HANDOFFS.md`](docs/STORE_HANDOFFS.md).
 
 | Retailer | Action | What it actually does |
 | --- | --- | --- |
-| **Kroger** | `search_deeplink` → **Open at Kroger** | Default when `KROGER_REDIRECT_URI` is unset, or when items have no UPC. Public `https://www.kroger.com/search?query=` using `productId`/UPC when the Products API returned one, otherwise the item name. Shopper adds to cart on kroger.com. |
-| **Kroger** | `kroger_cart` → **Add to Kroger cart** | When `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC/`productId`. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
-| **Walmart** | `walmart_cart` → **Add N items to Walmart cart** | When at least one Walmart line has a numeric item id (live or cached live). One link: `https://www.walmart.com/sc/cart/addToCart?items=ITEMID\|QTY,ITEMID`. Quantity 1 is the bare item id. `offers` is used only when a line already has an offer id and no item id. If the shopper's nearest Walmart is known, the link adds `storeId` (the fulfillment store id, or the store number when that is all the locator returned) and `ap` when the locator returned an accessPointId. If `WALMART_PUBLISHER_ID` is set, that URL is wrapped with the Impact template from [`productTrackingUrl`](https://walmart.io/apidocs/affiliates/reviews): `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u=…`. If it is unset, the unwrapped link still opens the cart. This is a shopper handoff, not an API cart write — Grocery Gitter does not report the cart as filled. Lines without a numeric item id (demo catalog, or a Flipp flyer id) are left off the link and named in the button detail. If none of the lines have an item id, the card stays on **Search at Walmart**. |
-| **Target** | `search_deeplink` | Public search URL. Not a cart fill — authenticated cart APIs need partner access. Grocery Gitter does not invent that API. |
-| **Publix / H-E-B / Meijer / Albertsons family / Ahold / club / Amazon** | `search_deeplink` | Public search URLs with honest copy (club membership; no third-party cart-write). |
-| **Aldi / unknown banners** | `coming_soon` | No fake checkout. |
-| **Instacart Developer Platform** | `POST /api/instacart/shopping-list` | Shown only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set. Not a native cart. See below. |
+| **Kroger** | `shop_list` → **Shop this list at Kroger** | Default when `KROGER_REDIRECT_URI` is unset, or when items have no UPC. Checklist with an **Open in Kroger** link (`https://www.kroger.com/search?query=`) using `productId`/UPC when the Products API returned one, otherwise the item name. |
+| **Kroger** | `kroger_cart` → **Send to Kroger cart** | When `KROGER_REDIRECT_URI` is set **and** at least one item has a UPC/`productId`. Starts **authorization-code** OAuth (`cart.basic:write`). The shopper must log in. Then `PUT https://api.kroger.com/v1/cart/add`. Client-credentials used for pricing **cannot** do this. |
+| **Walmart** | `walmart_cart` → **Open Walmart cart** | When at least one Walmart line has a numeric item id (live or cached live). One link: `https://www.walmart.com/sc/cart/addToCart?items=ITEMID\|QTY,ITEMID`. Quantity 1 is the bare item id. `offers` is used only when a line already has an offer id and no item id. If the shopper's nearest Walmart is known, the link adds `storeId` (the fulfillment store id, or the store number when that is all the locator returned) and `ap` when the locator returned an accessPointId. If `WALMART_PUBLISHER_ID` is set, that URL is wrapped with the Impact template from [`productTrackingUrl`](https://walmart.io/apidocs/affiliates/reviews): `https://goto.walmart.com/c/{publisherId}/568844/9383?veh=aff&sourceid=imp_000011112222333344&u=…`. If it is unset, the unwrapped link still opens the cart. This is a shopper handoff, not an API cart write — Grocery Gitter does not report the cart as filled. Lines without a numeric item id (demo catalog, or a Flipp flyer id) are left off the link and named in the button detail. If none of the lines have an item id, the card uses **Shop this list at Walmart**. |
+| **Target, Aldi, Publix, H-E-B, Meijer, and other link-tier banners** | `shop_list` → **Shop this list at {store}** | Checklist. Each item has **Open in {store}** (Target product URL by TCIN when the id is live, otherwise that store's search). Not a cart fill. |
+| **Giant Eagle and unknown banners** | `shop_list` tier `list` | Checklist only. No item link until one is verified. |
+| **Instacart Developer Platform** | `POST /api/instacart/shopping-list` | **Add to Instacart**, only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set. Not a native cart. See below. |
 
-Grocery Gitter **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx. Cancelled login, missing scopes, or a rejected UPC fall back to Open at Kroger search links. An Instacart shopping-list link is a handoff to Instacart checkout, not an in-store cart write.
+Grocery Gitter **never** reports a successful cart fill unless Kroger’s Cart API returns HTTP 2xx. Cancelled login, missing scopes, or a rejected UPC fall back to the Kroger checklist. An Instacart shopping-list link is a handoff to Instacart checkout, not an in-store cart write.
 
 ### Instacart shopping list (Developer Platform)
 
@@ -415,9 +414,9 @@ The key stays on the server. The browser calls `POST /api/instacart/shopping-lis
 
 **What the shopper sees**
 
-- On each trip-plan store that does **not** have a native cart handoff (Target search, Aldi “Coming soon”, Publix/H-E-B/regional search, Walmart **Search at Walmart** fallback, and Kroger when it is only “Open at Kroger”): a **Shop on Instacart** button for that section’s items.
-- On the trip total: “or shop the whole list on Instacart”, which sends every store’s items as one list.
-- Kroger’s **Add to Kroger cart** section and Walmart’s **Add N items to Walmart cart** section do not get a second per-store Instacart button. Those items are still included in the whole-list option. The nearest Walmart store line and unit prices stay on the card.
+- On each trip-plan store that does **not** have a native cart handoff (**Shop this list** for Target, Aldi, Publix, H-E-B, and the other link or list tiers, Walmart when it cannot open a cart, and Kroger when it cannot send the cart): **Add to Instacart** for that section’s items.
+- On the whole trip: **Add to Instacart**, which sends every store’s items as one list.
+- Kroger’s **Send to Kroger cart** section and Walmart’s **Open Walmart cart** section do not get a second per-store Instacart button. Those items are still included in the whole-list option. The nearest Walmart store line and unit prices stay on the card.
 - Instacart opens a hosted list. The shopper picks a retailer, reviews matches, and checks out on Instacart (login if needed). Grocery Gitter does not claim the in-store cart was filled, and Instacart prices can differ.
 
 **Retailer hint:** the create-shopping-list body has **no retailer field**. [Instacart’s FAQ](https://docs.instacart.com/developer_platform_api/faq) says directing a shopper to a specific merchant is not supported on that page. The only documented hint is appending `?retailer_key=` after [`GET /idp/v1/retailers`](https://docs.instacart.com/developer_platform_api/api/retailers/get_nearby_retailers), and that query parameter is documented for [recipe page URLs](https://docs.instacart.com/developer_platform_api/get_started/recipe), which may need a separate API key. For a single store section with a ZIP, Grocery Gitter tries that lookup and appends `retailer_key` when the retailer **name** matches the trip-plan store. If lookup fails or nothing matches, the link still opens and the shopper chooses the store. The whole-list option never preselects a retailer.
@@ -476,7 +475,7 @@ Use the **public HTTPS** Railway URL, not `*.railway.internal`. After changing t
 
 **3. What shoppers see**
 
-- Kroger card shows **Add to Kroger cart** (plus **or Open at Kroger**).
+- Kroger card shows **Send to Kroger cart** when shopper OAuth is configured and the lines have UPCs. Otherwise it shows **Shop this list at Kroger**.
 - Tap → Kroger login/consent (or a reuse of the encrypted shopper cookie if still valid).
 - Callback exchanges the code, then `PUT https://api.kroger.com/v1/cart/add` with `{ items: [{ upc, quantity, modality }] }`.
 - Success page only if that write is HTTP 2xx. Then finish checkout on [kroger.com/cart](https://www.kroger.com/cart) while logged into the **same** shopper account.
@@ -593,7 +592,7 @@ Response shape:
         ],
         "action": {
           "type": "kroger_cart",
-          "label": "Add to Kroger cart",
+          "label": "Send to Kroger cart",
           "url": "/api/kroger/cart/start",
           "status": "needs_shopper_login",
           "fallbackUrl": "https://www.kroger.com/search?query=0001111041700",

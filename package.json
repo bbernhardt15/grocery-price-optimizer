@@ -27,6 +27,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@capacitor/share": "^8.0.3",
     "axios": "^1.20.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
