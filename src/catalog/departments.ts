@@ -25,7 +25,7 @@ export const DEPARTMENTS: readonly Department[] = [
   { id: "meat-seafood", name: "Meat & Seafood", subcategories: ["Chicken", "Beef", "Pork", "Seafood"] },
   { id: "bakery", name: "Bakery", subcategories: ["Bread", "Rolls & Bagels", "Tortillas"] },
   { id: "deli", name: "Deli", subcategories: ["Sliced Meat", "Prepared"] },
-  { id: "pantry", name: "Pantry", subcategories: ["Pasta & Rice", "Canned", "Condiments", "Baking", "Gifts"] },
+  { id: "pantry", name: "Pantry", subcategories: ["Pasta & Rice", "Canned", "Condiments", "Baking", "Nuts & Seeds", "Gifts"] },
   { id: "frozen", name: "Frozen", subcategories: ["Meals", "Vegetables", "Ice Cream"] },
   { id: "snacks", name: "Snacks", subcategories: ["Chips", "Crackers", "Candy"] },
   { id: "beverages", name: "Beverages", subcategories: ["Juice", "Soda", "Water", "Coffee & Tea"] },
@@ -54,6 +54,8 @@ type Rule = {
   test: RegExp;
   departmentId: string;
   subcategory?: string;
+  /** Vitamin and medicine segments. Skipped when the name is gear, a book, a pet, or a nutrition drink. */
+  kind?: "health";
 };
 
 /**
@@ -100,8 +102,10 @@ const RULES: readonly Rule[] = [
   { test: /^(?:mixers?|cocktail mixers?|drink mixes?)$/i, departmentId: "beverages" },
   { test: /^(?:nutrition (?:shakes?|drinks?|powders?)|meal replacements?)$/i, departmentId: "beverages" },
   { test: /^(?:beer|wine|spirits|liquor)$/i, departmentId: "beverages" },
-  { test: /^(?:vitamins?(?:\s*(?:&|and)\s*supplements?)?|supplements?|digestive health|first aid|pain relievers?|diabetic supplies|cold (?:&|and) flu|antiseptics?)$/i, departmentId: "personal-care", subcategory: "Health" },
-  { test: /^(?:personal care|health|vitamins?|medicine|pharmacy)$/i, departmentId: "personal-care" },
+  { test: /^(?:vitamins?(?:\s*(?:&|and)\s*supplements?)?|supplements?|digestive health|first aid|pain relievers?|diabetic supplies|cold (?:&|and) flu|antiseptics?)$/i, departmentId: "personal-care", subcategory: "Health", kind: "health" },
+  { test: /^(?:letter vitamins|vitamin\s+[a-z](?:\s*complex)?|b[-\s]?complex|probiotics?|fish\s*oils?|melatonin|omega[-\s]?3|electrolytes?)$/i, departmentId: "personal-care", subcategory: "Health", kind: "health" },
+  { test: /^(?:health|vitamins?|medicine|pharmacy)$/i, departmentId: "personal-care", kind: "health" },
+  { test: /^personal care$/i, departmentId: "personal-care" },
   { test: /^(?:cleaning|cleaners?|cleaning tools?|janitorial(?:\s+supplies)?|cleaning chemicals?)$/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /^(?:paper(?:\s+goods|\s+products)?|paper\s*(?:&|and)\s*plastics?|food-?\s*service(?:\s+disposables?)?|foodservice(?:\s+disposables?)?|disposables?)$/i, departmentId: "household", subcategory: "Paper" },
   { test: /^(?:household|household essentials?)$/i, departmentId: "household" },
@@ -114,7 +118,7 @@ const RULES: readonly Rule[] = [
     departmentId: "produce",
     subcategory: "Vegetables",
   },
-  { test: /diaper|baby wipe|training pants|pull-?ups/i, departmentId: "baby", subcategory: "Diapers" },
+  { test: /diaper(?!\s+pins?\b)|baby wipe|training pants|pull-?ups/i, departmentId: "baby", subcategory: "Diapers" },
   { test: /infant formula|baby formula|baby food(?!\s*makers?\b)/i, departmentId: "baby", subcategory: "Baby Food" },
   { test: /dog food|dog treats?|puppy food|puppy treats?/i, departmentId: "pet", subcategory: "Dog" },
   { test: /cat food|cat treats?|cat litter|kitten food/i, departmentId: "pet", subcategory: "Cat" },
@@ -124,8 +128,8 @@ const RULES: readonly Rule[] = [
   { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
   { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
-  { test: /isopropyl alcohol|rubbing alcohol|test strips?|\bteething\b|\b(?:tylenol|advil|ibuprofen|acetaminophen|aspirin)\b/i, departmentId: "personal-care", subcategory: "Health" },
-  { test: /\b(?:ensure|glucerna)\b|\bnutrition (?:shakes?|drinks?|powders?)\b|\bmeal replacements?\b|\bprotein (?:shakes?|powders?)\b/i, departmentId: "beverages" },
+  { test: /isopropyl alcohol|rubbing alcohol|test strips?|\bteething\b|\b(?:tylenol|advil|ibuprofen|acetaminophen|aspirin)\b/i, departmentId: "personal-care", subcategory: "Health", kind: "health" },
+  { test: /\b(?:ensure|glucerna|pediasure)\b|\bnutrition(?:al)? (?:shakes?|drinks?|powders?)\b|\bmeal replacements?\b|\bprotein (?:shakes?|powders?)\b/i, departmentId: "beverages" },
   { test: /\bswiffer\b|\bdusters?\b|\bdegreasers?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /\bdixie\b|\bcup lids?\b/i, departmentId: "household", subcategory: "Paper" },
   { test: /\bgift (?:towers?|baskets?|sets?)\b/i, departmentId: "pantry", subcategory: "Gifts" },
@@ -252,7 +256,7 @@ const BABY_EQUIPMENT =
   /\b(?:wipe warmers?|breast pumps?|nursing covers?|sippy cups?|toddler plates?|sleep shorts?|food makers?|baby food makers?|bottle brushes?|bottle feed(?:ing|ers?)?|baby bottles?|pacifiers?|teethers?|strollers?|car\s*seats?|cribs?|crib sheets?|bassinets?|high\s*chairs?|playards?|play\s*yards?|baby\s*swings?|nursing pillows?|diaper\s*bags?|onesies|bodysuits?|baby monitors?|door\s*knob covers?|tableware)\b/i;
 
 const BABY_CONSUMABLE =
-  /\b(?:diapers?|diapering|training pants|pull-?ups|youth pants|bedwetting|baby wipes?|infant formula|baby formula|baby foods?(?!\s*makers?\b)|food pouches?)\b/i;
+  /\b(?:diapers?(?!\s+pins?\b)|diapering|training pants|pull-?ups|youth pants|bedwetting|baby wipes?|infant formula|baby formula|baby foods?(?!\s*makers?\b)|food pouches?)\b/i;
 
 const NOT_GROCERY =
   /\b(?:video games?|xbox|playstation|nintendo)\b|\b(?:cabinets?|bookcases?|dressers?|nightstands?|bathroom storage)\b/i;
@@ -391,11 +395,268 @@ function reasonText(kind: "path" | "name" | "none", source: string, departmentId
   return `${kind}:${label}→${departmentId}`;
 }
 
-function matchRules(text: string): Rule | undefined {
+function matchRules(text: string, skipHealth = false): Rule | undefined {
   if (!text.trim()) {
     return undefined;
   }
-  return RULES.find((rule) => rule.test.test(text));
+  return RULES.find((rule) => {
+    if (skipHealth && rule.kind === "health") {
+      return false;
+    }
+    return rule.test.test(text);
+  });
+}
+
+/**
+ * Words that name a swallowed health product. Omega-3 is separate: pantry
+ * oils and seeds say "high in omega-3" without being a supplement.
+ */
+const HEALTH_CONSUMABLE_NOUN =
+  /\b(?:multivitamins?|vitamins?|b[-\s]?complex(?:es)?|supplements?|probiotics?|fish\s*oils?|melatonin|electrolytes?)\b/i;
+
+const OMEGA3 = /\bomega[-\s]?3s?\b/i;
+
+/** Dosage forms that pair with a supplement brand. Caplets and chewables are the same class as tablets. */
+const DOSAGE_FORM = /\b(?:tablets?|tabs?|capsules?|soft\s*gels?|gummies|gummy|caplets?|chewables?|chews)\b/i;
+
+/** Olly and One A Day need a dosage form. The other names are only vitamins, but the same pairing avoids cookware and nameplates. */
+const HEALTH_BRAND =
+  /\b(?:nature made|nature['’]?s bounty|centrum|one a day|olly|vitafusion|nordic naturals|garden of life)\b/i;
+
+const PILL_GEAR =
+  /\b(?:pill|vitamin|supplement|medicine|medication)s?\s+(?:organizers?|planners?|boxes|cases|holders?|dispensers?|splitters?|cutters?|crushers?)\b/i;
+
+const NUTRITION_DRINK =
+  /\b(?:ensure|glucerna|pediasure)\b|\bnutrition(?:al)? (?:shakes?|drinks?|powders?)\b|\bmeal replacements?\b|\bboost\s+glucose\b|\bprotein\b[^.]{0,40}\b(?:shakes?|powders?)\b|\b(?:shakes?|powders?)\b[^.]{0,40}\bprotein\b/i;
+
+const TOPICAL_CARE = /\b(?:lip\s*care|lip\s*balms?|cocoa butter|lotions?|body butters?|moisturizers?|soaps?)\b/i;
+
+/** Creams and ointments. Gels stay with tablets so glucose gel and liquid gels stay oral. */
+const TOPICAL_MEDICINE = /\b(?:creams?|ointments?|lotions?|balms?|anti-?itch)\b/i;
+
+const ALLERGY_DRUG =
+  /\b(?:diphenhydramine|cetirizine|loratadine|fexofenadine|zyrtec|claritin|allegra|benadryl)\b/i;
+
+const ALLERGY_RELIEF = /\ballergy\b(?:\s+\w+){0,3}\s+relief\b/i;
+
+const HERB =
+  /\b(?:echinacea|black cohosh|saw palmetto|quercetin|co[\s-]?q[\s-]?10|coq10|turmeric|curcumin|ashwagandha|elderberry|elder berries)\b/i;
+
+const MINERAL = /\b(?:potassium|magnesium|zinc|calcium|iron|ferrous)\b/i;
+
+const MINERAL_GEAR = /\b(?:t-?shirts?|skillets?|pans?\b|woks?|cast iron|iron man|graphic tee|graphic t)\b/i;
+
+/** A count such as 60ct stands in for a dosage form on a supplement brand. */
+const COUNT_FORM = /\b\d+\s*ct\b|\bcount\b/i;
+
+const SINGLE_WORD_SUPPLEMENT_BRAND = /\b(?:bulksupplements|now foods)\b/i;
+
+const SEED_PANTRY = /\b(?:flax\s*seeds?|flaxseeds?|chia\s*seeds?|hemp\s*seeds?|hemp hearts)\b/i;
+
+/**
+ * Pet medicines and pet food. Bare "fish" is not a pet (fish oil is human).
+ * Bare "cat" is not a pet ("cat's claw" is an herb). "Horse chestnut" is an herb.
+ */
+function petHealthContext(name: string): boolean {
+  if (/\bfood spray\b/i.test(name)) {
+    return true;
+  }
+  const withoutHerb = name.replace(/\bhorse chestnut\b/gi, " ");
+  if (/\b(?:dogs?|puppies|kittens?|horses?|birds?|turtles?|hamsters?|guinea pigs?|goldfish|bearded dragons?|hermit crabs?|hedgehogs?|reptiles?|felines?|canines?)\b/i.test(withoutHerb)) {
+    return true;
+  }
+  return /\bfor\s+cats?\b|\bcats?\s+(?:food|foods|treats?|vitamins?|supplements?)\b|\bpet\s+(?:products?|food|tabs|vitamins?|supplements?)\b|\b(?:fish|turtle|bird|hamster|guinea pig)\s+food\b|\bsmall animals?\b/i.test(name);
+}
+
+function looksLikeBook(name: string): boolean {
+  if (/\b(?:paperback|hardcover|audiobook|step-by-step guide|handbook)\b/i.test(name)) {
+    return true;
+  }
+  return (
+    name.includes(":") &&
+    !DOSAGE_FORM.test(name) &&
+    !HEALTH_BRAND.test(name) &&
+    /\b(?:your|guide|overcome|handbook|edition)\b/i.test(name)
+  );
+}
+
+type HealthNameIntent = { intent: "health" | "body" | "block"; label: string };
+
+function supplementBrand(name: string): boolean {
+  if (/\bnordic ware\b/i.test(name)) {
+    return false;
+  }
+  if (/\b(?:holly|jolly)\b/i.test(name) && !/\bolly\b/i.test(name)) {
+    return false;
+  }
+  return HEALTH_BRAND.test(name);
+}
+
+function allergyMedicine(name: string): boolean {
+  if (/\ballergy[-\s]free\b/i.test(name) && !ALLERGY_DRUG.test(name)) {
+    return false;
+  }
+  if (ALLERGY_DRUG.test(name) || ALLERGY_RELIEF.test(name)) {
+    return true;
+  }
+  return /\bantihistamines?\b/i.test(name) && (DOSAGE_FORM.test(name) || COUNT_FORM.test(name));
+}
+
+function mineralSupplement(name: string): boolean {
+  if (!MINERAL.test(name) || !DOSAGE_FORM.test(name) || MINERAL_GEAR.test(name)) {
+    return false;
+  }
+  return true;
+}
+
+function departmentFromName(id: string, label: string, subcategory?: string): MappedDepartment {
+  const department = departmentById(id) ?? DEPARTMENTS[DEPARTMENTS.length - 1];
+  return {
+    departmentId: department.id,
+    departmentName: department.name,
+    ...(subcategory ? { subcategory } : {}),
+    signal: department.id === "other" ? "excluded" : "name",
+    ...(department.id === "other" ? { generalMerchandise: true } : {}),
+    reason: `name:${label}→${department.id}`,
+  };
+}
+
+function personalCareFromName(subcategory: "Health" | "Body", label: string): MappedDepartment {
+  return departmentFromName("personal-care", label, subcategory);
+}
+
+/**
+ * Dog and cat food, treats, litter, and pet vitamins win over a Toys path.
+ * Litter-Robot gear and pet toys stay on the general-merchandise path.
+ * "Cat's claw" and "horse chestnut" are herbs.
+ */
+function petNameOverride(name: string): MappedDepartment | null {
+  if (/\blitter[-\s]*robot\b/i.test(name) || /\blitter\s*(?:box(?:es)?|mats?|genie|scoops?)\b/i.test(name)) {
+    return null;
+  }
+  if (/\b(?:dog|puppy)\s+(?:foods?|treats?)\b/i.test(name)) {
+    return departmentFromName("pet", "pet-food", "Dog");
+  }
+  if (/\b(?:cat|kitten|kitty)\s+(?:foods?|treats?)\b/i.test(name)) {
+    return departmentFromName("pet", "pet-food", "Cat");
+  }
+  if (/\b(?:cat|kitty|pet|clumping|crystal)\s+litter\b/i.test(name)) {
+    return departmentFromName("pet", "pet-litter", "Cat");
+  }
+  if (/\b(?:fish|bird|turtle|hamster|guinea pig)\s+food\b/i.test(name)) {
+    return departmentFromName("pet", "pet-food");
+  }
+  const withoutHerb = name.replace(/\b(?:horse chestnut|cat'?s\s+claw)\b/gi, " ");
+  const dog = /\b(?:dogs?|puppies)\b/i.test(withoutHerb);
+  const cat = /\b(?:cats?|kittens?)\b/i.test(withoutHerb);
+  const otherAnimal = /\b(?:horses?|birds?|hamsters?|guinea pigs?|goldfish|reptiles?)\b/i.test(withoutHerb);
+  const supplementish = /\b(?:vitamins?|multivitamins?|supplements?|fish\s*oils?)\b/i.test(withoutHerb);
+  if (supplementish && (dog || cat || otherAnimal)) {
+    const subcategory = dog ? "Dog" : cat ? "Cat" : undefined;
+    return departmentFromName("pet", "pet-vitamin", subcategory);
+  }
+  return null;
+}
+
+/**
+ * Name-only health consumable decision. "block" means a vitamin segment
+ * must not pull the row into personal care (books, pets, formula,
+ * testosterone, devices, pill gear).
+ */
+function healthNameIntent(name: string): HealthNameIntent | null {
+  const text = name.trim();
+  if (!text) {
+    return null;
+  }
+  if (looksLikeBook(text)) {
+    return { intent: "block", label: "book" };
+  }
+  if (/\btestosterone\b/i.test(text) || HEALTH_DEVICE.test(text)) {
+    return { intent: "block", label: "device" };
+  }
+  // A vitamin path must not turn formula, a shake, or a pet medicine into Health.
+  if (petHealthContext(text) || NUTRITION_DRINK.test(text) || BABY_CONSUMABLE.test(text)) {
+    return { intent: "block", label: "kept" };
+  }
+  if (/\bserums?\b/i.test(text)) {
+    return { intent: "body", label: "skincare-serum" };
+  }
+  if (allergyMedicine(text) && TOPICAL_MEDICINE.test(text)) {
+    return { intent: "body", label: "topical" };
+  }
+  if (TOPICAL_CARE.test(text) && !DOSAGE_FORM.test(text) && (HEALTH_CONSUMABLE_NOUN.test(text) || supplementBrand(text))) {
+    return { intent: "body", label: "skincare-serum" };
+  }
+  if (allergyMedicine(text)) {
+    return { intent: "health", label: "allergy" };
+  }
+  if (/\bglucose\b/i.test(text) && (DOSAGE_FORM.test(text) || /\bgels?\b/i.test(text))) {
+    return { intent: "health", label: "glucose" };
+  }
+  if ((HERB.test(text) || mineralSupplement(text)) && DOSAGE_FORM.test(text)) {
+    return { intent: "health", label: "herbal-mineral" };
+  }
+  if (SINGLE_WORD_SUPPLEMENT_BRAND.test(text) && /\b(?:powders?|capsules?|tablets?|soft\s*gels?|gummies|caplets?)\b/i.test(text)) {
+    return { intent: "health", label: "supplement-brand" };
+  }
+  const omegaConsumable =
+    OMEGA3.test(text) &&
+    (DOSAGE_FORM.test(text) || /\bsupplements?\b/i.test(text) || /\bfish\s*oils?\b/i.test(text) || supplementBrand(text));
+  const foodCarrier =
+    /\b(?:yogurts?|kefirs?|kombuchas?|kimchi|sauerkraut|sardines?)\b/i.test(text) &&
+    !DOSAGE_FORM.test(text) &&
+    !supplementBrand(text);
+  const noun = HEALTH_CONSUMABLE_NOUN.test(text) && !foodCarrier;
+  if (noun || omegaConsumable || (supplementBrand(text) && (DOSAGE_FORM.test(text) || COUNT_FORM.test(text)))) {
+    return { intent: "health", label: "health-consumable" };
+  }
+  if (PILL_GEAR.test(text)) {
+    return { intent: "block", label: "pill-gear" };
+  }
+  return null;
+}
+
+/**
+ * Name wins over the stored path for the misses that were still in Other.
+ * Returns a department, or null when the usual path rules should run.
+ * blockHealth is true when a vitamin segment must not apply.
+ */
+function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: boolean } | { mapped?: undefined; blockHealth: boolean } {
+  const text = name.trim();
+  if (!text) {
+    return { blockHealth: false };
+  }
+  if (/\bdiaper\s+pins?\b/i.test(text)) {
+    return { mapped: departmentFromName("other", "diaper-pins"), blockHealth: true };
+  }
+  if (/\blitter[-\s]*robot\b/i.test(text)) {
+    return { mapped: departmentFromName("other", "litter-robot"), blockHealth: true };
+  }
+  if (looksLikeBook(text) && /\bgift (?:towers?|baskets?|sets?)\b/i.test(text)) {
+    return { mapped: departmentFromName("other", "gift-book"), blockHealth: true };
+  }
+  const pet = petNameOverride(text);
+  if (pet) {
+    return { mapped: pet, blockHealth: true };
+  }
+  if (/\b(?:training pants|pull-?ups)\b/i.test(text)) {
+    return { mapped: departmentFromName("baby", "training-pants", "Diapers"), blockHealth: true };
+  }
+  if (NUTRITION_DRINK.test(text)) {
+    return { mapped: departmentFromName("beverages", "nutrition-drink"), blockHealth: true };
+  }
+  const seedFood = /\b(?:crackers?|chips?|cookies?|breads?|bars?|muffins?|oils?|pillows?|masks?)\b/i.test(text);
+  if (SEED_PANTRY.test(text) && !seedFood && !(DOSAGE_FORM.test(text) && /\b(?:oils?|supplements?)\b/i.test(text))) {
+    return { mapped: departmentFromName("pantry", "seeds", "Nuts & Seeds"), blockHealth: true };
+  }
+  const health = healthNameIntent(text);
+  if (health?.intent === "health") {
+    return { mapped: personalCareFromName("Health", health.label), blockHealth: false };
+  }
+  if (health?.intent === "body") {
+    return { mapped: personalCareFromName("Body", health.label), blockHealth: false };
+  }
+  return { blockHealth: health?.intent === "block" };
 }
 
 function subcategoryFor(departmentId: string, text: string, explicit?: string): string | undefined {
@@ -420,6 +681,11 @@ export function mapToDepartment(
 ): MappedDepartment {
   const labels = (categories ?? []).map((entry) => entry.trim()).filter(Boolean);
   const other = departmentById("other") ?? DEPARTMENTS[DEPARTMENTS.length - 1];
+  const named = nameOverride(name);
+  if (named.mapped) {
+    return named.mapped;
+  }
+  const skipHealth = named.blockHealth;
   const junk = notGroceryLabel(labels, name);
   if (junk) {
     return {
@@ -464,7 +730,7 @@ export function mapToDepartment(
   let weakSource = "";
   for (let index = segments.length - 1; index >= 0; index -= 1) {
     const segment = segments[index] ?? "";
-    const rule = matchRules(segment);
+    const rule = matchRules(segment, skipHealth);
     if (!rule) {
       continue;
     }
@@ -483,13 +749,13 @@ export function mapToDepartment(
   let categorySource = specificRule ? specificSource : weakSource;
   let signal: MappedDepartment["signal"] = specificRule ? "specific" : fromCategory ? "broad" : "none";
   if (!fromCategory) {
-    fromCategory = matchRules(categoryText);
+    fromCategory = matchRules(categoryText, skipHealth);
     categorySource = categoryText;
     if (fromCategory) {
       signal = WEAK_SEGMENT.test(categorySource.trim()) || BROAD_CATEGORY.test(categorySource.trim()) ? "broad" : "specific";
     }
   }
-  const fromName = matchRules(name);
+  const fromName = matchRules(name, skipHealth);
 
   let rule = fromCategory ?? fromName;
   let reasonKind: "path" | "name" | "none" = fromCategory ? "path" : "none";
@@ -560,4 +826,84 @@ export function mapToDepartment(
     ...(department.id === "other" ? { generalMerchandise: true } : {}),
     reason: reasonText(reasonKind, reasonSource, department.id),
   };
+}
+
+export type HealthConsumableMoveCount = {
+  examined: number;
+  /** personal-care / Health via the name rule. */
+  toHealth: number;
+  /** personal-care / Body via the serum exception. */
+  toBody: number;
+  /** Not moved by this rule. Path rules and false friends stay here. */
+  stayed: number;
+};
+
+/**
+ * Dry-run for masters stored in Other.
+ * A row counts as a move only when the name rule (or the serum exception)
+ * returns personal care. Recategorize writes that department and clears
+ * refreshExcluded on the product's offers. `updated` is masters whose
+ * department or subcategory changes. `clearedExclusions` is offers that
+ * had the flag, which is not the same number as masters.
+ * Keyword search totals are an upper bound: they include books, pet
+ * medicines, pill organizers, and foods that this count leaves in place.
+ */
+export function countHealthConsumableMoves(
+  rows: readonly { name: string; categories?: string[]; departmentId?: string }[]
+): HealthConsumableMoveCount {
+  let examined = 0;
+  let toHealth = 0;
+  let toBody = 0;
+  let stayed = 0;
+  for (const row of rows) {
+    if ((row.departmentId ?? "other").trim().toLowerCase() !== "other") {
+      continue;
+    }
+    examined += 1;
+    const mapped = mapToDepartment(row.categories, row.name);
+    if (mapped.departmentId === "personal-care" && mapped.reason?.includes("health-consumable")) {
+      toHealth += 1;
+    } else if (mapped.departmentId === "personal-care" && mapped.reason?.includes("skincare-serum")) {
+      toBody += 1;
+    } else {
+      stayed += 1;
+    }
+  }
+  return { examined, toHealth, toBody, stayed };
+}
+
+export type NameMoveCount = {
+  examined: number;
+  stayed: number;
+  byRule: Record<string, number>;
+};
+
+/**
+ * Count Other rows by the name rule that moves them.
+ * `byRule` keys are the label in `name:<label>→department`.
+ * Recategorize writes the new department and clears refreshExcluded
+ * on that product's offers. `updated` counts masters whose department
+ * or subcategory changes. `clearedExclusions` counts offers that had
+ * the flag. Keyword totals count false friends, so they are an upper bound.
+ */
+export function countNameMoves(
+  rows: readonly { name: string; categories?: string[]; departmentId?: string }[]
+): NameMoveCount {
+  const byRule: Record<string, number> = {};
+  let examined = 0;
+  let stayed = 0;
+  for (const row of rows) {
+    if ((row.departmentId ?? "other").trim().toLowerCase() !== "other") {
+      continue;
+    }
+    examined += 1;
+    const mapped = mapToDepartment(row.categories, row.name);
+    const label = mapped.reason?.match(/^name:([^→ ]+)→/)?.[1];
+    if (!label || mapped.departmentId === "other") {
+      stayed += 1;
+      continue;
+    }
+    byRule[label] = (byRule[label] ?? 0) + 1;
+  }
+  return { examined, stayed, byRule };
 }

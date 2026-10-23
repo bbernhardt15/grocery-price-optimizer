@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { demoRecords } from "../catalog/demoCatalog";
+import { krogerProductIdForLookup, upcKey } from "../catalog/normalize";
+import type { RawCatalogRecord } from "../catalog/types";
 import { krogerApiConfigured } from "../pricing/krogerProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import {
@@ -26,7 +28,7 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
-import { finishLookups, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
+import { finishLookups, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { finishRefresh, nextRefreshPicks } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
@@ -91,8 +93,18 @@ export type KrogerCheckpoint = {
   pendingZips: string[];
   clientErrorStreak: number;
   clientErrorLocationId?: string;
+  /** Name search still owed after filter.productId missed. Not a discovery error. */
+  termFallback?: KrogerTermFallback;
   nextAllowedAt?: string;
   cycleStartedAt: string;
+};
+
+type KrogerTermFallback = {
+  key: string;
+  name: string;
+  code: string;
+  upc?: string;
+  locationId?: string;
 };
 
 type CheckpointDoc = {
@@ -185,6 +197,69 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     splitBrand: typeof record.splitBrand === "string" ? record.splitBrand : undefined,
     matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
     matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
+    termFallback: readKrogerTermFallback(record.termFallback),
+  };
+}
+
+function readKrogerTermFallback(value: unknown): KrogerTermFallback | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const row = value as Partial<KrogerTermFallback>;
+  if (typeof row.key !== "string" || typeof row.name !== "string" || typeof row.code !== "string") {
+    return undefined;
+  }
+  return {
+    key: row.key,
+    name: row.name,
+    code: row.code,
+    ...(typeof row.upc === "string" && row.upc ? { upc: row.upc } : {}),
+    ...(typeof row.locationId === "string" && row.locationId ? { locationId: row.locationId } : {}),
+  };
+}
+
+/** A lookup 400 is a miss. It does not join the discovery error streak. */
+function krogerClientMiss(error: unknown): boolean {
+  const status = httpStatusOf(error);
+  return status !== null && status >= 400 && status < 500 && status !== 429;
+}
+
+function krogerRecordMatches(record: RawCatalogRecord, masterKey: string, expected: string): boolean {
+  const id = (record.productId || record.retailerItemId || "").replace(/\D/g, "");
+  if (id && (id === expected || krogerProductIdForLookup(id) === expected)) {
+    return true;
+  }
+  const key = upcKey(record.upc) || upcKey(id);
+  return Boolean(key && key === masterKey);
+}
+
+function bindKrogerLookupRecords(
+  records: RawCatalogRecord[],
+  pick: { key: string; code: string; upc?: string },
+  mode: "id" | "term"
+): RawCatalogRecord[] {
+  const expected = pick.code.replace(/\D/g, "");
+  const chosen = mode === "id" ? records : records.filter((record) => krogerRecordMatches(record, pick.key, expected));
+  const upc = pick.upc?.replace(/\D/g, "");
+  return chosen.map((record) => {
+    const productId = (record.productId || record.retailerItemId || expected).trim();
+    return {
+      ...record,
+      ...(upc ? { upc } : {}),
+      ...(productId ? { productId, retailerItemId: record.retailerItemId?.trim() || productId } : {}),
+    };
+  });
+}
+
+function lookupPickFromTerm(pending: KrogerTermFallback): LookupPick {
+  return {
+    key: pending.key,
+    name: pending.name,
+    code: pending.code,
+    codes: [pending.code],
+    variantIndex: 0,
+    priority: "catalog",
+    ...(pending.upc ? { upc: pending.upc } : {}),
   };
 }
 
@@ -735,13 +810,105 @@ export async function stepKroger(options: {
     });
   };
 
+  const stampProductPace = () => {
+    const nextAt = productGate.nextAllowedAt();
+    if (nextAt > 0) {
+      cp.nextAllowedAt = new Date(nextAt).toISOString();
+    }
+  };
+
+  async function markKrogerLookupMiss(pick: LookupPick): Promise<void> {
+    const finished = await finishLookups("kroger", [pick], nowFn(), { forceMiss: true });
+    cp.matchAttempts += finished.attempts;
+    cp.attempts = 0;
+    delete cp.termFallback;
+    await persist("running", { clearError: true });
+  }
+
+  /** Name search after filter.productId was rejected or empty. A 400 stays a miss. */
+  async function runKrogerTerm(pending: KrogerTermFallback): Promise<"done" | "stop"> {
+    const term = sanitizeKrogerParam(pending.name, 80);
+    const lookupTerm = options.client.lookupTerm;
+    if (!term || !lookupTerm || calls >= options.maxCalls) {
+      if (!term || !lookupTerm) {
+        await markKrogerLookupMiss(lookupPickFromTerm(pending));
+        return "done";
+      }
+      cp.termFallback = pending;
+      await persist("running", { clearError: true });
+      return "stop";
+    }
+    try {
+      const charged = await spendCall(
+        productGate,
+        () => lookupTerm(term, pending.locationId),
+        () => {
+          calls += 1;
+        },
+        stampProductPace
+      );
+      if (charged === "budget") {
+        cp.termFallback = pending;
+        paused = "budget";
+        await persist("paused", { lastError: "Kroger daily budget reached" });
+        return "stop";
+      }
+      const matched = bindKrogerLookupRecords(charged.records, pending, "term");
+      if (matched.length > 0) {
+        const saved = await upsertCatalogRecords(matched, nowFn());
+        upserted += saved.offers;
+        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn());
+        cp.matchAttempts += finished.attempts;
+        cp.matchHits += finished.hits;
+      } else {
+        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn(), { forceMiss: true });
+        cp.matchAttempts += finished.attempts;
+      }
+      cp.attempts = 0;
+      delete cp.termFallback;
+      await persist("running", { clearError: true });
+      return "done";
+    } catch (error) {
+      if (krogerClientMiss(error)) {
+        await markKrogerLookupMiss(lookupPickFromTerm(pending));
+        return "done";
+      }
+      const kind = retryClass(error);
+      if (kind === "fatal" || cp.attempts >= 2) {
+        await markKrogerLookupMiss(lookupPickFromTerm(pending));
+        return "done";
+      }
+      cp.termFallback = pending;
+      const outcome = await failKroger(cp, error, sleep, nowFn(), { request: "products", term, lookup: true });
+      cp = outcome.checkpoint;
+      cp.termFallback = pending;
+      paused = outcome.paused;
+      await persist(outcome.status, { error: outcome.error });
+      return outcome.stop ? "stop" : "done";
+    }
+  }
+
   while (calls < options.maxCalls) {
+    if (cp.termFallback && options.client.lookupProductId) {
+      const outcome = await runKrogerTerm(cp.termFallback);
+      if (outcome === "stop") {
+        break;
+      }
+      continue;
+    }
     if (options.client.lookupProductId && !lookupExhausted && lookupsDone < lookupBudget) {
       const [picked] = await nextKrogerLookups(nowFn(), 1);
       if (!picked) {
         lookupExhausted = true;
       } else {
         const locationId = cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        const pending: KrogerTermFallback = {
+          key: picked.key,
+          name: picked.name,
+          code: picked.code,
+          ...(picked.upc ? { upc: picked.upc } : {}),
+          ...(locationId ? { locationId } : {}),
+        };
         lookupsDone += 1;
         try {
           const charged = await spendCall(
@@ -750,30 +917,37 @@ export async function stepKroger(options: {
             () => {
               calls += 1;
             },
-            () => {
-              const nextAt = productGate.nextAllowedAt();
-              if (nextAt > 0) {
-                cp.nextAllowedAt = new Date(nextAt).toISOString();
-              }
-            }
+            stampProductPace
           );
           if (charged === "budget") {
             paused = "budget";
             await persist("paused", { lastError: "Kroger daily budget reached" });
             break;
           }
-          if (charged.records.length > 0) {
-            const saved = await upsertCatalogRecords(charged.records, nowFn());
+          const bound = bindKrogerLookupRecords(charged.records, picked, "id");
+          if (bound.length === 0) {
+            const outcome = await runKrogerTerm(pending);
+            if (outcome === "stop") {
+              break;
+            }
+          } else {
+            const saved = await upsertCatalogRecords(bound, nowFn());
             upserted += saved.offers;
+            const finished = await finishLookups("kroger", [picked], nowFn());
+            cp.matchAttempts += finished.attempts;
+            cp.matchHits += finished.hits;
+            cp.attempts = 0;
+            delete cp.termFallback;
+            await persist("running", { clearError: true });
           }
-          const finished = await finishLookups("kroger", [picked], nowFn());
-          cp.matchAttempts += finished.attempts;
-          cp.matchHits += finished.hits;
-          cp.attempts = 0;
-          await persist("running", { clearError: true });
         } catch (error) {
           const kind = retryClass(error);
-          if (kind === "fatal" || cp.attempts >= 2) {
+          if (krogerClientMiss(error)) {
+            const outcome = await runKrogerTerm(pending);
+            if (outcome === "stop") {
+              break;
+            }
+          } else if (kind === "fatal" || cp.attempts >= 2) {
             const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true });
             cp.matchAttempts += finished.attempts;
             cp.attempts = 0;
@@ -833,7 +1007,11 @@ export async function stepKroger(options: {
           await persist("running", { clearError: true });
         } catch (error) {
           const kind = retryClass(error);
-          if (kind === "fatal" || cp.attempts >= 2) {
+          if (krogerClientMiss(error)) {
+            await finishRefresh([picked], nowFn(), 0);
+            cp.attempts = 0;
+            await persist("running", { clearError: true });
+          } else if (kind === "fatal" || cp.attempts >= 2) {
             await finishRefresh([picked], nowFn(), 0);
             cp.attempts = 0;
             await persist("running", {
@@ -858,7 +1036,7 @@ export async function stepKroger(options: {
     }
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       const pending = cp.pendingZips;
-      cp = { ...emptyKroger(nowFn()), pendingZips: pending, phase: "locations" };
+      cp = { ...emptyKroger(nowFn()), pendingZips: pending, phase: "locations", termFallback: cp.termFallback };
     }
 
     if (cp.pendingZips.length > 0) {

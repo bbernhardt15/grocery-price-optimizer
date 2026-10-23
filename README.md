@@ -73,13 +73,13 @@ On 2026-09-29 the catalog sat at the 40,000 product cap (pantry about half of th
 
 Grocery baby is diapers, wipes, training pants, pull-ups, infant or baby formula, and baby food. A bare `Baby` label does not keep a product in baby. Feeding gear (bottles, bottle brushes, pumps, sippy cups, plates, food makers, nursing covers, wipe warmers), nursery, travel, activities, resale, and shop-by-brand leaves map to Other and are not crawled. A bottle brush stays Other even when Walmart files it under Baby Wipes, because the name is gear. Baby carrots, baby spinach, and baby back ribs still follow the food name. Recategorize writes every department change, including a move to Other, and does not delete rows.
 
-Other is the general-merchandise aisle (`generalMerchandise: true` on that department). Shopper browse and search hide it unless the request asks for `department=other`. The department chips hide it too. Vitamins and supplements, digestive health, consumable first aid (isopropyl alcohol, bandages), OTC pain relievers, diabetic test strips, and teething pain relief map to personal care, subcategory Health. There is no separate health department. A product under Baby/Health stays Other unless the name itself is one of those consumables (teething relief, Tylenol). The Health and Medicine aisle is what maps vitamins and OTC medicine. Massage guns, shower chairs, air purifiers, sound machines, sleep masks, hot and cold packs, and testosterone boosters stay Other. Ensure and other nutrition shakes or powders map to beverages. Pet food, treats, litter, and bedding (including cedar bedding) map to pet. Pet toys, wheels, aquarium ornaments, and feeders stay Other. Food gifts, gift towers, and gift baskets map to pantry, subcategory Gifts. Swiffer dusters, janitorial cleaners, and food-service disposables such as Dixie cup lids map to household. Jewelry, office supplies, home improvement, apparel, electronics, toys, furniture, and the rest of Industrial & Scientific stay Other and are not crawled. Kroger category labels for those grocery aisles map to a grocery department. A Kroger id on a product that is still Other is almost certainly a miss: Kroger's catalog is groceries.
+Other is the general-merchandise aisle (`generalMerchandise: true` on that department). Shopper browse and search hide it unless the request asks for `department=other`. The department chips hide it too. Vitamins and supplements, digestive health, consumable first aid (isopropyl alcohol, bandages), OTC pain relievers, diabetic test strips, and teething pain relief map to personal care, subcategory Health. There is no separate health department. A product name moves to that same Health subcategory even when the stored path is Letter Vitamins, Vitamin B Complex, Health and Medicine, or general merchandise. The name match is vitamin, multivitamin, B-complex, supplement, probiotic, fish oil, melatonin, or electrolyte. Omega-3 counts when the name also has a dosage form, the word supplement, fish oil, or a supplement brand. Nature Made, Nature's Bounty, Centrum, One A Day, Olly, Vitafusion, Nordic Naturals, and Garden of Life count when the name also says tablets, capsules, softgels, gummies, caplets, or chewables. Pill organizers stay Other. A serum, including vitamin C serum, is personal care, subcategory Body. Books, testosterone, health devices, infant formula, nutrition shakes, and pet medicines stay on their own rules. Leaves named Letter Vitamins or Vitamin B Complex are crawled. Allergy medicines (diphenhydramine, cetirizine, loratadine, fexofenadine, Zyrtec, Claritin, Allegra, Benadryl, and allergy relief) map to personal care, subcategory Health. Itch cream maps to Body. Glucose tablets and gels map to Health. Herbs and minerals in tablets, capsules, or softgels map to Health, as do BulkSupplements and NOW Foods when the name also says powder, capsules, or tablets. A supplement brand plus a count such as 60ct maps to Health. Training pants and pull-ups map to baby by name, including under Clothing. Dog and cat food, treats, litter, and pet vitamins map to pet by name, including under Toys. PediaSure and nutritional shakes map to beverages. Flax, chia, and hemp seeds map to pantry, subcategory Nuts & Seeds. Diaper pins, Litter-Robot gear, gift-basket books, Nordic Ware, Holly, and Jolly stay Other. Walmart taxonomy version 6 re-reads the tree so training-pants and dog-food leaves are picked up. A product under Baby/Health stays Other unless the name itself is one of those consumables (teething relief, Tylenol). The Health and Medicine aisle is what maps vitamins and OTC medicine. Massage guns, shower chairs, air purifiers, sound machines, sleep masks, hot and cold packs, and testosterone boosters stay Other. Ensure and other nutrition shakes or powders map to beverages. Pet food, treats, litter, and bedding (including cedar bedding) map to pet. Pet toys, wheels, aquarium ornaments, and feeders stay Other. Food gifts, gift towers, and gift baskets map to pantry, subcategory Gifts. Swiffer dusters, janitorial cleaners, and food-service disposables such as Dixie cup lids map to household. Jewelry, office supplies, home improvement, apparel, electronics, toys, furniture, and the rest of Industrial & Scientific stay Other and are not crawled. Kroger category labels for those grocery aisles map to a grocery department. A Kroger id on a product that is still Other is almost certainly a miss: Kroger's catalog is groceries.
 
 `GET /api/admin/catalog/other-breakdown` returns the top stored category paths in Other (Walmart `categoryPath` or Kroger `categories`), a count, and three example names, plus `withKrogerId`. `GET /api/admin/catalog/sample?department=baby&limit=50` returns a random compact sample (name, brand, stores, paths, stored department, the department the current rules would pick, and the rule). `GET /api/admin/catalog/match-sample` returns a few normalized keys from each store. `counts` on status includes `match` lookups, `refreshQueue` (Walmart and Kroger offers still waiting), and `refreshedToday`. `match.queue` is how many masters are still waiting on a cross-store lookup, `match.hitRate` is today's hits over attempts, and `match.mergedToday` is how many masters gained both store ids that UTC day.
 
 The same product already shares one key when both stores have sent a code: Walmart UPC-A (12 digits, check digit), EAN-13, GTIN-14, and Kroger's 13-digit code with no check digit. A numeric Walmart `upc` that dropped a leading zero is padded back when that restores a valid check digit. A UPC-E (8 digits, number system 0 or 1) expands to that same UPC-A before the key is built, so the short code and the long code land on one master. Most masters still have only one store id because each crawl saw a different set of products, not because the keys disagree.
 
-Cross-store lookup and stale-offer refresh share the existing daily budgets and the Walmart 429 pause. `CATALOG_MATCH_LOOKUP_SHARE` (default `0.5`) is the fraction of each Walmart tick and each Kroger tick spent on lookups. `CATALOG_REFRESH_SHARE` (default `0.3`) is the fraction spent re-pricing the oldest stale offers. With the default batch of 4 calls, that is 2 lookup calls, 1 refresh call, and 1 discovery call. Lookup is reserved first. When a queue is empty, that tick's remaining calls go back to discovery. Walmart sends up to 20 UPCs on one `GET /items?upc=` (`WALMART_LOOKUP_BATCH`, default 20, the same cap as the Affiliate `ids` list). Kroger still takes one `filter.productId` per call. For lookups, staples are first, and a product on a shopper's saved list or in a recent search or recent priced result goes ahead of the aisle. For refresh, the order is saved lists, shared lists, price-alert watches, recent searches, then merged products, then the oldest stale offer. Each lookup try sends the next GTIN form: the 12-digit UPC-A, then the same code with a leading zero (EAN-13) and two leading zeros (GTIN-14) for Walmart; the 13-digit Kroger id, then a 14-digit pad and the 12-digit form when it has a leading zero. A lookup miss is tried again after `CATALOG_MATCH_RETRY_DAYS` (default 14). A refresh miss waits a day and does not delete the offer. A 400 on a multi-UPC Walmart call switches that crawl cycle to one UPC at a time and does not burn the batch. A new Walmart taxonomy version re-reads the category tree once so general-merchandise leaves drop out and grocery leaves are walked.
+Cross-store lookup and stale-offer refresh share the existing daily budgets and the Walmart 429 pause. `CATALOG_MATCH_LOOKUP_SHARE` (default `0.5`) is the fraction of each Walmart tick and each Kroger tick spent on lookups. `CATALOG_REFRESH_SHARE` (default `0.3`) is the fraction spent re-pricing the oldest stale offers. With the default batch of 4 calls, that is 2 lookup calls, 1 refresh call, and 1 discovery call. Lookup is reserved first. When a queue is empty, that tick's remaining calls go back to discovery. Walmart sends up to 20 UPCs on one `GET /items?upc=` (`WALMART_LOOKUP_BATCH`, default 20, the same cap as the Affiliate `ids` list). Kroger still takes one `filter.productId` per call. That id is 13 digits: drop the UPC-A check digit and left-pad, including when the stored digit fails the GS1 check. `070708200500` becomes `0007070820050`, `003063880160` becomes `0000306388016`, and `073214835404` becomes `0007321483540`. A 12-digit or 14-digit pad is not sent. If that id returns HTTP 400 or no rows, the same lookup tries `filter.term` with the product name and keeps a row only when the UPC or product id matches. A 400 on a lookup or that name search is a miss: it does not pause the crawl and it does not add to the three-in-a-row location skip, which still applies to discovery searches. For lookups, staples are first, and a product on a shopper's saved list or in a recent search or recent priced result goes ahead of the aisle. For refresh, the order is saved lists, shared lists, price-alert watches, recent searches, then merged products, then the oldest stale offer. Walmart still tries the 12-digit UPC-A, then EAN-13, then GTIN-14. A lookup miss is tried again after `CATALOG_MATCH_RETRY_DAYS` (default 14). A refresh miss waits a day and does not delete the offer. A 400 on a multi-UPC Walmart call switches that crawl cycle to one UPC at a time and does not burn the batch. A new Walmart taxonomy version re-reads the category tree once so general-merchandise leaves drop out and grocery leaves are walked. Production logged 1,220 Kroger match attempts and 3 hits while those calls were still sending the 12-digit UPC. That 0.2% rate was invalid ids, not assortment overlap. With the 13-digit id, the hit rate should track how many of those UPCs Kroger sells at the queried store. National grocery brands are often tens of percent. Walmart-only and store-brand items still miss.
 
 ### Size and time
 
@@ -100,7 +100,8 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - `ADMIN_TOKEN` set to a long random string.
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
-   - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only.
+   - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only. Generate a pair with `npx web-push generate-vapid-keys` (steps under Price drop alerts).
+   - Optional crash reporting: `SENTRY_DSN`. Leave it unset and Sentry stays off. To symbolicate server stack traces, also set `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` on the service that runs `npm run build`. See [Crash reporting](#crash-reporting-sentry).
    - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
@@ -119,9 +120,9 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
      `curl -H "Authorization: Bearer $ADMIN_TOKEN" "https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/sample?department=baby&limit=50"`
    - Read a few normalized keys from each store (`krogerId` is 13 digits, `walmartUpc` is 12 with the check digit, `key` should match for the same product):  
      `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/match-sample`
-   - Remap departments from the category path already stored on each product, including Kroger rows. Every department change is written, including a move to Other. A row is left alone only when the department and subcategory already match. Nothing is deleted. Run this before the exclude action so vitamins, training pants, and the other grocery misses leave Other:  
+   - Remap departments from the category path already stored on each product, including Kroger rows. The POST returns a `jobId` immediately and walks the catalog in batches, so a proxy timeout does not stop it. Progress is `recategorize` on the status route (`examined`, `updated`, `clearedExclusions`, `total`). A second POST while it is running returns the same job. A restart resumes from the saved cursor. Every department change is written, including a move to Other. A product that leaves Other has `refreshExcluded` cleared on its offers, including a vitamin the name rule moves out of Other. Nothing is deleted. Run this before exclude so vitamins, training pants, and the other grocery misses leave Other. If exclude already ran, this pass still clears those flags:  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"recategorize-catalog"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/recategorize`
-   - Optional, after recategorize. Marks offers for products that are still Other under the current rules so refresh does not spend a call on jewelry, office supplies, and the rest of general merchandise. Grocery rows the rules would move out of Other are left refreshable. Nothing is deleted:  
+   - Optional, after recategorize finishes (`recategorize.status` is `completed`). Marks offers for products that are still Other under the current rules so refresh does not spend a call on jewelry, office supplies, and the rest of general merchandise. Offers for groceries that are still stored as Other, or that have already moved, have the flag cleared. Running it again leaves the same offers excluded. Nothing is deleted:  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"exclude-nongrocery-refresh"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/exclude-nongrocery-refresh`
    - Optional, and only after a later status check shows UPC masters for items that still have a `local:` duplicate. The crawl itself renames `local:walmart:{itemId}` onto the UPC when it sees the item again, so this delete is not required for that upgrade. Rows that still have no UPC are kept:  
      `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"confirm":"drop-shadow-local-keys"}' https://grocery-price-optimizer-production.up.railway.app/api/admin/catalog/drop-shadow-local-keys`
@@ -138,6 +139,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    Invoke-RestMethod "$base/api/admin/catalog/other-breakdown" -Headers $headers
    Invoke-RestMethod "$base/api/admin/catalog/sample?department=other&limit=20" -Headers $headers
    Invoke-RestMethod "$base/api/admin/catalog/recategorize" -Method POST -Headers $headers -ContentType "application/json" -Body '{"confirm":"recategorize-catalog"}'
+   Invoke-RestMethod "$base/api/admin/catalog/status" -Headers $headers
    Invoke-RestMethod "$base/api/admin/catalog/exclude-nongrocery-refresh" -Method POST -Headers $headers -ContentType "application/json" -Body '{"confirm":"exclude-nongrocery-refresh"}'
    ```
 
@@ -157,13 +159,29 @@ The Alerts panel lists the item, the store, the old price, the new price, and th
 
 A shared list uses the same controls. The choice stays on this device; each collaborator sets their own. While a share link is open, alerts follow that link. A new link, or turning the link off, stops alerts for the previous one.
 
-Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification). `VAPID_SUBJECT` is a `mailto:` or `https:` URL; it defaults to `mailto:price-alerts@grocerygitter.app`. Generate a pair with `npx web-push generate-vapid-keys`. If the keys are unset, alerts still show in the app and `POST /api/price-alerts/push` returns 503.
+Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification).
+
+Generate a key pair:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+The command prints a Public Key and a Private Key. Set:
+
+- `VAPID_PUBLIC_KEY` to the Public Key
+- `VAPID_PRIVATE_KEY` to the Private Key
+- `VAPID_SUBJECT` optionally, to a `mailto:` address or an `https:` URL, for example `mailto:you@example.com`
+
+When `VAPID_SUBJECT` is unset, or is not a `mailto:` or `https:` URL, the server uses `mailto:price-alerts@grocerygitter.app`. Leave both keys unset to keep alerts in the app only. `POST /api/price-alerts/push` then returns 503, and a price drop is not sent to a push service. The in-app Alerts panel still works.
 
 Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the in-app badge and Alerts panel. A native transport can register later without a new collection. `GET /api/price-alerts/status` reports `nativePush.enabled: false` until that exists.
 
 ## Share a list
 
-A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
+A shopper can share the list on this device without an account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item. Sign-in is optional and stays hidden until it is configured. See [Optional accounts](docs/ACCOUNTS.md).
+
+Subscriptions stay off until `REVENUECAT_WEBHOOK_SECRET` is set. Until then every feature stays available. See [Subscriptions](docs/SUBSCRIPTIONS.md).
 
 Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
 
@@ -179,7 +197,7 @@ Share links use the hosted origin from `CAPACITOR_API_URL` / `apiUrl()`. That he
 
 The shopper UI stays a static SPA in `public/` (no frontend bundler). The website and the installed PWA are unchanged: the manifest, icons, and network-first service worker still install from the browser, and `/api` stays on the same origin.
 
-Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` is still only the TypeScript server (`tsc` → `dist/`), and `npm start` still serves `public/` from Express.
+Capacitor is an extra native shell. App id `app.grocerygitter`, display name **Grocery Gitter**. `npm run cap:sync` copies `public/` into `ios/` and `android/`. Railway does not run that step. `npm run build` compiles the TypeScript server (`tsc` → `dist/`), copies `src/pricing/flipp/merchants.json` next to the compiled Flipp module, and bundles the browser crash reporter. It does not build iOS or Android. `npm start` still serves `public/` from Express.
 
 The native WebView loads those copied files. It then calls the HTTPS API at `CAPACITOR_API_URL`, or `https://grocery-price-optimizer-production.up.railway.app` when that variable is unset. Retailer secrets stay on the server. Express already enables CORS, so the WebView origin (`capacitor://localhost` on iOS, `https://localhost` on Android) can call the API.
 
@@ -338,17 +356,18 @@ See [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md). This is **not** a fake
 | **Kroger** | Official Locations + Products (`product.compact`) | Demo catalog + `pricingWarning` mentioning `KROGER_CLIENT_ID` | Local shelf prices for the ZIP’s store |
 | **Walmart** | Official Affiliate Marketing API `GET https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search` with RSA headers (`WM_CONSUMER.ID`, timestamp, key version, `WM_SEC.AUTH_SIGNATURE`). `GET /stores?zip=` (cached per ZIP) for the nearest store name and address, plus `accessPointId` / `fulfillmentStoreId` when the locator sends them. | Demo catalog, badge **Demo catalog**. No red banner (keys are optional). Search handoff, no cart link. | **walmart.com catalog** prices. The Affiliate search API has **no store-price filter**, so the nearest store does not change the price. It is passed on the add-to-cart link as `storeId` (and `ap` when an access point id is present). Sign up at [walmart.io](https://walmart.io/apidocs/affiliates/quickstart), upload a public key, set `WALMART_CONSUMER_ID` and `WALMART_PRIVATE_KEY` (PEM; `\n` for newlines). `WALMART_PUBLISHER_ID` is optional until Impact approval. |
 | **Target** | **No public product API.** This app does **not** call RedSky, Target Circle, or RedCard pricing (those are account-specific and not a shelf feed). If you have a licensed partner feed, `GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=` with `Authorization: Bearer {TARGET_PARTNER_API_KEY}` expecting `{ "products": [{ "name", "brand", "price", "productId"|"tcin", "upc", "unit" }] }`. Otherwise the weekly circular. | Demo catalog until those env vars or Flipp weekly ads are set. | Partner-feed prices tagged live. Circular rows stay **Weekly ad**. |
-| **Aldi** (and Publix-like banners) | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
+| **Aldi** | No retailer product API and no third-party cart. Optional **Flipp weekly-ad** provider (see below). Handoff stays Coming soon — no fake cart. Many everyday Aldi prices are never printed in the ad. | Demo catalog | Weekly-ad / circular prices for the ZIP when Flipp is enabled |
+| **Other circular banners** | Publix, Meijer, H-E-B, Albertsons-family banners Flipp returned (Albertsons, Vons, Jewel-Osco, Acme, Tom Thumb, Randalls, Pavilions), Stop & Shop, Sprouts, Winn-Dixie, and Costco. Config is `src/pricing/flipp/merchants.json`. Trip prices are weekly-ad deals only (no demo shelf). Store-site search link, never a cart. | Unavailable until a ZIP has a circular | **Weekly ad, not shelf price** |
 
 Configured **partner feeds** (Publix, Meijer, H-E-B, Instacart-style banners, Datasembly-class shelf file) use the same optimize path when `SHELF_FEED_*` / `INSTACART_PARTNER_*` / `PUBLIX_PARTNER_*` / `HEB_PARTNER_*` / `MEIJER_PARTNER_*` are set. Hits are labeled **Partner feed**, not a fake retailer API. See [`docs/PARTNER_INTEGRATIONS.md`](docs/PARTNER_INTEGRATIONS.md). Licensed shelf feeds beat Flipp weekly ads for the same banner. Unconfigured partner banners are not added to the default trip.
 
-Each optimize response includes `pricingByStore` and each store group includes `pricing: { source, label, detail, error? }`. `source` is `live`, `cached_live`, `partner_feed`, `weekly_ad`, `cached_weekly_ad`, `seed`, `mixed`, or `unavailable`. Labels are **Live prices**, **Partner feed**, **Weekly ad**, or **Demo catalog**. A configured provider that fails sets `pricingWarning` (partial success still returns 200). If **no** item can be priced at all, the route still returns **503**.
+Each optimize response includes `pricingByStore` and each store group includes `pricing: { source, label, detail, error? }`. `source` is `live`, `cached_live`, `partner_feed`, `weekly_ad`, `cached_weekly_ad`, `seed`, `mixed`, or `unavailable`. Labels are **Live prices**, **Partner feed**, **Weekly ad, not shelf price**, or **Demo catalog**. A configured provider that fails sets `pricingWarning` (partial success still returns 200). If **no** item can be priced at all, the route still returns **503**.
 
 ## Weekly-ad / multi-store deals (Flipp)
 
 Banners without a public grocery API (Aldi, Target when the partner feed is absent, Publix, Meijer, and other mapped circulars) can leave the seed catalog during testing by opting into Flipp flyer data.
 
-**Weekly ad ≠ live shelf.** Flipp returns items printed in the current circular near a ZIP. Items not on the flyer are not priced from this source. Grocery Gitter labels those rows **Weekly ad** and never reports “added to cart.”
+**Weekly ad ≠ live shelf.** Flipp returns items printed in the current circular near a ZIP. Items not on the flyer are not priced from this source. Grocery Gitter labels those rows **Weekly ad, not shelf price** and never reports “added to cart.”
 
 | Path | When | What it calls | Honesty / risk |
 | --- | --- | --- | --- |
@@ -357,7 +376,9 @@ Banners without a public grocery API (Aldi, Target when the partner feed is abse
 
 **ZIP.** Weekly ads require a 5-digit US ZIP. `45202-1234` is accepted and sent as `45202`. The price is whatever flyer Flipp publishes for that postal code. It is not a store-locator aisle price, and a banner can appear in the circular even when the nearest store is far away. With no ZIP, browse keeps the demo catalog and says so; the trip labels that store **Unavailable** or **Demo catalog** instead of pretending a circular was checked.
 
-Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Harris Teeter as a *secondary* signal — live Kroger Products still wins when configured), **Publix**, **Meijer**, **Food Lion**, **H-E-B**, **Safeway**, **Giant Eagle**, **Costco**. When Flipp is on, those banners join the default trip. Pass `stores` to limit the list. Food Lion is merchant `2100`, H-E-B `2467`, US Safeway `5667` (not Safeway Liquor), Giant Eagle `2130`.
+The merchant list is `src/pricing/flipp/merchants.json`. Mapped Grocery Gitter `storeName`s: **Aldi**, **Target**, **Walmart**, **Kroger** (including family banners such as Ralphs / King Soopers / Mariano's / Food 4 Less as a *secondary* signal — live Kroger Products still wins when configured; Harris Teeter stays a Kroger name alias because Flipp did not return a separate Harris Teeter circular), **Publix**, **Meijer**, **H-E-B**, **Albertsons**, **Vons**, **Jewel-Osco**, **Acme**, **Tom Thumb**, **Randalls**, **Pavilions**, **Stop & Shop**, **Sprouts**, **Winn-Dixie**, **Costco**. When Flipp is on, those banners join the default trip. Deal-only banners (everything after Kroger in that list) are included only when a circular item wins — a demo seed row is not used as a shelf price. Pass `stores` to limit the list.
+
+Checked against Flipp's flyer index on 2026-10-23 for ZIPs 45103, 10001, 60601, 75201, 90012, 30303, 33101, and 77002 (`src/pricing/flipp/sample-zips.json`). **Not configured**, because they did not come back: Safeway, Shaw's, Food Lion, Giant, Giant Eagle, Hy-Vee, Wegmans, ShopRite, and Harris Teeter as its own flyer. `GET /api/catalog/coverage?zip=30303` returns `weeklyAdBanners` for the banners in that ZIP's index. The index is cached per ZIP and ISO week, and outbound calls are spaced (`FLIPP_MIN_INTERVAL_MS`, default 250).
 
 Pipeline: dedicated retailer APIs run first. Flipp fills in when that API is missing, empty, or failed **and** a ZIP is present. Flyer items without a numeric price (BOGO / “% off” only) are skipped so we do not invent a price. A flyer id is not a Target TCIN or a Walmart item id; those handoffs stay search links.
 
@@ -376,7 +397,7 @@ Invoke-RestMethod "$base/api/catalog/browse?q=chicken&zip=45202"
 Invoke-RestMethod "$base/api/catalog/browse?department=meat-seafood&zip=75201"
 ```
 
-Coverage for Target and Aldi should say **Weekly ad only**, and Food Lion, H-E-B, Safeway, Giant Eagle, Publix, Meijer, and Costco should say **Weekly ad**. A chicken or meat response should include `priceSource` `weekly_ad` when that ZIP's circular actually lists the item. An empty circular for a staple is honest: the offer stays demo or the trip store says **Unavailable**. Browse without `zip` returns a warning that a 5-digit ZIP is required.
+Coverage for Target and Aldi should say **Weekly ad only**, and Publix, Meijer, H-E-B, the Albertsons banners above, Stop & Shop, Sprouts, Winn-Dixie, and Costco should say **Weekly ad**. `Invoke-RestMethod "$base/api/catalog/coverage?zip=33101"` lists `weeklyAdBanners` actually present for that ZIP. A chicken or meat response should include `priceSource` `weekly_ad` when that ZIP's circular actually lists the item, labeled **Weekly ad, not shelf price**. An empty circular for a staple is honest: the offer stays demo (Aldi/Target) or the trip store says **Unavailable** (deal-only banners). Browse without `zip` returns a warning that a 5-digit ZIP is required.
 
 `Invoke-RestMethod "$base/api/catalog/browse?q=milk"` (no ZIP) should not invent Aldi or Target shelf prices.
 
@@ -492,6 +513,41 @@ Routes:
 ## FatSecret catalog
 
 `src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=premier`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`.
+
+## Crash reporting (Sentry)
+
+Sentry is off until `SENTRY_DSN` is set. With that variable empty, the server does not call `Sentry.init`, the shopper page does not download the SDK, and source map upload does not run. No DSN means no crash reports.
+
+When it is set, three places report:
+
+- **Server** (`@sentry/node`) — the Express process and the catalog ingest worker. Unhandled startup failures and Express 5xx errors are reported. The release is the git sha.
+- **Website** (`@sentry/browser`, loaded by the Capacitor SDK on the web) — `public/sentry-loader.js` asks `GET /api/observability`. `enabled: false` means it stops. A DSN loads `public/sentry.js`, which `npm run build` writes. That file is not committed.
+- **iOS and Android** (`@sentry/capacitor`) — the same bundle starts the native crash SDK inside the WebView. `npm run cap:sync` writes the DSN and the git sha into the native copy of `public/native-config.js` only. The website copy of that file stays empty.
+
+Reports do not include email addresses, names, grocery-list bodies, Kroger tokens, the `kroger_shopper` cookie, other cookies, or Authorization headers. A crash report is not tied to an account, even when sign-in is on, and Delete my data does not remove it. `/privacy` explains what is sent and how to ask for a crash report to be deleted.
+
+The release is the first of `SENTRY_RELEASE`, `RAILWAY_GIT_COMMIT_SHA`, `CM_COMMIT`, `GITHUB_SHA`, `COMMIT_SHA`, `SOURCE_VERSION`, then `git rev-parse HEAD`.
+
+| Variable | Where | Required |
+| --- | --- | --- |
+| `SENTRY_DSN` | Railway web service, ingest worker, and the Codemagic `grocery_gitter` group | No. Unset keeps reporting off |
+| `SENTRY_ENVIRONMENT` | Same places | No. Falls back to `NODE_ENV` on the server and `production` in the native shell |
+| `SENTRY_RELEASE` | Same places | No. The git sha above is used |
+| `SENTRY_AUTH_TOKEN` | The build that should upload source maps (Railway web build and Codemagic). Mark it secret | No. Unset skips upload |
+| `SENTRY_ORG` | Same build | Required only when the auth token is set |
+| `SENTRY_PROJECT` | Same build. One Sentry project receives server, web, and native events for this DSN | Required only when the auth token is set |
+
+`npm run build` compiles the server, copies the Flipp merchant config into `dist/pricing/flipp`, bundles `public/sentry.js`, and, only when `SENTRY_AUTH_TOKEN` is set, uploads source maps for `dist/` and that bundle, then deletes `public/sentry.js.map` so the site does not serve it. A token without `SENTRY_ORG`, `SENTRY_PROJECT`, or a release sha fails the build. The token is read from the environment and is not put on the command line.
+
+Use one DSN for the server and the clients. The DSN is public in the browser. The auth token is not. Do not commit either value.
+
+### Codemagic
+
+Add the variables above to the `grocery_gitter` group. `SENTRY_DSN` is what the native shell bakes in at `cap sync`. `CM_COMMIT` is the release for that build, so the uploaded maps match the WebView bundle and the dSYMs.
+
+`codemagic.yaml` runs `npm run build` before `npm run cap:sync:ios` / `cap:sync:android`. The build uploads JavaScript source maps when the token is set and does not rebuild the bundle during sync, so the baked git sha matches those maps. After the IPA and the AAB it uploads native debug files, and skips that step with a log line when `SENTRY_AUTH_TOKEN` is unset. iOS symbols come from the xcarchive. Android minify is off, so there is often no ProGuard map. The debug-file upload still runs over the Android build outputs when the token is set.
+
+Leave the whole group of Sentry variables unset and both workflows behave as they did before.
 
 ## Run locally
 
@@ -649,6 +705,10 @@ Each grocery item is assigned to **one** store using the [matching and unit-pric
 
 `DELETE /api/price-alerts/push` — `{ deviceId, endpoint }` removes that subscription.
 
+`DELETE /api/me/data` — `{ deviceId, lists?: [{ shareToken, ownerToken }] }` deletes this device’s price watches, alert records, and push subscriptions. A shared list is deleted only when its owner token is included, and price rows stored under that share link are removed with it. When the request sends the `kroger_shopper` cookie, the access token and refresh token are revoked at Kroger and the cookie is cleared. The same call with nothing left returns 200 and zero counts. ZIP totals and catalog-demand phrases are not tied to a device and are left in place. See `docs/DATA_DELETION.md`.
+
+`GET /api/kroger/logout` — revokes and clears the Kroger cookie in the browser that opens it. The iOS and Android shells open this in the system browser after Delete my data, because Kroger login stores the cookie there.
+
 ### `GET /api/kroger/auth-status`
 
 Whether `KROGER_REDIRECT_URI` is set. Always `requiresShopperLogin: true` — client-credentials cannot write a cart.
@@ -702,11 +762,11 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 
 | Script | Description |
 | --- | --- |
-| `npm run dev` | TypeScript watch server (`tsx`) |
+| `npm run dev` | Build the browser crash reporter, then start the TypeScript watch server (`tsx`) |
 | `npm test` | Unit tests for the optimizer and scraper |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
 | `npm run seed` | Insert 10 mock products into local MongoDB |
-| `npm run build` | Compile the API to `dist/` (Railway). Does not build iOS or Android. |
+| `npm run build` | Compile the API to `dist/`, copy the Flipp merchant config, and bundle crash reporting (Railway). Does not build iOS or Android. |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run cap:sync` | Copy `public/` into the iOS and Android projects |

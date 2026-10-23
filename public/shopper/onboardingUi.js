@@ -1,11 +1,12 @@
 import {
   ONBOARDING_KEY,
-  ONBOARDING_STEPS,
+  accountStepCopy,
   krogerStepCopy,
   onboardingDone,
   primaryLabel,
   progressLabel,
   shouldShowOnboarding,
+  welcomeSteps,
   zipAdvanceError,
 } from "./onboarding.js";
 
@@ -23,6 +24,9 @@ import {
  *   toast: (message: string) => void,
  *   themeLabel: () => string,
  *   cycleTheme: () => void,
+ *   accountsEnabled?: () => boolean,
+ *   signedIn?: () => boolean,
+ *   getBilling?: () => { enforced?: boolean, pro?: boolean, limits?: { multiStore?: boolean, cartHandoffs?: boolean, priceAlerts?: boolean } } | null,
  * }} deps
  */
 export function mountWelcome(deps) {
@@ -36,6 +40,14 @@ export function mountWelcome(deps) {
   let index = 0;
   /** @type {{ oauthConfigured?: boolean, connected?: boolean } | null} */
   let kroger = null;
+
+  function steps() {
+    return welcomeSteps({
+      accountsEnabled: Boolean(deps.accountsEnabled?.()),
+      signedIn: Boolean(deps.signedIn?.()),
+      billing: deps.getBilling?.() ?? null,
+    });
+  }
 
   function readFlag() {
     try {
@@ -63,28 +75,34 @@ export function mountWelcome(deps) {
   function renderDots() {
     const dots = $("onboard-dots");
     if (!dots) return;
-    dots.innerHTML = ONBOARDING_STEPS.map((_, stepIndex) => {
+    dots.innerHTML = steps().map((_, stepIndex) => {
       const current = stepIndex === index ? "true" : "false";
       return `<span data-current="${current}"></span>`;
     }).join("");
   }
 
   function renderStep() {
-    const step = ONBOARDING_STEPS[index];
+    const list = steps();
+    if (index >= list.length) index = list.length - 1;
+    const step = list[index];
     const progress = $("onboard-progress");
     const title = $("onboard-title");
     const body = $("onboard-body");
+    const accountFields = $("onboard-account-fields");
     const zipFields = $("onboard-zip-fields");
     const krogerFields = $("onboard-kroger-fields");
     const back = $("onboard-back");
     const next = $("onboard-next");
     const connect = $("onboard-kroger");
+    const signIn = $("onboard-sign-in");
     const loc = $("onboard-location");
     const zipError = $("onboard-zip-error");
     const zipInput = $("onboard-zip");
-    if (progress) progress.textContent = progressLabel(index);
+    const last = index >= list.length - 1;
+    if (progress) progress.textContent = progressLabel(index, list);
     if (title) title.textContent = step.title;
     if (body) body.textContent = step.body;
+    if (accountFields) accountFields.hidden = step.kind !== "account";
     if (zipFields) zipFields.hidden = step.kind !== "zip";
     if (krogerFields) krogerFields.hidden = step.kind !== "kroger";
     if (back) back.hidden = index === 0;
@@ -94,15 +112,22 @@ export function mountWelcome(deps) {
       zipError.textContent = "";
     }
     zipInput?.setAttribute("aria-invalid", "false");
+    if (connect && step.kind !== "kroger") connect.hidden = true;
+    if (signIn && step.kind !== "account") signIn.hidden = true;
     if (step.kind === "kroger") {
       const copy = krogerStepCopy(kroger);
       if (title) title.textContent = copy.title;
       if (body) body.textContent = copy.body;
       if (connect) connect.hidden = !copy.connect;
-      if (next) next.textContent = copy.action;
+      if (next) next.textContent = last ? copy.action : "Next";
+    } else if (step.kind === "account") {
+      const copy = accountStepCopy(Boolean(deps.signedIn?.()));
+      if (title) title.textContent = copy.title;
+      if (body) body.textContent = copy.body;
+      if (signIn) signIn.hidden = !copy.signIn;
+      if (next) next.textContent = last ? copy.action : "Next";
     } else if (next) {
       next.textContent = primaryLabel(step);
-      if (connect) connect.hidden = true;
     }
     renderDots();
   }
@@ -116,7 +141,7 @@ export function mountWelcome(deps) {
     } catch {
       kroger = { oauthConfigured: false, connected: false };
     }
-    if (ONBOARDING_STEPS[index]?.kind === "kroger") renderStep();
+    if (steps()[index]?.kind === "kroger") renderStep();
     syncSettings();
   }
 
@@ -144,7 +169,7 @@ export function mountWelcome(deps) {
   }
 
   function goNext() {
-    const step = ONBOARDING_STEPS[index];
+    const step = steps()[index];
     if (step.kind === "zip") {
       const zipInput = $("onboard-zip");
       const error = zipAdvanceError(zipInput?.value ?? "");
@@ -161,7 +186,7 @@ export function mountWelcome(deps) {
       const raw = String(zipInput?.value ?? "").trim();
       if (raw) deps.setZip(raw);
     }
-    if (index >= ONBOARDING_STEPS.length - 1) {
+    if (index >= steps().length - 1) {
       finish();
       return;
     }
@@ -291,6 +316,10 @@ export function mountWelcome(deps) {
   $("onboard-skip")?.addEventListener("click", finish);
   $("onboard-location")?.addEventListener("click", () => void useLocation());
   $("onboard-kroger")?.addEventListener("click", () => void connectKroger());
+  $("onboard-sign-in")?.addEventListener("click", () => {
+    finish();
+    openSettings();
+  });
   dialog.addEventListener("close", () => {
     if (!onboardingDone(readFlag())) writeFlag();
   });

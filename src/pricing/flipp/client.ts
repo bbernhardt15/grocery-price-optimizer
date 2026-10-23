@@ -3,6 +3,7 @@ import { envFlag } from "../envFlag";
 import { StorePricingError } from "../types";
 import {
   flippItemMatchesStore,
+  groceryStoreNameForFlippMerchant,
   mappingForStore,
   type FlippMerchantMapping,
 } from "./merchants";
@@ -20,8 +21,9 @@ export const FLIPP_USER_AGENT =
   "GroceryGitter/1.0 (+https://github.com/bbernhardt15/grocery-price-optimizer)";
 
 const SEARCH_TIMEOUT_MS = 10_000;
-const CACHE_TTL_MS = 15 * 60 * 1000;
-const CACHE_MAX = 200;
+const CACHE_MAX = 500;
+/** Minimum gap between outbound Flipp calls. Tests can set this to 0. */
+const DEFAULT_FLIPP_INTERVAL_MS = 250;
 
 export type FlippFlyerItem = {
   name?: string;
@@ -51,6 +53,18 @@ type FlippFlyerSummary = {
   merchant?: string;
   name?: string;
   valid_to?: string;
+  categories?: string[];
+};
+
+type FlyerIndex =
+  | { ok: true; flyers: FlippFlyerSummary[] }
+  | { ok: false };
+
+export type WeeklyAdBannerHit = {
+  storeName: string;
+  merchantName: string;
+  merchantId?: number;
+  flyerNames: string[];
 };
 
 type FlippSearchResponse = {
@@ -82,6 +96,70 @@ const searchCache = new Map<string, CacheEntry>();
 const flyerListCache = new Map<string, { expiresAt: number; flyers: FlippFlyerSummary[] }>();
 const dealsCache = new Map<string, { expiresAt: number; deals: NormalizedFlippDeal[] }>();
 const inflight = new Map<string, Promise<unknown>>();
+
+let flippChain: Promise<void> = Promise.resolve();
+let lastFlippStart = 0;
+
+function flippIntervalMs(): number {
+  const raw = process.env.FLIPP_MIN_INTERVAL_MS;
+  if (raw == null || raw.trim() === "") {
+    return DEFAULT_FLIPP_INTERVAL_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_FLIPP_INTERVAL_MS;
+}
+
+function paceFlipp(): Promise<void> {
+  const interval = flippIntervalMs();
+  const run = flippChain.then(async () => {
+    if (interval <= 0) {
+      return;
+    }
+    const wait = lastFlippStart + interval - Date.now();
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    lastFlippStart = Date.now();
+  });
+  flippChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+function nyDateParts(now: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return { year: read("year"), month: read("month"), day: read("day") };
+}
+
+/** ISO week for the America/New_York calendar date. Circulars are cached per ZIP and this week. */
+export function flippWeekKey(now = new Date()): string {
+  const { year, month, day } = nyDateParts(now);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const weekday = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - weekday);
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+}
+
+/** Keep a ZIP's circular until the next Monday morning Eastern, at least one hour. */
+export function flippCacheExpiresAt(now = new Date()): number {
+  const { year, month, day } = nyDateParts(now);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const daysUntilMonday = weekday === 0 ? 1 : 8 - weekday;
+  const endOfWeek = Date.UTC(year, month - 1, day + daysUntilMonday, 5, 0, 0);
+  return Math.max(endOfWeek, now.getTime() + 60 * 60 * 1000);
+}
 
 export function flippAccessToken(): string {
   return process.env.FLIPP_ACCESS_TOKEN?.trim() ?? "";
@@ -150,7 +228,7 @@ function cacheGet(key: string): FlippFlyerItem[] | undefined {
 function cacheSet(key: string, items: FlippFlyerItem[]): void {
   const now = Date.now();
   pruneCache(now);
-  searchCache.set(key, { expiresAt: now + CACHE_TTL_MS, items });
+  searchCache.set(key, { expiresAt: flippCacheExpiresAt(new Date(now)), items });
 }
 
 function zip5(zipCode: string | undefined): string | undefined {
@@ -170,6 +248,7 @@ function stillValid(item: FlippFlyerItem, now = new Date()): boolean {
 }
 
 async function flippGet(url: string): Promise<Response> {
+  await paceFlipp();
   try {
     return await fetch(url, {
       method: "GET",
@@ -249,7 +328,7 @@ export async function searchFlippConsumerItems(
   query: string,
   zipCode: string
 ): Promise<FlippFlyerItem[]> {
-  const key = `${zipCode}|${query.toLowerCase()}`;
+  const key = `${zipCode}|${flippWeekKey()}|${query.toLowerCase()}`;
   const cached = cacheGet(key);
   if (cached) {
     return cached;
@@ -384,15 +463,70 @@ async function withInflight<T>(key: string, loader: () => Promise<T>): Promise<T
   return promise;
 }
 
-async function searchFlippFlyers(zipCode: string): Promise<FlippFlyerSummary[]> {
-  const cached = flyerListCache.get(zipCode);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.flyers;
+function flyerCacheKey(zipCode: string): string {
+  return `${zipCode}|${flippWeekKey()}`;
+}
+
+function flyerRank(flyer: FlippFlyerSummary): number {
+  const name = (flyer.name ?? "").toLowerCase();
+  const categories = (flyer.categories ?? []).join(" ").toLowerCase();
+  let score = 0;
+  if (categories.includes("grocer")) {
+    score += 4;
   }
-  return withInflight(`flyers|${zipCode}`, async () => {
-    const again = flyerListCache.get(zipCode);
+  if (/weekly|circular|in[- ]store|ad\b/.test(name)) {
+    score += 2;
+  }
+  if (/liquor|halloween|apparel|beauty/.test(name)) {
+    score -= 3;
+  }
+  return score;
+}
+
+/**
+ * Mapped grocery banners present in a flyer index. Unmapped merchants and
+ * liquor circulars (Publix Liquors, and similar) are left out.
+ */
+export function weeklyAdBannersFromFlyers(
+  flyers: Array<Pick<FlippFlyerSummary, "merchant" | "merchant_id" | "name">>
+): WeeklyAdBannerHit[] {
+  const byStore = new Map<string, WeeklyAdBannerHit>();
+  for (const flyer of flyers) {
+    const storeName = groceryStoreNameForFlippMerchant(
+      flyer.merchant ?? "",
+      flyer.merchant_id
+    );
+    if (!storeName) {
+      continue;
+    }
+    const flyerName = flyer.name?.trim();
+    const existing = byStore.get(storeName);
+    if (!existing) {
+      byStore.set(storeName, {
+        storeName,
+        merchantName: (flyer.merchant ?? storeName).trim() || storeName,
+        ...(typeof flyer.merchant_id === "number" ? { merchantId: flyer.merchant_id } : {}),
+        flyerNames: flyerName ? [flyerName] : [],
+      });
+      continue;
+    }
+    if (flyerName && !existing.flyerNames.includes(flyerName)) {
+      existing.flyerNames.push(flyerName);
+    }
+  }
+  return [...byStore.values()];
+}
+
+async function searchFlippFlyers(zipCode: string): Promise<FlyerIndex> {
+  const key = flyerCacheKey(zipCode);
+  const cached = flyerListCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ok: true, flyers: cached.flyers };
+  }
+  return withInflight(`flyers|${key}`, async () => {
+    const again = flyerListCache.get(key);
     if (again && again.expiresAt > Date.now()) {
-      return again.flyers;
+      return { ok: true, flyers: again.flyers };
     }
     const url = `${FLIPP_FLYERS}?${new URLSearchParams({
       locale: "en-us",
@@ -403,14 +537,34 @@ async function searchFlippFlyers(zipCode: string): Promise<FlippFlyerSummary[]> 
     if (!response.ok) {
       throw new StorePricingError("Flipp", errorPayload(payload, response.status), "http");
     }
-    const flyers = Array.isArray(payload.flyers) ? payload.flyers : [];
-    flyerListCache.set(zipCode, { expiresAt: Date.now() + CACHE_TTL_MS, flyers });
-    return flyers;
+    if (!Array.isArray(payload.flyers)) {
+      return { ok: false };
+    }
+    flyerListCache.set(key, { expiresAt: flippCacheExpiresAt(), flyers: payload.flyers });
+    return { ok: true, flyers: payload.flyers };
   });
 }
 
+/**
+ * Which configured banners have a circular in Flipp's index for this ZIP.
+ * One index request per ZIP per week. Does not download flyer pages.
+ */
+export async function listWeeklyAdBanners(
+  zipCode: string | undefined
+): Promise<WeeklyAdBannerHit[]> {
+  const zip = zip5(zipCode);
+  if (!zip || !flippConsumerEnabled()) {
+    return [];
+  }
+  const index = await searchFlippFlyers(zip);
+  if (!index.ok) {
+    return [];
+  }
+  return weeklyAdBannersFromFlyers(index.flyers);
+}
+
 async function loadFlippFlyerItems(flyerId: number): Promise<FlippFlyerItem[]> {
-  const key = `flyer|${flyerId}`;
+  const key = `flyer|${flyerId}|${flippWeekKey()}`;
   const cached = cacheGet(key);
   if (cached) {
     return cached;
@@ -445,9 +599,10 @@ function stampMerchant(
 }
 
 /**
- * Full weekly circular for one banner near a ZIP. Cached per store and ZIP.
- * `q="{merchant} AND {term}"` returns no `items` on the consumer search, so
- * trip planning and browse read the flyer and match the grocery words locally.
+ * Full weekly circular for one banner near a ZIP. Cached per store, ZIP, and
+ * ISO week. The flyer index is fetched once per ZIP per week and paced so a
+ * browse does not burst one request per banner. A merchant that is absent
+ * from that index is not searched again.
  * Requires `FLIPP_ENABLED`. Does not call Flipp when that flag is off.
  */
 export async function loadWeeklyAdDeals(
@@ -460,7 +615,7 @@ export async function loadWeeklyAdDeals(
     return [];
   }
 
-  const cacheKey = `${mapping.storeName}|${zip}`;
+  const cacheKey = `${mapping.storeName}|${zip}|${flippWeekKey()}`;
   const cached = dealsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.deals;
@@ -472,29 +627,29 @@ export async function loadWeeklyAdDeals(
       return again.deals;
     }
 
-    let deals: NormalizedFlippDeal[] = [];
-    const flyers = (await searchFlippFlyers(zip)).filter((flyer) =>
-      flippItemMatchesStore(mapping.storeName, flyer.merchant ?? "", flyer.merchant_id)
-    );
-    const picked = flyers.filter((flyer) => typeof flyer.id === "number").slice(0, MAX_FLYERS_PER_STORE);
-    if (picked.length > 0) {
-      const pages = await Promise.all(
-        picked.map(async (flyer) => {
-          const items = await loadFlippFlyerItems(flyer.id as number);
-          return stampMerchant(items, mapping, flyer.merchant_id);
-        })
-      );
-      deals = filterForStore(pages.flat(), mapping.storeName);
-    }
-
-    if (deals.length === 0) {
-      deals = filterForStore(
+    const index = await searchFlippFlyers(zip);
+    if (!index.ok) {
+      return filterForStore(
         stampMerchant(await searchFlippConsumerItems(mapping.searchName, zip), mapping),
         mapping.storeName
       );
     }
 
-    dealsCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, deals });
+    const picked = index.flyers
+      .filter((flyer) =>
+        flippItemMatchesStore(mapping.storeName, flyer.merchant ?? "", flyer.merchant_id)
+      )
+      .filter((flyer) => typeof flyer.id === "number")
+      .sort((left, right) => flyerRank(right) - flyerRank(left) || (left.id ?? 0) - (right.id ?? 0))
+      .slice(0, MAX_FLYERS_PER_STORE);
+
+    const pages: FlippFlyerItem[][] = [];
+    for (const flyer of picked) {
+      const items = await loadFlippFlyerItems(flyer.id as number);
+      pages.push(stampMerchant(items, mapping, flyer.merchant_id));
+    }
+    const deals = filterForStore(pages.flat(), mapping.storeName);
+    dealsCache.set(cacheKey, { expiresAt: flippCacheExpiresAt(), deals });
     return deals;
   });
 }
@@ -544,6 +699,11 @@ export async function searchFlippDealsForStore(
   const circular = await loadWeeklyAdDeals(mapping.storeName, zip);
   const matched = circular.filter((deal) => weeklyAdNameMatches(deal.name, query));
   if (matched.length > 0 || circular.length > 0) {
+    return matched;
+  }
+
+  const index = flyerListCache.get(flyerCacheKey(zip));
+  if (index && index.expiresAt > Date.now()) {
     return matched;
   }
 

@@ -6,6 +6,7 @@ import {
   type WalmartCartLine,
 } from "./pricing/walmartCartLink";
 import type { WalmartNearbyStore } from "./pricing/walmartProvider";
+import { mappingForStore } from "./pricing/flipp/merchants";
 import type { StorePricingReport } from "./pricing/types";
 
 export type HandoffActionType =
@@ -224,6 +225,10 @@ export function partnerSearchUrl(
   item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string | undefined {
   const q = encodeURIComponent(searchQuery(item));
+  const configured = mappingForStore(storeName)?.searchUrl;
+  if (configured) {
+    return configured.replaceAll("{q}", q);
+  }
   switch (retailerKey(storeName)) {
     case "publix":
       return `https://www.publix.com/search?searchTerm=${q}`;
@@ -449,20 +454,24 @@ function partnerSearchAction(
   items: HandoffItem[]
 ): StoreHandoffAction {
   const firstUrl = items.find((item) => item.url)?.url;
+  const mapping = mappingForStore(storeName);
   const key = retailerKey(storeName);
-  const club =
-    key === "costco" || key === "sams_club"
-      ? " Club prices often need a membership; third-party cart-write is not available."
-      : key === "whole_foods" || key === "amazon_fresh"
-        ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
-        : " There is no public cart-write API for this banner.";
+  const club = Boolean(mapping?.club) || key === "costco" || key === "sams_club";
+  const weekly =
+    Boolean(mapping?.dealsOnly) || items.some((item) => item.priceSource === "weekly_ad");
+  const clubNote = club
+    ? " Club prices often need a membership; third-party cart-write is not available."
+    : key === "whole_foods" || key === "amazon_fresh"
+      ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
+      : " There is no public cart-write API for this banner.";
+  const priceNote = weekly ? " Prices are the weekly ad, not a shelf price." : "";
 
   return {
     type: "search_deeplink",
     label: `Search at ${storeName}`,
     url: firstUrl,
     status: firstUrl ? "ready" : "unavailable",
-    detail: `Search deep link, not a cart fill.${club}`,
+    detail: `Search deep link, not a cart fill.${clubNote}${priceNote}`,
   };
 }
 

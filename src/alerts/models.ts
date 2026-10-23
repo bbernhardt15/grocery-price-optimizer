@@ -17,6 +17,8 @@ const watchItemSchema = new Schema(
 const priceWatchSchema = new Schema(
   {
     deviceId: { type: String, required: true },
+    /** Set when this device signs in, so another device on the account can see the watch. */
+    accountId: { type: String },
     listId: { type: String, required: true },
     listName: { type: String, required: true },
     zip: { type: String, default: "" },
@@ -31,6 +33,7 @@ priceWatchSchema.index({ deviceId: 1, listId: 1 }, { unique: true });
 const priceAlertSchema = new Schema(
   {
     deviceId: { type: String, required: true, index: true },
+    accountId: { type: String },
     listId: { type: String, required: true },
     listName: { type: String, required: true },
     productId: { type: String, required: true },
@@ -59,6 +62,7 @@ const priceAlertSchema = new Schema(
   { timestamps: true }
 );
 
+priceAlertSchema.index({ accountId: 1, createdAt: -1 });
 priceAlertSchema.index({ deviceId: 1, createdAt: -1 });
 priceAlertSchema.index({ deviceId: 1, seenAt: 1 });
 priceAlertSchema.index({ pushState: 1, createdAt: 1 });
@@ -71,6 +75,7 @@ priceAlertSchema.index({ pushState: 1, createdAt: 1 });
 const pushSubscriptionSchema = new Schema(
   {
     deviceId: { type: String, required: true, index: true },
+    accountId: { type: String },
     channel: { type: String, enum: ["web", "native"], required: true },
     endpoint: { type: String },
     p256dh: { type: String },
@@ -101,6 +106,7 @@ export type PriceWatchItem = {
 
 export type PriceWatchDoc = {
   deviceId: string;
+  accountId?: string;
   listId: string;
   listName: string;
   zip: string;

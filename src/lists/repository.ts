@@ -430,3 +430,69 @@ export async function updateListSettings(input: {
   notify(found.record.shareTokenHash, next.shareTokenHash, next.seq);
   return { ok: true, shareToken, list: present(next, shareToken, "owner") };
 }
+
+/**
+ * Delete one shared list when the caller presents its owner secret.
+ * A current or retired share token is enough to find the document.
+ * Missing is idempotent. A token that does not match the owner does not delete.
+ */
+export async function deleteOwnedSharedList(
+  shareToken: string,
+  ownerToken: string
+): Promise<"deleted" | "missing" | "refused"> {
+  if (!isShareToken(shareToken) || !isShareToken(ownerToken)) {
+    return "refused";
+  }
+  const hash = hashSecret(shareToken);
+  const doc = await SharedList.findOne({
+    $or: [{ shareTokenHash: hash }, { retiredHashes: hash }],
+  }).lean();
+  if (!doc) {
+    return "missing";
+  }
+  if (!secretMatches(ownerToken, String(doc.ownerTokenHash ?? ""))) {
+    return "refused";
+  }
+  const removed = await SharedList.deleteOne({ _id: doc._id });
+  if (!removed.deletedCount) {
+    return "missing";
+  }
+  const shareHash = String(doc.shareTokenHash ?? "");
+  const seq = typeof doc.seq === "number" ? doc.seq : 0;
+  if (shareHash) {
+    publishList(shareHash, seq + 1);
+  }
+  return "deleted";
+}
+
+/**
+ * Attach a signed-in account, or the creating device, to a list the caller owns.
+ * A list already claimed by a different account is left alone.
+ */
+export async function tagOwnedSharedList(input: {
+  shareToken: string;
+  ownerToken: string;
+  accountId?: string;
+  ownerDeviceId?: string;
+}): Promise<"tagged" | "missing" | "refused"> {
+  if (!isShareToken(input.shareToken) || !isShareToken(input.ownerToken)) {
+    return "refused";
+  }
+  const hash = hashSecret(input.shareToken);
+  const doc = await SharedList.findOne({
+    $or: [{ shareTokenHash: hash }, { retiredHashes: hash }],
+  }).lean();
+  if (!doc) return "missing";
+  if (!secretMatches(input.ownerToken, String(doc.ownerTokenHash ?? ""))) return "refused";
+  const update: Record<string, string> = {};
+  const currentAccount = typeof doc.accountId === "string" ? doc.accountId : "";
+  if (input.accountId) {
+    if (currentAccount && currentAccount !== input.accountId) return "refused";
+    if (!currentAccount) update.accountId = input.accountId;
+  }
+  const currentDevice = typeof doc.ownerDeviceId === "string" ? doc.ownerDeviceId : "";
+  if (input.ownerDeviceId && !currentDevice) update.ownerDeviceId = input.ownerDeviceId;
+  if (Object.keys(update).length === 0) return "tagged";
+  await SharedList.updateOne({ _id: doc._id }, { $set: update });
+  return "tagged";
+}

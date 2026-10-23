@@ -1,4 +1,6 @@
 import { Router, Request, Response } from "express";
+import { requestAuth } from "../auth/middleware";
+import { Account } from "../auth/models";
 import {
   addItemsToKrogerCart,
   buildKrogerAuthorizeUrl,
@@ -6,6 +8,9 @@ import {
   krogerCartSessions,
   readCartModality,
   readKrogerOAuthConfig,
+  clearShopperCookieHeader,
+  readRequestCookie,
+  revokeSealedShopperCookie,
   sealShopperToken,
   shopperTokenForRequest,
   signCartState,
@@ -17,6 +22,7 @@ import {
   type ShopperToken,
 } from "../krogerCartAuth";
 import { krogerSearchUrl } from "../storeHandoff";
+import { blockUnlessFeature } from "../billing/middleware";
 
 const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
@@ -130,21 +136,22 @@ function searchLinkHtml(items: KrogerCartLine[]): string {
 }
 
 function cookieValue(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) {
-    return undefined;
-  }
-  for (const part of header.split(";")) {
-    const trimmed = part.trim();
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) {
-      continue;
-    }
-    if (trimmed.slice(0, eq) === name) {
-      return decodeURIComponent(trimmed.slice(eq + 1));
-    }
-  }
-  return undefined;
+  return readRequestCookie(req.headers.cookie, name);
+}
+
+async function rememberAccountKroger(res: Response, config: KrogerOAuthConfig, token: ShopperToken): Promise<void> {
+  const auth = requestAuth(res);
+  if (!auth) return;
+  await Account.updateOne({ _id: auth.accountId }, { $set: { krogerSealed: sealShopperToken(config.clientSecret, token) } });
+}
+
+async function sealedShopper(req: Request, res: Response): Promise<string | undefined> {
+  const cookie = cookieValue(req, KROGER_SHOPPER_COOKIE);
+  if (cookie) return cookie;
+  const auth = requestAuth(res);
+  if (!auth) return undefined;
+  const account = await Account.findById(auth.accountId).select("krogerSealed").lean();
+  return account?.krogerSealed || undefined;
 }
 
 function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: ShopperToken): void {
@@ -175,6 +182,23 @@ function pendingFromState(
   }
   return undefined;
 }
+
+router.get("/kroger/logout", async (req, res) => {
+  const sealed = cookieValue(req, KROGER_SHOPPER_COOKIE);
+  try {
+    await revokeSealedShopperCookie(sealed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Kroger logout revoke failed: ${message}`);
+  }
+  res.append("Set-Cookie", clearShopperCookieHeader());
+  res.status(200).send(
+    htmlPage(
+      "Kroger sign-in removed",
+      `<p class="status">The Kroger sign-in on this browser is gone. You can close this page and return to ${PRODUCT_NAME}.</p>`
+    )
+  );
+});
 
 router.get("/kroger/auth-status", async (req, res) => {
   const config = readKrogerOAuthConfig();
@@ -232,6 +256,9 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     });
     return;
   }
+  if (await blockUnlessFeature(req, res, "cartHandoffs", "Cart handoffs are part of Grocery Gitter Pro.")) {
+    return;
+  }
 
   const config = readKrogerOAuthConfig();
   if (!config) {
@@ -261,14 +288,12 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const existing = await shopperTokenForRequest(
-    config,
-    cookieValue(req, KROGER_SHOPPER_COOKIE)
-  );
+  const existing = await shopperTokenForRequest(config, await sealedShopper(req, res));
   if (existing) {
     const result = await addItemsToKrogerCart(existing.accessToken, lines);
     if (result.ok) {
       appendShopperCookie(res, config, existing);
+      await rememberAccountKroger(res, config, existing);
       res.json({
         status: "added",
         added: result.added,
@@ -392,6 +417,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
   }
 
   appendShopperCookie(res, config, token);
+  await rememberAccountKroger(res, config, token);
 
   if (pending.purpose === "connect" || pending.items.length === 0) {
     res.send(

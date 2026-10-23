@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  accountStepCopy,
   clampStep,
   krogerStepCopy,
   normalizeZipInput,
@@ -12,6 +13,8 @@ import {
   primaryLabel,
   progressLabel,
   shouldShowOnboarding,
+  tripStepCopy,
+  welcomeSteps,
   zipAdvanceError,
 } from "../../public/shopper/onboarding.js";
 
@@ -51,6 +54,49 @@ describe("onboarding steps", () => {
     assert.equal(zipAdvanceError("abc"), "Enter a 5-digit ZIP, or leave it blank.");
   });
 
+  it("fails open when RevenueCat is off and tells the free plan the truth", () => {
+    const open = tripStepCopy(null);
+    assert.match(open.split.body, /lowest price/);
+    assert.match(open.carts.body, /cart/);
+    const unenforced = tripStepCopy({ enforced: false, pro: false, limits: { multiStore: false, cartHandoffs: false } });
+    assert.equal(unenforced.split.body, open.split.body);
+    assert.equal(unenforced.carts.body, open.carts.body);
+    const free = tripStepCopy({
+      enforced: true,
+      pro: false,
+      limits: { multiStore: false, cartHandoffs: false },
+    });
+    assert.match(free.split.body, /one store/i);
+    assert.match(free.split.body, /Pro/);
+    assert.match(free.carts.body, /Pro/);
+    assert.equal(/lowest price/.test(free.split.body), false);
+    const pro = tripStepCopy({
+      enforced: true,
+      pro: true,
+      limits: { multiStore: true, cartHandoffs: true },
+    });
+    assert.match(pro.split.body, /lowest price/);
+    assert.match(pro.carts.body, /cart/);
+  });
+
+  it("adds an optional sign-in step only when accounts are configured", () => {
+    const off = welcomeSteps({ accountsEnabled: false, billing: null });
+    assert.equal(off.some((step) => step.id === "account"), false);
+    assert.equal(off.length, 5);
+    const on = welcomeSteps({ accountsEnabled: true, signedIn: false, billing: { enforced: false } });
+    assert.equal(on.length, 6);
+    assert.equal(progressLabel(0, on), "1 of 6");
+    const account = on.find((step) => step.id === "account");
+    assert.equal(account?.kind, "account");
+    assert.equal(accountStepCopy(false).signIn, true);
+    assert.match(accountStepCopy(false).body, /optional/i);
+    assert.match(accountStepCopy(false).body, /without an account/i);
+    assert.equal(accountStepCopy(true).signIn, false);
+    assert.match(accountStepCopy(true).title, /signed in/i);
+    const signed = welcomeSteps({ accountsEnabled: true, signedIn: true });
+    assert.equal(signed.filter((step) => step.id === "account").length, 1);
+  });
+
   it("keeps Kroger connect optional", () => {
     assert.equal(krogerStepCopy(null).connect, false);
     assert.equal(krogerStepCopy({ oauthConfigured: false }).connect, false);
@@ -73,6 +119,8 @@ describe("onboarding steps", () => {
     assert.match(html, />Skip</);
     assert.match(html, /for="onboard-zip"/);
     assert.match(html, /id="onboard-location"[^>]*hidden/);
+    assert.match(html, /id="onboard-sign-in"[^>]*hidden/);
+    assert.match(html, /id="onboard-account-fields"[^>]*hidden/);
     assert.match(html, /id="settings-dialog"/);
     assert.match(html, /id="settings-title" tabindex="-1"/);
     assert.match(html, /id="settings-welcome"/);

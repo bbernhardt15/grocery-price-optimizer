@@ -26,6 +26,7 @@ import {
   visibleItems,
 } from "./shopper/shareList.js";
 import {
+  alertsEmptyChoice,
   catalogEmptyKind,
   emptyState,
   emptyStateInner,
@@ -35,6 +36,8 @@ import {
   tripStoreEmpty,
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
+import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
+import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -85,6 +88,8 @@ const SHARE_KEY = "gg-share";
 const OWNER_KEY = "gg-owner";
 const NAME_KEY = "gg-display-name";
 const PERSONAL_KEY = "gg-list-personal";
+const REMOVED_KEY = "gg-list-removed";
+const REVISION_KEY = "gg-list-revision";
 const ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 function isNative() {
@@ -148,6 +153,7 @@ let nextCursor = null;
 let loading = false;
 let total = 0;
 let coverage = [];
+let weeklyAdBanners = [];
 let catalogSource = "demo";
 let instacartEnabled = false;
 /** @type {Record<string, any> | null} */
@@ -159,6 +165,7 @@ let activeSuggest = -1;
 let listLoading = false;
 let listReady = false;
 let watchTimer = 0;
+let deletingData = false;
 let unreadAlerts = 0;
 /** @type {Array<Record<string, any>>} */
 let priceAlerts = [];
@@ -182,6 +189,14 @@ let pollTimer = 0;
 /** @type {EventSource | null} */
 let listEvents = null;
 let syncGeneration = 0;
+/** @type {{ id: string, email?: string, displayName?: string, providers?: string[] } | null} */
+let accountState = null;
+/** @type {Record<string, any> | null} */
+let authStatus = null;
+let listRevision = 0;
+let listSyncTimer = 0;
+let applyingAccount = false;
+let arrivedWithSession = false;
 
 const money = formatMoney;
 
@@ -288,8 +303,19 @@ function toast(message) {
   window.setTimeout(() => toastEl.classList.remove("show"), 1600);
 }
 
-function apiFetch(path, init) {
-  return globalThis.fetch(apiUrl(path), init);
+function readSessionToken() {
+  return localStorage.getItem(SESSION_KEY) || "";
+}
+
+function apiFetch(path, init = {}) {
+  const headers = new Headers(init.headers || {});
+  const token = readSessionToken();
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return globalThis.fetch(apiUrl(path), {
+    ...init,
+    headers,
+    credentials: init.credentials ?? (apiOrigin() ? "omit" : "include"),
+  });
 }
 
 function readStoredJson(key) {
@@ -358,8 +384,13 @@ async function copyText(text) {
 function sourceLabel(source) {
   if (source === "live") return "Live";
   if (source === "partner_feed") return "Partner";
-  if (source === "weekly_ad") return "Weekly ad";
+  if (source === "weekly_ad") return "Weekly ad, not shelf price";
   return "Demo";
+}
+
+function badgeLabel(source) {
+  if (source === "weekly_ad") return "Weekly ad";
+  return sourceLabel(source);
 }
 
 function bestOffer(product, store) {
@@ -413,6 +444,7 @@ function findListEntry(id) {
 }
 
 function saveList() {
+  if (deletingData) return;
   const rows = [...list.values()].map((entry) => ({
     id: entry.product.id,
     itemId: entry.itemId || entry.product.id,
@@ -431,6 +463,7 @@ function saveList() {
   }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
   scheduleWatchSync();
+  scheduleAccountSync();
 }
 
 function scheduleWatchSync() {
@@ -440,6 +473,7 @@ function scheduleWatchSync() {
 }
 
 async function syncWatch() {
+  if (deletingData) return;
   const listOn = Boolean(listAlertsEl?.checked);
   const items = [];
   for (const entry of list.values()) {
@@ -462,7 +496,7 @@ async function syncWatch() {
   let retired = !previous || previous === listId;
   if (previous && previous !== listId) {
     try {
-      const off = await fetch(apiUrl("/api/price-alerts/watches"), {
+      const off = await apiFetch("/api/price-alerts/watches", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -480,7 +514,7 @@ async function syncWatch() {
     }
   }
   try {
-    const response = await fetch(apiUrl("/api/price-alerts/watches"), {
+    const response = await apiFetch("/api/price-alerts/watches", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -492,6 +526,12 @@ async function syncWatch() {
         items,
       }),
     });
+    if (response.status === 402) {
+      const body = await response.json().catch(() => ({}));
+      toast(body.error || "Price alerts are part of Grocery Gitter Pro.");
+      openPaywall();
+      return;
+    }
     if (response.ok) {
       localStorage.setItem(SYNC_FLAG, "1");
       if (retired) localStorage.setItem(WATCH_LIST_KEY, listId);
@@ -656,6 +696,7 @@ function setQuantity(id, quantity) {
     entry.writtenAt = Date.now();
     entry.itemId = entry.itemId || id;
     queueWrite(entry, true);
+    if (!shareState?.shareToken) noteRemoved(entry.itemId || id, entry.writtenAt);
     list.delete(id);
     toast("Removed from list");
   } else {
@@ -756,13 +797,14 @@ function cardHtml(product) {
     <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
       <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
       ${sale ? '<span class="badge">Sale</span>' : ""}
-      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(sourceLabel(offer.priceSource))}</span>`}
+      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
     </button>
     <div class="card-body">
       <p class="brand">${escapeHtml(product.brand)}${product.storeBrand ? " · store brand" : ""}</p>
       <h3>${escapeHtml(product.name)}</h3>
       <p class="size">${escapeHtml(product.sizeLabel || product.departmentName)}</p>
       <p class="price"><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
+      ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
       <p class="unit">${escapeHtml(offer.unitPriceText || "")}</p>
       ${gapHtml}
     </div>
@@ -834,6 +876,7 @@ async function loadPage(reset) {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     coverage = body.coverage ?? coverage;
+    weeklyAdBanners = Array.isArray(body.weeklyAdBanners) ? body.weeklyAdBanners : [];
     catalogSource = body.catalogSource || catalogSource;
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
@@ -855,16 +898,24 @@ async function loadPage(reset) {
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
     const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
+    const foundNames = weeklyAdBanners.map((banner) => banner.storeName).filter(Boolean);
+    const foundLine = !zipOk
+      ? ""
+      : foundNames.length
+        ? ` Circulars Flipp returned for this ZIP: ${foundNames.join(", ")}. Each of those prices is the weekly ad, not a shelf price.`
+        : Array.isArray(body.weeklyAdBanners)
+          ? " Flipp returned no mapped grocery circular for this ZIP."
+          : "";
     if (!zipOk && weeklyAds) {
       coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
     } else if (demo) {
-      coverageBannerEl.textContent = "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.";
+      coverageBannerEl.textContent = `Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.${foundLine}`;
     } else if (catalogSource === "database") {
-      coverageBannerEl.textContent = "Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.";
+      coverageBannerEl.textContent = `Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.${foundLine}`;
     } else if (catalogSource === "mixed") {
-      coverageBannerEl.textContent = "Live samples are mixed with the demo catalog. Weekly-ad prices are labeled Weekly ad, not a live shelf.";
+      coverageBannerEl.textContent = `Live samples are mixed with the demo catalog. Weekly-ad prices are labeled weekly ad, not a shelf price.${foundLine}`;
     } else {
-      coverageBannerEl.textContent = "Live catalog sample. This is not a full store assortment.";
+      coverageBannerEl.textContent = `Live catalog sample. This is not a full store assortment.${foundLine}`;
     }
     const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
     if (hardWarnings.length) {
@@ -1098,8 +1149,12 @@ function openProduct(product) {
 }
 
 function openCoverage() {
+  const found = weeklyAdBanners.length
+    ? `<p class="muted">Circulars Flipp returned for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Weekly ad, not shelf price.</p>`
+    : "";
   coverageDialog.innerHTML = `<div class="sheet-body">
     <h2 id="coverage-title">Catalog coverage</h2>
+    ${found}
     <ul class="offer-list">
       ${(coverage || [])
         .map(
@@ -1157,6 +1212,7 @@ function renderTrip(payload) {
       <div>
         <p>Trip plan</p>
         <p>${escapeHtml(payload.tripPlan?.summary || `${stores.length} stores`)}</p>
+        ${payload.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
         <div id="instacart-whole"></div>
       </div>
       <p class="trip-total">${money(payload.total)}</p>
@@ -1170,8 +1226,12 @@ function renderTrip(payload) {
     ${checkedStoresHtml(payload, stores)}
   `;
   const whole = $("instacart-whole");
-  if (instacartEnabled && stores.length) {
+  const cartLocked = payload.entitlement?.limited?.includes("cartHandoffs");
+  if (instacartEnabled && stores.length && !cartLocked) {
     whole.innerHTML = `<p>or shop the whole list on Instacart</p><button type="button" class="instacart-cta" data-instacart-scope="list"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`;
+  }
+  for (const button of tripEl.querySelectorAll("[data-open-paywall]")) {
+    button.addEventListener("click", () => openPaywall());
   }
   $("trip-back").onclick = () => {
     tripEl.hidden = true;
@@ -1184,12 +1244,16 @@ function renderStore(store) {
   const rows = (store.items ?? [])
     .map((item) => {
       const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
-      return `<li><span>${item.quantity}× ${escapeHtml(item.name)} (${escapeHtml(item.brand)})${sub}</span><span>${money(item.itemTotal ?? item.price)}</span></li>`;
+      const ad = item.priceSource === "weekly_ad" ? ` <span class="sub-tag">Weekly ad, not shelf price</span>` : "";
+      return `<li><span>${item.quantity}× ${escapeHtml(item.name)} (${escapeHtml(item.brand)})${sub}${ad}</span><span>${money(item.itemTotal ?? item.price)}</span></li>`;
     })
     .join("");
   const action = store.handoff?.action;
+  const cartLocked = lastOptimize?.entitlement?.limited?.includes("cartHandoffs");
   let handoff = "";
-  if (action?.type === "coming_soon") {
+  if (action?.type === "coming_soon" && cartLocked) {
+    handoff = `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
+  } else if (action?.type === "coming_soon") {
     handoff = `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
   } else if (action?.type === "kroger_cart") {
     handoff = `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label)}</button>`;
@@ -1197,7 +1261,7 @@ function renderStore(store) {
     handoff = `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label)}</a>`;
   }
   const instacart =
-    instacartEnabled && action?.type !== "kroger_cart" && action?.type !== "walmart_cart"
+    instacartEnabled && !cartLocked && action?.type !== "kroger_cart" && action?.type !== "walmart_cart"
       ? `<button type="button" class="instacart-cta" data-instacart-scope="store" data-instacart-store="${escapeHtml(store.storeName)}"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`
       : "";
   const nearby = store.nearbyStore?.name
@@ -1286,7 +1350,7 @@ async function openInstacart(button) {
   }
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/instacart/shopping-list"), {
+    const response = await apiFetch("/api/instacart/shopping-list", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1296,6 +1360,7 @@ async function openInstacart(button) {
       }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok || !body.productsLinkUrl) throw new Error(body.error || "Instacart did not return a link.");
     await openExternal(body.productsLinkUrl);
   } catch (error) {
@@ -1312,12 +1377,13 @@ async function startKroger(storeName, button) {
   if (!store) return;
   button.disabled = true;
   try {
-    const response = await fetch(apiUrl("/api/kroger/cart/start"), {
+    const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 402) openPaywall();
     if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
     if (body.authorizeUrl) {
       if (isNative()) {
@@ -1693,11 +1759,13 @@ async function postList(extra = {}) {
       shareToken: extra.shareToken || owned?.shareToken,
       displayName: readDisplayName() || undefined,
       title: "Shopping list",
+      deviceId: deviceId(),
       items: [...list.values()].map((entry) => toWrite(entry, false)),
       rotate: Boolean(extra.rotate),
     }),
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 402) openPaywall();
   if (!response.ok) {
     toast(body.error || "Could not share this list.");
     return null;
@@ -1837,6 +1905,7 @@ async function useOwnList() {
   if (owned?.shareToken) await openSharedList(owned.shareToken, { mergeLocal: true });
   else renderEstimate();
   scheduleWatchSync();
+  void syncAccountList();
 }
 
 function toggleChecked(itemId, checked) {
@@ -2144,6 +2213,26 @@ alertsToggle?.addEventListener("click", () => void openAlerts(!alertsDialog?.ope
 $("alerts-close")?.addEventListener("click", () => openAlerts(false));
 alertsDialog?.addEventListener("close", () => alertsToggle?.setAttribute("aria-expanded", "false"));
 $("push-btn")?.addEventListener("click", () => void enablePush());
+for (const button of document.querySelectorAll(".settings-open")) {
+  button.addEventListener("click", openSettings);
+}
+$("settings-close")?.addEventListener("click", () => $("settings-dialog")?.close());
+$("open-paywall")?.addEventListener("click", () => openPaywall());
+$("paywall-close")?.addEventListener("click", () => $("paywall-dialog")?.close());
+$("paywall-restore")?.addEventListener("click", () => void restorePurchases());
+$("delete-confirm")?.addEventListener("input", () => {
+  const button = $("delete-data-btn");
+  const confirmEl = $("delete-confirm");
+  if (button && confirmEl) button.disabled = confirmEl.value !== "DELETE";
+});
+$("delete-data-btn")?.addEventListener("click", () => void deleteMyData());
+$("sign-in-apple")?.addEventListener("click", () => void signInWithApple());
+$("sign-in-google")?.addEventListener("click", () => void signInWithGoogle());
+$("sign-out")?.addEventListener("click", () => void signOut());
+$("magic-link-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void sendMagicLink();
+});
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -2197,7 +2286,10 @@ function paintAlertList() {
   }
   alertsEmptyEl.hidden = priceAlerts.length > 0;
   if (priceAlerts.length === 0) {
-    fillEmpty(alertsEmptyEl, emptyState(listAlertsEl?.checked ? "alertsOn" : "alerts"));
+    fillEmpty(
+      alertsEmptyEl,
+      alertsEmptyChoice({ billing: billingStatus, alertsOn: Boolean(listAlertsEl?.checked) })
+    );
   }
   alertsListEl.innerHTML = priceAlerts
     .map((alert) => {
@@ -2220,7 +2312,7 @@ function paintAlertList() {
 
 async function refreshAlerts() {
   try {
-    const response = await fetch(apiUrl(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`));
+    const response = await apiFetch(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`);
     if (!response.ok) throw new Error(`Alerts failed (${response.status})`);
     const body = await response.json();
     priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
@@ -2250,7 +2342,7 @@ async function openAlerts(show) {
   const unseen = priceAlerts.filter((alert) => !alert.seen).map((alert) => alert.id);
   if (unseen.length === 0) return;
   try {
-    await fetch(apiUrl("/api/price-alerts/seen"), {
+    await apiFetch("/api/price-alerts/seen", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), ids: unseen }),
@@ -2306,7 +2398,7 @@ async function enablePush() {
       applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
     });
     const json = subscription.toJSON();
-    const response = await fetch(apiUrl("/api/price-alerts/push"), {
+    const response = await apiFetch("/api/price-alerts/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId: deviceId(), subscription: json }),
@@ -2321,8 +2413,625 @@ async function enablePush() {
   }
 }
 
+function clearLocalShopperData() {
+  const keys = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith("gg-")) keys.push(key);
+  }
+  for (const key of keys) localStorage.removeItem(key);
+}
+
+async function unsubscribeLocalPush() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+  } catch {
+    /* the server still drops the stored subscription */
+  }
+}
+
+function openSettings() {
+  const dialog = $("settings-dialog");
+  const confirmEl = $("delete-confirm");
+  const errorEl = $("delete-error");
+  const button = $("delete-data-btn");
+  if (confirmEl) confirmEl.value = "";
+  if (errorEl) {
+    errorEl.hidden = true;
+    errorEl.textContent = "";
+  }
+  if (button) button.disabled = true;
+  if (dialog && !dialog.open) dialog.showModal();
+  confirmEl?.focus();
+  void loadBilling();
+}
+
+async function dropKrogerInSystemBrowser() {
+  if (!isNative()) return;
+  const url = apiUrl("/api/kroger/logout");
+  const browser = window.Capacitor?.Plugins?.Browser;
+  try {
+    if (browser?.open) await browser.open({ url });
+    else window.open(url, "_blank", "noopener");
+  } catch {
+    /* this device's server data is already gone */
+  }
+}
+
+async function deleteMyData() {
+  const button = $("delete-data-btn");
+  const errorEl = $("delete-error");
+  const confirmEl = $("delete-confirm");
+  if (!confirmEl || confirmEl.value !== "DELETE") return;
+  deletingData = true;
+  window.clearTimeout(watchTimer);
+  stopSync();
+  if (button) button.disabled = true;
+  if (errorEl) errorEl.hidden = true;
+  const device = deviceId();
+  const owned = readOwned();
+  const lists = owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [];
+  try {
+    await unsubscribeLocalPush();
+    const response = await fetch(apiUrl("/api/me/data"), {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(readSessionToken() ? { Authorization: `Bearer ${readSessionToken()}` } : {}),
+      },
+      credentials: apiOrigin() ? "omit" : "include",
+      body: JSON.stringify({ deviceId: device, lists }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not delete your data.");
+    clearLocalShopperData();
+    await dropKrogerInSystemBrowser();
+    if (window.location.pathname === "/" && !window.location.search && !window.location.hash) {
+      window.location.reload();
+    } else {
+      window.location.replace("/");
+    }
+  } catch (error) {
+    deletingData = false;
+    if (shareState?.shareToken) startSync();
+    if (errorEl) {
+      errorEl.hidden = false;
+      errorEl.textContent = error instanceof Error ? error.message : "Could not delete your data.";
+    }
+    if (button) button.disabled = confirmEl.value !== "DELETE";
+  }
+}
+
+function readRemoved() {
+  const rows = readStoredJson(REMOVED_KEY);
+  return Array.isArray(rows) ? rows.filter((row) => row && typeof row.id === "string") : [];
+}
+
+function noteRemoved(id, writtenAt) {
+  const rows = readRemoved().filter((row) => row.id !== id);
+  rows.push({ id, writtenAt: Number(writtenAt) || Date.now() });
+  localStorage.setItem(REMOVED_KEY, JSON.stringify(rows.slice(-100)));
+}
+
+function personalListPayload() {
+  const source = shareState?.shareToken ? readStoredJson(PERSONAL_KEY) : null;
+  const items = Array.isArray(source)
+    ? source
+    : [...list.values()].map((entry) => ({
+        id: entry.product.id,
+        itemId: entry.itemId || entry.product.id,
+        name: entry.product.name,
+        brand: entry.product.brand || "",
+        sizeLabel: entry.product.sizeLabel || "",
+        quantity: entry.quantity,
+        checked: Boolean(entry.checked),
+        addedBy: entry.addedBy,
+        checkedBy: entry.checkedBy,
+        writtenAt: entry.writtenAt || 0,
+        baselinePrice: entry.baselinePrice,
+        baselineStore: entry.baselineStore || "",
+        watch: entry.watch || "inherit",
+        targetPrice: entry.targetPrice ?? null,
+      }));
+  return {
+    listId: savedListId(),
+    listName: "My list",
+    zip: ZIP_PATTERN.test(normalizeZip(zipEl.value)) ? normalizeZip(zipEl.value).slice(0, 5) : "",
+    alertsEnabled: Boolean(listAlertsEl?.checked),
+    items: items.filter((item) => item?.id && item?.name).slice(0, 100),
+    removed: shareState?.shareToken ? [] : readRemoved(),
+    baseRevision: listRevision || null,
+  };
+}
+
+function authReturnTo() {
+  if (!isNative()) return "/";
+  return `${window.location.origin}/`;
+}
+
+function setAuthMessage(text) {
+  const el = $("auth-message");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintAccount() {
+  const signedIn = $("account-signed-in");
+  const signedOut = $("account-signed-out");
+  const who = $("account-who");
+  const apple = $("sign-in-apple");
+  const google = $("sign-in-google");
+  const email = $("magic-link-form");
+  if (apple) apple.hidden = !authStatus?.providers?.apple?.enabled;
+  if (google) google.hidden = !authStatus?.providers?.google?.enabled;
+  if (email) email.hidden = !authStatus?.providers?.email?.enabled;
+  if (accountState) {
+    if (signedOut) signedOut.hidden = true;
+    if (signedIn) signedIn.hidden = false;
+    const label = accountState.displayName || accountState.email || "Signed in";
+    if (who) who.textContent = `Signed in as ${label}. This list and your alerts sync to your other devices.`;
+  } else {
+    if (signedIn) signedIn.hidden = true;
+    if (signedOut) signedOut.hidden = false;
+  }
+}
+
+function applyAccountRows(items) {
+  applyingAccount = true;
+  list.clear();
+  for (const row of items ?? []) {
+    if (row?.name) rememberLocalRow(row);
+  }
+  localStorage.removeItem(REMOVED_KEY);
+  renderEstimate();
+  renderListRows();
+  saveList();
+  applyingAccount = false;
+}
+
+function scheduleAccountSync() {
+  if (applyingAccount || !accountState || shareState?.shareToken || !listReady) return;
+  window.clearTimeout(listSyncTimer);
+  listSyncTimer = window.setTimeout(() => void pushAccountList(), 500);
+}
+
+async function pushAccountList() {
+  if (!accountState || shareState?.shareToken || applyingAccount) return;
+  try {
+    const response = await apiFetch("/api/me/list", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(personalListPayload()),
+    });
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.list?.revision) {
+      listRevision = body.list.revision;
+      localStorage.setItem(REVISION_KEY, String(listRevision));
+    }
+    if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
+    localStorage.removeItem(REMOVED_KEY);
+  } catch {
+    /* the list stays on this device and tries again on the next edit */
+  }
+}
+
+function rememberServerList(server) {
+  if (!server) return;
+  listRevision = server.revision || listRevision;
+  if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
+  if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
+  if (server.alertsEnabled && listAlertsEl) {
+    listAlertsEl.checked = true;
+    localStorage.setItem(ALERTS_KEY, "1");
+  }
+}
+
+async function syncAccountList() {
+  if (!accountState || shareState?.shareToken) return;
+  try {
+    if (!listRevision) {
+      const response = await apiFetch("/api/me/list", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...personalListPayload(), baseRevision: null }),
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      rememberServerList(body.list);
+      applyAccountRows(body.list?.items ?? []);
+      return;
+    }
+    const response = await apiFetch("/api/me/list");
+    if (!response.ok) return;
+    const body = await response.json();
+    const server = body.list;
+    if (!server) {
+      if (list.size) await pushAccountList();
+      return;
+    }
+    if (server.revision > listRevision) {
+      rememberServerList(server);
+      applyAccountRows(server.items);
+      return;
+    }
+    if (list.size) await pushAccountList();
+  } catch {
+    /* guest data on this device is unchanged */
+  }
+}
+
+async function mergeThisDevice() {
+  if (!readSessionToken()) return;
+  const owned = readOwned();
+  await apiFetch("/api/auth/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+}
+
+let billingStatus = null;
+let purchasesConfigured = false;
+
+function paywallError(text) {
+  const el = $("paywall-error");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+
+function paintPlan() {
+  const status = $("plan-status");
+  if (!status || !billingStatus) return;
+  if (!billingStatus.enforced) {
+    status.textContent = "Subscriptions are not turned on yet, so every feature stays available.";
+    return;
+  }
+  status.textContent = billingStatus.pro
+    ? "Grocery Gitter Pro is active on this account."
+    : "One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.";
+}
+
+function paintPaywall() {
+  const note = $("paywall-note");
+  const restore = $("paywall-restore");
+  const manage = $("paywall-manage");
+  const terms = $("paywall-terms");
+  const privacy = $("paywall-privacy");
+  const view = paywallView({
+    status: billingStatus,
+    platform: platformOf(window.Capacitor),
+    signedIn: Boolean(accountState?.id || readSessionToken()),
+  });
+  if (terms) terms.href = view.terms;
+  if (privacy) privacy.href = view.privacy;
+  if (manage) {
+    manage.hidden = !view.manageUrl;
+    if (view.manageUrl) manage.href = view.manageUrl;
+  }
+  if (restore) restore.hidden = !view.native;
+  const lines = [];
+  if (!view.enforced) lines.push("Subscriptions are not turned on yet, so every feature stays available.");
+  if (view.showWebNote) lines.push(view.webNote);
+  if (view.needsSignIn) lines.push("Sign in from Settings, then subscribe.");
+  if (view.unconfigured) lines.push("Subscriptions are not configured in this build yet.");
+  if (view.pro) lines.push("Grocery Gitter Pro is active on this account.");
+  if (note) note.textContent = lines.join(" ");
+  return view;
+}
+
+async function loadBilling() {
+  try {
+    const response = await apiFetch("/api/billing/status");
+    if (!response.ok) return;
+    billingStatus = await response.json();
+    paintPlan();
+  } catch {
+    /* the trip still works; Settings can try again */
+  }
+}
+
+function purchasesPlugin() {
+  return window.Capacitor?.Plugins?.Purchases || null;
+}
+
+async function configurePurchases(view) {
+  const plugin = purchasesPlugin();
+  if (!plugin?.configure || !view.canPurchase) return null;
+  const appUserID = accountState?.id;
+  if (!appUserID) return null;
+  const apiKey = sdkKeyFor(billingStatus, view.native ? platformOf(window.Capacitor) : "web");
+  if (!purchasesConfigured) {
+    await plugin.configure({ apiKey, appUserID });
+    purchasesConfigured = true;
+  } else if (plugin.logIn) {
+    await plugin.logIn({ appUserID });
+  }
+  return plugin;
+}
+
+async function refreshEntitlement() {
+  const response = await apiFetch("/api/billing/refresh", { method: "POST" });
+  if (!response.ok) return;
+  await loadBilling();
+  paintPaywall();
+}
+
+async function loadOfferings() {
+  const view = paintPaywall();
+  const box = $("paywall-packages");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!view.canPurchase) return;
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.getOfferings) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    const offerings = await plugin.getOfferings();
+    const choices = packageChoices(offerings);
+    if (!choices.length) {
+      paywallError("No subscription is available yet.");
+      return;
+    }
+    for (const choice of choices) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost";
+      button.textContent = choice.price ? `${choice.title} · ${choice.price}` : choice.title;
+      button.addEventListener("click", () => void purchasePackage(plugin, choice.raw));
+      box.appendChild(button);
+    }
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not load subscriptions.");
+  }
+}
+
+async function purchasePackage(plugin, aPackage) {
+  paywallError("");
+  try {
+    await plugin.purchasePackage({ aPackage });
+    await refreshEntitlement();
+    toast("Grocery Gitter Pro is active.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The purchase did not finish.";
+    if (!/cancel/i.test(message)) paywallError(message);
+  }
+}
+
+async function restorePurchases() {
+  const view = paintPaywall();
+  if (!view.canPurchase) {
+    paywallError(view.showWebNote ? view.webNote : "Sign in from Settings, then restore purchases.");
+    return;
+  }
+  paywallError("");
+  try {
+    const plugin = await configurePurchases(view);
+    if (!plugin?.restorePurchases) {
+      paywallError("Subscriptions are available in the iOS and Android apps.");
+      return;
+    }
+    await plugin.restorePurchases();
+    await refreshEntitlement();
+    toast(billingStatus?.pro ? "Purchases restored." : "No active subscription was found.");
+  } catch (error) {
+    paywallError(error instanceof Error ? error.message : "Could not restore purchases.");
+  }
+}
+
+function openPaywall() {
+  const dialog = $("paywall-dialog");
+  paintPaywall();
+  if (dialog && !dialog.open) dialog.showModal();
+  void loadOfferings();
+}
+
+async function loadAccount() {
+  const box = $("account-box");
+  try {
+    const statusResponse = await apiFetch("/api/auth/status");
+    if (!statusResponse.ok) return;
+    authStatus = await statusResponse.json();
+    if (!authStatus?.enabled) {
+      if (box) box.hidden = true;
+      return;
+    }
+    if (box) box.hidden = false;
+    const meResponse = await apiFetch("/api/auth/me");
+    const me = await meResponse.json().catch(() => ({}));
+    accountState = me.account || null;
+    paintAccount();
+    if (accountState && (arrivedWithSession || localStorage.getItem("gg-merged") !== accountState.id)) {
+      await mergeThisDevice();
+      localStorage.setItem("gg-merged", accountState.id);
+    }
+    arrivedWithSession = false;
+    if (accountState) await syncAccountList();
+  } catch {
+    if (box) box.hidden = true;
+  }
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load sign-in."));
+    document.head.appendChild(script);
+  });
+}
+
+async function finishIdentity(path, extra) {
+  setAuthMessage("");
+  const owned = readOwned();
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...extra,
+      deviceId: deviceId(),
+      lists: owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [],
+      list: personalListPayload(),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not sign in.");
+  if (body.token) localStorage.setItem(SESSION_KEY, body.token);
+  accountState = body.account || null;
+  paintAccount();
+  await syncAccountList();
+  setAuthMessage("Signed in.");
+}
+
+async function signInWithApple() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.SignInWithApple;
+    if (isNative() && plugin?.authorize) {
+      const result = await plugin.authorize({
+        clientId: authStatus?.providers?.apple?.clientId,
+        redirectURI: `${apiOrigin() || window.location.origin}/api/auth/apple/callback`,
+        scopes: "email name",
+      });
+      const identityToken = result?.response?.identityToken || result?.identityToken;
+      const given = result?.response?.givenName || result?.givenName || "";
+      const family = result?.response?.familyName || result?.familyName || "";
+      if (identityToken) {
+        await finishIdentity("/api/auth/apple", {
+          identityToken,
+          displayName: [given, family].filter(Boolean).join(" "),
+        });
+        return;
+      }
+    }
+    if (!isNative() && authStatus?.providers?.apple?.clientId) {
+      await loadScript("https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js");
+      window.AppleID.auth.init({
+        clientId: authStatus.providers.apple.clientId,
+        scope: "name email",
+        redirectURI: `${window.location.origin}/api/auth/apple/callback`,
+        usePopup: true,
+      });
+      const result = await window.AppleID.auth.signIn();
+      const name = [result?.user?.name?.firstName, result?.user?.name?.lastName].filter(Boolean).join(" ");
+      await finishIdentity("/api/auth/apple", { identityToken: result.authorization.id_token, displayName: name });
+      return;
+    }
+    const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+    window.location.assign(apiUrl(`/api/auth/apple/start?${params.toString()}`));
+  } catch (error) {
+    if (error?.error === "popup_closed_by_user") return;
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Apple.");
+  }
+}
+
+async function signInWithGoogle() {
+  setAuthMessage("");
+  try {
+    const plugin = window.Capacitor?.Plugins?.GoogleAuth;
+    if (isNative() && plugin?.signIn) {
+      const result = await plugin.signIn();
+      const idToken = result?.authentication?.idToken || result?.idToken;
+      if (idToken) {
+        await finishIdentity("/api/auth/google", { idToken, displayName: result?.displayName || result?.name });
+        return;
+      }
+    }
+    if (authStatus?.providers?.google?.redirect) {
+      const params = new URLSearchParams({ return: authReturnTo(), deviceId: deviceId() });
+      window.location.assign(apiUrl(`/api/auth/google/start?${params.toString()}`));
+      return;
+    }
+    const clientId = authStatus?.providers?.google?.clientId;
+    if (!clientId) throw new Error("Google sign-in is not configured.");
+    await loadScript("https://accounts.google.com/gsi/client");
+    await new Promise((resolve, reject) => {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          finishIdentity("/api/auth/google", { idToken: response.credential })
+            .then(resolve)
+            .catch(reject);
+        },
+      });
+      window.google.accounts.id.prompt((notification) => {
+        if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+          reject(new Error("Google sign-in did not open. Try again."));
+        }
+      });
+    });
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not sign in with Google.");
+  }
+}
+
+async function sendMagicLink() {
+  setAuthMessage("");
+  const email = $("magic-email")?.value?.trim() || "";
+  try {
+    const response = await apiFetch("/api/auth/email/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, return: "/" }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not send the email.");
+    setAuthMessage(
+      isNative()
+        ? "Check your email. The link opens Grocery Gitter in the browser and expires in 20 minutes."
+        : "Check your email for a sign-in link. It expires in 20 minutes."
+    );
+  } catch (error) {
+    setAuthMessage(error instanceof Error ? error.message : "Could not send the email.");
+  }
+}
+
+async function signOut() {
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    /* the token on this device is still dropped */
+  }
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem("gg-merged");
+  accountState = null;
+  paintAccount();
+  setAuthMessage("Signed out. This device can keep shopping without an account.");
+}
+
+function adoptSessionFromUrl() {
+  const token = sessionFromSearch(window.location.search);
+  if (!token) return;
+  localStorage.setItem(SESSION_KEY, token);
+  arrivedWithSession = true;
+  const next = pathWithoutSession(window.location.pathname, window.location.search);
+  history.replaceState({}, "", next);
+}
+
 async function boot() {
   try {
+    adoptSessionFromUrl();
+    listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
     await bootApp();
   } finally {
     welcome.maybeAutoOpen();
@@ -2382,6 +3091,8 @@ async function bootApp() {
   listReady = true;
   renderEstimate();
   saveList();
+  await loadAccount();
+  await loadBilling();
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);
@@ -2432,6 +3143,8 @@ document.addEventListener("click", (event) => {
     void openAlerts(false);
     openList(true);
     listAlertsEl?.focus();
+  } else if (action === "see-pro") {
+    openPaywall();
   }
 });
 
@@ -2447,6 +3160,9 @@ const welcome = mountWelcome({
   toast,
   themeLabel: () => themeButtonLabel(document.documentElement.dataset.theme || "system", window.matchMedia("(prefers-color-scheme: dark)").matches),
   cycleTheme: () => applyTheme(nextTheme(document.documentElement.dataset.theme || "system")),
+  accountsEnabled: () => Boolean(authStatus?.enabled),
+  signedIn: () => Boolean(accountState?.id),
+  getBilling: () => billingStatus,
 });
 
 void boot().finally(() => {

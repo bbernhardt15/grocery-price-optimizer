@@ -9,6 +9,7 @@ import {
 const KROGER_API_BASE = "https://api.kroger.com/v1";
 const AUTHORIZE_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/authorize`;
 const TOKEN_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/token`;
+const REVOKE_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/revoke`;
 const CART_ADD_ENDPOINT = `${KROGER_API_BASE}/cart/add`;
 
 export const KROGER_SHOPPER_COOKIE = "kroger_shopper";
@@ -275,6 +276,87 @@ export async function refreshShopperToken(
     refresh_token: refreshToken,
   });
   return postKrogerToken(config, body);
+}
+
+/**
+ * RFC 7009 token revocation. `invalid_token` counts as success so a second
+ * delete is safe after Kroger has already forgotten the token.
+ * Network errors and other statuses return false; the caller still drops the cookie.
+ */
+export async function revokeShopperToken(
+  config: KrogerOAuthConfig,
+  token: string,
+  hint: "access_token" | "refresh_token"
+): Promise<boolean> {
+  let response: Response;
+  try {
+    response = await fetch(REVOKE_ENDPOINT, {
+      method: "POST",
+      headers: tokenHeaders(config),
+      body: new URLSearchParams({ token, token_type_hint: hint }),
+    });
+  } catch {
+    return false;
+  }
+  if (response.ok) {
+    await response.text().catch(() => undefined);
+    return true;
+  }
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  return response.status === 400 && (payload.error === "invalid_token" || payload.error === "invalid_grant");
+}
+
+export type KrogerRevokeResult = {
+  hadToken: boolean;
+  revoked: boolean;
+};
+
+/** Unseal the shopper cookie and revoke whatever tokens it still holds. */
+export async function revokeSealedShopperCookie(sealed: string | undefined): Promise<KrogerRevokeResult> {
+  const config = readKrogerOAuthConfig();
+  if (!sealed || !config) {
+    return { hadToken: false, revoked: false };
+  }
+  const token = unsealShopperToken(config.clientSecret, sealed);
+  if (!token) {
+    return { hadToken: false, revoked: false };
+  }
+  let revoked = true;
+  if (token.refreshToken) {
+    revoked = (await revokeShopperToken(config, token.refreshToken, "refresh_token")) && revoked;
+  }
+  if (token.accessToken) {
+    revoked = (await revokeShopperToken(config, token.accessToken, "access_token")) && revoked;
+  }
+  return { hadToken: true, revoked };
+}
+
+export function readRequestCookie(header: string | undefined, name: string): string | undefined {
+  if (!header) {
+    return undefined;
+  }
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) {
+      continue;
+    }
+    if (trimmed.slice(0, eq) !== name) {
+      continue;
+    }
+    try {
+      return decodeURIComponent(trimmed.slice(eq + 1));
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Browser instruction to drop the HttpOnly Kroger cookie. Matches Path and SameSite used when it was set. */
+export function clearShopperCookieHeader(nodeEnv = process.env.NODE_ENV): string {
+  const secure = nodeEnv === "production" ? "; Secure" : "";
+  return `${KROGER_SHOPPER_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 export type CartAddResult =

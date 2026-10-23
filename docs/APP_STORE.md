@@ -72,43 +72,72 @@ Also upload a large iPhone size if you do not want the biggest phones to use a s
 
 ## Privacy answers, from the code
 
-There is no Grocery Gitter account, no analytics SDK, no advertising identifier, and no crash-reporting SDK. The website does not ask for location. The iOS and Android shells can ask for location only after the shopper taps **Use my location** on the welcome ZIP step. That lookup fills a ZIP and does not store coordinates. iOS declares `NSLocationWhenInUseUsageDescription` and `NSLocationAlwaysAndWhenInUseUsageDescription` (the geolocation library requires the second string; the app does not request background location). Android declares `INTERNET` and optional `ACCESS_COARSE_LOCATION`. It does not declare fine location, and location hardware is not required.
+Sign-in is optional and stays off until the account variables in `docs/ACCOUNTS.md` are set. With no account configured, the app does not ask for an email. There is no analytics SDK and no advertising identifier.
+
+Crash reporting is Sentry, and only when `SENTRY_DSN` is set. With that variable unset, the app does not initialize Sentry and does not send crash reports. The store answers below assume the build you ship has the DSN set. If you leave it unset, answer “No” for crash data and crash logs.
+
+The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Use my location** on the welcome ZIP step. That is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET` and `ACCESS_COARSE_LOCATION` only. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required.
+
+### Location questions
+
+Answer these the same way on App Store Connect and in the Play Console.
+
+| Question | Answer |
+| --- | --- |
+| Does the app use location? | Yes. Approximate location only, and only after **Use my location** |
+| Precise location | No. Do not mark Precise Location. Android does not declare `ACCESS_FINE_LOCATION` |
+| When is it used? | When In Use. Once, to fill a ZIP. Not in the background |
+| Is it stored? | No. Coordinates are sent to `GET /api/geo/zip`, which asks the Census geocoder and then drops them |
+| Linked to the user? | No. Not linked to the account, the email, or the random alert id |
+| iOS purpose string | `NSLocationWhenInUseUsageDescription`: approximate location, once, to look up a ZIP, not stored, not linked. The Always-and-When-In-Use key uses the same sentence and is not a background request |
+| Android permissions | `INTERNET` and `ACCESS_COARSE_LOCATION`. `android.hardware.location.network` is `required=false` |
 
 What the app actually handles:
 
 - **ZIP code.** Saved on the device. Also sent with browse, search, and trip planning. The 5-digit ZIP is stored in MongoDB (`ShopperZip`) with a hit count, last-seen time, and sometimes a Kroger location id. It is not tied to a name. The catalog job keeps a short list of recent shopper ZIPs. A price watch can store the same ZIP again, on that watch. In the phone shells, Use my location may send coordinates to `GET /api/geo/zip` so the server can ask the Census geocoder for that ZIP. The coordinates are not stored.
 - **Welcome flag.** `gg-onboarding-done` on the device, so the intro is not shown again. Settings can open it anyway. Not sent to the server.
 - **My list, before sharing.** Saved on the device: items (name, brand, size, quantity), substitute choice, and any per-item alert setting. Plan the trip sends name, brand, quantity, catalog id, UPC, and the substitute choice for that request only. That request is not stored as the list.
-- **Shared lists.** After Share list, the server stores a `SharedList`: items (name, brand, size, quantity, catalog id, checked, and a deletion marker for removed items), an optional display name on items the shopper adds or checks (max 40 characters; blank means no name), a title, edit or view-only, list and item timestamps, and SHA-256 hashes of the share secret and the owner secret. The raw secrets stay in the browser and in the link. Replacing a link keeps up to 10 retired share hashes. There is no expiry. Revoke link sets `revokedAt` and keeps the items. Guests then get “This link was turned off.” The owner can still open the list and can share a new link, which retires the old hash. Neither revoke nor a new link deletes the document. The app has no delete-list API.
-- **Price alerts.** A watch is saved when the list checkbox is on, or when one item is watched on its own. `PriceWatch` stores a random id created in the browser (`gg-device`, not a hardware id and not an advertising id), the list id and name, the ZIP, whether the list checkbox is on, and the watched items: product id, name, brand, watch mode, baseline price, baseline store, and an optional target price. Turning the checkbox off sets `enabled` to false and still uploads the current items. It does not delete the watch. An item set to watch on its own can still be checked. Switching lists sets the previous watch to disabled and clears its items; the watch row stays. `PriceAlert` records (item, store, old and new price, savings, baseline, target, seen time) are not deleted. Opening the panel sets `seenAt`. The API returns the latest 40. There is no expiry.
-- **Web Push.** Only when `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set, and only after the shopper taps “Notify this browser.” The server then stores the endpoint and the `p256dh` and `auth` keys with the same random device id. Turning alerts off does not delete that row. The shopper screen never calls the delete route. The server deletes a subscription when the push service returns 404 or 410. The native shells do not register a phone push token.
-- **Kroger tokens.** After the shopper signs in on Kroger’s site, the access token (and refresh token, when Kroger sends one) is encrypted with AES-256-GCM and kept in an HttpOnly cookie named `kroger_shopper`. It is not written to the database. About 7 days with a refresh token, otherwise about 40 minutes.
+- **Shared lists.** After Share list, the server stores a `SharedList`: items (name, brand, size, quantity, catalog id, checked, and a deletion marker for removed items), an optional display name on items the shopper adds or checks (max 40 characters; blank means no name), a title, edit or view-only, list and item timestamps, and SHA-256 hashes of the share secret and the owner secret. The raw secrets stay in the browser and in the link. Replacing a link keeps up to 10 retired share hashes. There is no expiry. Revoke link sets `revokedAt` and keeps the items. Guests then get “This link was turned off.” The owner can still open the list and can share a new link, which retires the old hash. Neither revoke nor a new link deletes the document. Delete my data removes lists created on this device and invalidates the link. There is no separate control that deletes one list and leaves another.
+- **Price alerts.** A watch is saved when the list checkbox is on, or when one item is watched on its own. `PriceWatch` stores a random id created in the browser (`gg-device`, not a hardware id and not an advertising id), the list id and name, the ZIP, whether the list checkbox is on, and the watched items: product id, name, brand, watch mode, baseline price, baseline store, and an optional target price. Turning the checkbox off sets `enabled` to false and still uploads the current items. It does not delete the watch. An item set to watch on its own can still be checked. Switching lists sets the previous watch to disabled and clears its items; the watch row stays. `PriceAlert` records (item, store, old and new price, savings, baseline, target, seen time) stay until Delete my data. Opening the panel sets `seenAt`. The API returns the latest 40. There is no expiry.
+- **Web Push.** Only when `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set, and only after the shopper taps “Notify this browser.” The server then stores the endpoint and the `p256dh` and `auth` keys with the same random device id. Turning alerts off does not delete that row. Delete my data does, and the page unsubscribes the browser. The server also deletes a subscription when the push service returns 404 or 410. The native shells do not register a phone push token.
+- **Optional Grocery Gitter account.** Off until `AUTH_SECRET` and a provider are set. Sign in with Apple, Google, or an email link. The server stores the provider subject, a verified email when the provider sends one, an optional display name, a hashed session, and one saved list. The raw session token and the raw magic-link token are not stored. Guest mode does not create these rows.
+- **Optional Grocery Gitter Pro.** Off until `REVENUECAT_WEBHOOK_SECRET` is set. Apple or Google charges the subscription. The account stores `pro` or `free` and the period end. No card number is stored. The website does not offer checkout. See `docs/SUBSCRIPTIONS.md`.
+- **Kroger tokens.** After the shopper signs in on Kroger’s site, the access token (and refresh token, when Kroger sends one) is encrypted with AES-256-GCM and kept in an HttpOnly cookie named `kroger_shopper`. About 7 days with a refresh token, otherwise about 40 minutes. If the shopper then signs in to Grocery Gitter, the same sealed blob is copied onto the account so another signed-in device can use the cart link. The plaintext is not stored.
 - **Retailer handoffs.** Kroger, Walmart, Target, weekly-ad (Flipp), and Instacart, as spelled out on `/privacy`. Instacart runs only when the shopper taps it. Kroger and Instacart login pages open in the system browser.
 - **Analytics.** None in the app. The host may keep ordinary request logs (IP address, time, path).
+- **Crash reports.** When `SENTRY_DSN` is set, the website, the server, and the iOS and Android shells send Sentry an error message, stack trace, release git sha, OS or browser, and the page or API path. They do not send an email, a name, the grocery list, a Kroger token, the `kroger_shopper` cookie, other cookies, or Authorization headers. Reports are not tied to the random price-alert id. Sentry holds them. They are not MongoDB rows. With `SENTRY_DSN` unset, nothing is sent.
 - **Sale of data.** No.
-- **Deletion.** Clearing site data removes only this device. Email [CONTACT EMAIL] to ask for a ZIP, a shared list, a watch, alert records, or a push subscription to be removed. The product does not delete those rows by itself.
+- **Deletion.** Settings → **Delete my data**, then type `DELETE`. The control is on the top bar, in My list, and in the footer, on the website and in the Capacitor shells. It removes this device’s saved list and preferences, price watches, alert records, and push subscriptions for this device, shared lists this device created (the link stops working), and the Kroger cookie after a revoke call. If this device is signed in, it also deletes the Grocery Gitter account, including the free or pro entitlement, and the other devices on it. It does not cancel an App Store or Google Play subscription. On iOS and Android it also opens the system browser to `/api/kroger/logout`, because that cookie is set there during Kroger login, not in the WebView. Doing it again is safe and deletes nothing further. ZIP hit counts (`ShopperZip`) and search or list phrases used to prioritize catalog refresh (`CatalogDemand`) are not tied to a device and are left in place. Host request logs are not deleted by the button. Crash reports in Sentry are not deleted by the button: they are not tied to an account. Email [CONTACT EMAIL] if the in-app control does not work, to ask about a ZIP total or a search phrase, or to ask for a crash report to be removed. Include the approximate time and the platform (website, iPhone, or Android) so a matching Sentry event can be deleted. If that is not enough to find it, say so.
 
 The shopper UI does not call the FatSecret catalog route. Do not list that as data the app collects.
 
 ### App Store privacy nutrition labels
 
-Answer “No” to tracking for every type. Do not mark any of this as linked to identity: there is no account, and the random alert id is not tied to a name, email, or phone.
+Answer “No” to tracking for every type. Guest use is not linked to an identity. When sign-in is on, email, the account name, and the account id are linked to the user for app functionality. The random alert id by itself is not an advertising id. Crash reports stay not linked to an identity. If `SENTRY_DSN` is unset, answer “No” for crash data.
+
+Data Linked to You (fill these in only when sign-in is on; leave them off the label while sign-in stays unset):
+
+| Data type | Collected? | Purpose |
+| --- | --- | --- |
+| Contact Info → Name | Yes, when sign-in is on | The account name, when Apple, Google, or the shopper provides one. App Functionality. Linked to the user |
+| Contact Info → Email Address | Yes, when sign-in is on | The verified email from Apple, Google, or the email link. App Functionality. Linked to the user. Deleted with the account |
+| Identifiers → User ID | Yes, when sign-in is on | The account id. App Functionality. Linked to the user |
 
 Data Not Linked to You:
 
 | Data type | Collected? | Purpose |
 | --- | --- | --- |
-| Contact Info → Name | Yes, if the form has no better row for it | The optional display name on a shared list, only when the shopper types one. App Functionality. People with the link can see it. Not an account name |
+| Contact Info → Name | Yes, if the form has no better row for it | The optional display name on a shared list, only when the shopper types one. App Functionality. People with the link can see it. This row is not the account name |
 | Other Contact Info, Health, Financial, Contacts, Sensitive Info | No | |
 | Precise Location | No | The shells request approximate location only. Do not mark precise location |
-| Coarse Location | Yes | The typed ZIP, including the copy stored on a price watch, plus an optional one-time device location in the iOS/Android shells used only to fill that ZIP. App Functionality. Coordinates are not stored |
+| Coarse Location | Yes | The typed ZIP, including the copy stored on a price watch, plus an optional one-time approximate device location in the iOS/Android shells used only to fill that ZIP. App Functionality. Coordinates are not stored and are not linked to the user |
 | User Content → Other User Content | Yes | The grocery list sent when planning a trip, and the shared list stored on the server (items, optional display names, timestamps). App Functionality |
 | Search History | Yes | Search words sent to price a shelf. App Functionality. Not kept as a profile |
 | Identifiers → Device ID | Yes | The random id created in the browser and stored with watches, alerts, and an optional push subscription. App Functionality. Not an advertising identifier |
-| Identifiers → User ID | No | The Kroger token stays in the cookie. The share secrets are not stored in the clear |
-| Purchases | No | Retailers charge the shopper on their own sites |
+| Purchases | Yes, only if subscriptions are on | Apple and Google process Grocery Gitter Pro. The account stores the plan (free or pro) and when it ends. No card number. Leave this off the label while RevenueCat stays unset |
 | Usage Data → Product Interaction | Yes | Department and product requests. App Functionality |
-| Diagnostics → Other Diagnostic Data | Yes | Host request logs (IP, time, path), if you can read them. App Functionality. Not a crash SDK |
+| Diagnostics → Crash Data | Yes, when `SENTRY_DSN` is set | Sentry crash and error reports (stack, release git sha, OS or browser, page or API path). App Functionality. Not linked to identity. No email, token, or Kroger cookie. Answer No when the DSN is unset |
+| Diagnostics → Other Diagnostic Data | Yes | Host request logs (IP, time, path), if you can read them. App Functionality. Separate from Sentry |
 | Advertising Data | No | |
 
 Privacy Policy URL: the deployed `/privacy` link above. Support URL: the same site’s home page.
@@ -121,24 +150,26 @@ Export compliance: `Info.plist` sets `ITSAppUsesNonExemptEncryption` to false. T
 
 - Collect or share user data: **Yes**
 - All collected data encrypted in transit: **Yes** (HTTPS)
-- Users can ask for deletion: **Yes.** They clear on-device data themselves. Revoke link does not delete the shared list. Turning alerts off does not delete the watch, the alert history, or a push subscription. For a stored ZIP, a shared list, a watch, alert records, or a push subscription, they email [CONTACT EMAIL]. There is no account to delete
+- Users can ask for deletion: **Yes.** Settings → Delete my data (type DELETE). With no session, that deletes the device’s server rows. With a session, it also deletes the Grocery Gitter account, including the free or pro entitlement. It does not cancel an App Store or Google Play subscription. It invalidates shared lists that device created, unsubscribes push, and drops the Kroger token. Revoke link by itself still does not delete a list, and turning alerts off still does not delete a watch. Aggregate ZIP totals and search phrases are not linked to the shopper. Crash reports are not tied to an account and are not removed by the button. Email [CONTACT EMAIL] if the in-app control does not work, or with the approximate time and whether it was the website, iPhone, or Android to ask for a crash report to be removed
 - Data sold: **No**
 - Data shared for advertising: **No**
 
 | Play data type | Collected | Shared | Why |
 | --- | --- | --- | --- |
-| Location → Approximate | Yes | Yes, with the retailer APIs that need a ZIP (Kroger, Walmart, Flipp, Instacart, and a Target feed if you configured one). The Census geocoder receives coordinates only for the optional shell lookup, and that request is not stored | Typed ZIP, for prices, the catalog refresh, and a price watch. Also stored as `ShopperZip`. Optional approximate device location in the shells, not stored |
-| Location → Precise | No | No | Android does not declare fine location. The app asks for coarse location only |
-| Personal info → Name | Yes | With other people who open the share link, not with advertisers | Optional display name, only if the shopper types one. Not an account |
-| Other personal info (email, address, phone, user id) | No | No | |
-| Financial info | No | No | Prices on a watch are product prices, not the shopper’s payment data |
+| Location → Approximate | Yes | Yes, with the retailer APIs that need a ZIP (Kroger, Walmart, Flipp, Instacart, and a Target feed if you configured one). The Census geocoder receives coordinates only for the optional shell lookup, and that request is not stored | Typed ZIP, for prices, the catalog refresh, and a price watch. Also stored as `ShopperZip`. Optional approximate device location in the shells, used once to fill a ZIP, not stored, not linked to the user |
+| Location → Precise | No | No | Android declares `ACCESS_COARSE_LOCATION` only. The app does not declare `ACCESS_FINE_LOCATION` |
+| Personal info → Name | Yes | The shared-list display name is shared with people who open the link, not with advertisers. The account name is not shared | Optional display name on a shared list. When sign-in is on, the account name is also stored and linked to the user for app functionality |
+| Personal info → Email address | Only if sign-in is on | No | Linked to the user for app functionality. Apple, Google, or the email link. Not sold. Deleted with the account |
+| Personal info → User IDs | Only if sign-in is on | No | The account id, linked to the user for app functionality. Leave this off the form while sign-in stays unset |
+| Financial info | Purchase history only, and only if subscriptions are on | No | Plan (free or pro) and the period end. No card number. Apple or Google charges the shopper |
 | App activity → In-app search history | Yes | Yes, the search is sent to the price source for that request | Not kept as a profile |
 | App activity → Other user-generated content | Yes | With other people who open the share link. Also with Instacart or Kroger only when the shopper uses that handoff | Shared lists are stored (items, timestamps, hashed secrets). Trip planning sends the list for that request. Alert records stay on our server |
-| App info → Diagnostics | Yes | No | Host request logs |
-| Device or other IDs | Yes | No | The random id created in the browser for watches, alerts, and an optional push subscription. Not an advertising id |
+| App info → Crash logs | Yes, when `SENTRY_DSN` is set | No | Sentry crash and error reports. Not linked to an account. No email, token, or Kroger cookie. Answer No when the DSN is unset |
+| App info → Diagnostics | Yes | No | Host request logs. Separate from crash logs |
+| Device or other IDs | Yes | No | The random id created in the browser for watches, alerts, and an optional push subscription. Not an advertising id. Not sent with crash reports |
 | Photos, audio, files, contacts, calendar, messages | No | No | |
 
-The Web Push endpoint and keys are stored only when VAPID is configured and the shopper opts in. Treat them as the device-id / app-functionality data above, used only to deliver a notification. They are removed when the push service says the subscription is gone.
+The Web Push endpoint and keys are stored only when VAPID is configured and the shopper opts in. Treat them as the device-id / app-functionality data above, used only to deliver a notification. They are removed by Delete my data, and when the push service says the subscription is gone.
 
 Content rating: shopping tool, no ads. User-generated content is the shared grocery list (item names and an optional display name) shown to people who have the link. Say that in the questionnaire.
 

@@ -88,7 +88,7 @@ img { max-width: 100%; display: block; }
 .brand-kicker { margin: 0; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .brand-title { margin: 0; font-family: var(--display); font-size: 1.25rem; }
 .search { position: relative; flex: 1 1 240px; min-width: 0; }
-.search input, .zip input, .filters select, .filters input, .sort select {
+.search input, .zip input, .filters select, .filters input, .sort select, .delete-box input, .account-box input {
   width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--surface); padding: 0 12px;
 }
@@ -133,10 +133,35 @@ img { max-width: 100%; display: block; }
   border-radius: 999px; background: var(--accent-ink); color: var(--accent); font-size: 0.8rem;
 }
 .count-pill[hidden] { display: none; }
-.alerts-toggle {
+.alerts-toggle, .settings-btn {
   min-height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
-  color: var(--ink); padding: 0 12px; font-weight: 700;
+  color: var(--ink); padding: 0 12px; font: inherit; font-weight: 700;
 }
+.linkish {
+  color: var(--muted); background: none; border: 0; padding: 0; min-height: 44px;
+  font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.delete-box h3, .account-box h3 { margin: 4px 0 0; font-size: 1.05rem; }
+.delete-box label, .account-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.account-box { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.account-box[hidden],
+.magic-form[hidden],
+#paywall-manage[hidden],
+#paywall-restore[hidden],
+#auth-message[hidden] { display: none; }
+.paywall-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 6px; }
+.paywall-packages, .paywall-actions { display: flex; flex-direction: column; gap: 8px; }
+.paywall-actions a { min-height: 44px; display: inline-flex; align-items: center; }
+.account-actions, .magic-form { display: flex; flex-direction: column; gap: 8px; }
+.apple-btn {
+  min-height: 44px; border-radius: 12px; border: 0; background: #000; color: #fff;
+  padding: 0 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
+.danger {
+  min-height: 44px; border-radius: 12px; border: 0; background: var(--sale); color: var(--sale-ink);
+  padding: 0 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
+.danger:disabled { opacity: 0.45; cursor: not-allowed; }
 .alerts-toggle .count-pill { background: var(--sale); color: var(--sale-ink); }
 
 .body {
@@ -446,9 +471,9 @@ img { max-width: 100%; display: block; }
 .onboard-dots { display: flex; gap: 6px; }
 .onboard-dots span { width: 8px; height: 8px; border-radius: 999px; background: var(--line); }
 .onboard-dots span[data-current="true"] { background: var(--accent); }
-#onboard-zip-fields, #onboard-kroger-fields { display: flex; flex-direction: column; gap: 8px; }
-#onboard-zip-fields[hidden], #onboard-kroger-fields[hidden],
-#onboard-location[hidden], #onboard-kroger[hidden], #onboard-back[hidden],
+#onboard-account-fields, #onboard-zip-fields, #onboard-kroger-fields { display: flex; flex-direction: column; gap: 8px; }
+#onboard-account-fields[hidden], #onboard-zip-fields[hidden], #onboard-kroger-fields[hidden],
+#onboard-location[hidden], #onboard-kroger[hidden], #onboard-sign-in[hidden], #onboard-back[hidden],
 #settings-kroger-connect[hidden] { display: none; }
 #onboard-zip-fields label { font-size: 0.85rem; color: var(--muted); }
 #onboard-zip {

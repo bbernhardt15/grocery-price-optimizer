@@ -62,6 +62,27 @@ export const EMPTY_STATES = {
   },
 };
 
+/**
+ * Alerts stay a normal empty state until billing is enforced and this plan
+ * cannot turn them on. A missing status fails open, matching the server.
+ * @param {{ billing?: { enforced?: boolean, pro?: boolean, limits?: { priceAlerts?: boolean } } | null, alertsOn?: boolean }} [options]
+ */
+export function alertsEmptyChoice(options = {}) {
+  if (options.alertsOn) return emptyState("alertsOn");
+  const billing = options.billing;
+  const enforced = Boolean(billing?.enforced);
+  const allowed = !enforced || Boolean(billing?.pro) || Boolean(billing?.limits?.priceAlerts);
+  if (!allowed) {
+    return {
+      title: "No price alerts",
+      body: "Price alerts are part of Grocery Gitter Pro.",
+      action: "See Pro",
+      actionId: "see-pro",
+    };
+  }
+  return emptyState("alerts");
+}
+
 /** @param {string} kind */
 export function emptyState(kind) {
   const state = EMPTY_STATES[kind] || EMPTY_STATES.network;

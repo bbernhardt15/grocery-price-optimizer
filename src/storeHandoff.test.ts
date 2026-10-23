@@ -426,7 +426,53 @@ describe("buildStoreHandoff", () => {
     assert.equal(costco.action.type, "search_deeplink");
     assert.match(costco.action.detail ?? "", /membership/i);
     assert.match(costco.action.detail ?? "", /cart-write is not available/i);
+    assert.match(costco.action.detail ?? "", /weekly ad, not a shelf price/i);
     assert.equal(costco.action.type, "search_deeplink");
+  });
+
+  it("sends circular banners to the store site and never a cart", () => {
+    const milk = {
+      query: "milk",
+      name: "Whole Milk",
+      brand: "Store",
+      storeName: "Jewel-Osco",
+      price: 3.19,
+      quantity: 1,
+      itemTotal: 3.19,
+      unit: "gal",
+      normalizedUnit: "gal",
+      productId: "999001",
+      upc: "041415000001",
+      priceSource: "weekly_ad" as const,
+    };
+    const banners = [
+      "Jewel-Osco",
+      "Vons",
+      "Acme",
+      "Albertsons",
+      "Tom Thumb",
+      "Randalls",
+      "Pavilions",
+      "Stop & Shop",
+      "Sprouts",
+      "Winn-Dixie",
+      "H-E-B",
+      "Meijer",
+    ];
+    for (const storeName of banners) {
+      const handoff = buildStoreHandoff({
+        storeName,
+        items: [{ ...milk, storeName }],
+        subtotal: 3.19,
+      });
+      assert.equal(handoff.action.type, "search_deeplink", storeName);
+      assert.notEqual(handoff.action.type, "kroger_cart");
+      assert.notEqual(handoff.action.type, "walmart_cart");
+      assert.match(handoff.action.detail ?? "", /not a cart fill/i, storeName);
+      assert.match(handoff.action.detail ?? "", /weekly ad, not a shelf price/i, storeName);
+      assert.match(handoff.action.url ?? "", /Whole%20Milk/, storeName);
+      assert.equal((handoff.action.url ?? "").includes("999001"), false, storeName);
+    }
   });
 });
 

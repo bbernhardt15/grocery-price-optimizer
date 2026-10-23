@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=onboard-1" />
+    <link rel="stylesheet" href="/styles.css?v=onboard-3" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -76,6 +76,7 @@
             <span>ZIP</span>
             <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" aria-describedby="zip-hint" />
           </label>
+          <button type="button" class="settings-btn settings-open">Settings</button>
           <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
             <span aria-hidden="true" id="theme-glyph">◐</span>
           </button>
@@ -168,6 +169,7 @@
             <nav aria-label="Legal">
               <a href="/privacy">Privacy</a>
               <a href="/terms">Terms</a>
+              <button type="button" class="linkish settings-open">Settings</button>
             </nav>
           </footer>
         </main>
@@ -231,6 +233,7 @@
           <nav class="panel-legal" aria-label="App information">
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
+            <button type="button" class="linkish settings-open">Settings</button>
           </nav>
         </aside>
       </div>
@@ -275,6 +278,9 @@
         <h2 id="onboard-title" tabindex="-1">Pick items</h2>
         <p id="onboard-body">Check groceries as you browse. Your list stays on this device.</p>
         <div id="onboard-extra">
+          <div id="onboard-account-fields" hidden>
+            <button type="button" id="onboard-sign-in" class="ghost" hidden>Sign in</button>
+          </div>
           <div id="onboard-zip-fields" hidden>
             <label for="onboard-zip">ZIP code</label>
             <input id="onboard-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" aria-describedby="onboard-zip-hint" />
@@ -300,6 +306,33 @@
           <h2 id="settings-title" tabindex="-1">Settings</h2>
           <button type="button" class="text-btn" id="settings-close">Close</button>
         </div>
+        <section id="account-box" class="account-box" hidden>
+          <h3>Account</h3>
+          <p id="account-status" class="muted">You can shop without an account. Sign in to keep this list and your alerts on your other devices.</p>
+          <div id="account-signed-out">
+            <div class="account-actions">
+              <button type="button" class="apple-btn" id="sign-in-apple" hidden>Sign in with Apple</button>
+              <button type="button" class="ghost" id="sign-in-google" hidden>Continue with Google</button>
+            </div>
+            <form id="magic-link-form" class="magic-form" hidden>
+              <label>
+                Email
+                <input id="magic-email" type="email" autocomplete="email" maxlength="200" placeholder="you@example.com" />
+              </label>
+              <button type="submit" class="ghost">Email me a sign-in link</button>
+            </form>
+            <p id="auth-message" class="muted" hidden></p>
+          </div>
+          <div id="account-signed-in" hidden>
+            <p id="account-who"></p>
+            <button type="button" class="ghost" id="sign-out">Sign out</button>
+          </div>
+        </section>
+        <section id="plan-box" class="account-box">
+          <h3>Grocery Gitter Pro</h3>
+          <p id="plan-status" class="muted">One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.</p>
+          <button type="button" class="ghost" id="open-paywall">See Pro</button>
+        </section>
         <div class="settings-list">
           <button type="button" class="ghost" id="settings-theme">Theme</button>
           <p id="settings-zip" class="muted">No ZIP saved yet.</p>
@@ -308,11 +341,50 @@
           <button type="button" class="ghost" id="settings-kroger-connect" hidden>Connect Kroger</button>
           <button type="button" class="primary" id="settings-welcome">Show welcome</button>
         </div>
+        <section class="delete-box" aria-labelledby="delete-data-title">
+          <h3 id="delete-data-title">Delete my data</h3>
+          <p class="muted">
+            This removes the list on this device, shared lists you created, price alerts, and notifications.
+            It also signs this browser out of Kroger. If you are signed in, it deletes the Grocery Gitter account too.
+            It does not remove crash reports. You cannot undo it.
+          </p>
+          <label>
+            Type DELETE to confirm
+            <input id="delete-confirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+          </label>
+          <button type="button" class="danger" id="delete-data-btn" disabled>Delete my data</button>
+          <p id="delete-error" class="status" role="alert" hidden></p>
+        </section>
+      </div>
+    </dialog>
+    <dialog id="paywall-dialog" class="sheet" aria-labelledby="paywall-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="paywall-title">Grocery Gitter Pro</h2>
+          <button type="button" class="text-btn" id="paywall-close">Close</button>
+        </div>
+        <ul class="paywall-list">
+          <li>Free compares one store for the whole list and includes one shared list.</li>
+          <li>Pro splits the list across stores when that costs less.</li>
+          <li>Pro adds price alerts, unlimited shared lists, and cart handoffs.</li>
+        </ul>
+        <p id="paywall-note" class="muted"></p>
+        <div id="paywall-packages" class="paywall-packages"></div>
+        <div class="paywall-actions">
+          <button type="button" class="ghost" id="paywall-restore">Restore purchases</button>
+          <a id="paywall-manage" href="https://apps.apple.com/account/subscriptions">Manage subscription</a>
+        </div>
+        <p class="panel-legal">
+          <a id="paywall-terms" href="/terms">Terms</a>
+          <a id="paywall-privacy" href="/privacy">Privacy</a>
+        </p>
+        <p id="paywall-error" class="status" role="alert" hidden></p>
       </div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
-    <script type="module" src="/app.js?v=onboard-1"></script>
+    <script src="/sentry-loader.js?v=sentry-1"></script>
+    <script type="module" src="/app.js?v=onboard-3"></script>
   </body>
 </html>

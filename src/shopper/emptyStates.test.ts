@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  alertsEmptyChoice,
   catalogEmptyKind,
   EMPTY_STATES,
   emptyState,
@@ -31,6 +32,19 @@ describe("empty states", () => {
       assert.ok(state.actionId, kind);
     }
     assert.equal(emptyState("alerts").actionId, "enable-alerts");
+    assert.equal(alertsEmptyChoice({ billing: null, alertsOn: false }).actionId, "enable-alerts");
+    assert.equal(alertsEmptyChoice({ billing: { enforced: false, pro: false }, alertsOn: false }).actionId, "enable-alerts");
+    assert.equal(
+      alertsEmptyChoice({ billing: { enforced: true, pro: true, limits: { priceAlerts: true } }, alertsOn: false }).actionId,
+      "enable-alerts"
+    );
+    const proOnly = alertsEmptyChoice({
+      billing: { enforced: true, pro: false, limits: { priceAlerts: false } },
+      alertsOn: false,
+    });
+    assert.equal(proOnly.actionId, "see-pro");
+    assert.match(proOnly.body, /Pro/);
+    assert.equal(alertsEmptyChoice({ billing: { enforced: true, pro: false }, alertsOn: true }).actionId, "browse");
     assert.equal(emptyState("alertsOn").actionId, "browse");
     assert.equal(emptyState("stores").title, "No stores near this ZIP");
     assert.equal(emptyState("shared").action, "Share list");

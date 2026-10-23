@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   FLIPP_FLYERS,
   FLIPP_FLYERKIT_BASE,
   clearFlippSearchCache,
+  flippWeekKey,
+  listWeeklyAdBanners,
   weeklyAdNameMatches,
 } from "./flipp/client";
 import {
@@ -14,11 +16,16 @@ import {
 
 const originalFetch = globalThis.fetch;
 
+beforeEach(() => {
+  process.env.FLIPP_MIN_INTERVAL_MS = "0";
+});
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   clearFlippSearchCache();
   delete process.env.FLIPP_ENABLED;
   delete process.env.FLIPP_ACCESS_TOKEN;
+  delete process.env.FLIPP_MIN_INTERVAL_MS;
 });
 
 function flippItem(overrides: Record<string, unknown> = {}) {
@@ -220,5 +227,51 @@ describe("FlippDealsProvider", () => {
     assert.equal(products[0].storeName, "Meijer");
     assert.equal(products[0].price, 2.5);
     assert.equal(products[0].priceSource, "weekly_ad");
+  });
+
+  it("keys the circular cache by America/New_York week", () => {
+    assert.equal(flippWeekKey(new Date("2026-10-23T15:00:00Z")), "2026-W43");
+    assert.equal(flippWeekKey(new Date("2026-10-26T03:00:00Z")), "2026-W43");
+    assert.equal(flippWeekKey(new Date("2026-10-26T12:00:00Z")), "2026-W44");
+  });
+
+  it("reuses the ZIP flyer index for the week and does not search a banner that is absent", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    let calls = 0;
+    globalThis.fetch = async (input) => {
+      calls += 1;
+      const url = String(input);
+      if (url.startsWith(`${FLIPP_FLYERS}?`)) {
+        return Response.json({
+          flyers: [{ id: 7, merchant: "ALDI", merchant_id: 2353, name: "Weekly Ad" }],
+        });
+      }
+      if (url.startsWith(`${FLIPP_FLYERS}/7`)) {
+        return Response.json({ items: [flippItem()] });
+      }
+      return Response.json({
+        items: [flippItem({ name: "Should Not Search", merchant_name: "Publix", merchant_id: 2361 })],
+      });
+    };
+
+    const first = await listWeeklyAdBanners("30303");
+    const second = await listWeeklyAdBanners("30303");
+    assert.deepEqual(
+      first.map((banner) => banner.storeName),
+      ["Aldi"]
+    );
+    assert.deepEqual(second, first);
+
+    const publix = await new FlippDealsProvider("Publix").searchProducts("milk", {
+      zipCode: "30303",
+    });
+    assert.deepEqual(publix, []);
+
+    const aldi = await new FlippDealsProvider("Aldi").searchProducts("milk", {
+      zipCode: "30303",
+    });
+    assert.equal(aldi.length, 1);
+    assert.equal(aldi[0].priceSource, "weekly_ad");
+    assert.equal(calls, 2);
   });
 });

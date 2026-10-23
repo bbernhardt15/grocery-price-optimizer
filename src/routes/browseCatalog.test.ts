@@ -88,6 +88,7 @@ describe("browse catalog routes", () => {
 
   it("shows Target and Aldi weekly-ad prices for a ZIP and asks for a ZIP when it is missing", async () => {
     process.env.FLIPP_ENABLED = "true";
+    process.env.FLIPP_MIN_INTERVAL_MS = "0";
     clearFlippSearchCache();
     const original = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -128,7 +129,8 @@ describe("browse catalog routes", () => {
       assert.equal(response.status, 200);
       const body = (await response.json()) as {
         items: Array<{ name: string; offers: Array<{ storeName: string; priceSource: string; price: number }> }>;
-        coverage: Array<{ storeName: string; mode: string; label: string }>;
+        coverage: Array<{ storeName: string; mode: string; label: string; detail: string }>;
+        weeklyAdBanners?: Array<{ storeName: string }>;
         warnings: string[];
       };
       const weekly = body.items.find((item) =>
@@ -139,9 +141,33 @@ describe("browse catalog routes", () => {
       const target = body.coverage.find((store) => store.storeName === "Target");
       assert.equal(target?.mode, "weekly_ad_only");
       assert.equal(target?.label, "Weekly ad only");
-      const foodLion = body.coverage.find((store) => store.storeName === "Food Lion");
-      assert.equal(foodLion?.mode, "weekly_ad_only");
+      const publix = body.coverage.find((store) => store.storeName === "Publix");
+      assert.equal(publix?.mode, "weekly_ad_only");
+      assert.match(publix?.detail ?? "", /not a shelf price/i);
+      const sprouts = body.coverage.find((store) => store.storeName === "Sprouts");
+      assert.equal(sprouts?.mode, "weekly_ad_only");
+      const stopAndShop = body.coverage.find((store) => store.storeName === "Stop & Shop");
+      assert.equal(stopAndShop?.mode, "weekly_ad_only");
+      assert.equal(body.coverage.find((store) => store.storeName === "Food Lion"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Safeway"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Hy-Vee"), undefined);
+      assert.deepEqual(
+        (body.weeklyAdBanners ?? []).map((banner) => banner.storeName),
+        ["Aldi", "Target"]
+      );
       assert.equal(body.warnings?.some((warning) => /5-digit US ZIP/i.test(warning)) ?? false, false);
+
+      const listed = await fetch(`${origin}/api/catalog/coverage?zip=45202`);
+      assert.equal(listed.status, 200);
+      const listedBody = (await listed.json()) as {
+        zip: string;
+        weeklyAdBanners: Array<{ storeName: string; merchantId?: number }>;
+      };
+      assert.equal(listedBody.zip, "45202");
+      assert.deepEqual(
+        listedBody.weeklyAdBanners.map((banner) => banner.storeName),
+        ["Aldi", "Target"]
+      );
 
       const missingZip = await fetch(`${origin}/api/catalog/browse?q=milk`);
       assert.equal(missingZip.status, 200);
@@ -150,6 +176,7 @@ describe("browse catalog routes", () => {
     } finally {
       globalThis.fetch = original;
       delete process.env.FLIPP_ENABLED;
+      delete process.env.FLIPP_MIN_INTERVAL_MS;
       clearFlippSearchCache();
     }
   });

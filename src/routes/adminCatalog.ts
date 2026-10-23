@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
+import { dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
 import { adminAuthorized, adminTokenConfigured, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus } from "../ingest/status";
 
 const router = Router();
@@ -117,7 +117,7 @@ router.post("/admin/catalog/recategorize", async (req: Request, res: Response) =
     return;
   }
   try {
-    res.json(await recategorizeCatalog());
+    res.json(await startRecategorizeJob());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
