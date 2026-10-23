@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { deleteAccount } from "../auth/accountDeletion";
+import { requestAuth } from "../auth/middleware";
+import { clearSessionCookieHeader } from "../auth/session";
 import {
   clearShopperCookieHeader,
   KROGER_SHOPPER_COOKIE,
@@ -17,11 +20,29 @@ router.delete("/me/data", async (req, res) => {
   }
   try {
     const deleted = await deleteShopperData(parsed.deviceId, parsed.lists);
+    const auth = requestAuth(res);
+    const account = auth ? await deleteAccount(auth.accountId) : null;
+    if (account?.deleted) {
+      deleted.priceWatches += account.priceWatches;
+      deleted.priceAlerts += account.priceAlerts;
+      deleted.pushSubscriptions += account.pushSubscriptions;
+      deleted.sharedLists += account.sharedLists;
+      res.append("Set-Cookie", clearSessionCookieHeader());
+    }
     const sealed = readRequestCookie(req.headers.cookie, KROGER_SHOPPER_COOKIE);
-    const kroger = await revokeSealedShopperCookie(sealed);
+    const cookieResult = await revokeSealedShopperCookie(sealed);
+    const accountResult = account?.krogerSealed && account.krogerSealed !== sealed
+      ? await revokeSealedShopperCookie(account.krogerSealed)
+      : { hadToken: false, revoked: false };
+    const kroger = {
+      hadToken: cookieResult.hadToken || accountResult.hadToken,
+      revoked: (cookieResult.hadToken ? cookieResult.revoked : true) && (accountResult.hadToken ? accountResult.revoked : true) && (cookieResult.hadToken || accountResult.hadToken),
+    };
+    if (!cookieResult.hadToken && !accountResult.hadToken) kroger.revoked = false;
     res.append("Set-Cookie", clearShopperCookieHeader());
     res.json({
       deleted,
+      account: { deleted: Boolean(account?.deleted) },
       kroger: { ...kroger, cookieCleared: true as const },
       notLinkedToYou: NOT_LINKED_TO_YOU,
     });

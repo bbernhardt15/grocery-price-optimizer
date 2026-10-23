@@ -264,11 +264,34 @@
           <h2 id="settings-title">Settings</h2>
           <button type="button" class="text-btn" id="settings-close">Close</button>
         </div>
+        <section id="account-box" class="account-box" hidden>
+          <h3>Account</h3>
+          <p id="account-status" class="muted">You can shop without an account. Sign in to keep this list and your alerts on your other devices.</p>
+          <div id="account-signed-out">
+            <div class="account-actions">
+              <button type="button" class="apple-btn" id="sign-in-apple" hidden>Sign in with Apple</button>
+              <button type="button" class="ghost" id="sign-in-google" hidden>Continue with Google</button>
+            </div>
+            <form id="magic-link-form" class="magic-form" hidden>
+              <label>
+                Email
+                <input id="magic-email" type="email" autocomplete="email" maxlength="200" placeholder="you@example.com" />
+              </label>
+              <button type="submit" class="ghost">Email me a sign-in link</button>
+            </form>
+            <p id="auth-message" class="muted" hidden></p>
+          </div>
+          <div id="account-signed-in" hidden>
+            <p id="account-who"></p>
+            <button type="button" class="ghost" id="sign-out">Sign out</button>
+          </div>
+        </section>
         <section class="delete-box" aria-labelledby="delete-data-title">
           <h3 id="delete-data-title">Delete my data</h3>
           <p class="muted">
             This removes the list on this device, shared lists you created, price alerts, and notifications.
-            It also signs this browser out of Kroger. You cannot undo it.
+            It also signs this browser out of Kroger. If you are signed in, it deletes the Grocery Gitter account too.
+            You cannot undo it.
           </p>
           <label>
             Type DELETE to confirm

@@ -178,7 +178,7 @@ Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the 
 
 ## Share a list
 
-A shopper can share the list on this device. There is still no account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item.
+A shopper can share the list on this device without an account. The device keeps a secret for that saved list, plus an optional name ("Sam", "Alex") that is only used to label who added or checked an item. Sign-in is optional and stays hidden until it is configured. See [Optional accounts](docs/ACCOUNTS.md).
 
 Tap **Share list**. Grocery Gitter creates a long random link. On a phone it opens the system share sheet (`navigator.share`, or the Capacitor Share plugin when `Capacitor.Plugins.Share` is present). Otherwise it copies the link.
 

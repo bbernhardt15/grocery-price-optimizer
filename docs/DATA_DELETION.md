@@ -1,6 +1,6 @@
 # Delete my data
 
-Grocery Gitter has no account. A shopper still needs a way to delete the data this device stored before the iOS app ships. Apple expects that control inside the app. The same control is on the website and in the Capacitor shells.
+A shopper can use Grocery Gitter with no account. Sign-in is optional. Either way, a shopper needs a way to delete the data this device stored. Apple expects that control inside the app. The same control is on the website and in the Capacitor shells.
 
 Open **Settings** (top bar, My list, or the footer). Choose **Delete my data**. Type `DELETE`. The app calls `DELETE /api/me/data`, clears this device, and loads a fresh start at `/`.
 
@@ -53,6 +53,24 @@ No `sessionStorage` keys are used. The Kroger cookie is HttpOnly, so the page ca
 | `SharedList` | Hashes of the share secret and the owner secret, up to 10 retired share hashes, title, edit or view-only, `revokedAt`, items (name, brand, size, quantity, catalog id, checked, optional display name, timestamps, deletion markers), and a sequence number. The raw secrets are not stored. | The document is deleted when the owner secret matches. Live listeners are notified so an open link refreshes and then fails. Revoke link, by itself, still does not delete the document. |
 
 A guest who only has the share link can delete their own device rows. They cannot delete the owner’s list.
+
+### Account, when this browser is signed in
+
+`DELETE /api/me/data` still requires `deviceId`. If the request also has a session (`Authorization: Bearer` or the `gg_session` cookie), the account is deleted after the device rows:
+
+| Collection | Delete action |
+| --- | --- |
+| `Account` | The document, including the sealed Kroger blob and the sealed share tokens. |
+| `AuthIdentity` | Apple, Google, and email subjects for that account. |
+| `AuthSession` | Every session, not only this device. The response also clears `gg_session`. |
+| `MagicLink` | Unused links for that email address. |
+| `SavedList` | The synced list. |
+| `PriceWatch`, `PriceAlert`, `PushSubscription` | Rows with that `accountId`, including another device on the same account. |
+| `SharedList` | Lists tagged with that `accountId`. Collaborator watches of a sealed share token are deleted too. |
+
+Signing out (`POST /api/auth/logout`) clears this session only. It does not delete the account. A request with no session still deletes only this device, and the response includes `account.deleted: false`.
+
+The response adds `"account": { "deleted": true }` or `"deleted": false`. The `deleted` counts include rows removed with the account.
 
 A rotated (retired) share token can still identify the document when the owner secret matches. Watches are removed for the token the caller presented. A collaborator’s watch that still uses an older token, which this device no longer has, stays until that collaborator uses Delete my data. The old link no longer opens the list, because the document is gone.
 
