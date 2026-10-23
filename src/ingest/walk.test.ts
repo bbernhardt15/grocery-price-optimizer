@@ -116,6 +116,82 @@ describe("walmart catalog walk", () => {
     assert.equal(leaves.find((leaf) => leaf.id === "formula")?.departmentId, "baby");
   });
 
+  it("crawls grocery misses and skips general-merchandise roots", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "food",
+          name: "Food",
+          path: "Food",
+          children: [
+            { id: "condiments", name: "Condiments", path: "Food", children: [] },
+            { id: "spices", name: "Spices & Seasonings", path: "Food", children: [] },
+            { id: "gifts", name: "Food Gifts", path: "Food", children: [] },
+            { id: "mixers", name: "Mixers", path: "Food", children: [] },
+            { id: "tea", name: "Tea", path: "Food", children: [] },
+          ],
+        },
+        {
+          id: "health",
+          name: "Health and Medicine",
+          path: "Health and Medicine",
+          children: [
+            { id: "vitamins", name: "Vitamins and Supplements", path: "Health and Medicine", children: [] },
+            { id: "massage", name: "Massage", path: "Health and Medicine", children: [] },
+            { id: "purifier", name: "Air Purifiers", path: "Health and Medicine", children: [] },
+          ],
+        },
+        {
+          id: "baby",
+          name: "Baby",
+          path: "Baby",
+          children: [
+            { id: "pants", name: "Training Pants", path: "Baby", children: [] },
+            { id: "bassinet", name: "Bassinets", path: "Baby", children: [] },
+          ],
+        },
+        {
+          id: "pets",
+          name: "Pets",
+          path: "Pets",
+          children: [
+            { id: "dog-food", name: "Dog Food", path: "Pets", children: [] },
+            { id: "dog-toys", name: "Dog Toys", path: "Pets", children: [] },
+          ],
+        },
+        {
+          id: "industrial",
+          name: "Industrial & Scientific",
+          path: "Industrial & Scientific",
+          children: [
+            { id: "janitorial", name: "Janitorial", path: "Industrial & Scientific", children: [] },
+            { id: "strainers", name: "Drain Strainers", path: "Industrial & Scientific", children: [] },
+          ],
+        },
+        { id: "jewelry", name: "Jewelry", path: "Jewelry", children: [{ id: "rings", name: "Rings", path: "Jewelry", children: [] }] },
+        {
+          id: "office",
+          name: "Office Supplies",
+          path: "Office Supplies",
+          children: [{ id: "shredders", name: "Paper Shredders", path: "Office Supplies", children: [] }],
+        },
+        {
+          id: "home",
+          name: "Home Improvement",
+          path: "Home Improvement",
+          children: [{ id: "gloves", name: "Work Gloves", path: "Home Improvement", children: [] }],
+        },
+      ],
+    });
+    const ids = leaves.map((leaf) => leaf.id).sort();
+    assert.deepEqual(ids, ["condiments", "dog-food", "gifts", "janitorial", "mixers", "pants", "spices", "tea", "vitamins"]);
+    assert.equal(leaves.find((leaf) => leaf.id === "vitamins")?.departmentId, "personal-care");
+    assert.equal(leaves.find((leaf) => leaf.id === "pants")?.departmentId, "baby");
+    assert.equal(leaves.find((leaf) => leaf.id === "janitorial")?.departmentId, "household");
+    assert.equal(leaves.find((leaf) => leaf.id === "dog-food")?.departmentId, "pet");
+    assert.equal(leaves.find((leaf) => leaf.id === "gifts")?.departmentId, "pantry");
+  });
+
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
     assert.equal(walmartPagePath("milk", null), "/paginated/items?category=milk&count=25");
     assert.equal(

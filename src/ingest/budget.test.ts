@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
-import { lookupCallsForTick } from "./config";
+import { lookupCallsForTick, tickCallSplit } from "./config";
 
 describe("lookup share", () => {
   it("gives lookups a fraction of the tick and at least one call when the share is above zero", () => {
@@ -10,6 +10,13 @@ describe("lookup share", () => {
     assert.equal(lookupCallsForTick(4, 0.25), 1);
     assert.equal(lookupCallsForTick(4, 1), 4);
     assert.equal(lookupCallsForTick(4, 0), 0);
+  });
+
+  it("reserves lookup first, then refresh, and leaves the rest for discovery", () => {
+    assert.deepEqual(tickCallSplit(4, 0.5, 0.3), { lookup: 2, refresh: 1, discovery: 1 });
+    assert.deepEqual(tickCallSplit(4, 0.5, 0), { lookup: 2, refresh: 0, discovery: 2 });
+    assert.deepEqual(tickCallSplit(1, 0.5, 0.3), { lookup: 1, refresh: 0, discovery: 0 });
+    assert.deepEqual(tickCallSplit(4, 1, 0.3), { lookup: 4, refresh: 0, discovery: 0 });
   });
 });
 

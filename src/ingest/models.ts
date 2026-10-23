@@ -58,6 +58,10 @@ const offerSchema = new Schema(
     productUrl: { type: String },
     priceSource: { type: String, enum: ["live", "seed"], default: "live" },
     lastSeenAt: { type: Date, required: true },
+    /** Set by the admin exclude action. Refresh will not spend a call on this offer. */
+    refreshExcluded: { type: Boolean, default: false },
+    /** Last refresh attempt, including a miss. Tried again after a day. */
+    refreshAttemptAt: { type: Date },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -71,6 +75,7 @@ offerSchema.index({ productKey: 1, storeName: 1, locationId: 1 }, { unique: true
 offerSchema.index({ storeName: 1, locationId: 1, status: 1 });
 offerSchema.index({ storeName: 1, zip: 1, status: 1 });
 offerSchema.index({ status: 1, lastSeenAt: 1 });
+offerSchema.index({ storeName: 1, status: 1, lastSeenAt: 1 });
 
 const checkpointSchema = new Schema(
   {
@@ -131,6 +136,12 @@ const matchDaySchema = new Schema({
   krogerHits: { type: Number, default: 0 },
 });
 
+const refreshDaySchema = new Schema({
+  day: { type: String, required: true, unique: true },
+  walmart: { type: Number, default: 0 },
+  kroger: { type: Number, default: 0 },
+});
+
 export type CatalogStatus = "active" | "stale" | "discontinued";
 
 export type CatalogMasterDoc = {
@@ -169,6 +180,8 @@ export type CatalogOfferDoc = {
   productUrl?: string;
   priceSource: "live" | "seed";
   lastSeenAt: Date;
+  refreshExcluded?: boolean;
+  refreshAttemptAt?: Date;
   status: CatalogStatus;
 };
 
@@ -180,3 +193,4 @@ export const IngestBudget = mongoose.model("IngestBudget", budgetSchema);
 export const ShopperZip = mongoose.model("ShopperZip", shopperZipSchema);
 export const CatalogDemand = mongoose.model("CatalogDemand", catalogDemandSchema);
 export const CatalogMatchDay = mongoose.model("CatalogMatchDay", matchDaySchema);
+export const CatalogRefreshDay = mongoose.model("CatalogRefreshDay", refreshDaySchema);

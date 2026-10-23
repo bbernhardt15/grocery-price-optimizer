@@ -17,7 +17,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
-import { ingestConfig, lookupCallsForTick, type IngestConfig } from "./config";
+import { ingestConfig, tickCallSplit, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
   krogerAdvance,
@@ -27,6 +27,7 @@ import {
   sanitizeKrogerParam,
 } from "./krogerTerms";
 import { finishLookups, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
+import { finishRefresh, nextRefreshPicks } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
@@ -46,7 +47,7 @@ const KROGER_LOCATION_ERROR_LIMIT = 3;
 
 export type WalmartCheckpoint = {
   phase: "taxonomy" | "categories" | "done";
-  /** Bump WALMART_TAXONOMY_VERSION to re-read the tree (baby gear vs household). */
+  /** Bump WALMART_TAXONOMY_VERSION to re-read the tree (grocery leaves vs general merchandise). */
   taxonomyVersion: number;
   categories: WalmartCategory[];
   index: number;
@@ -328,9 +329,13 @@ export async function stepWalmart(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
-  const lookupBudget = lookupCallsForTick(options.maxCalls, config.matchLookupShare);
+  const split = tickCallSplit(options.maxCalls, config.matchLookupShare, config.refreshShare);
+  const lookupBudget = split.lookup;
+  const refreshBudget = split.refresh;
   let lookupsDone = 0;
   let lookupExhausted = false;
+  let refreshesDone = 0;
+  let refreshExhausted = false;
   const lookupUpcs =
     options.client.lookupUpcs ??
     (options.client.lookupUpc ? (upcs: string[]) => options.client.lookupUpc!(upcs.join(",")) : undefined);
@@ -424,6 +429,70 @@ export async function stepWalmart(options: {
           } else if (kind === "fatal" || cp.attempts >= 2) {
             const finished = await finishLookups("walmart", picks, nowFn(), { forceMiss: true });
             cp.matchAttempts += finished.attempts;
+            cp.attempts = 0;
+            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
+          } else {
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          }
+        }
+        continue;
+      }
+    }
+    if (lookupUpcs && !refreshExhausted && refreshesDone < refreshBudget) {
+      const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
+      const picks = await nextRefreshPicks("Walmart", nowFn(), limit);
+      if (picks.length === 0) {
+        refreshExhausted = true;
+      } else {
+        const codes = picks.map((pick) => pick.code);
+        const params = { request: "items", upc: codes.join(",").slice(0, 300), refresh: true };
+        refreshesDone += 1;
+        try {
+          const charged = await spendCall(
+            gate,
+            () => lookupUpcs(codes),
+            () => {
+              calls += 1;
+            },
+            stampPace
+          );
+          if (charged === "budget") {
+            paused = "budget";
+            await persist("paused", { lastError: "Walmart daily budget reached" });
+            break;
+          }
+          const records = recordsFromWalmartPage(charged);
+          let refreshed = 0;
+          if (records.length > 0) {
+            const saved = await upsertCatalogRecords(records, nowFn());
+            upserted += saved.offers;
+            refreshed = saved.offers;
+          }
+          await finishRefresh(picks, nowFn(), refreshed);
+          noteWalmartSuccess(cp);
+          await persist("running", { clearError: true });
+        } catch (error) {
+          const kind = retryClass(error);
+          if (kind === "rate") {
+            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          } else if (kind === "fatal" && httpStatusOf(error) === 400 && picks.length > 1) {
+            cp.lookupSingle = true;
+            cp.attempts = 0;
+            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
+          } else if (kind === "fatal" || cp.attempts >= 2) {
+            await finishRefresh(picks, nowFn(), 0);
             cp.attempts = 0;
             await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
           } else {
@@ -641,9 +710,13 @@ export async function stepKroger(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
-  const lookupBudget = lookupCallsForTick(options.maxCalls, config.matchLookupShare);
+  const split = tickCallSplit(options.maxCalls, config.matchLookupShare, config.refreshShare);
+  const lookupBudget = split.lookup;
+  const refreshBudget = split.refresh;
   let lookupsDone = 0;
   let lookupExhausted = false;
+  let refreshesDone = 0;
+  let refreshExhausted = false;
 
   const persist = async (status: string, extra?: PersistExtra) => {
     const callDelta = calls - countedCalls;
@@ -711,6 +784,66 @@ export async function stepKroger(options: {
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",
               productId: picked.code,
+            });
+            cp = outcome.checkpoint;
+            paused = outcome.paused;
+            await persist(outcome.status, { error: outcome.error });
+            if (outcome.stop) {
+              break;
+            }
+          }
+        }
+        continue;
+      }
+    }
+    if (options.client.lookupProductId && !refreshExhausted && refreshesDone < refreshBudget) {
+      const [picked] = await nextRefreshPicks("Kroger", nowFn(), 1);
+      if (!picked) {
+        refreshExhausted = true;
+      } else {
+        const locationId = picked.locationId || cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        refreshesDone += 1;
+        try {
+          const charged = await spendCall(
+            productGate,
+            () => options.client.lookupProductId!(picked.code, locationId),
+            () => {
+              calls += 1;
+            },
+            () => {
+              const nextAt = productGate.nextAllowedAt();
+              if (nextAt > 0) {
+                cp.nextAllowedAt = new Date(nextAt).toISOString();
+              }
+            }
+          );
+          if (charged === "budget") {
+            paused = "budget";
+            await persist("paused", { lastError: "Kroger daily budget reached" });
+            break;
+          }
+          let refreshed = 0;
+          if (charged.records.length > 0) {
+            const saved = await upsertCatalogRecords(charged.records, nowFn());
+            upserted += saved.offers;
+            refreshed = saved.offers;
+          }
+          await finishRefresh([picked], nowFn(), refreshed);
+          cp.attempts = 0;
+          await persist("running", { clearError: true });
+        } catch (error) {
+          const kind = retryClass(error);
+          if (kind === "fatal" || cp.attempts >= 2) {
+            await finishRefresh([picked], nowFn(), 0);
+            cp.attempts = 0;
+            await persist("running", {
+              error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code, refresh: true }, nowFn()),
+            });
+          } else {
+            const outcome = await failKroger(cp, error, sleep, nowFn(), {
+              request: "products",
+              productId: picked.code,
+              refresh: true,
             });
             cp = outcome.checkpoint;
             paused = outcome.paused;

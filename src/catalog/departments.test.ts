@@ -173,4 +173,90 @@ describe("mapToDepartment", () => {
     assert.equal(mapToDepartment(["Cleaning Supplies"], "Lysol Disinfecting Wipes").departmentId, "household");
     assert.equal(mapToDepartment(["Laundry"], "Tide Pods").departmentId, "household");
   });
+
+  it("maps grocery leaves that were falling through, and keeps general merchandise in Other", () => {
+    assert.equal(mapToDepartment(["Baby/Diapering/Training Pants"], "Parent's Choice Training Pants").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Potty Training"], "Parent's Choice Training Pants").departmentId, "baby");
+    assert.equal(mapToDepartment(["Baby/Diapering"], "Parent's Choice Training Pants").subcategory, "Diapers");
+    const brush = mapToDepartment(["Baby/Diapering/Baby Wipes"], "Munchkin Bottle Brush");
+    assert.equal(brush.departmentId, "other");
+    assert.equal(brush.signal, "excluded");
+    assert.equal(brush.generalMerchandise, true);
+
+    assert.equal(
+      mapToDepartment(["Health and Medicine/Vitamins and Supplements"], "Nature Made Vitamin D").departmentId,
+      "personal-care"
+    );
+    assert.equal(
+      mapToDepartment(["Health and Medicine/Vitamins and Supplements"], "Nature Made Vitamin D").subcategory,
+      "Health"
+    );
+    assert.equal(mapToDepartment(["Health and Medicine/Digestive Health"], "Culturelle Probiotic").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Health and Medicine/First Aid"], "Isopropyl Alcohol").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Health and Medicine/Diabetic Supplies"], "True Metrix Test Strips").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Health and Medicine/Pain Relievers"], "Tylenol Extra Strength").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Baby/Health"], "Orajel Teething Pain Relief").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Health and Medicine/Weight Loss"], "Ensure Original Nutrition Shake").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Health and Medicine/Weight Loss/Nutrition Powders"], "Ensure Protein Powder").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Health and Medicine/Weight Loss"], "Testosterone Booster").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Massage"], "Handheld Massage Gun").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Mobility"], "Drive Shower Chair").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Hot & Cold Packs"], "Equate Turtleneck").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Sleep"], "Sound Machine").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Sleep"], "Sleep Mask").departmentId, "other");
+    assert.equal(mapToDepartment(["Health and Medicine/Air Quality"], "Levoit Air Purifier").departmentId, "other");
+
+    assert.equal(mapToDepartment(["Industrial & Scientific/Janitorial"], "Swiffer Duster").departmentId, "household");
+    assert.equal(
+      mapToDepartment(["Industrial & Scientific/Janitorial/Cleaning Chemicals"], "Commercial Degreaser").departmentId,
+      "household"
+    );
+    assert.equal(mapToDepartment(["Industrial & Scientific"], "Drain Strainer").departmentId, "other");
+    assert.equal(mapToDepartment(["Industrial & Scientific/Foodservice/Disposables"], "Dixie Cup Lids").departmentId, "household");
+    assert.equal(mapToDepartment(["Industrial & Scientific/Foodservice/Disposables"], "Dixie Cup Lids").subcategory, "Paper");
+
+    assert.equal(mapToDepartment(["Pets/Dog Food"], "Purina Dog Chow").departmentId, "pet");
+    assert.equal(mapToDepartment(["Pets/Dog Treats"], "Milk-Bone").departmentId, "pet");
+    assert.equal(mapToDepartment(["Pets/Cat Litter"], "Tidy Cats").departmentId, "pet");
+    assert.equal(mapToDepartment(["Pets/Dog Bedding"], "Vibrant Life Cedar Bedding").departmentId, "pet");
+    assert.equal(mapToDepartment(["Pets/Dog Toys"], "Vibrant Life Wheel").departmentId, "other");
+    assert.equal(mapToDepartment(["Pets/Aquarium"], "Aquarium Ornament").departmentId, "other");
+    assert.equal(mapToDepartment(["Pets/Horse"], "Horse Feeder").departmentId, "other");
+
+    const gifts = mapToDepartment(["Food/Food Gifts"], "Snack Gift Tower");
+    assert.equal(gifts.departmentId, "pantry");
+    assert.equal(gifts.subcategory, "Gifts");
+
+    assert.equal(mapToDepartment(["Food/Pantry/Condiments"], "Heinz Ketchup").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/Pantry/Spices & Seasonings"], "Ground Cinnamon").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/Pantry/Baking"], "Baking Powder").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/Pantry/Canned Goods"], "Canned Corn").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/International Foods"], "Yellow Curry Sauce").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/Beverages/Coffee"], "Folgers Ground Coffee").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Food/Beverages/Tea"], "Lipton Black Tea").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Food/Candy"], "Gummy Bears").departmentId, "snacks");
+    assert.equal(mapToDepartment(["Food/Beverages/Mixers"], "Fever-Tree Tonic").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "All-Purpose Cleaner").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Paper Products"], "Bounty Paper Towels").departmentId, "household");
+
+    assert.equal(mapToDepartment(["Spices"], "Cumin").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Coffee"], "Folgers").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Meat & Seafood"], "Atlantic Salmon").departmentId, "meat-seafood");
+    assert.equal(mapToDepartment(["Deli"], "Sliced Turkey").departmentId, "deli");
+    assert.equal(mapToDepartment(["Health"], "Multivitamin").departmentId, "personal-care");
+
+    assert.equal(mapToDepartment(["Jewelry/Necklaces"], "Personalized Necklace").departmentId, "other");
+    assert.equal(mapToDepartment(["Jewelry/Necklaces"], "Personalized Necklace").generalMerchandise, true);
+    assert.equal(mapToDepartment(["Office Supplies/Paper Shredders"], "Amazon Basics Paper Shredder").departmentId, "other");
+    assert.equal(mapToDepartment(["Home Improvement/Tools/Work Gloves"], "Work Gloves").departmentId, "other");
+    assert.equal(mapToDepartment(["Personalized Gifts"], "Personalized Gift").departmentId, "other");
+    assert.equal(mapToDepartment(["Apparel/Women"], "Turtleneck").departmentId, "other");
+    assert.equal(mapToDepartment(["Electronics/TVs"], "55 inch TV").departmentId, "other");
+    assert.equal(mapToDepartment(["Toys/Action Figures"], "Action Figure").departmentId, "other");
+    assert.equal(mapToDepartment(["Furniture/Bookcases"], "Bookcase").departmentId, "other");
+    assert.equal(
+      mapToDepartment(["Video Games/SpongeBob SquarePants"], "SpongeBob SquarePants Battle for Bikini Bottom").signal,
+      "excluded"
+    );
+  });
 });

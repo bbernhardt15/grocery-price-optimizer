@@ -11,6 +11,12 @@ export type Department = {
   id: string;
   name: string;
   subcategories: readonly string[];
+  /**
+   * General merchandise (jewelry, electronics, furniture, and the other
+   * non-grocery leftovers). Shopper browse and search hide this aisle
+   * unless the department id is requested directly.
+   */
+  generalMerchandise?: boolean;
 };
 
 export const DEPARTMENTS: readonly Department[] = [
@@ -19,16 +25,16 @@ export const DEPARTMENTS: readonly Department[] = [
   { id: "meat-seafood", name: "Meat & Seafood", subcategories: ["Chicken", "Beef", "Pork", "Seafood"] },
   { id: "bakery", name: "Bakery", subcategories: ["Bread", "Rolls & Bagels", "Tortillas"] },
   { id: "deli", name: "Deli", subcategories: ["Sliced Meat", "Prepared"] },
-  { id: "pantry", name: "Pantry", subcategories: ["Pasta & Rice", "Canned", "Condiments", "Baking"] },
+  { id: "pantry", name: "Pantry", subcategories: ["Pasta & Rice", "Canned", "Condiments", "Baking", "Gifts"] },
   { id: "frozen", name: "Frozen", subcategories: ["Meals", "Vegetables", "Ice Cream"] },
   { id: "snacks", name: "Snacks", subcategories: ["Chips", "Crackers", "Candy"] },
   { id: "beverages", name: "Beverages", subcategories: ["Juice", "Soda", "Water", "Coffee & Tea"] },
   { id: "breakfast", name: "Breakfast", subcategories: ["Cereal", "Oatmeal"] },
   { id: "baby", name: "Baby", subcategories: ["Diapers", "Baby Food"] },
   { id: "household", name: "Household", subcategories: ["Paper", "Cleaning", "Laundry"] },
-  { id: "personal-care", name: "Personal Care", subcategories: ["Hair", "Body", "Oral Care"] },
+  { id: "personal-care", name: "Personal Care", subcategories: ["Hair", "Body", "Oral Care", "Health"] },
   { id: "pet", name: "Pet", subcategories: ["Dog", "Cat"] },
-  { id: "other", name: "Other", subcategories: [] },
+  { id: "other", name: "Other", subcategories: [], generalMerchandise: true },
 ] as const;
 
 const BY_ID = new Map(DEPARTMENTS.map((department) => [department.id, department]));
@@ -74,6 +80,33 @@ const RULES: readonly Rule[] = [
   { test: /^household essentials?$/i, departmentId: "household" },
   { test: /^pet care$/i, departmentId: "pet" },
   { test: /^baby$/i, departmentId: "baby" },
+  { test: /^(?:meat\s*&\s*seafood|seafood)$/i, departmentId: "meat-seafood" },
+  { test: /^poultry$/i, departmentId: "meat-seafood", subcategory: "Chicken" },
+  { test: /^(?:fresh\s+)?produce$/i, departmentId: "produce" },
+  { test: /^(?:fresh\s+)?fruits?$/i, departmentId: "produce", subcategory: "Fruit" },
+  { test: /^(?:fresh\s+)?vegetables?$/i, departmentId: "produce", subcategory: "Vegetables" },
+  { test: /^fresh herbs$/i, departmentId: "produce", subcategory: "Fresh Herbs" },
+  { test: /^deli$/i, departmentId: "deli" },
+  { test: /^prepared(?:\s+foods?)?$/i, departmentId: "deli", subcategory: "Prepared" },
+  { test: /^(?:spices?(?:\s*(?:&|and)\s*seasonings?)?|seasonings?)$/i, departmentId: "pantry" },
+  { test: /^baking(?:\s+(?:goods|ingredients|needs|supplies))?$/i, departmentId: "pantry", subcategory: "Baking" },
+  { test: /^canned(?:\s*&\s*packaged|\s+(?:goods|foods?|vegetables|fruit|beans|meat))?$/i, departmentId: "pantry", subcategory: "Canned" },
+  { test: /^(?:condiments?(?:\s*(?:&|and)\s*(?:sauces?|toppings))?|sauces?)$/i, departmentId: "pantry", subcategory: "Condiments" },
+  { test: /^(?:international(?:\s+foods?)?|ethnic(?:\s+foods?)?|world foods?)$/i, departmentId: "pantry" },
+  { test: /^(?:food gifts?|gift (?:baskets?|towers?|sets?)|gourmet gifts?)$/i, departmentId: "pantry", subcategory: "Gifts" },
+  { test: /^(?:pasta|rice|grains?|soups?)$/i, departmentId: "pantry" },
+  { test: /^(?:coffees?|teas?|coffee\s*(?:&|and)\s*tea)$/i, departmentId: "beverages", subcategory: "Coffee & Tea" },
+  { test: /^(?:candy(?:\s*(?:&|and)\s*gum)?|gum)$/i, departmentId: "snacks", subcategory: "Candy" },
+  { test: /^(?:mixers?|cocktail mixers?|drink mixes?)$/i, departmentId: "beverages" },
+  { test: /^(?:nutrition (?:shakes?|drinks?|powders?)|meal replacements?)$/i, departmentId: "beverages" },
+  { test: /^(?:beer|wine|spirits|liquor)$/i, departmentId: "beverages" },
+  { test: /^(?:vitamins?(?:\s*(?:&|and)\s*supplements?)?|supplements?|digestive health|first aid|pain relievers?|diabetic supplies|cold (?:&|and) flu|antiseptics?)$/i, departmentId: "personal-care", subcategory: "Health" },
+  { test: /^(?:personal care|health|vitamins?|medicine|pharmacy)$/i, departmentId: "personal-care" },
+  { test: /^(?:cleaning|cleaners?|cleaning tools?|janitorial(?:\s+supplies)?|cleaning chemicals?)$/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /^(?:paper(?:\s+goods|\s+products)?|paper\s*(?:&|and)\s*plastics?|food-?\s*service(?:\s+disposables?)?|foodservice(?:\s+disposables?)?|disposables?)$/i, departmentId: "household", subcategory: "Paper" },
+  { test: /^(?:household|household essentials?)$/i, departmentId: "household" },
+  { test: /^(?:diapering|training pants|pull-?ups)$/i, departmentId: "baby", subcategory: "Diapers" },
+  { test: /^(?:dog|cat)\s+(?:food|treats?|litter|bedding)$/i, departmentId: "pet" },
   { test: /baby back ribs?/i, departmentId: "meat-seafood", subcategory: "Pork" },
   { test: /carrot cake/i, departmentId: "bakery" },
   {
@@ -81,15 +114,22 @@ const RULES: readonly Rule[] = [
     departmentId: "produce",
     subcategory: "Vegetables",
   },
-  { test: /diaper|baby wipe/i, departmentId: "baby", subcategory: "Diapers" },
+  { test: /diaper|baby wipe|training pants|pull-?ups/i, departmentId: "baby", subcategory: "Diapers" },
   { test: /infant formula|baby formula|baby food(?!\s*makers?\b)/i, departmentId: "baby", subcategory: "Baby Food" },
-  { test: /dog food|dog treat|puppy/i, departmentId: "pet", subcategory: "Dog" },
-  { test: /cat food|cat litter|kitten/i, departmentId: "pet", subcategory: "Cat" },
-  { test: /pet food|pet supply/i, departmentId: "pet" },
+  { test: /dog food|dog treats?|puppy food|puppy treats?/i, departmentId: "pet", subcategory: "Dog" },
+  { test: /cat food|cat treats?|cat litter|kitten food/i, departmentId: "pet", subcategory: "Cat" },
+  { test: /pet food|pet treats?/i, departmentId: "pet" },
+  { test: /\b(?:dog|cat|pet|puppy|kitten|cedar|small animal)\s+bedding\b|\bcedar bedding\b/i, departmentId: "pet" },
   { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bag/i, departmentId: "household", subcategory: "Paper" },
   { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
   { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
+  { test: /isopropyl alcohol|rubbing alcohol|test strips?|\bteething\b|\b(?:tylenol|advil|ibuprofen|acetaminophen|aspirin)\b/i, departmentId: "personal-care", subcategory: "Health" },
+  { test: /\b(?:ensure|glucerna)\b|\bnutrition (?:shakes?|drinks?|powders?)\b|\bmeal replacements?\b|\bprotein (?:shakes?|powders?)\b/i, departmentId: "beverages" },
+  { test: /\bswiffer\b|\bdusters?\b|\bdegreasers?\b/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /\bdixie\b|\bcup lids?\b/i, departmentId: "household", subcategory: "Paper" },
+  { test: /\bgift (?:towers?|baskets?|sets?)\b/i, departmentId: "pantry", subcategory: "Gifts" },
+  { test: /\b(?:ketchup|mustard|mayonnaise|salad dressing)\b/i, departmentId: "pantry", subcategory: "Condiments" },
   { test: /shampoo|conditioner/i, departmentId: "personal-care", subcategory: "Hair" },
   { test: /toothpaste|toothbrush|mouthwash/i, departmentId: "personal-care", subcategory: "Oral Care" },
   { test: /deodorant|body wash|lotion|personal care|beauty|hair care/i, departmentId: "personal-care", subcategory: "Body" },
@@ -165,6 +205,8 @@ export type MappedDepartment = {
    * name: the product name decided. none: nothing matched.
    */
   signal?: "specific" | "broad" | "name" | "none" | "excluded";
+  /** True when the row stays in Other because it is general merchandise. */
+  generalMerchandise?: boolean;
   /** Short explanation of the match, for the admin sample route. */
   reason?: string;
 };
@@ -207,10 +249,10 @@ const BABY_BLOCKED_BRANCH =
   /^(?:baby activities|activities|nursery|travel gear|resold baby|shop by baby brand|shop by brand|car seats?|strollers?|clothing|apparel|toys|feeding gear)$/i;
 
 const BABY_EQUIPMENT =
-  /\b(?:wipe warmers?|breast pumps?|nursing covers?|sippy cups?|toddler plates?|sleep shorts?|food makers?|baby food makers?|bottle feed(?:ing|ers?)?|baby bottles?|pacifiers?|teethers?|strollers?|car\s*seats?|cribs?|bassinets?|high\s*chairs?|playards?|play\s*yards?|baby\s*swings?|nursing pillows?|diaper\s*bags?|onesies|bodysuits?|baby monitors?)\b/i;
+  /\b(?:wipe warmers?|breast pumps?|nursing covers?|sippy cups?|toddler plates?|sleep shorts?|food makers?|baby food makers?|bottle brushes?|bottle feed(?:ing|ers?)?|baby bottles?|pacifiers?|teethers?|strollers?|car\s*seats?|cribs?|crib sheets?|bassinets?|high\s*chairs?|playards?|play\s*yards?|baby\s*swings?|nursing pillows?|diaper\s*bags?|onesies|bodysuits?|baby monitors?|door\s*knob covers?|tableware)\b/i;
 
 const BABY_CONSUMABLE =
-  /\b(?:diapers?|diapering|baby wipes?|infant formula|baby formula|baby foods?(?!\s*makers?\b)|food pouches?)\b/i;
+  /\b(?:diapers?|diapering|training pants|pull-?ups|youth pants|bedwetting|baby wipes?|infant formula|baby formula|baby foods?(?!\s*makers?\b)|food pouches?)\b/i;
 
 const NOT_GROCERY =
   /\b(?:video games?|xbox|playstation|nintendo)\b|\b(?:cabinets?|bookcases?|dressers?|nightstands?|bathroom storage)\b/i;
@@ -229,7 +271,8 @@ function isBabyConsumable(categories: string[], name: string): boolean {
   const leaf = segments.at(-1) ?? "";
   const focus = `${leaf} ${name}`;
   const text = `${categories.join(" ")} ${name}`;
-  if (BABY_EQUIPMENT.test(focus)) {
+  // The product name wins when the leaf is wipes but the item is a brush.
+  if (BABY_EQUIPMENT.test(name) || BABY_EQUIPMENT.test(focus)) {
     return false;
   }
   if (/\bparasite\b|\bformula\s*409\b/i.test(text)) {
@@ -281,18 +324,63 @@ function babyGearLabel(categories: string[], name: string): string | null {
   return null;
 }
 
+/** Walmart roots that are not a grocery aisle. Matched on a whole segment. */
+const GM_SEGMENT =
+  /^(?:jewelry|fine jewelry|fashion jewelry|office supplies|office products|home improvement|personalized gifts|apparel|clothing|shoes|electronics|tvs?|video games?|toys|home decor|home décor|furniture|automotive|patio & garden|sports & outdoors|arts crafts & sewing|books|movies(?: & music)?|musical instruments|industrial & scientific|floral|tobacco)$/i;
+
+/** Janitorial, food-service disposables, and named cleaning tools stay grocery under Industrial & Scientific. */
+const INDUSTRIAL_EXCEPTION =
+  /\b(?:janitorial|food-?\s*service|foodservice|cleaning chemicals?|disposables?|swiffer|dusters?|dixie|cup lids?|degreasers?)\b/i;
+
+const HEALTH_DEVICE =
+  /\b(?:massage(?:\s+guns?|\s+chairs?)?|gua sha|shower chairs?|air purifiers?|sound machines?|white noise machines?|sleep masks?|hot\s*(?:&|and)\s*cold packs?|heating pads?)\b/i;
+
+const PET_ACCESSORY =
+  /\b(?:toys?|wheels?|aquarium|ornaments?|feeders?|collars?|leashes|crates?|costumes?)\b/i;
+
+const PET_CONSUMABLE =
+  /\b(?:dog|cat|pet|puppy|kitten)\s+(?:food|foods|treats?)\b|\b(?:dog|cat|pet|kitty)\s+litter\b|\b(?:dog|cat|pet|puppy|kitten|cedar|small animal)\s+bedding\b|\bcedar bedding\b|\bcat litter\b/i;
+
+/**
+ * Non-grocery general merchandise. These stay in Other and are not crawled.
+ * A janitorial or food-service leaf under Industrial & Scientific is grocery.
+ */
 function notGroceryLabel(categories: string[], name: string): string | null {
-  const leaf = pathSegments(categories).at(-1) ?? "";
+  const segments = pathSegments(categories);
+  const leaf = segments.at(-1) ?? "";
   const focus = `${leaf} ${name}`;
-  const match = focus.match(NOT_GROCERY) ?? `${categories.join(" ")} ${name}`.match(/\b(?:video games?|xbox|playstation|nintendo)\b/i);
-  if (!match) {
-    return null;
+  const text = `${segments.join(" ")} ${name}`;
+  if (/\btestosterone\b/i.test(name)) {
+    return "testosterone";
   }
-  const label = match[0].toLowerCase();
-  if (/video game|xbox|playstation|nintendo/.test(label)) {
-    return "video game";
+  const device = focus.match(HEALTH_DEVICE);
+  if (device) {
+    return device[0].toLowerCase().replace(/\s+/g, " ");
   }
-  return "furniture";
+  const classic = focus.match(NOT_GROCERY) ?? text.match(/\b(?:video games?|xbox|playstation|nintendo)\b/i);
+  if (classic) {
+    const label = classic[0].toLowerCase();
+    if (/video game|xbox|playstation|nintendo/.test(label)) {
+      return "video game";
+    }
+    return "furniture";
+  }
+  const industrial = segments.some((segment) => /^industrial\s*&\s*scientific$/i.test(segment));
+  const industrialGrocery = industrial && (segments.some((segment) => INDUSTRIAL_EXCEPTION.test(segment)) || INDUSTRIAL_EXCEPTION.test(name));
+  if (!industrialGrocery) {
+    for (const segment of segments) {
+      if (GM_SEGMENT.test(segment.trim())) {
+        return segment.toLowerCase();
+      }
+    }
+  }
+  const petAisle = segments.some((segment) => /^(?:pets?|pet care|pet supplies)$/i.test(segment));
+  const consumable = PET_CONSUMABLE.test(text);
+  const accessory = focus.match(PET_ACCESSORY);
+  if (accessory && !consumable && (petAisle || /\b(?:dog|cat|pet|puppy|kitten|aquarium|horse)\b/i.test(text))) {
+    return accessory[0].toLowerCase();
+  }
+  return null;
 }
 
 function reasonText(kind: "path" | "name" | "none", source: string, departmentId: string): string {
@@ -338,6 +426,7 @@ export function mapToDepartment(
       departmentId: other.id,
       departmentName: other.name,
       signal: "excluded",
+      generalMerchandise: true,
       reason: `not-grocery:${junk}→other`,
     };
   }
@@ -347,6 +436,7 @@ export function mapToDepartment(
       departmentId: other.id,
       departmentName: other.name,
       signal: "excluded",
+      generalMerchandise: true,
       reason: `gear:${gear}→other`,
     };
   }
@@ -432,6 +522,7 @@ export function mapToDepartment(
       departmentId: other.id,
       departmentName: other.name,
       signal: "excluded",
+      generalMerchandise: true,
       reason: "baby:not diaper, wipe, formula, or baby food→other",
     };
   }
@@ -444,6 +535,7 @@ export function mapToDepartment(
       sameDepartment?.subcategory ?? rule?.subcategory ?? explicit?.subcategory
     ),
     signal,
+    ...(department.id === "other" ? { generalMerchandise: true } : {}),
     reason: reasonText(reasonKind, reasonSource, department.id),
   };
 }

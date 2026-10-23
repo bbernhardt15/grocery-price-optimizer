@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { dropShadowLocalKeys, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
-import { adminAuthorized, adminTokenConfigured, catalogMatchQueue, catalogMatchSample, catalogSample, catalogStatus } from "../ingest/status";
+import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters } from "../ingest/maintenance";
+import { adminAuthorized, adminTokenConfigured, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus } from "../ingest/status";
 
 const router = Router();
 
@@ -47,6 +47,19 @@ router.get("/admin/catalog/sample", async (req: Request, res: Response) => {
       return;
     }
     res.json(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/other-breakdown", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  const limit = Number(req.query.limit ?? 100);
+  try {
+    res.json(await catalogOtherBreakdown(limit));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
@@ -105,6 +118,25 @@ router.post("/admin/catalog/recategorize", async (req: Request, res: Response) =
   }
   try {
     res.json(await recategorizeCatalog());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/exclude-nongrocery-refresh", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  if (!confirmed(req, "exclude-nongrocery-refresh")) {
+    res.status(400).json({
+      error:
+        'Send { "confirm": "exclude-nongrocery-refresh" } to skip refresh on Other products that are still general merchandise. Nothing is deleted.',
+    });
+    return;
+  }
+  try {
+    res.json(await excludeNongroceryFromRefresh());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });

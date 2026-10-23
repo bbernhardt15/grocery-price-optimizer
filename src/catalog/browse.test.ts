@@ -110,6 +110,23 @@ describe("filter and sort", () => {
     );
   });
 
+  it("hides Other unless that department is requested", () => {
+    const necklace = product({
+      id: "necklace",
+      name: "Personalized Necklace",
+      departmentId: "other",
+      departmentName: "Other",
+      offers: [offer({ storeName: "Walmart", price: 12 })],
+    });
+    const withOther = [...catalog, necklace];
+    assert.equal(filterProducts(withOther, {}).some((entry) => entry.id === "necklace"), false);
+    assert.deepEqual(
+      filterProducts(withOther, { departmentId: "other" }).map((entry) => entry.id),
+      ["necklace"]
+    );
+    assert.equal(filterProducts(withOther, { query: "necklace" }).some((entry) => entry.id === "necklace"), false);
+  });
+
   it("sorts by price, unit price, name, and on sale first", () => {
     assert.deepEqual(
       sortProducts(catalog, "price").map((entry) => entry.id),
