@@ -311,6 +311,12 @@ img { max-width: 100%; display: block; }
 }
 .plan-btn, #sample-btn { width: 100%; }
 .sub-note { margin-top: -4px; }
+.panel-legal, .site-footer nav {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  margin: 4px 0 0; font-size: 0.85rem;
+}
+.site-footer { margin: 28px 0 8px; }
+.panel-legal a, .site-footer a { color: var(--muted); }
 
 .list-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;

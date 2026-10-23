@@ -1,7 +1,9 @@
 apply plugin: 'com.android.application'
 
-// Written by the Codemagic Android workflow from the grocery_gitter env group.
-// Local release builds stay unsigned until this file exists. It is gitignored.
+// Codemagic writes android/key.properties from the grocery_gitter env group.
+// A local release build stays unsigned until that file exists. It is gitignored.
+// storeFile is a path Gradle resolves from android/app, or an absolute path.
+// See docs/APP_STORE.md.
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {

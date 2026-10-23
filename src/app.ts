@@ -96,6 +96,11 @@ app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
+app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
+  const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
+  res.sendFile(path.join(publicDir, file));
+});
+
 app.use(
   express.static(publicDir, {
     etag: false,

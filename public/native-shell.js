@@ -82,6 +82,18 @@
   }
 
   /**
+   * The native WebView treats extensionless paths as the shopper app.
+   * /privacy and /terms are real pages on the website; the bundled copies
+   * are privacy.html and terms.html.
+   */
+  function bundledLegalPath(pathname) {
+    const path = String(pathname || "");
+    if (path === "/privacy" || path === "/privacy/") return "/privacy.html";
+    if (path === "/terms" || path === "/terms/") return "/terms.html";
+    return "";
+  }
+
+  /**
    * True for retailer https links. Same-document hashes and the bundled
    * WebView origin (https://localhost or capacitor://localhost) stay in the app.
    */
@@ -105,5 +117,6 @@
     resolveMediaUrl,
     isExternalHttp,
     isExternalNavigation,
+    bundledLegalPath,
   };
 });

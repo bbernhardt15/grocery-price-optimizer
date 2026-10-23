@@ -11,6 +11,7 @@ const {
   resolveMediaUrl,
   isExternalHttp,
   isExternalNavigation,
+  bundledLegalPath,
 } = require("../public/native-shell.js") as {
   DEFAULT_NATIVE_API: string;
   resolveApiOrigin: (input: {
@@ -22,6 +23,7 @@ const {
   resolveMediaUrl: (url: string, apiOrigin: string) => string;
   isExternalHttp: (url: string) => boolean;
   isExternalNavigation: (href: string, pageHref: string) => boolean;
+  bundledLegalPath: (pathname: string) => string;
 };
 
 const PRODUCTION = "https://grocery-price-optimizer-production.up.railway.app";
@@ -115,6 +117,15 @@ test("retailer handoffs leave the webview; in-app links do not", () => {
   const ios = "capacitor://localhost/index.html";
   assert.equal(isExternalNavigation("#catalog", ios), false);
   assert.equal(isExternalNavigation("https://www.target.com/s?searchTerm=milk", ios), true);
+});
+
+test("native webview opens the bundled privacy and terms files", () => {
+  assert.equal(bundledLegalPath("/privacy"), "/privacy.html");
+  assert.equal(bundledLegalPath("/privacy/"), "/privacy.html");
+  assert.equal(bundledLegalPath("/terms"), "/terms.html");
+  assert.equal(bundledLegalPath("/terms/"), "/terms.html");
+  assert.equal(bundledLegalPath("/privacy.html"), "");
+  assert.equal(bundledLegalPath("/"), "");
 });
 
 test("committed native config does not pin the website to Railway", () => {
