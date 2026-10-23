@@ -47,7 +47,9 @@ app.get("/api", (_req, res) => {
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, and how many offers were refreshed today. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+      "POST /api/admin/catalog/recategorize":
+        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route. A product that leaves Other has refresh exclusion cleared. Nothing is deleted.',
       "GET /api/admin/catalog/other-breakdown":
         "Top stored category paths in Other, with counts, three example names, and how many Other products have a Kroger id. Same admin token as status.",
       "GET /api/admin/catalog/match-queue":
