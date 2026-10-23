@@ -12,6 +12,7 @@ import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
+import deleteMyDataRouter from "./routes/deleteMyData";
 
 initSentry();
 
@@ -52,7 +53,9 @@ app.get("/api", (_req, res) => {
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, and how many offers were refreshed today. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+      "POST /api/admin/catalog/recategorize":
+        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route. A product that leaves Other has refresh exclusion cleared. Nothing is deleted.',
       "GET /api/admin/catalog/other-breakdown":
         "Top stored category paths in Other, with counts, three example names, and how many Other products have a Kroger id. Same admin token as status.",
       "GET /api/admin/catalog/match-queue":
@@ -93,6 +96,10 @@ app.get("/api", (_req, res) => {
         "Edits items. Last write wins per item. View-only guests are refused. Rate limited.",
       "POST /api/lists/:shareToken/settings":
         "Owner only. mode view or edit, revoke, or rotate the link.",
+      "DELETE /api/me/data":
+        "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals and catalog-demand phrases are not tied to a device and are left in place.",
+      "GET /api/kroger/logout":
+        "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "GET /api/observability":
         "Crash-reporting config for the website and the native shells. enabled is false when SENTRY_DSN is unset, and the body then has no DSN. The auth token is never returned.",
     },
@@ -111,6 +118,7 @@ app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
+app.use("/api", deleteMyDataRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));

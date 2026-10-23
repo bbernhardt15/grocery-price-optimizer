@@ -1,5 +1,6 @@
 import { rawFromCatalogProduct } from "../catalog/providers/fromCatalogProduct";
 import type { RawCatalogRecord } from "../catalog/types";
+import type { CatalogProduct } from "../optimizeGroceryList";
 import { krogerService } from "../krogerService";
 import { krogerApiConfigured } from "../pricing/krogerProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
@@ -29,6 +30,8 @@ export type KrogerCatalogClient = {
   resolveLocation(zip: string): Promise<string | null>;
   /** Products API filter.productId. Optional so term-only tests stay quiet. */
   lookupProductId?(productId: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
+  /** Name search used when filter.productId is rejected or returns nothing. */
+  lookupTerm?(term: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
 };
 
 export function walmartAffiliateClient(): WalmartCatalogClient {
@@ -75,18 +78,35 @@ export function krogerProductsClient(): KrogerCatalogClient {
     },
     async lookupProductId(productId, locationId) {
       const page = await krogerService.productsById(productId, locationId);
-      const records: RawCatalogRecord[] = [];
-      for (const product of page.products) {
-        const raw = rawFromCatalogProduct(product, "live");
-        if (!raw) {
-          continue;
-        }
-        if (locationId) {
-          raw.locationId = locationId;
-        }
-        records.push(raw);
-      }
-      return { records, returned: page.returned };
+      return krogerLookupRecords(page.products, locationId, page.returned);
+    },
+    async lookupTerm(term, locationId) {
+      const page = await krogerService.searchProductsPage({
+        term,
+        locationId,
+        start: 0,
+        limit: 8,
+      });
+      return krogerLookupRecords(page.products, locationId, page.returned);
     },
   };
+}
+
+function krogerLookupRecords(
+  products: CatalogProduct[],
+  locationId: string | undefined,
+  returned: number
+): { records: RawCatalogRecord[]; returned: number } {
+  const records: RawCatalogRecord[] = [];
+  for (const product of products) {
+    const raw = rawFromCatalogProduct(product, "live");
+    if (!raw) {
+      continue;
+    }
+    if (locationId) {
+      raw.locationId = locationId;
+    }
+    records.push(raw);
+  }
+  return { records, returned };
 }

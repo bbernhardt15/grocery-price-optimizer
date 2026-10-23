@@ -6,6 +6,7 @@ import { estimateStorageBytes, ingestConfig, lookupCallsForTick } from "./config
 import { utcDay, type IngestErrorDetail } from "./budget";
 import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
+import { recategorizeProgress } from "./maintenance";
 import { refreshQueueSize, refreshedToday } from "./refresh";
 
 export function presentIngestError(entry: unknown): IngestErrorDetail | { message: string } {
@@ -142,7 +143,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshed] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshed, recategorize] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -165,6 +166,7 @@ export async function catalogStatus() {
     matchProgress(now),
     refreshQueueSize(now),
     refreshedToday(now),
+    recategorizeProgress(),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -204,8 +206,9 @@ export async function catalogStatus() {
       lookupShare: progress.lookupShare,
       retryDays: progress.retryDays,
       walmartBatch: progress.walmartBatch,
-      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. A miss is tried again after the cooldown. Nothing is deleted.",
+      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1) and the body is zero-padded, so 070708200500 becomes 0007070820050. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. The old 3/1220 hit rate was those invalid ids. With valid ids, the hit rate should track how many of those UPCs Kroger stocks at the queried store, often tens of percent for national brands. A miss is tried again after the cooldown. Nothing is deleted.",
     },
+    recategorize,
     caps: {
       maxProducts: config.maxProducts,
       maxOffers: config.maxOffers,
