@@ -60,6 +60,10 @@ describe("public privacy and terms", () => {
     assert.match(privacy, /\[CONTACT EMAIL\]/);
     assert.match(privacy, /\[LEGAL NAME\]/);
     assert.match(privacy, /\[MAILING ADDRESS\]/);
+    assert.match(privacy, /Delete my data/);
+    assert.match(privacy, /type DELETE/);
+    assert.match(privacy, /\/api\/kroger\/logout/);
+    assert.match(privacy, /not stored with your device id/);
 
     const terms = (await bodyOf("/terms")).replace(/\s+/g, " ");
     assert.match(terms, /Terms of use/);
@@ -71,6 +75,8 @@ describe("public privacy and terms", () => {
     assert.match(terms, /\[GOVERNING LAW\]/);
     assert.match(terms, /\[CONTACT EMAIL\]/);
     assert.match(terms, /href="\/privacy"/);
+    assert.match(terms, /Delete my data/);
+    assert.match(terms, /type DELETE/);
   });
 
   it("links privacy and terms from the shopper page", () => {

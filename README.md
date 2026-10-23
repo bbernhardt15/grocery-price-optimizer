@@ -100,7 +100,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - `ADMIN_TOKEN` set to a long random string.
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
-   - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only.
+   - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only. Generate a pair with `npx web-push generate-vapid-keys` (steps under Price drop alerts).
    - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
@@ -157,7 +157,21 @@ The Alerts panel lists the item, the store, the old price, the new price, and th
 
 A shared list uses the same controls. The choice stays on this device; each collaborator sets their own. While a share link is open, alerts follow that link. A new link, or turning the link off, stops alerts for the previous one.
 
-Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification). `VAPID_SUBJECT` is a `mailto:` or `https:` URL; it defaults to `mailto:price-alerts@grocerygitter.app`. Generate a pair with `npx web-push generate-vapid-keys`. If the keys are unset, alerts still show in the app and `POST /api/price-alerts/push` returns 503.
+Browser notifications are optional. They stay off until both `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. Set the same keys on the web service and on the ingest worker (the worker is what sends the notification).
+
+Generate a key pair:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+The command prints a Public Key and a Private Key. Set:
+
+- `VAPID_PUBLIC_KEY` to the Public Key
+- `VAPID_PRIVATE_KEY` to the Private Key
+- `VAPID_SUBJECT` optionally, to a `mailto:` address or an `https:` URL, for example `mailto:you@example.com`
+
+When `VAPID_SUBJECT` is unset, or is not a `mailto:` or `https:` URL, the server uses `mailto:price-alerts@grocerygitter.app`. Leave both keys unset to keep alerts in the app only. `POST /api/price-alerts/push` then returns 503, and a price drop is not sent to a push service. The in-app Alerts panel still works.
 
 Phone push (APNs or FCM) is not sent yet. The Capacitor shell already shows the in-app badge and Alerts panel. A native transport can register later without a new collection. `GET /api/price-alerts/status` reports `nativePush.enabled: false` until that exists.
 
@@ -648,6 +662,10 @@ Each grocery item is assigned to **one** store using the [matching and unit-pric
 `POST /api/price-alerts/push` — `{ deviceId, subscription }` stores a browser push subscription. **503** when the VAPID keys are unset.
 
 `DELETE /api/price-alerts/push` — `{ deviceId, endpoint }` removes that subscription.
+
+`DELETE /api/me/data` — `{ deviceId, lists?: [{ shareToken, ownerToken }] }` deletes this device’s price watches, alert records, and push subscriptions. A shared list is deleted only when its owner token is included, and price rows stored under that share link are removed with it. When the request sends the `kroger_shopper` cookie, the access token and refresh token are revoked at Kroger and the cookie is cleared. The same call with nothing left returns 200 and zero counts. ZIP totals and catalog-demand phrases are not tied to a device and are left in place. See `docs/DATA_DELETION.md`.
+
+`GET /api/kroger/logout` — revokes and clears the Kroger cookie in the browser that opens it. The iOS and Android shells open this in the system browser after Delete my data, because Kroger login stores the cookie there.
 
 ### `GET /api/kroger/auth-status`
 

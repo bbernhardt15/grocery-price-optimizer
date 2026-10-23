@@ -9,6 +9,7 @@ import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
+import deleteMyDataRouter from "./routes/deleteMyData";
 
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -88,6 +89,10 @@ app.get("/api", (_req, res) => {
         "Edits items. Last write wins per item. View-only guests are refused. Rate limited.",
       "POST /api/lists/:shareToken/settings":
         "Owner only. mode view or edit, revoke, or rotate the link.",
+      "DELETE /api/me/data":
+        "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals and catalog-demand phrases are not tied to a device and are left in place.",
+      "GET /api/kroger/logout":
+        "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
     },
   });
 });
@@ -100,6 +105,7 @@ app.use("/api", krogerCartRouter);
 app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
+app.use("/api", deleteMyDataRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));

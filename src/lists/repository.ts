@@ -430,3 +430,37 @@ export async function updateListSettings(input: {
   notify(found.record.shareTokenHash, next.shareTokenHash, next.seq);
   return { ok: true, shareToken, list: present(next, shareToken, "owner") };
 }
+
+/**
+ * Delete one shared list when the caller presents its owner secret.
+ * A current or retired share token is enough to find the document.
+ * Missing is idempotent. A token that does not match the owner does not delete.
+ */
+export async function deleteOwnedSharedList(
+  shareToken: string,
+  ownerToken: string
+): Promise<"deleted" | "missing" | "refused"> {
+  if (!isShareToken(shareToken) || !isShareToken(ownerToken)) {
+    return "refused";
+  }
+  const hash = hashSecret(shareToken);
+  const doc = await SharedList.findOne({
+    $or: [{ shareTokenHash: hash }, { retiredHashes: hash }],
+  }).lean();
+  if (!doc) {
+    return "missing";
+  }
+  if (!secretMatches(ownerToken, String(doc.ownerTokenHash ?? ""))) {
+    return "refused";
+  }
+  const removed = await SharedList.deleteOne({ _id: doc._id });
+  if (!removed.deletedCount) {
+    return "missing";
+  }
+  const shareHash = String(doc.shareTokenHash ?? "");
+  const seq = typeof doc.seq === "number" ? doc.seq : 0;
+  if (shareHash) {
+    publishList(shareHash, seq + 1);
+  }
+  return "deleted";
+}
