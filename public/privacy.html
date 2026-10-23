@@ -18,7 +18,7 @@
         </nav>
       </header>
       <h1>Privacy policy</h1>
-      <p class="updated">Last updated October 16, 2026.</p>
+      <p class="updated">Last updated October 23, 2026.</p>
       <p>
         Grocery Gitter helps you browse groceries, compare prices, and split a shopping trip across stores.
         It is operated by [LEGAL NAME]. Email [CONTACT EMAIL]. Mailing address: [MAILING ADDRESS].
@@ -28,7 +28,8 @@
       <p>
         There is no Grocery Gitter account. The app does not ask for an email address, a phone number, or a
         password of ours. You do not sign in to Grocery Gitter. If you share a list, you can type an optional
-        display name. That name is not an account.
+        display name. That name is not an account. You can still delete the data this device stored. Open
+        Settings and choose Delete my data, then type DELETE. That is described below.
       </p>
 
       <h2>Saved on this device</h2>
@@ -48,7 +49,7 @@
       </ul>
       <p>
         Clearing site data for Grocery Gitter, or deleting the app, removes them from this device. It does not
-        remove a shared list or a price watch already saved on the server.
+        remove a shared list or a price watch already saved on the server. Delete my data does both.
       </p>
 
       <h2>What is sent when you shop</h2>
@@ -103,8 +104,9 @@
         address off the same way. Revoking or replacing a link does not delete the list.
       </p>
       <p>
-        The database does not expire a shared list, and the app has no button that deletes the server copy.
-        Email [CONTACT EMAIL] if you want that list removed.
+        The database does not expire a shared list. Revoke link leaves the stored list in place.
+        Delete my data removes a list you created on this device and turns the link off for everyone you sent
+        it to. Email [CONTACT EMAIL] if that control does not work.
       </p>
 
       <h2>Kroger sign-in</h2>
@@ -161,7 +163,8 @@
         When a watched price drops, the server stores an alert record: the item, the store, the old and new
         price, the savings, the baseline price, any target price, and whether you have opened it. Opening the
         price-alerts panel marks those alerts seen. It does not delete them. The panel loads the latest 40.
-        The app does not expire or delete alert history.
+        The app does not expire alert history on a timer. Delete my data removes the watches and alert records
+        stored for this device.
       </p>
 
       <h2>Browser notifications</h2>
@@ -172,22 +175,42 @@
         subscription only to send a price-drop notification.
       </p>
       <p>
-        Turning the alert checkbox off does not remove the subscription. The shopper screen has no control
-        that deletes it. The server deletes a subscription when the browser’s push service reports that it is
-        gone. The iOS and Android shells do not register a phone push token. Email [CONTACT EMAIL] if you want
-        the watch, the alert records, or a push subscription removed. Nothing in the app deletes them on a timer.
+        Turning the alert checkbox off does not remove the subscription. Delete my data does. It deletes the
+        subscription stored for this device and unsubscribes this browser. The server also deletes a
+        subscription when the browser’s push service reports that it is gone. The iOS and Android shells do
+        not register a phone push token. Nothing in the app deletes a subscription on a timer.
       </p>
 
-      <h2>Analytics</h2>
+      <h2>Analytics and crash reporting</h2>
       <p>
         Grocery Gitter does not include a third-party analytics or advertising SDK. There is no advertising
-        identifier and no crash-reporting product in the app. The shopper screen does not call a separate
-        nutrition-catalog search.
+        identifier. The shopper screen does not call a separate nutrition-catalog search.
+      </p>
+      <p>
+        Crash and error reporting is optional. It stays off until <code>SENTRY_DSN</code> is set. When that
+        variable is unset, the website, the iOS and Android apps, and the server do not start Sentry and do
+        not send crash reports. When it is set, those same places send a report to Sentry so a crash can be
+        fixed. Sentry is not used for advertising or for a usage profile.
+      </p>
+      <p>
+        A report can include the error message, a stack trace, the release (the git commit that was built),
+        the operating system or browser, and the page or API path. It does not include your email address,
+        your name, your grocery list, a Kroger access or refresh token, the <code>kroger_shopper</code>
+        cookie, other cookies, or Authorization headers. Reports are not tied to the random price-alert id
+        and not tied to an account. There is no Grocery Gitter account to attach them to.
+      </p>
+      <p>
+        Sentry stores those reports. They are not rows in the Grocery Gitter database. Delete my data does
+        not remove them, and it does not turn crash reporting off. Clearing site data or deleting the app
+        stops reports from this device until Grocery Gitter is opened again. Because a report is not linked
+        to you, email [CONTACT EMAIL] with the approximate time and whether you were on the website, an
+        iPhone, or Android. We will delete matching crash reports when we can tell which ones they are.
+        We cannot promise to find a report that has no identifier.
       </p>
       <p>
         The server writes operational logs, for example when a store lookup fails or the catalog job is
         running. The host that runs the site may keep ordinary request logs: IP address, time, and the path
-        that was requested. Those logs are for operating the service.
+        that was requested. Those logs are for operating the service. They are separate from Sentry.
       </p>
 
       <h2>We do not sell data</h2>
@@ -205,6 +228,31 @@
         under 13. If you believe a child used the app, email [CONTACT EMAIL].
       </p>
 
+      <h2>Delete my data</h2>
+      <p>
+        Open Settings. It is at the top of the screen, at the bottom of My list, and in the page footer.
+        Choose Delete my data and type DELETE. There is no Grocery Gitter account. The request is for this
+        device: the random id stored here, the owner secret if you created a shared list on this device, and
+        the Kroger cookie if this browser has one.
+      </p>
+      <p>That removes:</p>
+      <ul>
+        <li>The list, ZIP, theme, display name, and other Grocery Gitter values saved on this device.</li>
+        <li>Price watches, alert records, and Web Push subscriptions stored for this device. This browser is unsubscribed from notifications.</li>
+        <li>Shared lists you created on this device. The link stops working, including for people you sent it to. Price watches saved for that link are removed, because those rows store the link and the item names. Someone else’s own list is left alone.</li>
+        <li>The Kroger access token and refresh token. On the website the cookie is cleared in this browser. On the iOS and Android apps, Grocery Gitter also opens a page in the system browser so the sign-in stored there is revoked and dropped. That page is the hosted <code>/api/kroger/logout</code> address. The Kroger login itself happens in the system browser, so the app WebView does not hold that cookie.</li>
+      </ul>
+      <p>
+        Doing it twice is safe. The second time there is nothing left to remove.
+      </p>
+      <p>
+        ZIP totals and the words used to decide which products to refresh are not stored with your device id.
+        They are counts shared by everyone who typed the same ZIP or the same search. Delete my data does not
+        erase those counts. Email [CONTACT EMAIL] with the ZIP or the search words if you want a count reviewed.
+        Host request logs, when the host keeps them, are not deleted by the button.
+      </p>
+      <p>After the data is removed, the app starts over as if this device had not been used.</p>
+
       <h2>Your choices</h2>
       <ul>
         <li>You can browse without a ZIP. Nearby-store and weekly-ad prices will be limited, and Plan the trip asks for one.</li>
@@ -213,8 +261,9 @@
         <li>You can leave price alerts off. Turning the checkbox off disables the watch. It does not delete the watch or past alerts.</li>
         <li>You can skip “Notify this browser.” Alerts still show in the panel.</li>
         <li>You can skip Kroger cart login and Instacart. Search links still open the store.</li>
-        <li>You can clear on-device data in the browser, or delete the app. That does not erase a shared list, a price watch, or alert records already on the server.</li>
-        <li>Email [CONTACT EMAIL] to ask us to delete a ZIP record, a shared list, a price watch, alert records, or a push subscription. Include the ZIP, and for a list include the link or say you are the person who shared it.</li>
+        <li>You can clear on-device data in the browser, or delete the app. That does not erase a shared list, a price watch, or alert records already on the server. Delete my data does.</li>
+        <li>Email [CONTACT EMAIL] if Delete my data does not work, or if you want a ZIP total or a search phrase reviewed. Those counts are not tied to a device. Include the ZIP or the words you searched, and for a list include the link or say you are the person who shared it.</li>
+        <li>Email [CONTACT EMAIL] to ask us to delete a crash report. Include the approximate time and whether you were on the website, an iPhone, or Android. Crash reports are not linked to you, and Delete my data does not remove them, so we can delete one only when that is enough to find it.</li>
       </ul>
 
       <h2>Changes</h2>

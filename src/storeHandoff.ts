@@ -6,6 +6,7 @@ import {
   type WalmartCartLine,
 } from "./pricing/walmartCartLink";
 import type { WalmartNearbyStore } from "./pricing/walmartProvider";
+import { mappingForStore } from "./pricing/flipp/merchants";
 import type { StorePricingReport } from "./pricing/types";
 import {
   handoffTierFor,
@@ -258,6 +259,10 @@ export function partnerSearchUrl(
   item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string | undefined {
   const q = encodeURIComponent(searchQuery(item));
+  const configured = mappingForStore(storeName)?.searchUrl;
+  if (configured) {
+    return configured.replaceAll("{q}", q);
+  }
   switch (retailerKey(storeName)) {
     case "publix":
       return `https://www.publix.com/search?searchTerm=${q}`;
@@ -340,7 +345,29 @@ function withOfferLinks(item: PickedItem): PickedItem {
   return { ...item, offers };
 }
 
+const WEEKLY_AD_SEGMENT_LABEL = "Weekly ad, not shelf price";
+
+function weeklyAdSegment(storeName: string, pricing: StorePricingReport | undefined): boolean {
+  if (
+    pricing?.source === "live" ||
+    pricing?.source === "cached_live" ||
+    pricing?.source === "partner_feed" ||
+    pricing?.source === "mixed" ||
+    pricing?.source === "seed" ||
+    pricing?.source === "unavailable"
+  ) {
+    return false;
+  }
+  if (pricing?.source === "weekly_ad" || pricing?.source === "cached_weekly_ad") {
+    return true;
+  }
+  return mappingForStore(storeName)?.dealsOnly === true;
+}
+
 function priceLabelFor(group: StoreGroup, pricing: StorePricingReport | undefined): string {
+  if (weeklyAdSegment(group.storeName, pricing)) {
+    return WEEKLY_AD_SEGMENT_LABEL;
+  }
   if (pricing?.source) {
     return priceSourceLabel(pricing.source);
   }
@@ -348,6 +375,9 @@ function priceLabelFor(group: StoreGroup, pricing: StorePricingReport | undefine
     ...new Set(group.items.map((item) => item.priceSource).filter((source): source is PriceSource => Boolean(source))),
   ];
   if (sources.length === 1) {
+    if (sources[0] === "weekly_ad") {
+      return WEEKLY_AD_SEGMENT_LABEL;
+    }
     return priceSourceLabel(sources[0]);
   }
   if (sources.length > 1) {
@@ -522,18 +552,22 @@ function partnerSearchAction(
   storeName: string,
   items: HandoffItem[]
 ): StoreHandoffAction {
+  const mapping = mappingForStore(storeName);
   const key = retailerKey(storeName);
-  const club =
-    key === "costco" || key === "sams_club"
-      ? " Club prices often need a membership; third-party cart-write is not available."
-      : key === "whole_foods" || key === "amazon_fresh"
-        ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
-        : " There is no public cart-write API for this banner.";
+  const club = Boolean(mapping?.club) || key === "costco" || key === "sams_club";
+  const weekly =
+    Boolean(mapping?.dealsOnly) || items.some((item) => item.priceSource === "weekly_ad");
+  const clubNote = club
+    ? " Club prices often need a membership; third-party cart-write is not available."
+    : key === "whole_foods" || key === "amazon_fresh"
+      ? " Amazon Fresh / Whole Foods checkout is not a third-party cart API."
+      : " There is no public cart-write API for this banner.";
+  const priceNote = weekly ? " Prices are the weekly ad, not a shelf price." : "";
 
   return shopListAction(
     storeName,
     items,
-    `Checklist with an Open in ${storeName} link for each item. Not a cart fill.${club}`
+    `Checklist with an Open in ${storeName} link for each item. Not a cart fill.${clubNote}${priceNote}`
   );
 }
 

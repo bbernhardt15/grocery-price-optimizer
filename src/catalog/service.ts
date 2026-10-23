@@ -17,7 +17,12 @@ import { targetPricingProvider } from "../pricing/targetProvider";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { rawFromCatalogProduct } from "./providers/fromCatalogProduct";
 import { fetchWeeklyAdRecords } from "./providers/flippBrowse";
-import { flippConfigured } from "../pricing/flipp/client";
+import {
+  flippConfigured,
+  flippConsumerEnabled,
+  listWeeklyAdBanners,
+  type WeeklyAdBannerHit,
+} from "../pricing/flipp/client";
 import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
 import { ingestConfig } from "../ingest/config";
@@ -51,6 +56,8 @@ export type BrowsePage = {
   nextCursor: string | null;
   facets: ReturnType<typeof facetsFor>;
   coverage: StoreCoverage[];
+  /** Configured banners whose circular Flipp returned for this ZIP. */
+  weeklyAdBanners?: WeeklyAdBannerHit[];
   warnings: string[];
   cached: boolean;
   catalogSource: "demo" | "mixed" | "live" | "database";
@@ -495,12 +502,23 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     gaps: gapsForProduct(product, scope.products, GAP_STORES),
   }));
 
+  let weeklyAdBanners: WeeklyAdBannerHit[] | undefined;
+  if (request.zipCode && flippConsumerEnabled()) {
+    try {
+      weeklyAdBanners = await listWeeklyAdBanners(request.zipCode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      scope.warnings.push(`Weekly-ad banner list failed: ${message}`);
+    }
+  }
+
   return {
     items,
     total: page.total,
     nextCursor: page.nextCursor,
     facets: facetsFor(facetPool),
     coverage: catalogCoverage({ ...coverageFlags(), stored: scope.fromDatabase }),
+    ...(weeklyAdBanners ? { weeklyAdBanners } : {}),
     warnings: scope.warnings,
     cached: scope.cached,
     catalogSource: scope.fromDatabase ? "database" : catalogSourceOf(scope.products),

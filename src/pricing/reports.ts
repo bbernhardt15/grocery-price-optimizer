@@ -76,7 +76,7 @@ function mixedDetail(acc: StorePricingAccumulator): string {
     parts.push("live (or cached live) retailer API rows");
   }
   if (weeklyLike) {
-    parts.push("weekly-ad / circular prices (not a full shelf catalog)");
+    parts.push("weekly ad, not a shelf price");
   }
   if (hasSeed) {
     parts.push("demo catalog rows");
@@ -151,7 +151,7 @@ function labelOf(
       return partner ? "Cached partner feed" : "Cached live";
     case "weekly_ad":
     case "cached_weekly_ad":
-      return "Weekly ad";
+      return "Weekly ad, not shelf price";
     case "mixed":
       return mixedLabel(acc);
     case "seed":
@@ -191,9 +191,9 @@ export function finalizeStoreReport(
       ? `Using ${acc.storeName} prices cached from a licensed partner feed (less than 24 hours old).`
       : `Using ${acc.storeName} prices cached from a live API (less than 24 hours old).`;
   } else if (source === "weekly_ad") {
-    detail = `${acc.storeName} prices are from the weekly ad / circular near this ZIP, not a full live shelf catalog.`;
+    detail = `${acc.storeName} prices are the weekly ad, not a shelf price. They come from the circular near this ZIP, not a full live shelf catalog.`;
   } else if (source === "cached_weekly_ad") {
-    detail = `Using ${acc.storeName} weekly-ad prices cached from Flipp (less than 24 hours old). Flyer prices are not a full shelf catalog.`;
+    detail = `Using ${acc.storeName} weekly-ad prices cached from Flipp (less than 24 hours old). This is the weekly ad, not a shelf price.`;
   } else if (source === "mixed") {
     detail = mixedDetail(acc);
   } else if (source === "seed") {

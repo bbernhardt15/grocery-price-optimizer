@@ -12,6 +12,8 @@ import {
   readTripSnapshot,
   saveTripSnapshot,
   shareItemId,
+  buildHandoff,
+  segmentPriceLabel,
   singleStoreSavings,
   storeTiers,
   tierForStore,
@@ -142,6 +144,20 @@ describe("handoff tiers stay aligned with config", () => {
     }
     assert.equal(priceSourceLabel("live"), "Live shelf price");
     assert.equal(priceSourceLabel("weekly_ad"), "Weekly ad");
+    assert.equal(
+      segmentPriceLabel("Publix", [{ priceSource: "weekly_ad" }], { pricing: { source: "weekly_ad" } }),
+      "Weekly ad, not shelf price"
+    );
+    assert.equal(segmentPriceLabel("Costco", [], {}), "Weekly ad, not shelf price");
+    assert.equal(segmentPriceLabel("Aldi", [{ priceSource: "seed" }], { pricing: { source: "seed" } }), "Demo catalog");
+    const rebuilt = buildHandoff(
+      "Jewel-Osco",
+      [{ name: "Milk", price: 3, quantity: 1, priceSource: "weekly_ad", url: "https://www.jewelosco.com/shop/search-results.html?q=Milk" }],
+      {},
+      { pricing: { source: "weekly_ad" } }
+    );
+    assert.equal(rebuilt.priceLabel, "Weekly ad, not shelf price");
+    assert.equal(rebuilt.tier, "link");
   });
 });
 

@@ -1,3 +1,4 @@
+import { FLIPP_MERCHANT_MAPPINGS } from "../pricing/flipp/merchants";
 import type { StoreCatalogMode, StoreCoverage } from "./types";
 
 export type CoverageFlags = {
@@ -11,16 +12,6 @@ export type CoverageFlags = {
 };
 
 const DEFAULT_STORES = ["Aldi", "Kroger", "Target", "Walmart"] as const;
-
-const WEEKLY_AD_BANNERS = [
-  "Publix",
-  "Meijer",
-  "Food Lion",
-  "H-E-B",
-  "Safeway",
-  "Giant Eagle",
-  "Costco",
-] as const;
 
 const WEEKLY_AD_ZIP =
   "A 5-digit US ZIP is required (ZIP+4 is shortened to five digits). Prices are the circular Flipp publishes for that ZIP, not a national shelf and not an in-aisle price.";
@@ -102,7 +93,7 @@ export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
           false,
           flags.flipp ? "Weekly ad only" : "Demo catalog",
           flags.flipp
-            ? `Target has no public shelf API. RedSky, Target Circle offers, and RedCard discounts are not used. Browse, search, and the trip plan show this week's Target circular when Flipp has one for the ZIP, labeled Weekly ad. Items that are not on the flyer stay on the demo catalog. ${WEEKLY_AD_ZIP}`
+            ? `Target has no public shelf API. RedSky, Target Circle offers, and RedCard discounts are not used. Browse, search, and the trip plan show this week's Target circular when Flipp has one for the ZIP, labeled weekly ad, not a shelf price. Items that are not on the flyer stay on the demo catalog. ${WEEKLY_AD_ZIP}`
             : "Target has no public product catalog API. Department shelves stay on the demo catalog until a licensed partner feed or Flipp weekly ads are configured. RedSky is not used."
         ),
     coverage(
@@ -111,30 +102,33 @@ export function catalogCoverage(flags: CoverageFlags): StoreCoverage[] {
       false,
       flags.flipp ? "Weekly ad only" : "Demo catalog",
       flags.flipp
-        ? `Aldi has no product catalog API and no third-party cart. Browse, search, and the trip plan show Aldi circular prices when Flipp has a flyer for the ZIP, labeled Weekly ad. Many staples are never in the ad; those stay on the demo catalog or Unavailable. ${WEEKLY_AD_ZIP}`
+        ? `Aldi has no product catalog API and no third-party cart. Browse, search, and the trip plan show Aldi circular prices when Flipp has a flyer for the ZIP, labeled weekly ad, not a shelf price. Many staples are never in the ad; those stay on the demo catalog or Unavailable. ${WEEKLY_AD_ZIP}`
         : "Aldi has no product catalog API. Browse shows the demo catalog only. Nothing here is a live Aldi shelf."
     ),
   ];
 
   if (flags.flipp) {
-    for (const storeName of WEEKLY_AD_BANNERS) {
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      if (!mapping.dealsOnly) {
+        continue;
+      }
+      const storeName = mapping.storeName;
       if (rows.some((row) => row.storeName.toLowerCase() === storeName.toLowerCase())) {
         continue;
       }
       if (flags.partnerStores.some((name) => name.toLowerCase() === storeName.toLowerCase())) {
         continue;
       }
-      const club =
-        storeName === "Costco"
-          ? " Warehouse prices can require a membership, and there is no third-party cart write."
-          : " There is no public cart-write API for this banner.";
+      const club = mapping.club
+        ? " Warehouse prices can require a membership, and there is no third-party cart write."
+        : " There is no public cart-write API for this banner.";
       rows.push(
         coverage(
           storeName,
           "weekly_ad_only",
           false,
           "Weekly ad",
-          `${storeName} has no public grocery price API. When this ZIP has a current circular, browse and search show those items labeled Weekly ad, and the default trip includes the banner.${club} ${WEEKLY_AD_ZIP}`
+          `${storeName} has no public grocery price API. When this ZIP has a current circular, browse and search show those items as the weekly ad, not a shelf price, and the default trip includes the banner only when a circular item is the winning deal.${club} ${WEEKLY_AD_ZIP}`
         )
       );
     }

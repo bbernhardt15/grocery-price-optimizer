@@ -176,10 +176,37 @@ export function upcKey(upc: string | undefined | null): string | null {
   return stripped.length > 0 ? stripped : null;
 }
 
-/** 13-digit Kroger `filter.productId` (UPC body, no check digit, leading zeros kept). */
+/**
+ * 13-digit Kroger `filter.productId`.
+ * UPC-A is 12 digits and the last digit is the check digit. Drop it and
+ * left-pad, even when that digit fails GS1: Walmart codes such as
+ * `070708200500` are still sent as `0007070820050`. A 13-digit Kroger id
+ * is left intact when its last digit is not a check digit.
+ */
 export function krogerProductIdForLookup(upc: string | undefined | null): string | null {
-  const digits = digitsWithoutCheck(upc);
-  if (!digits || digits.length > 13) {
+  if (!upc) {
+    return null;
+  }
+  let digits = upc.replace(/\D/g, "");
+  const expanded = expandUpcE(digits);
+  if (expanded) {
+    digits = expanded;
+  }
+  if (digits.length < 8 || digits.length > 14) {
+    return null;
+  }
+  if (digits.length === 12) {
+    return digits.slice(0, -1).padStart(13, "0");
+  }
+  if ((digits.length === 8 || digits.length === 13 || digits.length === 14) && hasStandardCheckDigit(digits)) {
+    digits = digits.slice(0, -1);
+  } else if (digits.length < 12) {
+    const padded = digits.padStart(12, "0");
+    if (hasStandardCheckDigit(padded)) {
+      return padded.slice(0, -1).padStart(13, "0");
+    }
+  }
+  if (digits.length > 13 || digits.length < 8) {
     return null;
   }
   return digits.padStart(13, "0");
@@ -224,21 +251,12 @@ export function walmartLookupCodes(upc: string | undefined | null): string[] {
 }
 
 /**
- * Codes to ask Kroger about, primary first.
- * The 13-digit product id (no check digit) is followed by a 14-digit pad and,
- * when the id has a leading zero, the 12-digit form.
+ * The one Kroger product id to ask for. Extra 12- and 14-digit pads were
+ * rejected with PRODUCT-4111-400. A miss falls back to a name search.
  */
 export function krogerLookupCodes(upc: string | undefined | null): string[] {
-  const out: string[] = [];
   const primary = krogerProductIdForLookup(upc);
-  pushCode(out, primary, /^\d{8,14}$/);
-  if (primary && primary.length < 14) {
-    pushCode(out, primary.padStart(14, "0"), /^\d{14}$/);
-  }
-  if (primary && primary.length === 13 && primary.startsWith("0")) {
-    pushCode(out, primary.slice(1), /^\d{12}$/);
-  }
-  return out;
+  return primary ? [primary] : [];
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

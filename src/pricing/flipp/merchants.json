@@ -1,0 +1,196 @@
+[
+  {
+    "storeName": "Aldi",
+    "merchantIds": [2353],
+    "nameAliases": ["aldi"],
+    "searchName": "ALDI",
+    "flyerKitSlug": "aldi"
+  },
+  {
+    "storeName": "Target",
+    "merchantIds": [2040],
+    "nameAliases": ["target"],
+    "searchName": "Target",
+    "flyerKitSlug": "target"
+  },
+  {
+    "storeName": "Walmart",
+    "merchantIds": [2175],
+    "nameAliases": ["walmart", "walmart supercenter", "walmart neighborhood market"],
+    "searchName": "Walmart",
+    "flyerKitSlug": "walmart"
+  },
+  {
+    "storeName": "Kroger",
+    "merchantIds": [2437, 2449, 2550, 2706, 2707, 2774, 2775, 2776, 2777, 2778, 2779, 2780, 2781, 3883, 4359, 5927, 6133],
+    "nameAliases": [
+      "kroger",
+      "ralphs",
+      "fred meyer",
+      "qfc",
+      "king soopers",
+      "smith's",
+      "smiths",
+      "dillons",
+      "harris teeter",
+      "food 4 less",
+      "fry's",
+      "frys",
+      "mariano's",
+      "marianos",
+      "pick n save",
+      "pick 'n save",
+      "city market",
+      "baker's",
+      "gerbes",
+      "pay less",
+      "jayc",
+      "owen's",
+      "ruler foods",
+      "foods co"
+    ],
+    "searchName": "Kroger",
+    "flyerKitSlug": "kroger"
+  },
+  {
+    "storeName": "Publix",
+    "merchantIds": [2361],
+    "nameAliases": ["publix"],
+    "searchName": "Publix",
+    "flyerKitSlug": "publix",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.publix.com/search?searchTerm={q}"
+  },
+  {
+    "storeName": "Meijer",
+    "merchantIds": [2281],
+    "nameAliases": ["meijer"],
+    "searchName": "Meijer",
+    "flyerKitSlug": "meijer",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.meijer.com/shopping/search.html?query={q}"
+  },
+  {
+    "storeName": "H-E-B",
+    "merchantIds": [2467],
+    "nameAliases": ["h-e-b", "heb"],
+    "searchName": "H-E-B",
+    "flyerKitSlug": "heb",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.heb.com/search/?q={q}"
+  },
+  {
+    "storeName": "Albertsons",
+    "merchantIds": [5661],
+    "nameAliases": ["albertsons"],
+    "searchName": "Albertsons",
+    "flyerKitSlug": "albertsons",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.albertsons.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Vons",
+    "merchantIds": [2375],
+    "nameAliases": ["vons"],
+    "searchName": "Vons",
+    "flyerKitSlug": "vons",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.vons.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Jewel-Osco",
+    "merchantIds": [2364],
+    "nameAliases": ["jewel-osco", "jewel osco"],
+    "searchName": "Jewel-Osco",
+    "flyerKitSlug": "jewelosco",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.jewelosco.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Acme",
+    "merchantIds": [2365],
+    "nameAliases": ["acme", "acme markets"],
+    "searchName": "Acme Markets",
+    "flyerKitSlug": "acme",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.acmemarkets.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Tom Thumb",
+    "merchantIds": [2381],
+    "nameAliases": ["tom thumb"],
+    "searchName": "Tom Thumb",
+    "flyerKitSlug": "tomthumb",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.tomthumb.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Randalls",
+    "merchantIds": [2378],
+    "nameAliases": ["randalls"],
+    "searchName": "Randalls",
+    "flyerKitSlug": "randalls",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.randalls.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Pavilions",
+    "merchantIds": [2377],
+    "nameAliases": ["pavilions"],
+    "searchName": "Pavilions",
+    "flyerKitSlug": "pavilions",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://www.pavilions.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Stop & Shop",
+    "merchantIds": [2393],
+    "nameAliases": ["stop & shop", "stop and shop"],
+    "searchName": "Stop & Shop",
+    "flyerKitSlug": "stopandshop",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://stopandshop.com/shop/search-results.html?q={q}"
+  },
+  {
+    "storeName": "Sprouts",
+    "merchantIds": [2419],
+    "nameAliases": ["sprouts", "sprouts farmers market"],
+    "searchName": "Sprouts Farmers Market",
+    "flyerKitSlug": "sprouts",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://shop.sprouts.com/search?search_term={q}"
+  },
+  {
+    "storeName": "Winn-Dixie",
+    "merchantIds": [2415],
+    "nameAliases": ["winn-dixie", "winn dixie"],
+    "searchName": "Winn-Dixie",
+    "flyerKitSlug": "winndixie",
+    "exactName": true,
+    "dealsOnly": true,
+    "searchUrl": "https://shop.winndixie.com/shop/search?search_term={q}"
+  },
+  {
+    "storeName": "Costco",
+    "merchantIds": [2519],
+    "nameAliases": ["costco"],
+    "searchName": "Costco",
+    "flyerKitSlug": "costco",
+    "exactName": true,
+    "dealsOnly": true,
+    "club": true,
+    "searchUrl": "https://www.costco.com/CatalogSearch?keyword={q}"
+  }
+]

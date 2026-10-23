@@ -12,15 +12,23 @@ const STORES = [
   { name: "Walmart", tier: "cart", aliases: ["walmart"] },
   { name: "Target", tier: "link", aliases: ["target"] },
   { name: "Aldi", tier: "link", aliases: ["aldi"] },
-  { name: "Publix", tier: "link", aliases: ["publix"] },
-  { name: "H-E-B", tier: "link", aliases: ["h e b", "heb"] },
-  { name: "Meijer", tier: "link", aliases: ["meijer"] },
+  { name: "Publix", tier: "link", dealsOnly: true, aliases: ["publix"] },
+  { name: "H-E-B", tier: "link", dealsOnly: true, aliases: ["h e b", "heb"] },
+  { name: "Meijer", tier: "link", dealsOnly: true, aliases: ["meijer"] },
   { name: "Safeway", tier: "link", aliases: ["safeway"] },
-  { name: "Albertsons", tier: "link", aliases: ["albertsons"] },
+  { name: "Albertsons", tier: "link", dealsOnly: true, aliases: ["albertsons"] },
+  { name: "Vons", tier: "link", dealsOnly: true, aliases: ["vons"] },
+  { name: "Jewel-Osco", tier: "link", dealsOnly: true, aliases: ["jewel osco"] },
+  { name: "Acme", tier: "link", dealsOnly: true, aliases: ["acme", "acme markets"] },
+  { name: "Tom Thumb", tier: "link", dealsOnly: true, aliases: ["tom thumb"] },
+  { name: "Randalls", tier: "link", dealsOnly: true, aliases: ["randalls"] },
+  { name: "Pavilions", tier: "link", dealsOnly: true, aliases: ["pavilions"] },
   { name: "Food Lion", tier: "link", aliases: ["food lion"] },
   { name: "Giant", tier: "link", aliases: ["giant", "giant food"] },
-  { name: "Stop & Shop", tier: "link", aliases: ["stop and shop"] },
-  { name: "Costco", tier: "link", aliases: ["costco"] },
+  { name: "Stop & Shop", tier: "link", dealsOnly: true, aliases: ["stop and shop"] },
+  { name: "Sprouts", tier: "link", dealsOnly: true, aliases: ["sprouts", "sprouts farmers market"] },
+  { name: "Winn-Dixie", tier: "link", dealsOnly: true, aliases: ["winn dixie"] },
+  { name: "Costco", tier: "link", dealsOnly: true, aliases: ["costco"] },
   { name: "Sam's Club", tier: "link", aliases: ["sams club"] },
   { name: "Whole Foods", tier: "link", aliases: ["whole foods", "whole foods market"] },
   { name: "Amazon Fresh", tier: "link", aliases: ["amazon fresh"] },
@@ -104,6 +112,33 @@ export function storePriceLabel(items) {
   if (sources.length === 1) return priceSourceLabel(sources[0]);
   if (sources.length > 1) return "Mixed prices";
   return "Price";
+}
+
+function dealsOnlyStore(storeName) {
+  const key = normalizeStoreKey(storeName);
+  return STORES.some((store) => store.dealsOnly && store.aliases.includes(key));
+}
+
+/** Store-card label. Weekly-ad-only banners stay distinct from a shelf price. */
+export function segmentPriceLabel(storeName, items, prior) {
+  const source = prior?.pricing?.source;
+  if (
+    source === "live" ||
+    source === "cached_live" ||
+    source === "partner_feed" ||
+    source === "mixed" ||
+    source === "seed" ||
+    source === "unavailable"
+  ) {
+    return priceSourceLabel(source);
+  }
+  if (source === "weekly_ad" || source === "cached_weekly_ad" || dealsOnlyStore(storeName)) {
+    return "Weekly ad, not shelf price";
+  }
+  const fromItems = storePriceLabel(items);
+  if (fromItems === "Weekly ad") return "Weekly ad, not shelf price";
+  if (prior?.handoff?.priceLabel && fromItems === "Price") return prior.handoff.priceLabel;
+  return fromItems;
 }
 
 function money(value) {
@@ -296,11 +331,7 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     };
   }
 
-  const priceLabel = prior?.pricing?.source
-    ? priceSourceLabel(prior.pricing.source)
-    : prior?.handoff?.priceLabel && storePriceLabel(items) === "Price"
-      ? prior.handoff.priceLabel
-      : storePriceLabel(items);
+  const priceLabel = segmentPriceLabel(storeName, items, prior);
 
   return {
     storeName,

@@ -1,0 +1,704 @@
+{
+  "checkedOn": "2026-10-23",
+  "source": "GET https://backflipp.wishabi.com/flipp/flyers?locale=en-us&postal_code=",
+  "note": "A row is a grocery circular Flipp returned for that ZIP. It is not proof a store is nearby. Banners absent from every sample ZIP are not in the merchant config.",
+  "postalCodes": [
+    "45103",
+    "10001",
+    "60601",
+    "75201",
+    "90012",
+    "30303",
+    "33101",
+    "77002"
+  ],
+  "notFound": [
+    "Safeway",
+    "Shaw's",
+    "Food Lion",
+    "Giant",
+    "Giant Eagle",
+    "Hy-Vee",
+    "Wegmans",
+    "ShopRite",
+    "Harris Teeter"
+  ],
+  "byZip": {
+    "10001": [
+      {
+        "merchantId": 2365,
+        "merchantName": "Acme Markets"
+      },
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2806,
+        "merchantName": "Bravo Supermarket"
+      },
+      {
+        "merchantId": 2383,
+        "merchantName": "C Town"
+      },
+      {
+        "merchantId": 5006,
+        "merchantName": "Circus Fruits"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 4657,
+        "merchantName": "DeCicco & Sons"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 2760,
+        "merchantName": "Extra Supermarket"
+      },
+      {
+        "merchantId": 2539,
+        "merchantName": "Fine Fare Supermarkets"
+      },
+      {
+        "merchantId": 4863,
+        "merchantName": "Kings Food Markets"
+      },
+      {
+        "merchantId": 5114,
+        "merchantName": "Lidl"
+      },
+      {
+        "merchantId": 5945,
+        "merchantName": "Marino's Supermarket"
+      },
+      {
+        "merchantId": 2697,
+        "merchantName": "Met Foods"
+      },
+      {
+        "merchantId": 4495,
+        "merchantName": "Mitsuwa Marketplace"
+      },
+      {
+        "merchantId": 2638,
+        "merchantName": "Morton Williams Supermarket"
+      },
+      {
+        "merchantId": 2766,
+        "merchantName": "Pioneer Supermarket"
+      },
+      {
+        "merchantId": 2786,
+        "merchantName": "Putnam Lake Market"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 7302,
+        "merchantName": "Seasons Kosher"
+      },
+      {
+        "merchantId": 2393,
+        "merchantName": "Stop & Shop"
+      },
+      {
+        "merchantId": 5908,
+        "merchantName": "SuperFresh"
+      },
+      {
+        "merchantId": 2838,
+        "merchantName": "Supremo Foods Inc"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2783,
+        "merchantName": "Trade Fair Supermarket"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      },
+      {
+        "merchantId": 2455,
+        "merchantName": "Weis Markets"
+      }
+    ],
+    "30303": [
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 2916,
+        "merchantName": "Food Depot"
+      },
+      {
+        "merchantId": 2774,
+        "merchantName": "Kroger"
+      },
+      {
+        "merchantId": 5114,
+        "merchantName": "Lidl"
+      },
+      {
+        "merchantId": 2361,
+        "merchantName": "Publix"
+      },
+      {
+        "merchantId": 2419,
+        "merchantName": "Sprouts Farmers Market"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      }
+    ],
+    "33101": [
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2806,
+        "merchantName": "Bravo Supermarket"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 4417,
+        "merchantName": "Fresco Y Mas"
+      },
+      {
+        "merchantId": 3194,
+        "merchantName": "Milam's Markets"
+      },
+      {
+        "merchantId": 3195,
+        "merchantName": "Presidente Supermarkets"
+      },
+      {
+        "merchantId": 2361,
+        "merchantName": "Publix"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 3133,
+        "merchantName": "Sabor Tropical"
+      },
+      {
+        "merchantId": 2549,
+        "merchantName": "Sedano's"
+      },
+      {
+        "merchantId": 2419,
+        "merchantName": "Sprouts Farmers Market"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      },
+      {
+        "merchantId": 6811,
+        "merchantName": "Wild Fork"
+      },
+      {
+        "merchantId": 2415,
+        "merchantName": "Winn-Dixie"
+      }
+    ],
+    "45103": [
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 3552,
+        "merchantName": "Fresh Thyme Market"
+      },
+      {
+        "merchantId": 2707,
+        "merchantName": "Kroger"
+      },
+      {
+        "merchantId": 2281,
+        "merchantName": "Meijer"
+      },
+      {
+        "merchantId": 2361,
+        "merchantName": "Publix"
+      },
+      {
+        "merchantId": 2425,
+        "merchantName": "Remke Markets"
+      },
+      {
+        "merchantId": 4359,
+        "merchantName": "Ruler Foods"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      }
+    ],
+    "60601": [
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2976,
+        "merchantName": "Carnicerias Jimenez"
+      },
+      {
+        "merchantId": 3201,
+        "merchantName": "Cermak Fresh Market"
+      },
+      {
+        "merchantId": 4383,
+        "merchantName": "Cermak Produce"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 4432,
+        "merchantName": "Devon Market"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 3702,
+        "merchantName": "Fairplay Foods"
+      },
+      {
+        "merchantId": 5927,
+        "merchantName": "Food 4 Less"
+      },
+      {
+        "merchantId": 3552,
+        "merchantName": "Fresh Thyme Market"
+      },
+      {
+        "merchantId": 2364,
+        "merchantName": "Jewel-Osco"
+      },
+      {
+        "merchantId": 4386,
+        "merchantName": "La Chiquita Food Market"
+      },
+      {
+        "merchantId": 2437,
+        "merchantName": "Mariano's"
+      },
+      {
+        "merchantId": 2281,
+        "merchantName": "Meijer"
+      },
+      {
+        "merchantId": 3639,
+        "merchantName": "Morse Fresh Market"
+      },
+      {
+        "merchantId": 2803,
+        "merchantName": "One Stop Foods"
+      },
+      {
+        "merchantId": 4442,
+        "merchantName": "Park Packing"
+      },
+      {
+        "merchantId": 2921,
+        "merchantName": "Peoria Packing Butcher Shop"
+      },
+      {
+        "merchantId": 2636,
+        "merchantName": "Pete's Fresh Market"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 4387,
+        "merchantName": "Rio Valley Market"
+      },
+      {
+        "merchantId": 2423,
+        "merchantName": "Strack and Van Til"
+      },
+      {
+        "merchantId": 4384,
+        "merchantName": "Super Mercados El Guero"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2931,
+        "merchantName": "Tony's Fresh Market"
+      },
+      {
+        "merchantId": 4897,
+        "merchantName": "Torres Supermercado"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      },
+      {
+        "merchantId": 6811,
+        "merchantName": "Wild Fork"
+      },
+      {
+        "merchantId": 5962,
+        "merchantName": "World Fresh Market"
+      }
+    ],
+    "75201": [
+      {
+        "merchantId": 5661,
+        "merchantName": "Albertsons"
+      },
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 4943,
+        "merchantName": "Cash Saver DFW"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 2699,
+        "merchantName": "El Rancho Supermercado"
+      },
+      {
+        "merchantId": 2937,
+        "merchantName": "El Rio Grande"
+      },
+      {
+        "merchantId": 2814,
+        "merchantName": "Fiesta Mart"
+      },
+      {
+        "merchantId": 2467,
+        "merchantName": "H-E-B"
+      },
+      {
+        "merchantId": 5916,
+        "merchantName": "Jerry's Supermarkets"
+      },
+      {
+        "merchantId": 2816,
+        "merchantName": "Joe V's Smart Shop"
+      },
+      {
+        "merchantId": 3883,
+        "merchantName": "Kroger"
+      },
+      {
+        "merchantId": 2815,
+        "merchantName": "La Michoacana Meat Market"
+      },
+      {
+        "merchantId": 2986,
+        "merchantName": "Malone's Cost Plus"
+      },
+      {
+        "merchantId": 2352,
+        "merchantName": "Market Street"
+      },
+      {
+        "merchantId": 5974,
+        "merchantName": "Migalitos Supermercado"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 2419,
+        "merchantName": "Sprouts Farmers Market"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 2381,
+        "merchantName": "Tom Thumb"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      }
+    ],
+    "77002": [
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 2699,
+        "merchantName": "El Rancho Supermercado"
+      },
+      {
+        "merchantId": 2814,
+        "merchantName": "Fiesta Mart"
+      },
+      {
+        "merchantId": 6087,
+        "merchantName": "Food Town Texas"
+      },
+      {
+        "merchantId": 2796,
+        "merchantName": "Foodarama"
+      },
+      {
+        "merchantId": 2467,
+        "merchantName": "H-E-B"
+      },
+      {
+        "merchantId": 2816,
+        "merchantName": "Joe V's Smart Shop"
+      },
+      {
+        "merchantId": 2781,
+        "merchantName": "Kroger"
+      },
+      {
+        "merchantId": 2815,
+        "merchantName": "La Michoacana Meat Market"
+      },
+      {
+        "merchantId": 4379,
+        "merchantName": "Mi Tienda"
+      },
+      {
+        "merchantId": 4290,
+        "merchantName": "Pyburn's Farm Fresh Foods"
+      },
+      {
+        "merchantId": 2378,
+        "merchantName": "Randalls"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 2719,
+        "merchantName": "Sellers Bros."
+      },
+      {
+        "merchantId": 2419,
+        "merchantName": "Sprouts Farmers Market"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 5295,
+        "merchantName": "Teloloapan Meat Market"
+      },
+      {
+        "merchantId": 6685,
+        "merchantName": "TeloMarket"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      }
+    ],
+    "90012": [
+      {
+        "merchantId": 5661,
+        "merchantName": "Albertsons"
+      },
+      {
+        "merchantId": 2353,
+        "merchantName": "ALDI"
+      },
+      {
+        "merchantId": 3103,
+        "merchantName": "Baja Ranch Supermarket"
+      },
+      {
+        "merchantId": 3069,
+        "merchantName": "Big Saver Foods"
+      },
+      {
+        "merchantId": 2566,
+        "merchantName": "Bristol Farms"
+      },
+      {
+        "merchantId": 2519,
+        "merchantName": "Costco"
+      },
+      {
+        "merchantId": 2063,
+        "merchantName": "Dollar General"
+      },
+      {
+        "merchantId": 3037,
+        "merchantName": "El Super"
+      },
+      {
+        "merchantId": 5606,
+        "merchantName": "El Super Fresh"
+      },
+      {
+        "merchantId": 2449,
+        "merchantName": "Food 4 Less"
+      },
+      {
+        "merchantId": 6408,
+        "merchantName": "Galleria Market"
+      },
+      {
+        "merchantId": 5660,
+        "merchantName": "Gelson's Market"
+      },
+      {
+        "merchantId": 2906,
+        "merchantName": "Grocery Outlet"
+      },
+      {
+        "merchantId": 2782,
+        "merchantName": "H Mart"
+      },
+      {
+        "merchantId": 3084,
+        "merchantName": "Jons International Marketplace"
+      },
+      {
+        "merchantId": 6855,
+        "merchantName": "Mercado Las Glorias"
+      },
+      {
+        "merchantId": 4495,
+        "merchantName": "Mitsuwa Marketplace"
+      },
+      {
+        "merchantId": 2377,
+        "merchantName": "Pavilions"
+      },
+      {
+        "merchantId": 2550,
+        "merchantName": "Ralphs"
+      },
+      {
+        "merchantId": 4440,
+        "merchantName": "Restaurant Depot"
+      },
+      {
+        "merchantId": 2438,
+        "merchantName": "Smart & Final"
+      },
+      {
+        "merchantId": 2419,
+        "merchantName": "Sprouts Farmers Market"
+      },
+      {
+        "merchantId": 2525,
+        "merchantName": "Stater Bros. Markets"
+      },
+      {
+        "merchantId": 2633,
+        "merchantName": "Super King Markets"
+      },
+      {
+        "merchantId": 2555,
+        "merchantName": "Superior Grocers"
+      },
+      {
+        "merchantId": 2040,
+        "merchantName": "Target"
+      },
+      {
+        "merchantId": 3049,
+        "merchantName": "Vallarta Supermarkets"
+      },
+      {
+        "merchantId": 7287,
+        "merchantName": "Valley Marketplace"
+      },
+      {
+        "merchantId": 2375,
+        "merchantName": "Vons"
+      },
+      {
+        "merchantId": 2175,
+        "merchantName": "Walmart"
+      }
+    ]
+  }
+}

@@ -60,10 +60,10 @@ function addKey(bucket: Set<string>, value: string | undefined): void {
 function lookupCode(storeName: string, master: MasterRow): string | null {
   if (storeName === "Kroger") {
     const stored = master.krogerProductId?.replace(/\D/g, "") ?? "";
-    if (stored.length >= 8 && stored.length <= 14) {
-      return stored;
+    if (stored.length === 13 || stored.length === 14) {
+      return krogerProductIdForLookup(stored) ?? stored;
     }
-    return krogerProductIdForLookup(master.upc || master.key);
+    return krogerProductIdForLookup(master.upc || stored || master.key);
   }
   return walmartUpcForLookup(master.upc || master.key);
 }

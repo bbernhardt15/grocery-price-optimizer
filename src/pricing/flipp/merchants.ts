@@ -1,8 +1,20 @@
 /**
- * Map Flipp flyer merchants (numeric id + display name) onto Grocery Gitter
- * `storeName` values. Weekly ads are not a full shelf catalog; this list is
- * only the banners we will price from circulars when Flipp is enabled.
+ * Map Flipp flyer merchants onto Grocery Gitter `storeName` values.
+ * The banner list lives in `merchants.json` (loaded at startup). Weekly ads
+ * are not a shelf catalog. `dealsOnly` banners enter the trip only when a
+ * circular item wins — demo seed rows are not used as a shelf price.
+ *
+ * Ids in that file were checked against Flipp's flyer index for ZIPs
+ * 45103, 10001, 60601, 75201, 90012, 30303, 33101, and 77002 on 2026-10-23.
+ * See `sample-zips.json`. Banners that did not come back (Safeway, Shaw's,
+ * Food Lion, Giant, Giant Eagle, Hy-Vee, Wegmans, ShopRite, Harris Teeter
+ * as its own circular) are not listed. Harris Teeter stays a Kroger name
+ * alias because the live Kroger API covers that banner; Flipp did not
+ * return a separate Harris Teeter flyer for those ZIPs.
  */
+
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 export type FlippMerchantMapping = {
   /** Grocery Gitter storeName. */
@@ -20,126 +32,91 @@ export type FlippMerchantMapping = {
   flyerKitSlug: string;
   /** When true, name aliases must match exactly (no prefix). */
   exactName?: boolean;
+  /**
+   * Trip and browse prices come only from the circular. No demo-catalog
+   * fallback, and no cart handoff.
+   */
+  dealsOnly?: boolean;
+  /** Public storefront search. `{q}` is the encoded query. Not a cart fill. */
+  searchUrl?: string;
+  /** Club pricing. Membership may be required. No third-party cart write. */
+  club?: boolean;
 };
 
-export const FLIPP_MERCHANT_MAPPINGS: FlippMerchantMapping[] = [
-  {
-    storeName: "Aldi",
-    merchantIds: [2353],
-    nameAliases: ["aldi"],
-    searchName: "ALDI",
-    flyerKitSlug: "aldi",
-  },
-  {
-    storeName: "Target",
-    merchantIds: [2040],
-    nameAliases: ["target"],
-    searchName: "Target",
-    flyerKitSlug: "target",
-  },
-  {
-    storeName: "Walmart",
-    merchantIds: [2175],
-    nameAliases: [
-      "walmart",
-      "walmart supercenter",
-      "walmart neighborhood market",
-    ],
-    searchName: "Walmart",
-    flyerKitSlug: "walmart",
-  },
-  {
-    storeName: "Kroger",
-    // US regional circulars (Cincinnati, Atlanta, Columbus, Dallas, and others).
-    // Live Kroger Products still wins when those keys are set.
-    merchantIds: [
-      2706, 2707, 2774, 2775, 2776, 2777, 2778, 2779, 2780, 2781, 3883, 6133,
-    ],
-    nameAliases: [
-      "kroger",
-      "ralphs",
-      "fred meyer",
-      "qfc",
-      "king soopers",
-      "smith's",
-      "smiths",
-      "dillons",
-      "harris teeter",
-      "food 4 less",
-      "fry's",
-      "frys",
-      "mariano's",
-      "marianos",
-      "pick n save",
-      "pick 'n save",
-      "city market",
-      "baker's",
-      "gerbes",
-      "pay less",
-      "jayc",
-      "owen's",
-      "ruler foods",
-      "foods co",
-    ],
-    searchName: "Kroger",
-    flyerKitSlug: "kroger",
-  },
-  {
-    storeName: "Publix",
-    merchantIds: [2361],
-    nameAliases: ["publix"],
-    searchName: "Publix",
-    flyerKitSlug: "publix",
-    exactName: true,
-  },
-  {
-    storeName: "Meijer",
-    merchantIds: [2281],
-    nameAliases: ["meijer"],
-    searchName: "Meijer",
-    flyerKitSlug: "meijer",
-  },
-  {
-    storeName: "Food Lion",
-    merchantIds: [2100],
-    nameAliases: ["food lion"],
-    searchName: "Food Lion",
-    flyerKitSlug: "foodlion",
-    exactName: true,
-  },
-  {
-    storeName: "H-E-B",
-    merchantIds: [2467],
-    nameAliases: ["h-e-b", "heb"],
-    searchName: "H-E-B",
-    flyerKitSlug: "heb",
-    exactName: true,
-  },
-  {
-    storeName: "Safeway",
-    // 5667 is US Safeway. 2126 is Safeway Canada and 4623 is Safeway Liquor.
-    merchantIds: [5667],
-    nameAliases: ["safeway"],
-    searchName: "Safeway",
-    flyerKitSlug: "safeway",
-    exactName: true,
-  },
-  {
-    storeName: "Giant Eagle",
-    merchantIds: [2130],
-    nameAliases: ["giant eagle"],
-    searchName: "Giant Eagle",
-    flyerKitSlug: "gianteagle",
-    exactName: true,
-  },
-  {
-    storeName: "Costco",
-    merchantIds: [2519],
-    nameAliases: ["costco"],
-    searchName: "Costco",
-    flyerKitSlug: "costco",
-  },
-];
+type MerchantConfigRow = {
+  storeName?: string;
+  merchantIds?: number[];
+  nameAliases?: string[];
+  searchName?: string;
+  flyerKitSlug?: string;
+  exactName?: boolean;
+  dealsOnly?: boolean;
+  searchUrl?: string;
+  club?: boolean;
+};
+
+function merchantsFile(): string {
+  const nextToModule = path.join(__dirname, "merchants.json");
+  if (existsSync(nextToModule)) {
+    return nextToModule;
+  }
+  const fromSource = path.join(process.cwd(), "src/pricing/flipp/merchants.json");
+  if (existsSync(fromSource)) {
+    return fromSource;
+  }
+  throw new Error(`Flipp merchant config not found at ${nextToModule}`);
+}
+
+function loadMerchantConfig(): FlippMerchantMapping[] {
+  const parsed = JSON.parse(readFileSync(merchantsFile(), "utf8")) as unknown;
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("Flipp merchant config must be a non-empty JSON array");
+  }
+
+  const seen = new Set<string>();
+  return parsed.map((entry, index) => {
+    const row = entry as MerchantConfigRow;
+    const storeName = row.storeName?.trim() ?? "";
+    const searchName = row.searchName?.trim() ?? "";
+    const flyerKitSlug = row.flyerKitSlug?.trim() ?? "";
+    if (!storeName || !searchName || !flyerKitSlug) {
+      throw new Error(
+        `Flipp merchant config row ${index} is missing storeName, searchName, or flyerKitSlug`
+      );
+    }
+    const key = storeName.toLowerCase();
+    if (seen.has(key)) {
+      throw new Error(`Flipp merchant config lists ${storeName} more than once`);
+    }
+    seen.add(key);
+    if (
+      !Array.isArray(row.merchantIds) ||
+      row.merchantIds.length === 0 ||
+      row.merchantIds.some((id) => !Number.isInteger(id))
+    ) {
+      throw new Error(`Flipp merchant config row ${storeName} has invalid merchantIds`);
+    }
+    if (!Array.isArray(row.nameAliases) || row.nameAliases.length === 0) {
+      throw new Error(`Flipp merchant config row ${storeName} needs nameAliases`);
+    }
+    if (row.searchUrl !== undefined && !row.searchUrl.includes("{q}")) {
+      throw new Error(`Flipp merchant config row ${storeName} searchUrl must include {q}`);
+    }
+    return {
+      storeName,
+      merchantIds: row.merchantIds,
+      nameAliases: row.nameAliases,
+      searchName,
+      flyerKitSlug,
+      ...(row.exactName ? { exactName: true } : {}),
+      ...(row.dealsOnly ? { dealsOnly: true } : {}),
+      ...(row.searchUrl ? { searchUrl: row.searchUrl } : {}),
+      ...(row.club ? { club: true } : {}),
+    };
+  });
+}
+
+export const FLIPP_MERCHANT_MAPPINGS: FlippMerchantMapping[] = loadMerchantConfig();
 
 export function normalizeMerchantName(value: string): string {
   return value
@@ -174,6 +151,14 @@ export function mappingForStore(
       normalizeMerchantName(mapping.storeName) === key ||
       mapping.nameAliases.some((alias) => aliasMatches(storeName, alias, mapping.exactName))
   );
+}
+
+/**
+ * Deal-only banners must not fall back to the demo catalog. A missing
+ * circular stays Unavailable instead of looking like a shelf price.
+ */
+export function allowsDemoFallback(storeName: string): boolean {
+  return mappingForStore(storeName)?.dealsOnly !== true;
 }
 
 export function canonicalGroceryStoreName(storeName: string): string {

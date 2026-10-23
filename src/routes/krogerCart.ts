@@ -6,6 +6,9 @@ import {
   krogerCartSessions,
   readCartModality,
   readKrogerOAuthConfig,
+  clearShopperCookieHeader,
+  readRequestCookie,
+  revokeSealedShopperCookie,
   sealShopperToken,
   shopperTokenForRequest,
   signCartState,
@@ -130,21 +133,7 @@ function searchLinkHtml(items: KrogerCartLine[]): string {
 }
 
 function cookieValue(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) {
-    return undefined;
-  }
-  for (const part of header.split(";")) {
-    const trimmed = part.trim();
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) {
-      continue;
-    }
-    if (trimmed.slice(0, eq) === name) {
-      return decodeURIComponent(trimmed.slice(eq + 1));
-    }
-  }
-  return undefined;
+  return readRequestCookie(req.headers.cookie, name);
 }
 
 function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: ShopperToken): void {
@@ -175,6 +164,23 @@ function pendingFromState(
   }
   return undefined;
 }
+
+router.get("/kroger/logout", async (req, res) => {
+  const sealed = cookieValue(req, KROGER_SHOPPER_COOKIE);
+  try {
+    await revokeSealedShopperCookie(sealed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Kroger logout revoke failed: ${message}`);
+  }
+  res.append("Set-Cookie", clearShopperCookieHeader());
+  res.status(200).send(
+    htmlPage(
+      "Kroger sign-in removed",
+      `<p class="status">The Kroger sign-in on this browser is gone. You can close this page and return to ${PRODUCT_NAME}.</p>`
+    )
+  );
+});
 
 router.get("/kroger/auth-status", (_req, res) => {
   const config = readKrogerOAuthConfig();

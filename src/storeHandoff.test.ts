@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { STORE_HANDOFF_CONFIG } from "./storeHandoffConfig";
+import { FLIPP_MERCHANT_MAPPINGS } from "./pricing/flipp/merchants";
 import type { StoreGroup } from "./optimizeGroceryList";
 import {
   buildStoreHandoff,
@@ -432,9 +433,60 @@ describe("buildStoreHandoff", () => {
       subtotal: 3.19,
     });
     assert.equal(costco.action.type, "shop_list");
+    assert.equal(costco.tier, "link");
+    assert.equal(costco.priceLabel, "Weekly ad, not shelf price");
     assert.match(costco.action.detail ?? "", /membership/i);
     assert.match(costco.action.detail ?? "", /cart-write is not available/i);
-    assert.equal(costco.tier, "link");
+    assert.match(costco.action.detail ?? "", /weekly ad, not a shelf price/i);
+  });
+
+  it("sends circular banners to the store site and never a cart", () => {
+    const milk = {
+      query: "milk",
+      name: "Whole Milk",
+      brand: "Store",
+      storeName: "Jewel-Osco",
+      price: 3.19,
+      quantity: 1,
+      itemTotal: 3.19,
+      unit: "gal",
+      normalizedUnit: "gal",
+      productId: "999001",
+      upc: "041415000001",
+      priceSource: "weekly_ad" as const,
+    };
+    const banners = [
+      "Jewel-Osco",
+      "Vons",
+      "Acme",
+      "Albertsons",
+      "Tom Thumb",
+      "Randalls",
+      "Pavilions",
+      "Stop & Shop",
+      "Sprouts",
+      "Winn-Dixie",
+      "H-E-B",
+      "Meijer",
+    ];
+    for (const storeName of banners) {
+      const handoff = buildStoreHandoff({
+        storeName,
+        items: [{ ...milk, storeName }],
+        subtotal: 3.19,
+      });
+      assert.equal(handoff.action.type, "shop_list", storeName);
+      assert.equal(handoff.tier, "link", storeName);
+      assert.equal(handoff.priceLabel, "Weekly ad, not shelf price", storeName);
+      assert.equal(handoff.action.label, `Shop this list at ${storeName}`, storeName);
+      assert.notEqual(handoff.action.type, "kroger_cart");
+      assert.notEqual(handoff.action.type, "walmart_cart");
+      assert.match(handoff.action.detail ?? "", /not a cart fill/i, storeName);
+      assert.match(handoff.action.detail ?? "", /weekly ad, not a shelf price/i, storeName);
+      assert.match(handoff.action.url ?? "", /Whole%20Milk/, storeName);
+      assert.equal(handoff.items[0].openLabel, `Open in ${storeName}`, storeName);
+      assert.equal((handoff.action.url ?? "").includes("999001"), false, storeName);
+    }
   });
 });
 
@@ -487,6 +539,32 @@ describe("enrichOptimizeResult", () => {
     assert.equal(enriched.stores[0].nearbyStore, undefined);
     assert.equal(enriched.stores[1].nearbyStore?.name, "WM Supercenter");
     assert.equal(enriched.stores[1].nearbyStore?.storeId, "2066");
+  });
+});
+
+describe("Flipp merchants have a handoff tier", () => {
+  it("uses link when merchants.json has a search URL, and never invents a cart", () => {
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      const row = STORE_HANDOFF_CONFIG.find((config) => config.storeName === mapping.storeName);
+      assert.ok(row, mapping.storeName);
+      if (mapping.searchUrl) {
+        assert.equal(row.tier, "link", mapping.storeName);
+        const url = partnerSearchUrl(mapping.storeName, {
+          name: "Milk",
+          priceSource: "weekly_ad",
+        });
+        assert.equal(url, mapping.searchUrl.replaceAll("{q}", "Milk"), mapping.storeName);
+        const handoff = buildStoreHandoff({
+          storeName: mapping.storeName,
+          items: [{ ...aldiBananas, storeName: mapping.storeName, priceSource: "weekly_ad" }],
+          subtotal: 1.47,
+        });
+        assert.equal(handoff.priceLabel, "Weekly ad, not shelf price", mapping.storeName);
+        assert.equal(handoff.action.type, "shop_list", mapping.storeName);
+      } else {
+        assert.ok(row.tier === "cart" || row.tier === "link", mapping.storeName);
+      }
+    }
   });
 });
 

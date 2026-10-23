@@ -42,6 +42,8 @@ export type LookupPick = {
   codes: string[];
   variantIndex: number;
   priority: LookupPriority;
+  /** Stored retailer code, so a Kroger hit can stay on this master. */
+  upc?: string;
 };
 
 type CandidateRow = {
@@ -181,6 +183,7 @@ function toPick(side: Side, row: CandidateRow, priority: LookupPriority): Lookup
     codes,
     variantIndex,
     priority,
+    ...(row.upc ? { upc: row.upc } : {}),
   };
 }
 

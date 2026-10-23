@@ -151,6 +151,7 @@ let nextCursor = null;
 let loading = false;
 let total = 0;
 let coverage = [];
+let weeklyAdBanners = [];
 let catalogSource = "demo";
 let instacartEnabled = false;
 /** @type {Record<string, any> | null} */
@@ -163,6 +164,7 @@ let activeSuggest = -1;
 let listLoading = false;
 let listReady = false;
 let watchTimer = 0;
+let deletingData = false;
 let unreadAlerts = 0;
 /** @type {Array<Record<string, any>>} */
 let priceAlerts = [];
@@ -277,8 +279,13 @@ async function copyText(text) {
 function sourceLabel(source) {
   if (source === "live") return "Live";
   if (source === "partner_feed") return "Partner";
-  if (source === "weekly_ad") return "Weekly ad";
+  if (source === "weekly_ad") return "Weekly ad, not shelf price";
   return "Demo";
+}
+
+function badgeLabel(source) {
+  if (source === "weekly_ad") return "Weekly ad";
+  return sourceLabel(source);
 }
 
 function bestOffer(product, store) {
@@ -332,6 +339,7 @@ function findListEntry(id) {
 }
 
 function saveList() {
+  if (deletingData) return;
   const rows = [...list.values()].map((entry) => ({
     id: entry.product.id,
     itemId: entry.itemId || entry.product.id,
@@ -359,6 +367,7 @@ function scheduleWatchSync() {
 }
 
 async function syncWatch() {
+  if (deletingData) return;
   const listOn = Boolean(listAlertsEl?.checked);
   const items = [];
   for (const entry of list.values()) {
@@ -675,13 +684,14 @@ function cardHtml(product) {
     <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
       <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
       ${sale ? '<span class="badge">Sale</span>' : ""}
-      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(sourceLabel(offer.priceSource))}</span>`}
+      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
     </button>
     <div class="card-body">
       <p class="brand">${escapeHtml(product.brand)}${product.storeBrand ? " · store brand" : ""}</p>
       <h3>${escapeHtml(product.name)}</h3>
       <p class="size">${escapeHtml(product.sizeLabel || product.departmentName)}</p>
       <p class="price"><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
+      ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
       <p class="unit">${escapeHtml(offer.unitPriceText || "")}</p>
       ${gapHtml}
     </div>
@@ -753,6 +763,7 @@ async function loadPage(reset) {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     coverage = body.coverage ?? coverage;
+    weeklyAdBanners = Array.isArray(body.weeklyAdBanners) ? body.weeklyAdBanners : [];
     catalogSource = body.catalogSource || catalogSource;
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
@@ -770,16 +781,24 @@ async function loadPage(reset) {
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
     const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
+    const foundNames = weeklyAdBanners.map((banner) => banner.storeName).filter(Boolean);
+    const foundLine = !zipOk
+      ? ""
+      : foundNames.length
+        ? ` Circulars Flipp returned for this ZIP: ${foundNames.join(", ")}. Each of those prices is the weekly ad, not a shelf price.`
+        : Array.isArray(body.weeklyAdBanners)
+          ? " Flipp returned no mapped grocery circular for this ZIP."
+          : "";
     if (!zipOk && weeklyAds) {
       coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
     } else if (demo) {
-      coverageBannerEl.textContent = "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.";
+      coverageBannerEl.textContent = `Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.${foundLine}`;
     } else if (catalogSource === "database") {
-      coverageBannerEl.textContent = "Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.";
+      coverageBannerEl.textContent = `Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.${foundLine}`;
     } else if (catalogSource === "mixed") {
-      coverageBannerEl.textContent = "Live samples are mixed with the demo catalog. Weekly-ad prices are labeled Weekly ad, not a live shelf.";
+      coverageBannerEl.textContent = `Live samples are mixed with the demo catalog. Weekly-ad prices are labeled weekly ad, not a shelf price.${foundLine}`;
     } else {
-      coverageBannerEl.textContent = "Live catalog sample. This is not a full store assortment.";
+      coverageBannerEl.textContent = `Live catalog sample. This is not a full store assortment.${foundLine}`;
     }
     const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
     if (hardWarnings.length) {
@@ -999,8 +1018,12 @@ function openProduct(product) {
 }
 
 function openCoverage() {
+  const found = weeklyAdBanners.length
+    ? `<p class="muted">Circulars Flipp returned for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Weekly ad, not shelf price.</p>`
+    : "";
   coverageDialog.innerHTML = `<div class="sheet-body">
     <h2 id="coverage-title">Catalog coverage</h2>
+    ${found}
     <ul class="offer-list">
       ${(coverage || [])
         .map(
@@ -1072,13 +1095,15 @@ function shareEnv() {
 
 function labelClass(label) {
   if (label === "Live shelf price" || label === "Partner feed") return "badge-live";
-  if (label === "Weekly ad") return "badge-ad";
+  if (label === "Weekly ad" || label === "Weekly ad, not shelf price") return "badge-ad";
   return "badge-demo";
 }
 
 function itemPriceLabel(item, store) {
-  if (item?.priceSource) return priceSourceLabel(item.priceSource);
-  return store?.handoff?.priceLabel || priceSourceLabel(store?.pricing?.source);
+  const source = item?.priceSource;
+  if (source === "weekly_ad" || source === "cached_weekly_ad") return "Weekly ad, not shelf price";
+  if (source) return priceSourceLabel(source);
+  return store?.handoff?.priceLabel || store?.pricing?.label || priceSourceLabel(store?.pricing?.source);
 }
 
 function exportRow(scope, storeName, actionType) {
@@ -1179,6 +1204,7 @@ function renderStore(store, checks) {
       const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
       const checked = item.lineId && checks[item.lineId] ? " checked" : "";
       const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
+      const priceLabel = itemPriceLabel(item, store);
       return `<li class="trip-item">
         <label class="check-line">
           <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
@@ -1188,7 +1214,7 @@ function renderStore(store, checks) {
           </span>
         </label>
         <span class="item-price">
-          <span class="${labelClass(itemPriceLabel(item, store))}">${escapeHtml(itemPriceLabel(item, store))}</span>
+          <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
           <span>${money(item.price)} each</span>
           <strong>${money(item.itemTotal ?? item.price)}</strong>
         </span>
@@ -2323,6 +2349,16 @@ alertsToggle?.addEventListener("click", () => void openAlerts(!alertsDialog?.ope
 $("alerts-close")?.addEventListener("click", () => openAlerts(false));
 alertsDialog?.addEventListener("close", () => alertsToggle?.setAttribute("aria-expanded", "false"));
 $("push-btn")?.addEventListener("click", () => void enablePush());
+for (const button of document.querySelectorAll(".settings-open")) {
+  button.addEventListener("click", openSettings);
+}
+$("settings-close")?.addEventListener("click", () => $("settings-dialog")?.close());
+$("delete-confirm")?.addEventListener("input", () => {
+  const button = $("delete-data-btn");
+  const confirmEl = $("delete-confirm");
+  if (button && confirmEl) button.disabled = confirmEl.value !== "DELETE";
+});
+$("delete-data-btn")?.addEventListener("click", () => void deleteMyData());
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -2481,6 +2517,94 @@ async function enablePush() {
     if (note) note.textContent = "This browser will get a notification when a price drops.";
   } catch (error) {
     if (note) note.textContent = error instanceof Error ? error.message : "Could not turn on notifications.";
+  }
+}
+
+function clearLocalShopperData() {
+  const keys = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith("gg-")) keys.push(key);
+  }
+  for (const key of keys) localStorage.removeItem(key);
+}
+
+async function unsubscribeLocalPush() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+  } catch {
+    /* the server still drops the stored subscription */
+  }
+}
+
+function openSettings() {
+  const dialog = $("settings-dialog");
+  const confirmEl = $("delete-confirm");
+  const errorEl = $("delete-error");
+  const button = $("delete-data-btn");
+  if (confirmEl) confirmEl.value = "";
+  if (errorEl) {
+    errorEl.hidden = true;
+    errorEl.textContent = "";
+  }
+  if (button) button.disabled = true;
+  if (dialog && !dialog.open) dialog.showModal();
+  confirmEl?.focus();
+}
+
+async function dropKrogerInSystemBrowser() {
+  if (!isNative()) return;
+  const url = apiUrl("/api/kroger/logout");
+  const browser = window.Capacitor?.Plugins?.Browser;
+  try {
+    if (browser?.open) await browser.open({ url });
+    else window.open(url, "_blank", "noopener");
+  } catch {
+    /* this device's server data is already gone */
+  }
+}
+
+async function deleteMyData() {
+  const button = $("delete-data-btn");
+  const errorEl = $("delete-error");
+  const confirmEl = $("delete-confirm");
+  if (!confirmEl || confirmEl.value !== "DELETE") return;
+  deletingData = true;
+  window.clearTimeout(watchTimer);
+  stopSync();
+  if (button) button.disabled = true;
+  if (errorEl) errorEl.hidden = true;
+  const device = deviceId();
+  const owned = readOwned();
+  const lists = owned?.shareToken && owned?.ownerToken ? [{ shareToken: owned.shareToken, ownerToken: owned.ownerToken }] : [];
+  try {
+    await unsubscribeLocalPush();
+    const response = await fetch(apiUrl("/api/me/data"), {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: apiOrigin() ? "omit" : "include",
+      body: JSON.stringify({ deviceId: device, lists }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not delete your data.");
+    clearLocalShopperData();
+    await dropKrogerInSystemBrowser();
+    if (window.location.pathname === "/" && !window.location.search && !window.location.hash) {
+      window.location.reload();
+    } else {
+      window.location.replace("/");
+    }
+  } catch (error) {
+    deletingData = false;
+    if (shareState?.shareToken) startSync();
+    if (errorEl) {
+      errorEl.hidden = false;
+      errorEl.textContent = error instanceof Error ? error.message : "Could not delete your data.";
+    }
+    if (button) button.disabled = confirmEl.value !== "DELETE";
   }
 }
 

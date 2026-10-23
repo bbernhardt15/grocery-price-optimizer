@@ -11,7 +11,7 @@ import type { RawCatalogRecord } from "../catalog/types";
 import { MemoryBudgetStore, MongoBudgetStore } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
-import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters } from "./maintenance";
+import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
 import { CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { noteCatalogDemand } from "./demand";
 import { matchProgress, nextWalmartLookups } from "./crossLookup";
@@ -1706,5 +1706,270 @@ describe("catalog ingestion", () => {
     assert.equal(status.counts.refreshedToday.walmart >= 1, true);
     assert.equal(typeof status.counts.refreshQueue.walmart, "number");
     assert.equal(typeof status.refresh.share, "number");
+  });
+
+  it("sends a 13-digit Kroger id and treats a lookup 400 as a miss", async () => {
+    const walmartUpc = "070708200500";
+    const productId = krogerProductIdForLookup(walmartUpc);
+    const key = upcKey(walmartUpc);
+    assert.equal(productId, "0007070820050");
+    assert.ok(key);
+    const now = new Date("2026-10-23T16:00:00.000Z");
+    await CatalogMaster.deleteMany({ key });
+    await CatalogOffer.deleteMany({ productKey: key });
+    await CatalogMaster.create({
+      key,
+      name: "Great Value Black Beans",
+      brand: "Great Value",
+      departmentId: "pantry",
+      upc: walmartUpc,
+      walmartItemId: "beans-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $ne: key } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 2,
+        clientErrorLocationId: "01400431",
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const seenIds: string[] = [];
+    const seenTerms: string[] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400431",
+        page: async () => {
+          throw new Error("discovery should not run");
+        },
+        lookupProductId: async (id: string) => {
+          seenIds.push(id);
+          const error = new Error("Kroger products request failed (400)");
+          (error as Error & { status: number }).status = 400;
+          throw error;
+        },
+        lookupTerm: async (term: string) => {
+          seenTerms.push(term);
+          return {
+            returned: 1,
+            records: [
+              {
+                name: "Great Value Black Beans",
+                brand: "Great Value",
+                storeName: "Kroger",
+                price: 0.86,
+                upc: "0007070820050",
+                productId,
+                priceSource: "live" as const,
+                categories: ["Canned Goods"],
+              },
+            ],
+          };
+        },
+      },
+      maxCalls: 2,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.deepEqual(seenIds, [productId]);
+    assert.deepEqual(seenTerms, ["Great Value Black Beans"]);
+    const row = await CatalogMaster.findOne({ key });
+    assert.equal(row?.krogerProductId, productId);
+    assert.equal(row?.walmartItemId, "beans-1");
+    const saved = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{
+      lastError?: string;
+      checkpoint?: { clientErrorStreak?: number; queryIndex?: number; phase?: string };
+    }>();
+    assert.equal(saved?.lastError ?? "", "");
+    assert.equal(saved?.checkpoint?.clientErrorStreak, 2);
+    assert.equal(saved?.checkpoint?.queryIndex, 4);
+    assert.equal(saved?.checkpoint?.phase, "queries");
+  });
+
+  it("clears a premature refresh exclusion and is idempotent", async () => {
+    await CatalogMaster.create({
+      key: "other-ensure",
+      name: "Ensure Original Nutrition Shake",
+      brand: "Ensure",
+      departmentId: "other",
+      categoryPaths: ["Health and Medicine/Weight Loss"],
+      walmartItemId: "ensure-1",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "other-ensure",
+      storeName: "Walmart",
+      locationId: "",
+      price: 9,
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: true,
+    });
+    await CatalogMaster.updateOne(
+      { key: "other-jewelry" },
+      {
+        $setOnInsert: {
+          name: "Personalized Necklace",
+          brand: "Walmart",
+          departmentId: "other",
+          categoryPaths: ["Jewelry/Necklaces"],
+          walmartItemId: "jew-1",
+          lastSeenAt: new Date(),
+          status: "active",
+        },
+      },
+      { upsert: true }
+    );
+    await CatalogOffer.updateOne(
+      { productKey: "other-jewelry", storeName: "Walmart", locationId: "" },
+      { $set: { price: 12, lastSeenAt: new Date(), status: "stale", refreshExcluded: true } },
+      { upsert: true }
+    );
+    const first = await excludeNongroceryFromRefresh();
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-ensure" }))?.refreshExcluded, false);
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+    assert.ok(first.cleared >= 1);
+    assert.ok(first.masters >= 1);
+    const second = await excludeNongroceryFromRefresh();
+    assert.equal(second.cleared, 0);
+    assert.equal(second.masters, first.masters);
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-ensure" }))?.refreshExcluded, false);
+    assert.equal(await CatalogMaster.countDocuments({ key: "other-ensure" }), 1);
+  });
+
+  it("recategorize clears refresh exclusion when a product leaves Other", async () => {
+    await CatalogOffer.updateOne({ productKey: "other-ensure" }, { $set: { refreshExcluded: true } });
+    const started = await startRecategorizeJob();
+    assert.ok(started.jobId);
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.ok(finished.examined > 0);
+    assert.equal((await CatalogMaster.findOne({ key: "other-ensure" }))?.departmentId, "beverages");
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-ensure" }))?.refreshExcluded, false);
+    assert.equal((await CatalogMaster.findOne({ key: "other-jewelry" }))?.departmentId, "other");
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+    const status = await catalogStatus();
+    assert.equal(status.recategorize.status, "completed");
+    assert.equal(status.recategorize.jobId, finished.jobId);
+  });
+
+  it("clears refresh exclusion when a named vitamin leaves Other", async () => {
+    await CatalogMaster.create({
+      key: "other-b-complex",
+      name: "Nature Made Super B-Complex With Vitamin C & Folic Acid Twin Pack Tablets 100 ct Vitamins 2 ct",
+      brand: "Nature Made",
+      departmentId: "other",
+      categoryPaths: ["Health and Medicine/Letter Vitamins/Vitamin B Complex"],
+      walmartItemId: "10535957",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "other-b-complex",
+      storeName: "Walmart",
+      locationId: "",
+      price: 7.52,
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: true,
+    });
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    const master = await CatalogMaster.findOne({ key: "other-b-complex" });
+    assert.equal(master?.departmentId, "personal-care");
+    assert.equal(master?.subcategory, "Health");
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-b-complex" }))?.refreshExcluded, false);
+    assert.ok(finished.clearedExclusions >= 1);
+    await excludeNongroceryFromRefresh();
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-b-complex" }))?.refreshExcluded, false);
+    assert.equal(await CatalogMaster.countDocuments({ key: "other-b-complex" }), 1);
+  });
+
+  it("clears refresh exclusion when allergy, pet food, training pants, and seeds leave Other", async () => {
+    const rows = [
+      {
+        key: "other-allergy",
+        name: "Benadryl Allergy Ultratabs",
+        categoryPaths: ["Health and Medicine"],
+        departmentId: "personal-care",
+      },
+      {
+        key: "other-dog-food",
+        name: "Iams ProActive Health Adult Dry Dog Food",
+        categoryPaths: ["Toys/Plush"],
+        departmentId: "pet",
+      },
+      {
+        key: "other-training-pants",
+        name: "Parent's Choice Training Pants",
+        categoryPaths: ["Clothing/Baby"],
+        departmentId: "baby",
+      },
+      {
+        key: "other-chia",
+        name: "Sanar Naturals Raw Black Chia Seeds, High Fiber, Omega-3",
+        categoryPaths: ["Health and Medicine"],
+        departmentId: "pantry",
+      },
+    ];
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: "Store",
+        departmentId: "other",
+        categoryPaths: row.categoryPaths,
+        walmartItemId: row.key,
+        lastSeenAt: new Date(),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 4,
+        lastSeenAt: new Date(),
+        status: "stale",
+        refreshExcluded: true,
+      });
+    }
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.ok(finished.clearedExclusions >= rows.length);
+    for (const row of rows) {
+      const master = await CatalogMaster.findOne({ key: row.key });
+      assert.equal(master?.departmentId, row.departmentId, row.key);
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, false, row.key);
+    }
+    await excludeNongroceryFromRefresh();
+    for (const row of rows) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, false, row.key);
+      assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
   });
 });

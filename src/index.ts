@@ -1,7 +1,10 @@
 import "dotenv/config";
+import "./observability/instrument";
 import app from "./app";
 import { connectDatabase } from "./db";
 import { startIngestScheduler } from "./ingest/scheduler";
+import { scrubString } from "./observability/scrub";
+import { captureServerException, flushSentry } from "./observability/sentry";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -15,7 +18,10 @@ async function start(): Promise<void> {
 }
 
 void start().catch((error: unknown) => {
+  captureServerException(error);
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`Failed to start: ${message}`);
-  process.exit(1);
+  console.error(`Failed to start: ${scrubString(message)}`);
+  void flushSentry().finally(() => {
+    process.exit(1);
+  });
 });

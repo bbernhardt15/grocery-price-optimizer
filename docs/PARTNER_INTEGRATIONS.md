@@ -253,7 +253,7 @@ HTTP contract the stub already implements (put a proxy in front of the vendor if
 | **Kroger** Products/Locations | live | Client-credentials. Cart = separate shopper OAuth. |
 | **Walmart Affiliate** | optional keys | Catalog, not aisle. Add-to-cart deep link when item ids exist; otherwise search. Nearest store is a label only. |
 | **Target partner feed** | stub `TARGET_PARTNER_*` | Same idea as `PartnerFeedProvider`; keep RedSky unused. |
-| **Flipp weekly ads** | **live** (optional) | FlyerKit (`FLIPP_ACCESS_TOKEN`) or opt-in consumer search (`FLIPP_ENABLED=true`). Labeled **Weekly ad**, not a shelf catalog. Licensed partner feeds beat Flipp for the same banner. |
+| **Flipp weekly ads** | **live** (optional) | FlyerKit (`FLIPP_ACCESS_TOKEN`) or opt-in consumer search (`FLIPP_ENABLED=true`). Labeled **Weekly ad, not shelf price**. The banner list is `src/pricing/flipp/merchants.json`. Licensed partner feeds beat Flipp for the same banner. |
 
 ---
 
@@ -262,9 +262,9 @@ HTTP contract the stub already implements (put a proxy in front of the vendor if
 | Banner | Shippable now | Still not available |
 | --- | --- | --- |
 | **Target** | Weekly circular for a 5-digit ZIP when `FLIPP_ENABLED=true`, labeled **Weekly ad**, in browse, search, and the trip. Search handoff only. | No public shelf API. RedSky is not called. Target Circle offers and RedCard 5% are signed-in account discounts, not a price file we can license from a docs page. Full shelf still needs `TARGET_PARTNER_*` or a Datasembly-class feed. |
-| **Aldi** | Same weekly-ad path. Aldi merchant id `2353`. Handoff stays **Coming soon**. | No public product or cart API. The ad is a small subset of the store (many staples never appear). In-stock shelf price needs `SHELF_FEED_STORES=Aldi` or an Instacart Connect contract. Instacart prices are often marked up and must stay labeled **Partner feed**. |
+| **Aldi** | Same weekly-ad path. Aldi merchant id `2353`. Handoff is **Shop this list at Aldi** with `https://www.aldi.us/store/aldi/search?q=`. | No public product or cart API. The ad is a small subset of the store (many staples never appear). In-stock shelf price needs `SHELF_FEED_STORES=Aldi` or an Instacart Connect contract. Instacart prices are often marked up and must stay labeled **Partner feed**. |
 
-Food Lion (`2100`), H-E-B (`2467`), US Safeway (`5667`), and Giant Eagle (`2130`) use that same circular path. They are not live shelf prices.
+H-E-B (`2467`), Publix (`2361`), Meijer (`2281`), Albertsons (`5661`), Vons (`2375`), Jewel-Osco (`2364`), Acme (`2365`), Tom Thumb (`2381`), Randalls (`2378`), Pavilions (`2377`), Stop & Shop (`2393`), Sprouts (`2419`), Winn-Dixie (`2415`), and Costco (`2519`) use that same circular path when Flipp's flyer index includes them. They are the weekly ad, not a shelf price. Safeway, Shaw's, Food Lion, Giant, Giant Eagle, Hy-Vee, Wegmans, ShopRite, and a separate Harris Teeter flyer were not in the 2026-10-23 sample ZIPs, so they are not in `merchants.json`.
 
 ## What NOT to do
 

@@ -10,7 +10,7 @@ Each banner has a **tier** in `src/storeHandoffConfig.ts`:
 | `link` | No cart write. **Shop this list at {store}** opens a checklist. Each line has **Open in {store}** (a product page when we have a real id, otherwise that store's search). |
 | `list` | No verified item link. The same checklist, with quantities and a check-off box, and nothing that pretends to open the store. |
 
-The trip is segmented by store. Each segment shows the items, quantity, price, a price-source label (**Live shelf price** or **Weekly ad**, plus Demo catalog or Partner feed when that's the truth), a store total, and the savings versus the cheapest one-store trip that can fill every line. The shopper can move a line to another store that has a price, lock one store for the whole trip, copy or share the list, and shop it offline.
+The trip is segmented by store. Each segment shows the items, quantity, price, a price-source label (**Live shelf price**, **Weekly ad, not shelf price** on a weekly-ad-only banner, plus Demo catalog or Partner feed when that's the truth), a store total, and the savings versus the cheapest one-store trip that can fill every line. The shopper can move a line to another store that has a price, lock one store for the whole trip, copy or share the list, and shop it offline.
 
 Per-store **Copy list** is one item per line, with quantity and size (`2 Whole Milk, 1 gal`), so it pastes into notes or a store app's list. The whole trip adds the store name above each group. Share uses the Capacitor Share plugin when the native shell has it, then the Web Share API, then copy. **Shareable link** creates a list with the existing shared-list API. **Add to Instacart** appears only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set.
 
@@ -28,21 +28,29 @@ Link checks below were HTTP fetches on 23 Oct 2026 with a normal browser user ag
 | Walmart | Walmart Affiliate catalog (walmart.com, not in-aisle) or weekly ad | cart | Cart: `https://www.walmart.com/sc/cart/addToCart?items={itemId}\|{qty}`. Item: `https://www.walmart.com/ip/{itemId}`. Search: `https://www.walmart.com/search?q={query}` |
 | Target | Weekly ad, or a licensed partner feed when `TARGET_PARTNER_*` is set | link | Product by TCIN: `https://www.target.com/p/-/A-{tcin}` (200). Search: `https://www.target.com/s?searchTerm={query}` (200). A weekly-ad flyer id is not used as a TCIN. |
 | Aldi | Weekly ad or the demo catalog. No Aldi shelf API | link | Search: `https://www.aldi.us/store/aldi/search?q={query}` (200). This is Aldi's online shop (delivery or pickup), not an in-aisle map. |
-| Publix | Weekly ad | link | Search: `https://www.publix.com/search?searchTerm={query}` (200; the site redirects into results). |
-| H-E-B | Weekly ad | link | Search: `https://www.heb.com/search/?q={query}` (200). |
-| Meijer | Weekly ad | link | Search: `https://www.meijer.com/shopping/search.html?query={query}` (403 from a script; this is Meijer's own search page). |
-| Safeway | Weekly ad or a licensed partner feed | link | Search: `https://www.safeway.com/shop/search-results.html?q={query}` (200). |
-| Albertsons | Weekly ad or a licensed partner feed | link | Search: `https://www.albertsons.com/shop/search-results.html?q={query}` (200). |
-| Food Lion | Weekly ad | link | Search: `https://www.foodlion.com/shop/search-results.html?q={query}` (403 from a script; the banner's own search path). |
-| Giant | Weekly ad | link | Search: `https://giantfood.com/shop/search-results.html?q={query}` (403 from a script). This is Giant Food, not Giant Eagle. |
-| Stop & Shop | Weekly ad | link | Search: `https://stopandshop.com/shop/search-results.html?q={query}` (403 from a script). |
-| Costco | Weekly ad. Warehouse prices can require a membership | link | Search: `https://www.costco.com/CatalogSearch?keyword={query}` (200). No third-party cart write. |
+| Publix | Weekly ad, not a shelf price | link | Search: `https://www.publix.com/search?searchTerm={query}` (200; the site redirects into results). |
+| H-E-B | Weekly ad, not a shelf price | link | Search: `https://www.heb.com/search/?q={query}` (200). |
+| Meijer | Weekly ad, not a shelf price | link | Search: `https://www.meijer.com/shopping/search.html?query={query}` (403 from a script; this is Meijer's own search page). |
+| Safeway | Weekly ad or a licensed partner feed | link | Search: `https://www.safeway.com/shop/search-results.html?q={query}` (200). Not in `merchants.json`; Flipp did not return a Safeway circular for the sample ZIPs. |
+| Albertsons | Weekly ad, not a shelf price | link | Search: `https://www.albertsons.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Vons | Weekly ad, not a shelf price | link | Search: `https://www.vons.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Jewel-Osco | Weekly ad, not a shelf price | link | Search: `https://www.jewelosco.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Acme | Weekly ad, not a shelf price | link | Search: `https://www.acmemarkets.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Tom Thumb | Weekly ad, not a shelf price | link | Search: `https://www.tomthumb.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Randalls | Weekly ad, not a shelf price | link | Search: `https://www.randalls.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Pavilions | Weekly ad, not a shelf price | link | Search: `https://www.pavilions.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Food Lion | Weekly ad | link | Search: `https://www.foodlion.com/shop/search-results.html?q={query}` (403 from a script; the banner's own search path). Not in `merchants.json`. |
+| Giant | Weekly ad | link | Search: `https://giantfood.com/shop/search-results.html?q={query}` (403 from a script). This is Giant Food, not Giant Eagle. Not in `merchants.json`. |
+| Stop & Shop | Weekly ad, not a shelf price | link | Search: `https://stopandshop.com/shop/search-results.html?q={query}` (from `merchants.json`). |
+| Sprouts | Weekly ad, not a shelf price | link | Search: `https://shop.sprouts.com/search?search_term={query}` (from `merchants.json`). |
+| Winn-Dixie | Weekly ad, not a shelf price | link | Search: `https://shop.winndixie.com/shop/search?search_term={query}` (from `merchants.json`). |
+| Costco | Weekly ad, not a shelf price. Warehouse prices can require a membership | link | Search: `https://www.costco.com/CatalogSearch?keyword={query}` (200). No third-party cart write. |
 | Sam's Club | No shelf feed. Club prices can require a membership | link | Search: `https://www.samsclub.com/s/{query}` (200). No third-party cart write. |
 | Whole Foods | No shelf feed | link | Search: `https://www.wholefoodsmarket.com/search?text={query}` (200). |
 | Amazon Fresh | No shelf feed | link | Search: `https://www.amazon.com/s?k={query}` (200). Not a Fresh shelf price. |
 | Giant Eagle | Weekly ad | list | No verified item link. Checklist only. |
 
-A banner that shows up from a weekly ad and is not in this table is `list` until someone verifies a search or product URL and adds it to the config. That includes banners a parallel Flipp change might start pricing. Do not invent a cart write for them.
+Every banner in `src/pricing/flipp/merchants.json` is in this table. A `searchUrl` in that file is the link tier. A banner with no verified search URL stays `list`. Do not invent a cart write for a circular.
 
 ## Candidate sources for more shelf prices
 

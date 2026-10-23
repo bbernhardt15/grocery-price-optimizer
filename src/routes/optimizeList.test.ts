@@ -1130,12 +1130,13 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Aldi.items[0].query, "FlippAmaranth");
       assert.equal(byStore.Aldi.items[0].price, 1.79);
       assert.equal(byStore.Aldi.items[0].priceSource, "weekly_ad");
-      assert.equal(byStore.Aldi.pricing?.label, "Weekly ad");
+      assert.equal(byStore.Aldi.pricing?.label, "Weekly ad, not shelf price");
+      assert.match(byStore.Aldi.pricing?.detail ?? "", /not a shelf price/i);
       assert.match(byStore.Aldi.pricing?.detail ?? "", /not a full live shelf/i);
 
       assert.equal(byStore.Target.items[0].query, "FlippBokChoy");
       assert.equal(byStore.Target.items[0].priceSource, "weekly_ad");
-      assert.equal(byStore.Target.pricing?.label, "Weekly ad");
+      assert.equal(byStore.Target.pricing?.label, "Weekly ad, not shelf price");
 
       assert.equal(byStore.Kroger, undefined);
 
@@ -1291,6 +1292,122 @@ describe("POST /api/optimize-list", () => {
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
       krogerService.getClosestStoreLocation = originalLookup;
+      for (const stub of stubs) {
+        const provider = flippProviderForStore(stub.store);
+        if (provider) {
+          provider.searchProducts = stub.original;
+        }
+      }
+      clearPricingEnv();
+    }
+  });
+
+  it("puts deal-only banners on the trip only when the price is a weekly ad", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    setKrogerCreds();
+    const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const stubs: Array<{
+      store: string;
+      original: FlippDealsProvider["searchProducts"];
+    }> = [];
+    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.searchProducts = async () => [];
+    try {
+    await Product.create({
+      name: "FlippOnlyQuinoa",
+      brand: "Publix",
+      storeName: "Publix",
+      price: 0.25,
+      unit: "count",
+      normalizedUnit: "count",
+      priceSource: "seed",
+      lastUpdated: new Date(),
+    });
+    await Product.create({
+      name: "FlippMissingQuinoa",
+      brand: "Sprouts",
+      storeName: "Sprouts",
+      price: 0.2,
+      unit: "count",
+      normalizedUnit: "count",
+      priceSource: "seed",
+      lastUpdated: new Date(),
+    });
+
+    for (const mapping of FLIPP_MERCHANT_MAPPINGS) {
+      const provider = flippProviderForStore(mapping.storeName);
+      assert.ok(provider, mapping.storeName);
+      stubs.push({
+        store: mapping.storeName,
+        original: provider.searchProducts.bind(provider),
+      });
+      provider.searchProducts = async (term) => {
+        if (mapping.storeName !== "Publix" || term !== "FlippOnlyQuinoa") {
+          return [];
+        }
+        return [
+          {
+            name: "Publix FlippOnlyQuinoa",
+            brand: "Publix",
+            storeName: "Publix",
+            locationId: "30303",
+            price: 4,
+            unit: "count",
+            normalizedUnit: "count",
+            priceSource: "weekly_ad",
+          },
+        ];
+      };
+    }
+
+      const deal = await optimize({
+        groceryList: ["FlippOnlyQuinoa"],
+        zipCode: "30303",
+      });
+      assert.equal(deal.status, 200);
+      const dealBody = deal.json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ price: number; priceSource?: string }>;
+          handoff: { priceLabel?: string; action: { type: string; detail?: string; url?: string } };
+          pricing?: { label: string };
+        }>;
+      };
+      assert.equal(dealBody.stores.length, 1);
+      assert.equal(dealBody.stores[0].storeName, "Publix");
+      assert.equal(dealBody.stores[0].items[0].price, 4);
+      assert.equal(dealBody.stores[0].items[0].priceSource, "weekly_ad");
+      assert.equal(dealBody.stores[0].pricing?.label, "Weekly ad, not shelf price");
+      assert.equal(dealBody.stores[0].handoff.priceLabel, "Weekly ad, not shelf price");
+      assert.equal(dealBody.stores[0].handoff.action.type, "shop_list");
+      assert.match(dealBody.stores[0].handoff.action.detail ?? "", /not a cart fill/i);
+      assert.match(dealBody.stores[0].handoff.action.detail ?? "", /not a shelf price/i);
+      assert.match(dealBody.stores[0].handoff.action.url ?? "", /publix\.com/i);
+
+      const miss = await optimize({
+        groceryList: ["FlippMissingQuinoa"],
+        zipCode: "30303",
+      });
+      assert.equal(miss.status, 200);
+      const missBody = miss.json as {
+        stores: Array<{ storeName: string }>;
+        unavailable: string[];
+        pricingByStore: Array<{ storeName: string; source: string }>;
+      };
+      assert.equal(
+        missBody.stores.some((store) => store.storeName === "Sprouts"),
+        false
+      );
+      assert.ok(missBody.unavailable.some((item) => /quinoa/i.test(item)));
+      assert.equal(
+        missBody.pricingByStore.find((row) => row.storeName === "Sprouts")?.source,
+        "unavailable"
+      );
+    } finally {
+      krogerService.searchProducts = originalKrogerSearch;
+      krogerService.getClosestStoreLocation = originalLookup;
+      await Product.deleteMany({ storeName: { $in: ["Publix", "Sprouts"] } });
       for (const stub of stubs) {
         const provider = flippProviderForStore(stub.store);
         if (provider) {
