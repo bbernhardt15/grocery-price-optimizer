@@ -9,6 +9,7 @@ import {
 import { catalogCoverage } from "../catalog/coverage";
 import type { BrowseSort, SizeClass } from "../catalog/types";
 import { noteShopperZip } from "../ingest/runner";
+import { flippConsumerEnabled, listWeeklyAdBanners } from "../pricing/flipp/client";
 
 const router = Router();
 
@@ -67,8 +68,28 @@ router.get("/catalog/departments", (_req, res) => {
   });
 });
 
-router.get("/catalog/coverage", (_req, res) => {
-  res.json({ stores: catalogCoverage(coverageFlags()) });
+router.get("/catalog/coverage", async (req, res) => {
+  const zipCode = readZip(req.query.zip ?? req.query.zipCode);
+  if (zipCode === "invalid") {
+    res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
+    return;
+  }
+  let weeklyAdBanners: Awaited<ReturnType<typeof listWeeklyAdBanners>> | undefined;
+  let weeklyAdWarning: string | undefined;
+  if (zipCode && flippConsumerEnabled()) {
+    try {
+      weeklyAdBanners = await listWeeklyAdBanners(zipCode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      weeklyAdBanners = [];
+      weeklyAdWarning = `Weekly-ad banner list failed: ${message}`;
+    }
+  }
+  res.json({
+    stores: catalogCoverage(coverageFlags()),
+    ...(zipCode ? { zip: zipCode, weeklyAdBanners: weeklyAdBanners ?? [] } : {}),
+    ...(weeklyAdWarning ? { warning: weeklyAdWarning } : {}),
+  });
 });
 
 router.get("/catalog/placeholder.svg", (req, res) => {

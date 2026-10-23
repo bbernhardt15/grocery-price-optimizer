@@ -70,7 +70,7 @@ export type StorePricingReport = {
   attempted: boolean;
   ok: boolean;
   usedFallback: boolean;
-  /** Shopper-facing label: Live prices / Partner feed / Cached live / Weekly ad / Demo catalog. */
+  /** Shopper-facing label: Live prices / Partner feed / Cached live / Weekly ad, not shelf price / Demo catalog. */
   label: string;
   detail: string;
   error?: string;
