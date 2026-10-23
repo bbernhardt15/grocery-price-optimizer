@@ -144,6 +144,9 @@ img { max-width: 100%; display: block; }
 .delete-box h3, .account-box h3 { margin: 4px 0 0; font-size: 1.05rem; }
 .delete-box label, .account-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
 .account-box { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.paywall-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 6px; }
+.paywall-packages, .paywall-actions { display: flex; flex-direction: column; gap: 8px; }
+.paywall-actions a { min-height: 44px; display: inline-flex; align-items: center; }
 .account-actions, .magic-form { display: flex; flex-direction: column; gap: 8px; }
 .apple-btn {
   min-height: 44px; border-radius: 12px; border: 0; background: #000; color: #fff;

@@ -22,6 +22,7 @@ import {
   type ShopperToken,
 } from "../krogerCartAuth";
 import { krogerSearchUrl } from "../storeHandoff";
+import { blockUnlessFeature } from "../billing/middleware";
 
 const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
@@ -220,6 +221,9 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     res.status(400).json({
       error: "Body must include items[] from the Kroger store handoff.",
     });
+    return;
+  }
+  if (await blockUnlessFeature(req, res, "cartHandoffs", "Cart handoffs are part of Grocery Gitter Pro.")) {
     return;
   }
 

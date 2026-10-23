@@ -23,11 +23,17 @@ const accountSchema = new Schema(
       ],
       default: [],
     },
+    /** `pro` while an App Store or Play subscription is active. Absent means free. */
+    entitlement: { type: String, enum: ["free", "pro"], default: "free" },
+    entitlementExpiresAt: { type: Date, default: null },
+    /** RevenueCat app user id. The apps send this account's id. */
+    revenueCatAppUserId: { type: String },
   },
   { timestamps: true }
 );
 
 accountSchema.index({ email: 1 }, { unique: true, sparse: true });
+accountSchema.index({ revenueCatAppUserId: 1 }, { sparse: true });
 
 const identitySchema = new Schema(
   {
@@ -130,6 +136,9 @@ export type AccountDoc = {
   displayName: string;
   krogerSealed?: string;
   linkedLists: LinkedListSeal[];
+  entitlement?: "free" | "pro";
+  entitlementExpiresAt?: Date | null;
+  revenueCatAppUserId?: string;
   createdAt?: Date;
   updatedAt?: Date;
 };

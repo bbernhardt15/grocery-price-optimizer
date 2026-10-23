@@ -13,6 +13,7 @@ import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
 import authRouter from "./routes/auth";
+import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 
@@ -111,6 +112,12 @@ app.get("/api", (_req, res) => {
         "The signed-in account, or account null. Guest mode does not need this.",
       "PUT /api/me/list":
         "Saves the signed-in shopper's list. A newer revision from another device is merged per item.",
+      "GET /api/billing/status":
+        "Whether subscriptions are enforced, the current plan, the free and Pro limits, and the public RevenueCat SDK keys. Enforced is false until REVENUECAT_WEBHOOK_SECRET is set, and every feature stays available until then.",
+      "POST /api/billing/revenuecat":
+        "RevenueCat webhook. Stores entitlement pro on the account. 503 until the webhook secret is set. Unknown app user ids return stored false.",
+      "POST /api/billing/refresh":
+        "Signed-in only. Asks RevenueCat for this account when REVENUECAT_SECRET_API_KEY is set. Otherwise returns the stored plan.",
       "DELETE /api/me/data":
         "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. When a session is sent, also deletes that account and the other devices on it. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals, catalog-demand phrases, and Sentry crash reports are not tied to a device or account and are left in place.",
       "GET /api/kroger/logout":
@@ -127,6 +134,7 @@ app.get("/api/observability", (_req, res) => {
 
 app.use("/api", attachAccount);
 app.use("/api", authRouter);
+app.use("/api", billingRouter);
 app.use("/api", catalogRouter);
 app.use("/api", browseCatalogRouter);
 app.use("/api", adminCatalogRouter);

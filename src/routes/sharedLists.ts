@@ -11,6 +11,10 @@ import {
   writeSharedItems,
 } from "../lists/repository";
 import { createRateLimiter, hashSecret, isShareToken } from "../lists/sharedList";
+import { accessFor } from "../billing/access";
+import { paywallBody } from "../billing/http";
+import { withinCap } from "../billing/limits";
+import { SharedList } from "../models/SharedList";
 
 const router = Router();
 const writeLimiter = createRateLimiter({ windowMs: 60_000 });
@@ -46,6 +50,33 @@ function tooMany(res: Response, message = "Too many list edits. Wait a moment an
   res.status(429).json({ error: message });
 }
 
+async function sharedListCreateAllowed(
+  res: Response,
+  deviceIdRaw: unknown,
+  ownerToken: unknown
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const access = await accessFor(res);
+  const cap = access.limits.sharedLists;
+  if (cap === 0) return { ok: true };
+  if (typeof ownerToken === "string" && isShareToken(ownerToken)) {
+    const existing = await SharedList.exists({ ownerTokenHash: hashSecret(ownerToken) });
+    if (existing) return { ok: true };
+  }
+  const accountId = requestAuth(res)?.accountId;
+  const noun = cap === 1 ? "1 shared list" : `${cap} shared lists`;
+  const message = `The free plan includes ${noun}. Grocery Gitter Pro includes unlimited shared lists.`;
+  if (accountId) {
+    const count = await SharedList.countDocuments({ accountId, revokedAt: null });
+    return withinCap(count, cap) ? { ok: true } : { ok: false, error: message };
+  }
+  const deviceId = parsePublicId(deviceIdRaw);
+  if (!deviceId) {
+    return { ok: false, error: "Send deviceId to create a shared list, or sign in to Grocery Gitter Pro." };
+  }
+  const count = await SharedList.countDocuments({ ownerDeviceId: deviceId, revokedAt: null });
+  return withinCap(count, cap) ? { ok: true } : { ok: false, error: message };
+}
+
 function allowWrite(req: Request, shareToken: string): boolean {
   const address = clientAddress(req);
   const perIp = writeLimiter.allow(`ip:${address}`, limitFromEnv("LIST_WRITE_IP_LIMIT", 120));
@@ -64,6 +95,11 @@ router.post("/lists", async (req, res) => {
   }
   const body = req.body as Record<string, unknown>;
   try {
+    const allowed = await sharedListCreateAllowed(res, body.deviceId, body.ownerToken);
+    if (!allowed.ok) {
+      res.status(402).json(paywallBody(allowed.error, "sharedLists"));
+      return;
+    }
     const result = await createOrResumeList({
       ownerToken: body.ownerToken,
       shareToken: body.shareToken,

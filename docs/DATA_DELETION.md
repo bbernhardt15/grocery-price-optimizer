@@ -60,7 +60,7 @@ A guest who only has the share link can delete their own device rows. They canno
 
 | Collection | Delete action |
 | --- | --- |
-| `Account` | The document, including the sealed Kroger blob and the sealed share tokens. |
+| `Account` | The document, including the sealed Kroger blob, the sealed share tokens, and the free or pro entitlement. |
 | `AuthIdentity` | Apple, Google, and email subjects for that account. |
 | `AuthSession` | Every session, not only this device. The response also clears `gg_session`. |
 | `MagicLink` | Unused links for that email address. |
@@ -71,6 +71,8 @@ A guest who only has the share link can delete their own device rows. They canno
 Signing out (`POST /api/auth/logout`) clears this session only. It does not delete the account. A request with no session still deletes only this device, and the response includes `account.deleted: false`.
 
 Sentry crash reports are not part of this delete. They are sent only when `SENTRY_DSN` is set, and a report is not tied to an account or to `gg-device`. The button does not remove them. Email [CONTACT EMAIL] with the approximate time and whether it was the website, iPhone, or Android to ask for a matching report to be removed.
+
+Deleting the account does not cancel an App Store or Google Play subscription. The shopper cancels that in the store. A later RevenueCat event for the deleted account returns `stored: false`.
 
 The response adds `"account": { "deleted": true }` or `"deleted": false`. The `deleted` counts include rows removed with the account.
 
