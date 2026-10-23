@@ -38,8 +38,12 @@ export function filterProducts(products: BrowseProduct[], filters: BrowseFilters
   const subcategory = filters.subcategory?.trim().toLowerCase();
   const store = filters.store?.trim().toLowerCase();
   const brand = filters.brand?.trim().toLowerCase();
+  const hideGeneralMerchandise = !departmentId || departmentId === "all";
 
   return products.filter((product) => {
+    if (hideGeneralMerchandise && product.departmentId === "other") {
+      return false;
+    }
     if (departmentId && departmentId !== "all" && product.departmentId !== departmentId) {
       return false;
     }

@@ -71,18 +71,36 @@ export type IngestConfig = {
   browseScan: number;
   /** Fraction of each Walmart or Kroger tick spent on cross-store lookups. */
   matchLookupShare: number;
+  /** Fraction of each Walmart or Kroger tick spent refreshing the oldest stale offers. */
+  refreshShare: number;
   /** Days before a no-hit lookup is tried again. */
   matchRetryDays: number;
   /** UPCs per Walmart GET /items call. The Affiliate ids list allows 20. */
   walmartLookupBatch: number;
 };
 
-/** How many calls in one tick are cross-store lookups. At least one when the share is above zero. */
+/** How many calls in one tick a share gets. At least one when the share is above zero. */
 export function lookupCallsForTick(maxCalls: number, share: number): number {
   if (!(share > 0) || maxCalls < 1) {
     return 0;
   }
   return Math.min(maxCalls, Math.max(1, Math.round(maxCalls * share)));
+}
+
+/**
+ * Split one tick across cross-store lookup, stale-offer refresh, and discovery.
+ * Lookup is reserved first. Refresh takes its share of whatever calls remain.
+ * Discovery is the rest, and it also receives calls when a queue is empty.
+ */
+export function tickCallSplit(
+  maxCalls: number,
+  lookupShare: number,
+  refreshShare: number
+): { lookup: number; refresh: number; discovery: number } {
+  const lookup = lookupCallsForTick(maxCalls, lookupShare);
+  const refresh = Math.min(lookupCallsForTick(maxCalls, refreshShare), Math.max(0, maxCalls - lookup));
+  const discovery = Math.max(0, maxCalls - lookup - refresh);
+  return { lookup, refresh, discovery };
 }
 
 export function ingestConfig(): IngestConfig {
@@ -120,6 +138,7 @@ export function ingestConfig(): IngestConfig {
     shopperZipLimit: intEnv("CATALOG_SHOPPER_ZIP_LIMIT", 12, 1, 100),
     browseScan: intEnv("CATALOG_BROWSE_SCAN", 1500, 50, 5000),
     matchLookupShare: floatEnv("CATALOG_MATCH_LOOKUP_SHARE", 0.5, 0, 1),
+    refreshShare: floatEnv("CATALOG_REFRESH_SHARE", 0.3, 0, 1),
     matchRetryDays: intEnv("CATALOG_MATCH_RETRY_DAYS", 14, 1, 365),
     walmartLookupBatch: intEnv("WALMART_LOOKUP_BATCH", 20, 1, 20),
   };

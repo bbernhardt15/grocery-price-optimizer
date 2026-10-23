@@ -706,7 +706,8 @@ function fillFacets(facets) {
 function renderDepartments() {
   const chips = [`<button type="button" class="chip" data-dept="all" role="tab" aria-selected="${activeDepartment === "all"}">All</button>`];
   const links = [`<button type="button" class="dept-link" data-dept="all" ${activeDepartment === "all" ? 'aria-current="page"' : ""}>All departments</button>`];
-  for (const department of departments) {
+  const visible = departments.filter((department) => department.id !== "other" && !department.generalMerchandise);
+  for (const department of visible) {
     const selected = activeDepartment === department.id;
     chips.push(`<button type="button" class="chip" data-dept="${escapeHtml(department.id)}" role="tab" aria-selected="${selected}">${escapeHtml(department.name)}</button>`);
     links.push(`<button type="button" class="dept-link" data-dept="${escapeHtml(department.id)}" ${selected ? 'aria-current="page"' : ""}>${escapeHtml(department.name)}</button>`);

@@ -18,17 +18,26 @@ function matchesTokens(name: string, brand: string, tokens: string[]): boolean {
   return tokens.every((token) => haystack.includes(token));
 }
 
+/** Shopper browse and search omit Other unless that aisle was asked for. */
+function departmentClause(departmentId?: string): Record<string, unknown> {
+  if (departmentId && departmentId !== "all") {
+    return { departmentId };
+  }
+  return { departmentId: { $ne: "other" } };
+}
+
 async function findMasters(scope: { departmentId?: string; query?: string }): Promise<CatalogMasterDoc[]> {
   const config = ingestConfig();
   const tokens = tokensOf(scope.query ?? "");
   const status = { $ne: "discontinued" };
+  const department = departmentClause(scope.departmentId);
   if (tokens.length > 0) {
     try {
       const found = await CatalogMaster.find(
         {
           $text: { $search: tokens.join(" ") },
           status,
-          ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
+          ...department,
         },
         { score: { $meta: "textScore" } }
       )
@@ -49,18 +58,15 @@ async function findMasters(scope: { departmentId?: string; query?: string }): Pr
     return CatalogMaster.find({
       status,
       $and: clauses,
-      ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
+      ...department,
     })
       .limit(config.browseScan)
       .lean<CatalogMasterDoc[]>();
   }
-  if (scope.departmentId) {
-    return CatalogMaster.find({ departmentId: scope.departmentId, status })
-      .sort({ name: 1 })
-      .limit(config.browseScan)
-      .lean<CatalogMasterDoc[]>();
-  }
-  return CatalogMaster.find({ status }).sort({ lastSeenAt: -1 }).limit(config.browseScan).lean<CatalogMasterDoc[]>();
+  return CatalogMaster.find({ ...department, status })
+    .sort(scope.departmentId && scope.departmentId !== "all" ? { name: 1 } : { lastSeenAt: -1 })
+    .limit(config.browseScan)
+    .lean<CatalogMasterDoc[]>();
 }
 
 function recordFrom(master: CatalogMasterDoc, offer: CatalogOfferDoc): RawCatalogRecord {

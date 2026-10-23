@@ -36,9 +36,6 @@ type Taxon = {
   children: Taxon[];
 };
 
-const GROCERY_PATH =
-  /grocery|food|produce|dairy|meat|seafood|bakery|deli|frozen|snack|beverage|breakfast|cereal|household|cleaning|paper|personal|beauty|health|pet|pantry|coffee|juice/i;
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -100,17 +97,21 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
   return reported;
 }
 
-export const WALMART_TAXONOMY_VERSION = 3;
+/** Bump when grocery leaves change so a resume re-reads the Walmart tree. */
+export const WALMART_TAXONOMY_VERSION = 4;
 
+/**
+ * Crawl a leaf only when it maps to a grocery department.
+ * General merchandise (jewelry, office, home improvement, electronics,
+ * apparel, toys, pet accessories, health devices, and the rest of
+ * Industrial & Scientific) stays out so the daily budget is not spent there.
+ */
 function isGrocery(node: Taxon): boolean {
   const mapped = mapToDepartment([node.path, node.name], node.name);
-  if (mapped.signal === "excluded") {
+  if (mapped.signal === "excluded" || mapped.generalMerchandise) {
     return false;
   }
-  if (mapped.departmentId !== "other") {
-    return true;
-  }
-  return GROCERY_PATH.test(`${node.path} ${node.name}`);
+  return mapped.departmentId !== "other";
 }
 
 function leavesOf(nodes: Taxon[], out: Taxon[] = []): Taxon[] {

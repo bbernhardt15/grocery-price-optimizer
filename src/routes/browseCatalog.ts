@@ -62,6 +62,7 @@ router.get("/catalog/departments", (_req, res) => {
       id: department.id,
       name: department.name,
       subcategories: department.subcategories,
+      ...(department.generalMerchandise ? { generalMerchandise: true } : {}),
     })),
   });
 });

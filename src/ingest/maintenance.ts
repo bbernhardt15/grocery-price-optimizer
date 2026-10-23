@@ -79,6 +79,35 @@ export async function recategorizeCatalog(): Promise<{ examined: number; updated
 }
 
 /**
+ * Mark offers for Other products that are still general merchandise so refresh
+ * does not spend Walmart or Kroger calls on them. Grocery rows that the
+ * current rules would move out of Other are left alone. Nothing is deleted.
+ */
+export async function excludeNongroceryFromRefresh(): Promise<{
+  examined: number;
+  masters: number;
+  offers: number;
+}> {
+  const rows = await CatalogMaster.find({ departmentId: "other", status: { $ne: "discontinued" } })
+    .select("key name categoryPaths")
+    .lean<Array<{ key: string; name: string; categoryPaths?: string[] }>>();
+  const keys: string[] = [];
+  for (const row of rows) {
+    const mapped = mapToDepartment(row.categoryPaths, row.name);
+    if (mapped.departmentId === "other") {
+      keys.push(row.key);
+    }
+  }
+  let offers = 0;
+  for (let index = 0; index < keys.length; index += 500) {
+    const chunk = keys.slice(index, index + 500);
+    const result = await CatalogOffer.updateMany({ productKey: { $in: chunk } }, { $set: { refreshExcluded: true } });
+    offers += result.modifiedCount ?? 0;
+  }
+  return { examined: rows.length, masters: keys.length, offers };
+}
+
+/**
  * Compare opted-in saved lists with catalog offers. The ingest tick calls
  * this after prices refresh, so price alerts do not need their own service.
  * A failure is logged and does not stop the crawl.

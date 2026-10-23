@@ -6,6 +6,7 @@ import { estimateStorageBytes, ingestConfig, lookupCallsForTick } from "./config
 import { utcDay, type IngestErrorDetail } from "./budget";
 import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
+import { refreshQueueSize, refreshedToday } from "./refresh";
 
 export function presentIngestError(entry: unknown): IngestErrorDetail | { message: string } {
   if (typeof entry === "string") {
@@ -141,7 +142,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshed] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -162,6 +163,8 @@ export async function catalogStatus() {
     CatalogMaster.countDocuments({ matchWalmartAt: { $type: "date" } }),
     CatalogMaster.countDocuments({ matchKrogerAt: { $type: "date" } }),
     matchProgress(now),
+    refreshQueueSize(now),
+    refreshedToday(now),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -179,9 +182,17 @@ export async function catalogStatus() {
       offers,
       staleOffers: stale,
       discontinuedOffers: discontinued,
+      refreshQueue,
+      refreshedToday: refreshed,
       byStore: Object.fromEntries(byStore.map((row) => [row._id, row.count])),
       byDepartment: departmentCounts,
       masters,
+    },
+    refresh: {
+      share: config.refreshShare,
+      queue: refreshQueue,
+      refreshedToday: refreshed,
+      note: "Refresh takes CATALOG_REFRESH_SHARE of each Walmart and Kroger tick, inside the same daily budgets and the Walmart 429 pause. Saved lists, shared lists, price watches, and recent searches go first, then merged products, then the oldest stale offer. A miss waits a day. Offers marked refreshExcluded are skipped. Nothing is deleted.",
     },
     match: {
       merged: masters.merged,
@@ -305,6 +316,61 @@ export async function catalogSample(department: string, rawLimit: number): Promi
     };
   });
   return { department: known.id, n: items.length, items };
+}
+
+/**
+ * Top stored category paths inside Other, plus how many of those products
+ * carry a Kroger id. Kroger sells groceries, so a Kroger id here is a miss.
+ */
+export async function catalogOtherBreakdown(rawLimit = 100): Promise<{
+  department: "other";
+  products: number;
+  withKrogerId: number;
+  paths: Array<{ path: string; count: number; examples: string[] }>;
+  note: string;
+}> {
+  const limit = Math.min(100, Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 100));
+  const match = { departmentId: "other", status: { $ne: "discontinued" } };
+  const [products, withKrogerId, grouped] = await Promise.all([
+    CatalogMaster.countDocuments(match),
+    CatalogMaster.countDocuments({ ...match, krogerProductId: { $type: "string", $gt: "" } }),
+    CatalogMaster.aggregate<{ _id: string; count: number; examples: string[] }>([
+      { $match: match },
+      {
+        $project: {
+          name: 1,
+          path: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$categoryPaths", []] } }, 0] },
+              "$categoryPaths",
+              ["(none)"],
+            ],
+          },
+        },
+      },
+      { $unwind: "$path" },
+      {
+        $group: {
+          _id: "$path",
+          count: { $sum: 1 },
+          examples: { $topN: { n: 3, sortBy: { name: 1 }, output: "$name" } },
+        },
+      },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: limit },
+    ]),
+  ]);
+  return {
+    department: "other",
+    products,
+    withKrogerId,
+    paths: grouped.map((row) => ({
+      path: row._id || "(none)",
+      count: row.count,
+      examples: (row.examples ?? []).map((name) => clip(String(name ?? ""), 80)),
+    })),
+    note: "Paths are the stored Walmart categoryPath or Kroger categories on products currently in Other. withKrogerId counts products, not paths. A Kroger id in Other is almost certainly mis-sorted. Nothing is deleted.",
+  };
 }
 
 type KeyRow = { name?: string; upc?: string; key?: string; walmartItemId?: string; krogerProductId?: string };
