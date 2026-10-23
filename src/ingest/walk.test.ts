@@ -173,6 +173,21 @@ describe("walmart catalog walk", () => {
         },
         { id: "jewelry", name: "Jewelry", path: "Jewelry", children: [{ id: "rings", name: "Rings", path: "Jewelry", children: [] }] },
         {
+          id: "clothing",
+          name: "Clothing",
+          path: "Clothing",
+          children: [{ id: "cloth-pants", name: "Training Pants", path: "Clothing", children: [] }],
+        },
+        {
+          id: "toys",
+          name: "Toys",
+          path: "Toys",
+          children: [
+            { id: "toy-food", name: "Dog Food", path: "Toys", children: [] },
+            { id: "toy-toys", name: "Dog Toys", path: "Toys", children: [] },
+          ],
+        },
+        {
           id: "office",
           name: "Office Supplies",
           path: "Office Supplies",
@@ -187,7 +202,9 @@ describe("walmart catalog walk", () => {
       ],
     });
     const ids = leaves.map((leaf) => leaf.id).sort();
-    assert.deepEqual(ids, ["bcomplex", "condiments", "dog-food", "gifts", "janitorial", "letters", "mixers", "pants", "spices", "tea", "vitamins"]);
+    assert.deepEqual(ids, ["bcomplex", "cloth-pants", "condiments", "dog-food", "gifts", "janitorial", "letters", "mixers", "pants", "spices", "tea", "toy-food", "vitamins"]);
+    assert.equal(leaves.find((leaf) => leaf.id === "cloth-pants")?.departmentId, "baby");
+    assert.equal(leaves.find((leaf) => leaf.id === "toy-food")?.departmentId, "pet");
     assert.equal(leaves.find((leaf) => leaf.id === "vitamins")?.departmentId, "personal-care");
     assert.equal(leaves.find((leaf) => leaf.id === "letters")?.departmentId, "personal-care");
     assert.equal(leaves.find((leaf) => leaf.id === "bcomplex")?.departmentId, "personal-care");
