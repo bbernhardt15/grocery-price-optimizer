@@ -101,6 +101,7 @@ Recommended: a second service so the crawl is not tied to web deploys. One servi
    - Existing `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, optional `WALMART_KEY_VERSION` / `WALMART_PUBLISHER_ID`.
    - Existing `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`.
    - Optional price-alert Web Push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and optional `VAPID_SUBJECT`. Set the same values on the ingest worker. Leave them unset to keep alerts in the app only.
+   - Optional crash reporting: `SENTRY_DSN`. Leave it unset and Sentry stays off. To symbolicate server stack traces, also set `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` on the service that runs `npm run build`. See [Crash reporting](#crash-reporting-sentry).
    - `FLIPP_ENABLED=true` on the web service so Target, Aldi, and the other mapped circulars load for a shopper ZIP. Do not set it only on the ingest worker. Leave `FLIPP_ACCESS_TOKEN` empty unless Flipp issued a FlyerKit token. See “Verify weekly ads (Railway)” below.
 3. **New service** (empty start command override):
    - Start command: `npm run ingest`
@@ -492,6 +493,41 @@ Routes:
 ## FatSecret catalog
 
 `src/services/fatsecretService.ts` talks to FatSecret’s Platform API. `getAccessToken()` POSTs an OAuth 2.0 client-credentials form (`grant_type=client_credentials`, `scope=premier`, `client_id`, `client_secret`) to `https://oauth.fatsecret.com/connect/token` and caches the bearer token until it is within 60 seconds of expiry. `searchGlobalCatalog(query)` then `GET`s `https://platform.fatsecret.com/rest/server.api` with `method=foods.search.v3`, `search_expression`, `format=json`, and `Authorization: Bearer`. Results are `{ id, name, brand }`.
+
+## Crash reporting (Sentry)
+
+Sentry is off until `SENTRY_DSN` is set. With that variable empty, the server does not call `Sentry.init`, the shopper page does not download the SDK, and source map upload does not run. No DSN means no crash reports.
+
+When it is set, three places report:
+
+- **Server** (`@sentry/node`) — the Express process and the catalog ingest worker. Unhandled startup failures and Express 5xx errors are reported. The release is the git sha.
+- **Website** (`@sentry/browser`, loaded by the Capacitor SDK on the web) — `public/sentry-loader.js` asks `GET /api/observability`. `enabled: false` means it stops. A DSN loads `public/sentry.js`, which `npm run build` writes. That file is not committed.
+- **iOS and Android** (`@sentry/capacitor`) — the same bundle starts the native crash SDK inside the WebView. `npm run cap:sync` writes the DSN and the git sha into the native copy of `public/native-config.js` only. The website copy of that file stays empty.
+
+Reports do not include email addresses, names, grocery-list bodies, Kroger tokens, the `kroger_shopper` cookie, other cookies, or Authorization headers. There is no account id on a crash report. `/privacy` explains what is sent and how to ask for a crash report to be deleted.
+
+The release is the first of `SENTRY_RELEASE`, `RAILWAY_GIT_COMMIT_SHA`, `CM_COMMIT`, `GITHUB_SHA`, `COMMIT_SHA`, `SOURCE_VERSION`, then `git rev-parse HEAD`.
+
+| Variable | Where | Required |
+| --- | --- | --- |
+| `SENTRY_DSN` | Railway web service, ingest worker, and the Codemagic `grocery_gitter` group | No. Unset keeps reporting off |
+| `SENTRY_ENVIRONMENT` | Same places | No. Falls back to `NODE_ENV` on the server and `production` in the native shell |
+| `SENTRY_RELEASE` | Same places | No. The git sha above is used |
+| `SENTRY_AUTH_TOKEN` | The build that should upload source maps (Railway web build and Codemagic). Mark it secret | No. Unset skips upload |
+| `SENTRY_ORG` | Same build | Required only when the auth token is set |
+| `SENTRY_PROJECT` | Same build. One Sentry project receives server, web, and native events for this DSN | Required only when the auth token is set |
+
+`npm run build` compiles the server, bundles `public/sentry.js`, and, only when `SENTRY_AUTH_TOKEN` is set, uploads source maps for `dist/` and that bundle, then deletes `public/sentry.js.map` so the site does not serve it. A token without `SENTRY_ORG`, `SENTRY_PROJECT`, or a release sha fails the build. The token is read from the environment and is not put on the command line.
+
+Use one DSN for the server and the clients. The DSN is public in the browser. The auth token is not. Do not commit either value.
+
+### Codemagic
+
+Add the variables above to the `grocery_gitter` group. `SENTRY_DSN` is what the native shell bakes in at `cap sync`. `CM_COMMIT` is the release for that build, so the uploaded maps match the WebView bundle and the dSYMs.
+
+`codemagic.yaml` runs `npm run build` before `npm run cap:sync:ios` / `cap:sync:android`. The build uploads JavaScript source maps when the token is set and does not rebuild the bundle during sync, so the baked git sha matches those maps. After the IPA and the AAB it uploads native debug files, and skips that step with a log line when `SENTRY_AUTH_TOKEN` is unset. iOS symbols come from the xcarchive. Android minify is off, so there is often no ProGuard map. The debug-file upload still runs over the Android build outputs when the token is set.
+
+Leave the whole group of Sentry variables unset and both workflows behave as they did before.
 
 ## Run locally
 

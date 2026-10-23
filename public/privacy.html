@@ -18,7 +18,7 @@
         </nav>
       </header>
       <h1>Privacy policy</h1>
-      <p class="updated">Last updated October 16, 2026.</p>
+      <p class="updated">Last updated October 23, 2026.</p>
       <p>
         Grocery Gitter helps you browse groceries, compare prices, and split a shopping trip across stores.
         It is operated by [LEGAL NAME]. Email [CONTACT EMAIL]. Mailing address: [MAILING ADDRESS].
@@ -178,16 +178,36 @@
         the watch, the alert records, or a push subscription removed. Nothing in the app deletes them on a timer.
       </p>
 
-      <h2>Analytics</h2>
+      <h2>Analytics and crash reporting</h2>
       <p>
         Grocery Gitter does not include a third-party analytics or advertising SDK. There is no advertising
-        identifier and no crash-reporting product in the app. The shopper screen does not call a separate
-        nutrition-catalog search.
+        identifier. The shopper screen does not call a separate nutrition-catalog search.
+      </p>
+      <p>
+        Crash and error reporting is optional. It stays off until <code>SENTRY_DSN</code> is set. When that
+        variable is unset, the website, the iOS and Android apps, and the server do not start Sentry and do
+        not send crash reports. When it is set, those same places send a report to Sentry so a crash can be
+        fixed. Sentry is not used for advertising or for a usage profile.
+      </p>
+      <p>
+        A report can include the error message, a stack trace, the release (the git commit that was built),
+        the operating system or browser, and the page or API path. It does not include your email address,
+        your name, your grocery list, a Kroger access or refresh token, the <code>kroger_shopper</code>
+        cookie, other cookies, or Authorization headers. Reports are not tied to the random price-alert id
+        and not tied to an account. There is no Grocery Gitter account to attach them to.
+      </p>
+      <p>
+        Sentry stores those reports. They are not rows in the Grocery Gitter database. Clearing site data
+        or deleting the app stops new reports from this device. It does not delete reports already sent.
+        Because a report is not linked to you, email [CONTACT EMAIL] with the approximate time and whether
+        you were on the website, an iPhone, or Android. We will delete matching crash reports when we can
+        tell which ones they are. There is no in-app button that deletes them, and we cannot promise to find
+        a report that has no identifier.
       </p>
       <p>
         The server writes operational logs, for example when a store lookup fails or the catalog job is
         running. The host that runs the site may keep ordinary request logs: IP address, time, and the path
-        that was requested. Those logs are for operating the service.
+        that was requested. Those logs are for operating the service. They are separate from Sentry.
       </p>
 
       <h2>We do not sell data</h2>
@@ -214,7 +234,7 @@
         <li>You can skip “Notify this browser.” Alerts still show in the panel.</li>
         <li>You can skip Kroger cart login and Instacart. Search links still open the store.</li>
         <li>You can clear on-device data in the browser, or delete the app. That does not erase a shared list, a price watch, or alert records already on the server.</li>
-        <li>Email [CONTACT EMAIL] to ask us to delete a ZIP record, a shared list, a price watch, alert records, or a push subscription. Include the ZIP, and for a list include the link or say you are the person who shared it.</li>
+        <li>Email [CONTACT EMAIL] to ask us to delete a ZIP record, a shared list, a price watch, alert records, a push subscription, or a crash report. Include the ZIP, and for a list include the link or say you are the person who shared it. For a crash report, include the approximate time and whether you were on the website, an iPhone, or Android. Crash reports are not linked to you, so we can delete one only when that is enough to find it.</li>
       </ul>
 
       <h2>Changes</h2>

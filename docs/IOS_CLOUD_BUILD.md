@@ -42,6 +42,12 @@ The workflow lives in `codemagic.yaml` at the root of this repo. The iOS workflo
    - `APP_STORE_APPLE_ID` = the numeric Apple ID from step 3
    - Leave both of those as plain variables. Do not put the Issuer ID, the Key ID, or the .p8 in this group. Those stay in the `app_store_connect` integration from step 7.
    - The iOS workflow reads this group before it syncs the app, so the phone build calls that Railway URL.
+   - Crash reporting is optional. Leave these unset and Sentry stays off, including source map and dSYM upload:
+     - `SENTRY_DSN` — same value as the Railway web service. The sync step writes it into the native app.
+     - `SENTRY_AUTH_TOKEN` — secret. Set it only when this build should upload source maps and iOS debug files.
+     - `SENTRY_ORG` and `SENTRY_PROJECT` — required when the auth token is set. One Sentry project covers the server, the website, and the native shells.
+     - `SENTRY_ENVIRONMENT` — optional. The native shell uses `production` when it is unset.
+   - Do not set `SENTRY_RELEASE` unless you want to override the commit. The workflow uses Codemagic’s `CM_COMMIT`, which is the git sha of the build.
 
 9. **Start a build.** In Codemagic, choose Start new build, pick the branch that contains `codemagic.yaml`, and choose the workflow **iOS TestFlight**. You can also start it by pushing a git tag whose name starts with `v`, such as `v1.0.0`. A normal push or a pull request does not start the build. The version people see is **1.0** until `MARKETING_VERSION` in the Xcode project changes. The build number is one higher than the newest TestFlight build. The first time TestFlight has no build yet, the build number is 1.
 
