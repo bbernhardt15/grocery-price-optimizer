@@ -138,6 +138,7 @@ let nextCursor = null;
 let loading = false;
 let total = 0;
 let coverage = [];
+let weeklyAdBanners = [];
 let catalogSource = "demo";
 let instacartEnabled = false;
 /** @type {Record<string, any> | null} */
@@ -264,8 +265,13 @@ async function copyText(text) {
 function sourceLabel(source) {
   if (source === "live") return "Live";
   if (source === "partner_feed") return "Partner";
-  if (source === "weekly_ad") return "Weekly ad";
+  if (source === "weekly_ad") return "Weekly ad, not shelf price";
   return "Demo";
+}
+
+function badgeLabel(source) {
+  if (source === "weekly_ad") return "Weekly ad";
+  return sourceLabel(source);
 }
 
 function bestOffer(product, store) {
@@ -664,13 +670,14 @@ function cardHtml(product) {
     <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
       <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
       ${sale ? '<span class="badge">Sale</span>' : ""}
-      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(sourceLabel(offer.priceSource))}</span>`}
+      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
     </button>
     <div class="card-body">
       <p class="brand">${escapeHtml(product.brand)}${product.storeBrand ? " · store brand" : ""}</p>
       <h3>${escapeHtml(product.name)}</h3>
       <p class="size">${escapeHtml(product.sizeLabel || product.departmentName)}</p>
       <p class="price"><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
+      ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
       <p class="unit">${escapeHtml(offer.unitPriceText || "")}</p>
       ${gapHtml}
     </div>
@@ -742,6 +749,7 @@ async function loadPage(reset) {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     coverage = body.coverage ?? coverage;
+    weeklyAdBanners = Array.isArray(body.weeklyAdBanners) ? body.weeklyAdBanners : [];
     catalogSource = body.catalogSource || catalogSource;
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
@@ -759,16 +767,24 @@ async function loadPage(reset) {
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
     const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
+    const foundNames = weeklyAdBanners.map((banner) => banner.storeName).filter(Boolean);
+    const foundLine = !zipOk
+      ? ""
+      : foundNames.length
+        ? ` Circulars Flipp returned for this ZIP: ${foundNames.join(", ")}. Each of those prices is the weekly ad, not a shelf price.`
+        : Array.isArray(body.weeklyAdBanners)
+          ? " Flipp returned no mapped grocery circular for this ZIP."
+          : "";
     if (!zipOk && weeklyAds) {
       coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
     } else if (demo) {
-      coverageBannerEl.textContent = "Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.";
+      coverageBannerEl.textContent = `Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.${foundLine}`;
     } else if (catalogSource === "database") {
-      coverageBannerEl.textContent = "Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.";
+      coverageBannerEl.textContent = `Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.${foundLine}`;
     } else if (catalogSource === "mixed") {
-      coverageBannerEl.textContent = "Live samples are mixed with the demo catalog. Weekly-ad prices are labeled Weekly ad, not a live shelf.";
+      coverageBannerEl.textContent = `Live samples are mixed with the demo catalog. Weekly-ad prices are labeled weekly ad, not a shelf price.${foundLine}`;
     } else {
-      coverageBannerEl.textContent = "Live catalog sample. This is not a full store assortment.";
+      coverageBannerEl.textContent = `Live catalog sample. This is not a full store assortment.${foundLine}`;
     }
     const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
     if (hardWarnings.length) {
@@ -988,8 +1004,12 @@ function openProduct(product) {
 }
 
 function openCoverage() {
+  const found = weeklyAdBanners.length
+    ? `<p class="muted">Circulars Flipp returned for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Weekly ad, not shelf price.</p>`
+    : "";
   coverageDialog.innerHTML = `<div class="sheet-body">
     <h2 id="coverage-title">Catalog coverage</h2>
+    ${found}
     <ul class="offer-list">
       ${(coverage || [])
         .map(
@@ -1062,7 +1082,8 @@ function renderStore(store) {
   const rows = (store.items ?? [])
     .map((item) => {
       const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
-      return `<li><span>${item.quantity}× ${escapeHtml(item.name)} (${escapeHtml(item.brand)})${sub}</span><span>${money(item.itemTotal ?? item.price)}</span></li>`;
+      const ad = item.priceSource === "weekly_ad" ? ` <span class="sub-tag">Weekly ad, not shelf price</span>` : "";
+      return `<li><span>${item.quantity}× ${escapeHtml(item.name)} (${escapeHtml(item.brand)})${sub}${ad}</span><span>${money(item.itemTotal ?? item.price)}</span></li>`;
     })
     .join("");
   const action = store.handoff?.action;

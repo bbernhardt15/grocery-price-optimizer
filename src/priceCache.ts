@@ -8,6 +8,7 @@ import {
   providerForStore,
 } from "./pricing/providers";
 import { flippProviderForStore } from "./pricing/flipp/flippProvider";
+import { allowsDemoFallback } from "./pricing/flipp/merchants";
 import {
   emptyAccumulator,
   finalizeStoreReport,
@@ -412,7 +413,7 @@ export async function resolveCatalogProducts(
       } else if (weeklyFallback.length > 0) {
         add(weeklyFallback, line.name, "weekly_ad");
         acc.cachedWeeklyAdHits += 1;
-      } else if (seedFallback.length > 0) {
+      } else if (seedFallback.length > 0 && allowsDemoFallback(storeName)) {
         add(seedFallback, line.name, "seed");
         acc.seedHits += 1;
       }
