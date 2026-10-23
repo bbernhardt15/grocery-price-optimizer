@@ -70,6 +70,8 @@ A guest who only has the share link can delete their own device rows. They canno
 
 Signing out (`POST /api/auth/logout`) clears this session only. It does not delete the account. A request with no session still deletes only this device, and the response includes `account.deleted: false`.
 
+Sentry crash reports are not part of this delete. They are sent only when `SENTRY_DSN` is set, and a report is not tied to an account or to `gg-device`. The button does not remove them. Email [CONTACT EMAIL] with the approximate time and whether it was the website, iPhone, or Android to ask for a matching report to be removed.
+
 The response adds `"account": { "deleted": true }` or `"deleted": false`. The `deleted` counts include rows removed with the account.
 
 A rotated (retired) share token can still identify the document when the owner secret matches. Watches are removed for the token the caller presented. A collaborator’s watch that still uses an older token, which this device no longer has, stays until that collaborator uses Delete my data. The old link no longer opens the list, because the document is gone.
@@ -113,6 +115,7 @@ Host request logs (IP address, time, path), when the host keeps them, are outsid
     "sharedListsRefused": 0
   },
   "kroger": { "hadToken": false, "revoked": false, "cookieCleared": true },
+  "account": { "deleted": false },
   "notLinkedToYou": {
     "shopperZips": "ZIP totals have no device id and were left in place.",
     "catalogDemand": "Search and list phrases have no device id and were left in place."

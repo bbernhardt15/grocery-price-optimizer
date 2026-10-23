@@ -188,16 +188,36 @@
         not register a phone push token. Nothing in the app deletes a subscription on a timer.
       </p>
 
-      <h2>Analytics</h2>
+      <h2>Analytics and crash reporting</h2>
       <p>
         Grocery Gitter does not include a third-party analytics or advertising SDK. There is no advertising
-        identifier and no crash-reporting product in the app. The shopper screen does not call a separate
-        nutrition-catalog search.
+        identifier. The shopper screen does not call a separate nutrition-catalog search.
+      </p>
+      <p>
+        Crash and error reporting is optional. It stays off until <code>SENTRY_DSN</code> is set. When that
+        variable is unset, the website, the iOS and Android apps, and the server do not start Sentry and do
+        not send crash reports. When it is set, those same places send a report to Sentry so a crash can be
+        fixed. Sentry is not used for advertising or for a usage profile.
+      </p>
+      <p>
+        A report can include the error message, a stack trace, the release (the git commit that was built),
+        the operating system or browser, and the page or API path. It does not include your email address,
+        your name, your grocery list, a Kroger access or refresh token, the <code>kroger_shopper</code>
+        cookie, other cookies, or Authorization headers. Reports are not tied to the random price-alert id
+        and not tied to an account. Signing in does not put the account id on a crash report.
+      </p>
+      <p>
+        Sentry stores those reports. They are not rows in the Grocery Gitter database. Delete my data does
+        not remove them, and it does not turn crash reporting off. Clearing site data or deleting the app
+        stops reports from this device until Grocery Gitter is opened again. Because a report is not linked
+        to you, email [CONTACT EMAIL] with the approximate time and whether you were on the website, an
+        iPhone, or Android. We will delete matching crash reports when we can tell which ones they are.
+        We cannot promise to find a report that has no identifier.
       </p>
       <p>
         The server writes operational logs, for example when a store lookup fails or the catalog job is
         running. The host that runs the site may keep ordinary request logs: IP address, time, and the path
-        that was requested. Those logs are for operating the service.
+        that was requested. Those logs are for operating the service. They are separate from Sentry.
       </p>
 
       <h2>We do not sell data</h2>
@@ -218,9 +238,10 @@
       <h2>Delete my data</h2>
       <p>
         Open Settings. It is at the top of the screen, at the bottom of My list, and in the page footer.
-        Choose Delete my data and type DELETE. There is no Grocery Gitter account. The request is for this
+        Choose Delete my data and type DELETE. With no account, the request is for this
         device: the random id stored here, the owner secret if you created a shared list on this device, and
-        the Kroger cookie if this browser has one.
+        the Kroger cookie if this browser has one. If you are signed in, the same request also deletes the
+        Grocery Gitter account, including the saved list and the other devices on it.
       </p>
       <p>That removes:</p>
       <ul>
@@ -228,6 +249,7 @@
         <li>Price watches, alert records, and Web Push subscriptions stored for this device. This browser is unsubscribed from notifications.</li>
         <li>Shared lists you created on this device. The link stops working, including for people you sent it to. Price watches saved for that link are removed, because those rows store the link and the item names. Someone else’s own list is left alone.</li>
         <li>The Kroger access token and refresh token. On the website the cookie is cleared in this browser. On the iOS and Android apps, Grocery Gitter also opens a page in the system browser so the sign-in stored there is revoked and dropped. That page is the hosted <code>/api/kroger/logout</code> address. The Kroger login itself happens in the system browser, so the app WebView does not hold that cookie.</li>
+        <li>The Grocery Gitter account, when you are signed in. That includes the saved list, the Apple, Google, or email sign-in, and shared lists linked to the account.</li>
       </ul>
       <p>
         Doing it twice is safe. The second time there is nothing left to remove.
@@ -237,6 +259,7 @@
         They are counts shared by everyone who typed the same ZIP or the same search. Delete my data does not
         erase those counts. Email [CONTACT EMAIL] with the ZIP or the search words if you want a count reviewed.
         Host request logs, when the host keeps them, are not deleted by the button.
+        Crash reports are not tied to an account, so Delete my data does not remove them either.
       </p>
       <p>After the data is removed, the app starts over as if this device had not been used.</p>
 
@@ -250,6 +273,7 @@
         <li>You can skip Kroger cart login and Instacart. Search links still open the store.</li>
         <li>You can clear on-device data in the browser, or delete the app. That does not erase a shared list, a price watch, or alert records already on the server. Delete my data does.</li>
         <li>Email [CONTACT EMAIL] if Delete my data does not work, or if you want a ZIP total or a search phrase reviewed. Those counts are not tied to a device. Include the ZIP or the words you searched, and for a list include the link or say you are the person who shared it.</li>
+        <li>Email [CONTACT EMAIL] to ask us to delete a crash report. Include the approximate time and whether you were on the website, an iPhone, or Android. Crash reports are not linked to you, and Delete my data does not remove them, so we can delete one only when that is enough to find it.</li>
       </ul>
 
       <h2>Changes</h2>

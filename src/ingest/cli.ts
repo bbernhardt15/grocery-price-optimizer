@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "../observability/instrument";
 import { connectDatabase } from "../db";
 import { ingestConfig } from "./config";
 import { runDemoIngest, runIngestTick } from "./runner";

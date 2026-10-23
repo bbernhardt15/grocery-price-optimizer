@@ -51,8 +51,16 @@ describe("pricing providers registry", () => {
     assert.equal(providerForStore("Aldi")?.isConfigured(), true);
     assert.equal(providerForStore("Walmart")?.isConfigured(), true);
     assert.equal(providerForStore("Target")?.isConfigured(), true);
-    assert.equal(providerForStore("Food Lion")?.isConfigured(), true);
+    assert.equal(providerForStore("Jewel-Osco")?.isConfigured(), true);
     assert.equal(providerForStore("H-E-B")?.isConfigured(), true);
+    assert.equal(providerForStore("Stop & Shop")?.isConfigured(), true);
+    assert.equal(providerForStore("Sprouts")?.isConfigured(), true);
+    assert.equal(providerForStore("Winn-Dixie")?.isConfigured(), true);
+    assert.equal(providerForStore("Food Lion"), undefined);
+    assert.equal(providerForStore("Safeway"), undefined);
+    assert.equal(providerForStore("Hy-Vee"), undefined);
+    assert.equal(providerForStore("Wegmans"), undefined);
+    assert.equal(providerForStore("ShopRite"), undefined);
     assert.doesNotMatch(providerForStore("Walmart")?.setupHint() ?? "", /FLIPP_ENABLED=true/);
     assert.doesNotMatch(providerForStore("Aldi")?.setupHint() ?? "", /FLIPP_ACCESS_TOKEN/);
     assert.deepEqual(competingStoreNames([]), [
@@ -62,10 +70,17 @@ describe("pricing providers registry", () => {
       "Aldi",
       "Publix",
       "Meijer",
-      "Food Lion",
       "H-E-B",
-      "Safeway",
-      "Giant Eagle",
+      "Albertsons",
+      "Vons",
+      "Jewel-Osco",
+      "Acme",
+      "Tom Thumb",
+      "Randalls",
+      "Pavilions",
+      "Stop & Shop",
+      "Sprouts",
+      "Winn-Dixie",
       "Costco",
     ]);
   });
@@ -170,7 +185,8 @@ describe("pricing reports", () => {
     assert.equal(reports[2].label, "Live prices");
     assert.equal(reports[2].ok, true);
     assert.equal(reports[3].source, "weekly_ad");
-    assert.equal(reports[3].label, "Weekly ad");
+    assert.equal(reports[3].label, "Weekly ad, not shelf price");
+    assert.match(reports[3].detail, /not a shelf price/i);
     assert.match(reports[3].detail, /not a full live shelf catalog/i);
 
     const warning = pricingWarningFromReports(reports);
