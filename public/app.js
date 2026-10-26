@@ -3762,6 +3762,7 @@ async function bootApp() {
   renderEstimate();
   if (typeof navigator !== "undefined" && navigator.onLine === false && restoreOfflineTrip()) {
     showCatalogError("You're offline. This trip is saved on this device.");
+    if (resultCountEl) resultCountEl.textContent = "Saved on this device";
     listLoading = false;
     listReady = true;
     return;
