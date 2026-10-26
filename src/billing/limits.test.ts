@@ -54,15 +54,25 @@ describe("cart handoff lock", () => {
       stores: [
         {
           storeName: "Kroger",
-          items: [{ name: "Milk", url: "https://www.kroger.com/search?query=milk" }],
+          items: [
+            {
+              name: "Milk",
+              url: "https://www.kroger.com/search?query=milk",
+              openLabel: "Open in Kroger",
+              offers: [{ storeName: "Walmart", url: "https://www.walmart.com/search?q=milk" }],
+            },
+          ],
           handoff: {
-            items: [{ name: "Milk", url: "https://www.kroger.com/search?query=milk" }],
+            items: [{ name: "Milk", url: "https://www.kroger.com/search?query=milk", openLabel: "Open in Kroger" }],
             action: { type: "kroger_cart", label: "Add to Kroger", url: "https://www.kroger.com/cart", status: "ready" },
           },
         },
       ],
     });
-    assert.equal("url" in locked.stores[0].items[0], false);
+    const line = locked.stores[0].items[0] as { url?: string; openLabel?: string; offers?: Array<{ url?: string }> };
+    assert.equal("url" in line, false);
+    assert.equal("openLabel" in line, false);
+    assert.equal("url" in (line.offers?.[0] ?? {}), false);
     assert.equal(locked.stores[0].handoff?.action.type, "coming_soon");
     assert.equal("url" in (locked.stores[0].handoff?.action ?? {}), false);
   });

@@ -715,18 +715,18 @@ describe("POST /api/optimize-list", () => {
       body.stores.map((store) => [store.storeName, store])
     );
 
-    assert.equal(byStore.Kroger.handoff.action.type, "search_deeplink");
-    assert.equal(byStore.Kroger.handoff.action.label, "Open at Kroger");
+    assert.equal(byStore.Kroger.handoff.action.type, "shop_list");
+    assert.equal(byStore.Kroger.handoff.action.label, "Shop this list at Kroger");
     assert.equal(byStore.Kroger.handoff.action.status, "ready");
     assert.match(byStore.Kroger.handoff.action.url ?? "", /kroger\.com\/search/);
     assert.match(byStore.Kroger.handoff.items[0].url ?? "", /kroger\.com\/search/);
 
-    assert.equal(byStore.Walmart.handoff.action.type, "search_deeplink");
-    assert.equal(byStore.Walmart.handoff.action.label, "Search at Walmart");
+    assert.equal(byStore.Walmart.handoff.action.type, "shop_list");
+    assert.equal(byStore.Walmart.handoff.action.label, "Shop this list at Walmart");
     assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/search/);
 
-    assert.equal(byStore.Target.handoff.action.type, "search_deeplink");
-    assert.equal(byStore.Target.handoff.action.label, "Search at Target");
+    assert.equal(byStore.Target.handoff.action.type, "shop_list");
+    assert.equal(byStore.Target.handoff.action.label, "Shop this list at Target");
     assert.match(byStore.Target.handoff.action.url ?? "", /target\.com\/s/);
 
     const bodyWithPricing = json as {
@@ -782,7 +782,7 @@ describe("POST /api/optimize-list", () => {
     assert.ok(kroger);
     assert.equal(kroger.handoff.items[0].upc, "0001111041700");
     assert.equal(kroger.handoff.action.type, "kroger_cart");
-    assert.equal(kroger.handoff.action.label, "Add to Kroger cart");
+    assert.equal(kroger.handoff.action.label, "Send to Kroger cart");
     assert.equal(kroger.handoff.action.status, "needs_shopper_login");
     assert.equal(kroger.handoff.action.url, "/api/kroger/cart/start");
     assert.match(kroger.handoff.action.fallbackUrl ?? "", /kroger\.com\/search/);
@@ -923,7 +923,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Walmart.nearbyStore?.name, "WM Supercenter");
       assert.equal(byStore.Walmart.nearbyStore?.storeId, "2066");
       assert.equal(byStore.Walmart.handoff.action.type, "walmart_cart");
-      assert.equal(byStore.Walmart.handoff.action.label, "Add 1 item to Walmart cart");
+      assert.equal(byStore.Walmart.handoff.action.label, "Open Walmart cart");
       const walmartCart = new URL(byStore.Walmart.handoff.action.url ?? "");
       assert.match(walmartCart.pathname, /\/c\/impact-1\/568844\/9383$/);
       const walmartDestination = new URL(walmartCart.searchParams.get("u") ?? "");
@@ -1370,7 +1370,7 @@ describe("POST /api/optimize-list", () => {
         stores: Array<{
           storeName: string;
           items: Array<{ price: number; priceSource?: string }>;
-          handoff: { action: { type: string; detail?: string; url?: string } };
+          handoff: { priceLabel?: string; action: { type: string; detail?: string; url?: string } };
           pricing?: { label: string };
         }>;
       };
@@ -1379,7 +1379,8 @@ describe("POST /api/optimize-list", () => {
       assert.equal(dealBody.stores[0].items[0].price, 4);
       assert.equal(dealBody.stores[0].items[0].priceSource, "weekly_ad");
       assert.equal(dealBody.stores[0].pricing?.label, "Weekly ad, not shelf price");
-      assert.equal(dealBody.stores[0].handoff.action.type, "search_deeplink");
+      assert.equal(dealBody.stores[0].handoff.priceLabel, "Weekly ad, not shelf price");
+      assert.equal(dealBody.stores[0].handoff.action.type, "shop_list");
       assert.match(dealBody.stores[0].handoff.action.detail ?? "", /not a cart fill/i);
       assert.match(dealBody.stores[0].handoff.action.detail ?? "", /not a shelf price/i);
       assert.match(dealBody.stores[0].handoff.action.url ?? "", /publix\.com/i);
@@ -1414,6 +1415,43 @@ describe("POST /api/optimize-list", () => {
         }
       }
       clearPricingEnv();
+    }
+  });
+
+  it("keeps a free trip on one store and drops cart links when billing is enforced", async () => {
+    const previous = process.env.REVENUECAT_WEBHOOK_SECRET;
+    delete process.env.REVENUECAT_WEBHOOK_SECRET;
+    try {
+      const open = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      assert.equal(open.status, 200);
+      const openBody = open.json as { stores: Array<{ storeName: string }>; entitlement?: { plan: string } };
+      assert.ok(openBody.stores.length > 1);
+      assert.equal(openBody.entitlement, undefined);
+
+      process.env.REVENUECAT_WEBHOOK_SECRET = "webhook-secret";
+      const free = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      assert.equal(free.status, 200);
+      const body = free.json as {
+        stores: Array<{
+          storeName: string;
+          items: Array<{ lineId?: string; url?: string; offers?: Array<{ url?: string }> }>;
+          handoff: { action: { type: string; label: string; url?: string } };
+        }>;
+        entitlement?: { plan: string; limited: string[] };
+      };
+      assert.equal(body.stores.length, 1);
+      assert.equal(body.entitlement?.plan, "free");
+      assert.ok(body.entitlement?.limited.includes("multiStoreSplit"));
+      assert.ok(body.entitlement?.limited.includes("cartHandoffs"));
+      assert.equal(body.stores[0].items[0].lineId?.startsWith("0:"), true);
+      assert.equal(body.stores[0].items[0].url, undefined);
+      assert.equal(body.stores[0].items[0].offers?.some((offer) => offer.url), false);
+      assert.equal(body.stores[0].handoff.action.type, "coming_soon");
+      assert.equal(body.stores[0].handoff.action.label, "Grocery Gitter Pro");
+      assert.equal(body.stores[0].handoff.action.url, undefined);
+    } finally {
+      if (previous === undefined) delete process.env.REVENUECAT_WEBHOOK_SECRET;
+      else process.env.REVENUECAT_WEBHOOK_SECRET = previous;
     }
   });
 });

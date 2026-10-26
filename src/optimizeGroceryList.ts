@@ -1,3 +1,4 @@
+import { mapToDepartment } from "./catalog/departments";
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
 import { compareProductOffers, unitPriceForProduct } from "./productMatch";
@@ -65,6 +66,33 @@ export type PickedItem = {
   /** Set when the winning offer is a labeled substitute, not the exact UPC. */
   matchKind?: "exact" | "substitute";
   substitutedFor?: string;
+  /** Stable id for this grocery line, used to remember checks and moves. */
+  lineId?: string;
+  /** Department name when the catalog or the product name maps to one. */
+  department?: string;
+  /** Aisle or subcategory when one is known. */
+  aisle?: string;
+  /** Cheapest offer at each store that carries this line, including the winner. */
+  offers?: ItemOffer[];
+};
+
+/** One store's price for a line, so the shopper can move it and re-total offline. */
+export type ItemOffer = {
+  storeName: string;
+  name: string;
+  brand: string;
+  price: number;
+  unit: string;
+  normalizedUnit: string;
+  size?: string;
+  productId?: string;
+  upc?: string;
+  locationId?: string;
+  priceSource?: PriceSource;
+  department?: string;
+  aisle?: string;
+  /** Filled in when the trip is enriched with handoff links. */
+  url?: string;
 };
 
 export type StoreGroup = {
@@ -161,16 +189,8 @@ function productsMatchingQuery(
   return dedupeCandidates([...matches, ...substitutes]);
 }
 
-function pickForLine(
-  line: GroceryLine,
-  catalog: CatalogProduct[]
-): PickedItem | null {
+function rankedMatches(line: GroceryLine, catalog: CatalogProduct[]): CatalogProduct[] {
   const matches = productsMatchingQuery(catalog, line.name);
-
-  if (matches.length === 0) {
-    return null;
-  }
-
   matches.sort((a, b) =>
     compareProductOffers(
       line.name,
@@ -178,8 +198,54 @@ function pickForLine(
       b.offerRole === "substitute" ? { ...b, name: line.name } : b
     )
   );
+  return matches;
+}
+
+function toItemOffer(product: CatalogProduct): ItemOffer {
+  const mapped = mapToDepartment(product.categories, product.name);
+  return {
+    storeName: product.storeName,
+    name: product.name,
+    brand: product.brand,
+    price: product.price,
+    unit: product.unit,
+    normalizedUnit: product.normalizedUnit,
+    ...(product.size ? { size: product.size } : {}),
+    ...(product.productId ? { productId: product.productId } : {}),
+    ...(product.upc ? { upc: product.upc } : {}),
+    ...(product.locationId ? { locationId: product.locationId } : {}),
+    ...(product.priceSource ? { priceSource: product.priceSource } : {}),
+    department: mapped.departmentName,
+    ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+  };
+}
+
+/** First match per store wins because `matches` is already ranked best-first. */
+function bestOfferPerStore(matches: CatalogProduct[]): ItemOffer[] {
+  const seen = new Set<string>();
+  const offers: ItemOffer[] = [];
+  for (const product of matches) {
+    const key = product.storeName.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    offers.push(toItemOffer(product));
+  }
+  return offers;
+}
+
+function pickForLine(
+  line: GroceryLine,
+  catalog: CatalogProduct[]
+): PickedItem | null {
+  const matches = rankedMatches(line, catalog);
+
+  if (matches.length === 0) {
+    return null;
+  }
+
   const best = matches[0];
   const unitPrice = unitPriceForProduct(best.price, best.name, best.size);
+  const mapped = mapToDepartment(best.categories, best.name);
 
   return {
     query: line.name,
@@ -197,6 +263,9 @@ function pickForLine(
     ...(best.productId ? { productId: best.productId } : {}),
     ...(best.upc ? { upc: best.upc } : {}),
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
+    department: mapped.departmentName,
+    ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    offers: bestOfferPerStore(matches),
     ...(best.offerRole === "substitute"
       ? {
           matchKind: "substitute" as const,
@@ -240,11 +309,11 @@ export function optimizeSingleStore(
     const shelf = catalog.filter((product) => product.storeName === storeName);
     const picks: PickedItem[] = [];
     const unavailable: string[] = [];
-    for (const line of items) {
+    items.forEach((line, index) => {
       const pick = pickForLine(line, shelf);
       if (!pick) unavailable.push(line.name);
-      else picks.push(pick);
-    }
+      else picks.push({ ...pick, lineId: `${index}:${line.name.trim().toLowerCase()}` });
+    });
     if (picks.length === 0) continue;
     const total = roundMoney(picks.reduce((sum, item) => sum + item.itemTotal, 0));
     const bestTotal = best ? roundMoney(best.picks.reduce((sum, item) => sum + item.itemTotal, 0)) : Number.POSITIVE_INFINITY;
@@ -280,15 +349,18 @@ export function optimizeGroceryList(
   const picks: PickedItem[] = [];
   const unavailable: string[] = [];
 
-  for (const line of items) {
+  items.forEach((line, index) => {
     const pick = pickForLine(line, catalog);
     if (!pick) {
       unavailable.push(line.name);
-      continue;
+      return;
     }
 
-    picks.push(pick);
-  }
+    picks.push({
+      ...pick,
+      lineId: `${index}:${line.name.trim().toLowerCase()}`,
+    });
+  });
 
   const grouped = new Map<string, PickedItem[]>();
   for (const pick of picks) {

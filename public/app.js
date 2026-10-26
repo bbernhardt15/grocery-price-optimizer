@@ -36,6 +36,19 @@ import {
   tripStoreEmpty,
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
+import {
+  applyTripEdits,
+  formatTripText,
+  groupForAisle,
+  priceSourceLabel,
+  readChecks,
+  readTripSnapshot,
+  saveTripSnapshot,
+  shareItemId,
+  singleStoreSavings,
+  tripFingerprint,
+  writeCheck,
+} from "./shopper/tripPlan.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 
@@ -158,6 +171,7 @@ let catalogSource = "demo";
 let instacartEnabled = false;
 /** @type {Record<string, any> | null} */
 let lastOptimize = null;
+let tripEdits = { lockedStore: null, moves: {} };
 let searchTimer = 0;
 let suggestLoadingTimer = 0;
 let suggestAbort = null;
@@ -1188,13 +1202,128 @@ function checkedStoresHtml(payload, shown) {
     .join("")}</ul>`;
 }
 
+function summaryOf(stores) {
+  if (!stores.length) return "No stores matched this list.";
+  return stores
+    .map((store) => {
+      const count = store.itemCount ?? (store.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+      return `${count} ${store.storeName}`;
+    })
+    .join(" + ");
+}
+
+function tripId() {
+  return tripFingerprint(lastOptimize?.stores || []);
+}
+
+function currentTrip() {
+  if (!lastOptimize) return null;
+  const edited =
+    !planLimited("multiStoreSplit") && Boolean(tripEdits.lockedStore || Object.keys(tripEdits.moves || {}).length);
+  if (!edited) {
+    return { stores: lastOptimize.stores ?? [], total: Number(lastOptimize.total) || 0 };
+  }
+  return applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+}
+
+function rememberTrip() {
+  if (!lastOptimize) return;
+  saveTripSnapshot(localStorage, lastOptimize, tripEdits);
+}
+
+function shareEnv() {
+  return {
+    capacitorShare: window.Capacitor?.Plugins?.Share,
+    navigatorShare: typeof navigator.share === "function" ? (data) => navigator.share(data) : undefined,
+    copy: copyText,
+  };
+}
+
+function labelClass(label) {
+  if (label === "Live shelf price" || label === "Partner feed") return "badge-live";
+  if (label === "Weekly ad" || label === "Weekly ad, not shelf price") return "badge-ad";
+  return "badge-demo";
+}
+
+function itemPriceLabel(item, store) {
+  const source = item?.priceSource;
+  if (source === "weekly_ad" || source === "cached_weekly_ad") return "Weekly ad, not shelf price";
+  if (source) return priceSourceLabel(source);
+  return store?.handoff?.priceLabel || store?.pricing?.label || priceSourceLabel(store?.pricing?.source);
+}
+
+function planLimited(feature) {
+  return Boolean(lastOptimize?.entitlement?.limited?.includes(feature));
+}
+
+function exportRow(scope, storeName, actionType) {
+  const storeAttr = storeName ? ` data-export-store="${escapeHtml(storeName)}"` : "";
+  const instacartScope = scope === "store" ? "store" : "list";
+  const showInstacart =
+    instacartEnabled && !planLimited("cartHandoffs") && actionType !== "kroger_cart" && actionType !== "walmart_cart";
+  const instacart = showInstacart
+    ? `<button type="button" class="instacart-cta" data-instacart-scope="${instacartScope}"${storeName ? ` data-instacart-store="${escapeHtml(storeName)}"` : ""}><img src="/instacart-carrot.svg" alt="" />Add to Instacart</button>`
+    : "";
+  return `<div class="export-row" aria-label="${scope === "store" ? "Share this store" : "Share this trip"}">
+    <button type="button" class="ghost" data-export="copy"${storeAttr}>Copy list</button>
+    <button type="button" class="ghost" data-export="share"${storeAttr}>Share</button>
+    <button type="button" class="ghost" data-export="print"${storeAttr}>Print or PDF</button>
+    <button type="button" class="ghost" data-export="link"${storeAttr}>Shareable link</button>
+    ${instacart}
+  </div>`;
+}
+
+function moveControl(item) {
+  if (planLimited("multiStoreSplit")) return "";
+  const offers = item.offers || [];
+  if (offers.length < 2 || !item.lineId) return "";
+  const options = offers
+    .map((offer) => {
+      const selected = offer.storeName === item.storeName ? " selected" : "";
+      return `<option value="${escapeHtml(offer.storeName)}"${selected}>${escapeHtml(offer.storeName)} · ${money(offer.price)}</option>`;
+    })
+    .join("");
+  return `<label class="move">Move
+    <select data-move-line="${escapeHtml(item.lineId)}" aria-label="Move ${escapeHtml(item.name)} to another store">${options}</select>
+  </label>`;
+}
+
+function primaryAction(store) {
+  const action = store.handoff?.action;
+  if (!action) return "";
+  if (planLimited("cartHandoffs")) {
+    return `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
+  }
+  if (action.type === "coming_soon") {
+    return `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
+  }
+  if (action.type === "kroger_cart") {
+    return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label || "Send to Kroger cart")}</button>`;
+  }
+  if (action.type === "walmart_cart" && action.url) {
+    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || "Open Walmart cart")}</a>`;
+  }
+  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Shop this list at ${store.storeName}`)}</button>`;
+}
+
 function renderTrip(payload) {
   lastOptimize = payload;
+  tripEdits = { lockedStore: null, moves: {} };
+  rememberTrip();
+  paintTrip();
+}
+
+function paintTrip() {
+  const view = currentTrip();
+  if (!view) return;
+  const stores = view.stores ?? [];
+  const checks = readChecks(localStorage, tripId());
+  const comparison = singleStoreSavings(stores.flatMap((store) => store.items || []));
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   gridEl.hidden = true;
   sentinelEl.hidden = true;
   tripEl.hidden = false;
-  const stores = payload.stores ?? [];
-  if (tripStoreEmpty(payload)) {
+  if (tripStoreEmpty(lastOptimize)) {
     tripEl.innerHTML = `
       <button type="button" class="ghost" id="trip-back">Back to shelves</button>
       ${emptyStateMarkup(emptyState("stores"), escapeHtml)}
@@ -1211,28 +1340,25 @@ function renderTrip(payload) {
     <div class="trip-banner">
       <div>
         <p>Trip plan</p>
-        <p>${escapeHtml(payload.tripPlan?.summary || `${stores.length} stores`)}</p>
-        ${payload.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
-        <div id="instacart-whole"></div>
+        <p>${escapeHtml(summaryOf(stores))}</p>
+        ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
       </div>
-      <p class="trip-total">${money(payload.total)}</p>
+      <p class="trip-total">${money(view.total)}</p>
     </div>
-    ${savingsBlock(Number(payload.total))}
-    ${payload.pricingWarning ? `<p class="muted">${escapeHtml(payload.pricingWarning)}</p>` : ""}
+    <p class="trip-compare">${escapeHtml(comparison.note)}</p>
+    ${offline ? `<p class="offline-note">You're offline. This trip is saved on this device, including what you've checked off.</p>` : ""}
+    ${!planLimited("multiStoreSplit") && tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
+    <div class="trip-actions">
+      <button type="button" class="ghost" data-instore="trip">In-store mode</button>
+      ${exportRow("trip")}
+    </div>
+    ${lastOptimize?.pricingWarning ? `<p class="muted">${escapeHtml(lastOptimize.pricingWarning)}</p>` : ""}
     <div class="store-grid">
-      ${stores.map(renderStore).join("")}
+      ${stores.map((store) => renderStore(store, checks)).join("")}
     </div>
-    ${(payload.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(payload.unavailable.join(", "))}</p>` : ""}
-    ${checkedStoresHtml(payload, stores)}
+    ${(lastOptimize?.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(lastOptimize.unavailable.join(", "))}</p>` : ""}
+    ${checkedStoresHtml(lastOptimize || {}, stores)}
   `;
-  const whole = $("instacart-whole");
-  const cartLocked = payload.entitlement?.limited?.includes("cartHandoffs");
-  if (instacartEnabled && stores.length && !cartLocked) {
-    whole.innerHTML = `<p>or shop the whole list on Instacart</p><button type="button" class="instacart-cta" data-instacart-scope="list"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`;
-  }
-  for (const button of tripEl.querySelectorAll("[data-open-paywall]")) {
-    button.addEventListener("click", () => openPaywall());
-  }
   $("trip-back").onclick = () => {
     tripEl.hidden = true;
     gridEl.hidden = false;
@@ -1240,46 +1366,200 @@ function renderTrip(payload) {
   };
 }
 
-function renderStore(store) {
+function renderStore(store, checks) {
   const rows = (store.items ?? [])
     .map((item) => {
       const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
-      const ad = item.priceSource === "weekly_ad" ? ` <span class="sub-tag">Weekly ad, not shelf price</span>` : "";
-      return `<li><span>${item.quantity}× ${escapeHtml(item.name)} (${escapeHtml(item.brand)})${sub}${ad}</span><span>${money(item.itemTotal ?? item.price)}</span></li>`;
+      const checked = item.lineId && checks[item.lineId] ? " checked" : "";
+      const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
+      const priceLabel = itemPriceLabel(item, store);
+      return `<li class="trip-item">
+        <label class="check-line">
+          <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
+          <span>
+            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}${sub}</span>
+            <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
+          </span>
+        </label>
+        <span class="item-price">
+          <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
+          <span>${money(item.price)} each</span>
+          <strong>${money(item.itemTotal ?? item.price)}</strong>
+        </span>
+        ${moveControl(item)}
+      </li>`;
     })
     .join("");
   const action = store.handoff?.action;
-  const cartLocked = lastOptimize?.entitlement?.limited?.includes("cartHandoffs");
-  let handoff = "";
-  if (action?.type === "coming_soon" && cartLocked) {
-    handoff = `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
-  } else if (action?.type === "coming_soon") {
-    handoff = `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
-  } else if (action?.type === "kroger_cart") {
-    handoff = `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label)}</button>`;
-  } else if (action?.url) {
-    handoff = `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label)}</a>`;
-  }
-  const instacart =
-    instacartEnabled && !cartLocked && action?.type !== "kroger_cart" && action?.type !== "walmart_cart"
-      ? `<button type="button" class="instacart-cta" data-instacart-scope="store" data-instacart-store="${escapeHtml(store.storeName)}"><img src="/instacart-carrot.svg" alt="" />Shop on Instacart</button>`
-      : "";
+  const priceLabel = store.handoff?.priceLabel || store.pricing?.label || "Price";
   const nearby = store.nearbyStore?.name
     ? `<p class="store-nearby">Nearest store: ${escapeHtml(store.nearbyStore.name)}</p>`
     : "";
+  const lock = planLimited("multiStoreSplit")
+    ? ""
+    : tripEdits.lockedStore === store.storeName
+      ? `<button type="button" class="ghost" data-unlock-store>Unlock ${escapeHtml(store.storeName)}</button>`
+      : `<button type="button" class="ghost" data-lock-store="${escapeHtml(store.storeName)}">Lock ${escapeHtml(store.storeName)} for this trip</button>`;
   return `<article class="store-card">
     <header>
       <div>
         <h3>${escapeHtml(store.storeName)}</h3>
         ${nearby}
-        <span class="${pricingClass(store.pricing)}">${escapeHtml(store.pricing?.label || "Prices")}</span>
+        <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
         ${store.pricing?.detail ? `<p class="muted">${escapeHtml(store.pricing.detail)}</p>` : ""}
       </div>
-      <strong>${money(store.subtotal)}</strong>
+      <p class="store-total"><span>Store total</span><strong>${money(store.subtotal)}</strong></p>
     </header>
     <ul class="item-list">${rows}</ul>
-    <footer class="store-handoff">${handoff}${action?.detail ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>` : ""}${instacart}</footer>
+    <footer class="store-handoff">
+      ${primaryAction(store)}
+      ${action?.detail ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>` : ""}
+      ${lock}
+      ${exportRow("store", store.storeName, action?.type)}
+    </footer>
   </article>`;
+}
+
+function itemUrl(item) {
+  if (planLimited("cartHandoffs")) return "";
+  if (item?.url) return item.url;
+  const offer = (item?.offers || []).find((row) => row.storeName === item.storeName);
+  return offer?.url || "";
+}
+
+function checklistItems(storeName) {
+  const view = currentTrip();
+  const stores = storeName ? (view?.stores || []).filter((store) => store.storeName === storeName) : view?.stores || [];
+  return stores.flatMap((store) => (store.items || []).map((item) => ({ ...item, storeName: store.storeName })));
+}
+
+function openChecklist(storeName) {
+  const dialog = $("trip-dialog");
+  if (!dialog) return;
+  const instore = !storeName;
+  const items = checklistItems(storeName);
+  const groups = groupForAisle(items);
+  const checks = readChecks(localStorage, tripId());
+  const title = instore ? "In the store" : `Shop this list at ${storeName}`;
+  const groupsHtml = groups
+    .map((group) => {
+      const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
+      const rows = group.items
+        .map((item) => {
+          const checked = item.lineId && checks[item.lineId] ? " checked" : "";
+          const size = item.size ? `, ${escapeHtml(item.size)}` : "";
+          const where = instore ? `<span class="muted">${escapeHtml(item.storeName)}</span>` : "";
+          const url = itemUrl(item);
+          const link = url
+            ? `<a class="text-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open in ${escapeHtml(item.storeName)}</a>`
+            : "";
+          return `<li class="check-row-line">
+            <label class="check-line">
+              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
+              <span>${item.quantity}× ${escapeHtml(item.name)}${size}</span>
+            </label>
+            ${where}
+            <strong>${money(item.itemTotal ?? item.price)}</strong>
+            ${link}
+          </li>`;
+        })
+        .join("");
+      return `<section><h3>${escapeHtml(group.department || "Other")}${aisle}</h3><ul class="check-list">${rows}</ul></section>`;
+    })
+    .join("");
+  dialog.innerHTML = `<div class="sheet-body">
+    <div class="list-head">
+      <h2 id="trip-dialog-title">${escapeHtml(title)}</h2>
+      <button type="button" class="text-btn" data-close-checklist>Close</button>
+    </div>
+    <p class="muted">${instore ? "Sorted by department and aisle. Checked items stay on this device, including offline." : "Check items off as you go. Open a link when this store has one."}</p>
+    ${groupsHtml || "<p class='muted'>Nothing in this list.</p>"}
+  </div>`;
+  if (!dialog.open) dialog.showModal();
+}
+
+function storesForExport(storeName) {
+  const view = currentTrip();
+  if (!view) return [];
+  if (!storeName) return view.stores;
+  return view.stores.filter((store) => store.storeName === storeName);
+}
+
+function printTrip(title, text) {
+  const root = $("print-root");
+  if (!root) return;
+  root.hidden = false;
+  root.innerHTML = `<h1>${escapeHtml(title)}</h1><pre>${escapeHtml(text)}</pre>`;
+  window.print();
+}
+
+async function shareTripLink(stores, title) {
+  const checks = readChecks(localStorage, tripId());
+  const items = [];
+  stores.forEach((store) => {
+    for (const item of store.items || []) {
+      items.push({
+        itemId: shareItemId(item, items.length),
+        name: item.name,
+        ...(item.brand ? { brand: item.brand } : {}),
+        ...(item.size ? { sizeLabel: item.size } : {}),
+        quantity: item.quantity || 1,
+        checked: Boolean(item.lineId && checks[item.lineId]),
+        writtenAt: Date.now(),
+        deleted: false,
+      });
+    }
+  });
+  const response = await apiFetch("/api/lists", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title, items }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 402) {
+    openPaywall();
+    return;
+  }
+  if (!response.ok || !body.shareToken) throw new Error(body.error || "Could not make a share link.");
+  const url = sharePageUrl(body.shareToken, { apiOrigin: apiOrigin(), locationHref: window.location.href });
+  const how = await deliverShare({ title, text: title, url, dialogTitle: "Share list" }, shareEnv());
+  toast(how === "copy" ? "Link copied." : "Choose who to send the link to.");
+}
+
+async function exportTrip(kind, storeName) {
+  const stores = storesForExport(storeName);
+  if (!stores.length) return;
+  const title = storeName ? `${storeName} list` : "Grocery Gitter trip";
+  const text = formatTripText(stores, { headed: !storeName });
+  if (kind === "copy") {
+    await copyText(text);
+    toast("List copied.");
+    return;
+  }
+  if (kind === "share") {
+    const how = await deliverShare({ title, text, dialogTitle: "Share list" }, shareEnv());
+    toast(how === "copy" ? "List copied." : "Choose who to send the list to.");
+    return;
+  }
+  if (kind === "print") {
+    printTrip(title, text);
+    return;
+  }
+  if (kind === "link") {
+    await shareTripLink(stores, title);
+  }
+}
+
+function restoreOfflineTrip() {
+  const saved = readTripSnapshot(localStorage);
+  if (!saved?.payload?.stores?.length) return false;
+  lastOptimize = saved.payload;
+  tripEdits = {
+    lockedStore: saved.edits?.lockedStore || null,
+    moves: { ...(saved.edits?.moves || {}) },
+  };
+  paintTrip();
+  return true;
 }
 
 async function planTrip() {
@@ -1333,7 +1613,7 @@ async function planTrip() {
 async function openInstacart(button) {
   const scope = button.dataset.instacartScope;
   const storeName = button.dataset.instacartStore || "";
-  const stores = lastOptimize?.stores ?? [];
+  const stores = currentTrip()?.stores ?? [];
   const selected = scope === "store" ? stores.filter((store) => store.storeName === storeName) : stores;
   const items = [];
   for (const store of selected) {
@@ -1373,7 +1653,7 @@ async function openInstacart(button) {
 }
 
 async function startKroger(storeName, button) {
-  const store = lastOptimize?.stores?.find((entry) => entry.storeName === storeName);
+  const store = currentTrip()?.stores?.find((entry) => entry.storeName === storeName);
   if (!store) return;
   button.disabled = true;
   try {
@@ -2068,8 +2348,88 @@ document.addEventListener("click", (event) => {
     void startKroger(target.closest("[data-kroger]").getAttribute("data-kroger"), target.closest("[data-kroger]"));
     return;
   }
+  if (target.closest("[data-open-paywall]")) {
+    openPaywall();
+    return;
+  }
+  if (target.closest("[data-shop-list]")) {
+    if (planLimited("cartHandoffs")) {
+      openPaywall();
+      return;
+    }
+    openChecklist(target.closest("[data-shop-list]").getAttribute("data-shop-list"));
+    return;
+  }
+  if (target.closest("[data-instore]")) {
+    openChecklist("");
+    return;
+  }
+  if (target.closest("[data-close-checklist]")) {
+    $("trip-dialog")?.close();
+    return;
+  }
+  if (target.closest("[data-lock-store]")) {
+    if (planLimited("multiStoreSplit")) {
+      openPaywall();
+      return;
+    }
+    tripEdits = { ...tripEdits, lockedStore: target.closest("[data-lock-store]").getAttribute("data-lock-store") };
+    rememberTrip();
+    paintTrip();
+    return;
+  }
+  if (target.closest("[data-unlock-store]")) {
+    tripEdits = { ...tripEdits, lockedStore: null };
+    rememberTrip();
+    paintTrip();
+    return;
+  }
+  const exportButton = target.closest("[data-export]");
+  if (exportButton) {
+    void exportTrip(exportButton.getAttribute("data-export"), exportButton.getAttribute("data-export-store") || "").catch((error) => {
+      if (isShareCancel(error)) return;
+      toast(error instanceof Error ? error.message : "Could not share that list.");
+    });
+    return;
+  }
   if (target.closest(".instacart-cta")) {
+    if (planLimited("cartHandoffs")) {
+      openPaywall();
+      return;
+    }
     void openInstacart(target.closest(".instacart-cta"));
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (target instanceof HTMLSelectElement && target.dataset.moveLine) {
+    if (planLimited("multiStoreSplit")) {
+      openPaywall();
+      return;
+    }
+    const lineId = target.dataset.moveLine;
+    const storeName = target.value;
+    const moves = { ...tripEdits.moves };
+    const original = (lastOptimize?.stores || [])
+      .flatMap((store) => store.items || [])
+      .find((item) => item.lineId === lineId);
+    const locked = tripEdits.lockedStore;
+    const backToOriginal = original && storeName === original.storeName && !locked;
+    const backToLock = locked && storeName === locked;
+    if (backToOriginal || backToLock) delete moves[lineId];
+    else moves[lineId] = storeName;
+    tripEdits = { ...tripEdits, moves };
+    rememberTrip();
+    paintTrip();
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.dataset.tripCheck) {
+    const checks = writeCheck(localStorage, tripId(), target.dataset.tripCheck, target.checked);
+    document.querySelectorAll(`[data-trip-check="${CSS.escape(target.dataset.tripCheck)}"]`).forEach((box) => {
+      if (box instanceof HTMLInputElement) box.checked = Boolean(checks[target.dataset.tripCheck]);
+    });
   }
 });
 
@@ -3061,6 +3421,12 @@ async function bootApp() {
   }
   listLoading = !urlToken && Array.isArray(savedRows) && savedRows.some((row) => row?.id || row?.itemId);
   renderEstimate();
+  if (typeof navigator !== "undefined" && navigator.onLine === false && restoreOfflineTrip()) {
+    showCatalogError("You're offline. This trip is saved on this device.");
+    listLoading = false;
+    listReady = true;
+    return;
+  }
   try {
     const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
     if (!deptResponse.ok) throw new Error(`Departments failed (${deptResponse.status})`);

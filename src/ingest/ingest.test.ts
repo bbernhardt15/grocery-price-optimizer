@@ -1617,7 +1617,7 @@ describe("catalog ingestion", () => {
 
   it("refreshes a saved-list stale offer ahead of an older one", async () => {
     await CatalogOffer.updateMany({ status: "stale" }, { $set: { refreshExcluded: true } });
-    const now = new Date("2026-10-23T15:00:00.000Z");
+    const now = new Date();
     const listUpc = "049000042566";
     const oldUpc = "016000275287";
     const listKey = upcKey(listUpc);
