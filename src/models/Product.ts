@@ -34,6 +34,12 @@ const productSchema = new Schema(
       default: "seed",
       index: true,
     },
+    /** Set only when the price source says this selling price is a sale. */
+    onSale: { type: Boolean, default: false },
+    /** Previous price from that same source, when it is higher than `price`. */
+    regularPrice: { type: Number },
+    /** YYYY-MM-DD sale end, when the source sent one. */
+    saleEndsOn: { type: String, trim: true },
   },
   {
     timestamps: { createdAt: false, updatedAt: true },

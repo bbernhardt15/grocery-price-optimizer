@@ -439,6 +439,53 @@ a.handoff-btn:active { color: var(--bg); text-decoration: none; }
 .check-line input { width: 1.1rem; height: 1.1rem; margin-top: 2px; }
 .item-name { display: block; }
 .item-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
+.sale-badge {
+  display: inline-flex; align-items: center; min-height: 1.35rem; padding: 1px 8px;
+  border-radius: 999px; background: var(--sale); color: var(--sale-ink);
+  font-size: 0.72rem; font-weight: 700;
+}
+.sale-was, .sale-ends { font-size: 0.72rem; color: var(--sale); font-weight: 700; }
+.coupon-panel {
+  margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-accent);
+}
+.coupon-panel summary {
+  min-height: 44px; padding: 10px 12px; font-weight: 700; cursor: pointer;
+}
+.coupon-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; }
+.coupon-link {
+  display: inline-flex; align-items: center; justify-content: center; align-self: flex-start;
+  min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--ink); color: var(--bg);
+  text-decoration: none; font-weight: 700;
+}
+a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--bg); text-decoration: none; }
+.coupon-note, .coupon-list, .coupon-estimate-note, .coupon-form-title, .trip-coupon-savings, .trip-coupon-total { margin: 0; }
+.coupon-clipped { min-height: 44px; align-items: center; }
+.coupon-clipped input { width: 1.25rem; height: 1.25rem; margin-top: 0; }
+.your-coupon-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.your-coupon {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; background: var(--surface);
+}
+.your-coupon .text-btn { min-height: 44px; }
+.store-coupon-total {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; margin: 0;
+}
+.estimate-tag {
+  display: inline-block; border-radius: 999px; padding: 2px 8px;
+  background: var(--sale-soft); color: var(--sale); font-size: 0.72rem; font-weight: 700;
+}
+.coupon-form { display: flex; flex-direction: column; gap: 8px; }
+.coupon-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.coupon-form select, .coupon-form input {
+  min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); padding: 0 10px; font: inherit;
+}
+.coupon-amount { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.coupon-form .ghost { min-height: 44px; }
+.coupon-form-error { color: var(--sale); margin: 0; }
+@media (min-width: 420px) {
+  .coupon-amount { grid-template-columns: 1fr 1fr; }
+}
 .move { display: flex; flex-direction: column; gap: 2px; font-size: 0.75rem; color: var(--muted); min-width: 9rem; }
 .move select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 0 8px; }
 .checklist-sheet { width: min(640px, calc(100% - 24px)); }

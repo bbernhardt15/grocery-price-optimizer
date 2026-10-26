@@ -1,4 +1,5 @@
 import type { CatalogProduct } from "../optimizeGroceryList";
+import { walmartSale } from "./saleFacts";
 import { parseGroceryUnit } from "./parseGroceryUnit";
 import type { PricingContext, StorePricingProvider } from "./types";
 import { StorePricingError } from "./types";
@@ -115,10 +116,7 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
   const categories = [item.categoryPath, item.categoryNode]
     .map((value) => value?.trim())
     .filter((value): value is string => Boolean(value));
-  const onSale =
-    typeof item.msrp === "number" &&
-    item.msrp > price &&
-    typeof item.salePrice === "number";
+  const sale = walmartSale(price, item.salePrice, item.msrp);
   const stock = item.stock?.trim().toLowerCase();
   const availability = !stock
     ? undefined
@@ -134,7 +132,7 @@ function toCatalogProduct(item: WalmartItem): CatalogProduct | null {
     ...(size ? { size } : {}),
     ...(imageUrls.length > 0 ? { imageUrls: [...new Set(imageUrls)].slice(0, 4) } : {}),
     ...(categories.length > 0 ? { categories } : {}),
-    ...(onSale ? { onSale: true } : {}),
+    ...(sale ?? {}),
     ...(availability ? { availability } : {}),
     price,
     unit,

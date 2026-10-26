@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { walmartAddToCartUrl } from "../pricing/walmartCartLink";
 import { priceSourceLabel as serverPriceLabel, STORE_HANDOFF_CONFIG } from "../storeHandoffConfig";
+import { couponSavingsSummary } from "../../public/shopper/coupons.js";
 import {
   applyTripEdits,
   formatItemLine,
@@ -203,6 +204,76 @@ describe("applyTripEdits", () => {
     assert.equal(next.stores.length, 1);
     assert.equal(next.stores[0].storeName, "Aldi");
     assert.equal(next.total, 6.17);
+  });
+
+  it("keeps a sale on the store that has it and a coupon link on the handoff", () => {
+    const eggs = {
+      query: "eggs",
+      lineId: "0:eggs",
+      name: "Large Eggs",
+      brand: "Great Value",
+      storeName: "Walmart",
+      price: 2.14,
+      quantity: 1,
+      itemTotal: 2.14,
+      unit: "dozen",
+      normalizedUnit: "dozen",
+      onSale: true,
+      regularPrice: 2.64,
+      saleEndsOn: "2026-11-08",
+      offers: [
+        {
+          storeName: "Walmart",
+          name: "Large Eggs",
+          brand: "Great Value",
+          price: 2.14,
+          onSale: true,
+          regularPrice: 2.64,
+          saleEndsOn: "2026-11-08",
+          priceSource: "seed",
+        },
+        {
+          storeName: "Aldi",
+          name: "Large Eggs",
+          brand: "Aldi",
+          price: 1.89,
+          regularPrice: 3,
+          priceSource: "seed",
+        },
+      ],
+    };
+    const stayed = applyTripEdits([{ storeName: "Walmart", items: [eggs], subtotal: 2.14 }], {}, {});
+    const walmartLine = stayed.stores[0].items[0];
+    assert.equal(walmartLine.onSale, true);
+    assert.equal(walmartLine.regularPrice, 2.64);
+    assert.equal(walmartLine.saleEndsOn, "2026-11-08");
+    assert.equal(stayed.stores[0].handoff.coupon?.url, "https://www.walmart.com/walmartcash");
+
+    const moved = applyTripEdits(
+      [{ storeName: "Walmart", items: [eggs], subtotal: 2.14 }],
+      { moves: { "0:eggs": "Aldi" } },
+      {}
+    );
+    const aldiLine = moved.stores[0].items[0];
+    assert.equal(aldiLine.storeName, "Aldi");
+    assert.equal(aldiLine.onSale, undefined);
+    assert.equal(aldiLine.regularPrice, undefined);
+    assert.equal(aldiLine.saleEndsOn, undefined);
+    assert.equal(moved.stores[0].handoff.coupon?.url, "https://www.aldi.us/store/aldi/pages/weekly-specials");
+
+    const lines = stayed.stores.flatMap((store) => store.items);
+    const comparison = singleStoreSavings(lines);
+    assert.equal(comparison.splitTotal, 2.14);
+    assert.equal(comparison.singleStore?.storeName, "Aldi");
+    assert.equal(comparison.savings, -0.25);
+    const coupons = couponSavingsSummary(
+      stayed.stores,
+      [{ id: "c-eggs", storeName: "Walmart", lineId: "0:eggs", itemName: "Large Eggs", kind: "dollars", amount: 1 }],
+      "2026-10-26"
+    );
+    assert.equal(coupons.savings, 1);
+    assert.equal(singleStoreSavings(lines).splitTotal, comparison.splitTotal);
+    assert.equal(singleStoreSavings(lines).savings, comparison.savings);
   });
 
   it("keeps a shop-list action for a link store", () => {

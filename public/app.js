@@ -49,6 +49,22 @@ import {
   tripFingerprint,
   writeCheck,
 } from "./shopper/tripPlan.js";
+import {
+  couponPageFor,
+  couponSavingsSummary,
+  couponSummaryMarkup,
+  isClipped,
+  parseCouponForm,
+  readCoupons,
+  removeCoupon,
+  saleBadgeMarkup,
+  couponLineLabel,
+  storeCouponMarkup,
+  todayKey,
+  upsertCoupon,
+  writeClipped,
+  writeCoupons,
+} from "./shopper/coupons.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 
@@ -1328,6 +1344,31 @@ function primaryAction(store) {
   return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Open ${store.storeName} list`)}</button>`;
 }
 
+function addOwnCoupon(button) {
+  const form = button.closest("form");
+  const error = form?.querySelector("[data-coupon-error]");
+  const line = form?.querySelector("[data-coupon-line]");
+  const selected = line?.selectedOptions?.[0];
+  const parsed = parseCouponForm({
+    storeName: form?.dataset.couponStore || "",
+    lineId: line?.value || "",
+    itemName: selected?.textContent || "",
+    kind: form?.querySelector("[data-coupon-kind]")?.value,
+    amount: form?.querySelector("[data-coupon-amount]")?.value,
+    expiresOn: form?.querySelector("[data-coupon-expires]")?.value,
+  });
+  if (!parsed.ok) {
+    if (error) {
+      error.hidden = false;
+      error.textContent = parsed.error;
+    }
+    return;
+  }
+  upsertCoupon(localStorage, parsed.coupon);
+  scheduleAccountSync();
+  paintTrip();
+}
+
 function renderTrip(payload) {
   lastOptimize = payload;
   tripEdits = { lockedStore: null, moves: {} };
@@ -1341,6 +1382,9 @@ function paintTrip() {
   const stores = view.stores ?? [];
   const checks = readChecks(localStorage, tripId());
   const comparison = singleStoreSavings(stores.flatMap((store) => store.items || []));
+  const coupons = readCoupons(localStorage);
+  const couponSummary = couponSavingsSummary(stores, coupons, todayKey());
+  const showCouponEstimate = !planLimited("ownCoupons") || couponSummary.savings > 0;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   gridEl.hidden = true;
   sentinelEl.hidden = true;
@@ -1368,6 +1412,7 @@ function paintTrip() {
       <p class="trip-total">${money(view.total)}</p>
     </div>
     <p class="trip-compare">${escapeHtml(comparison.note)}</p>
+    ${showCouponEstimate ? couponSummaryMarkup(couponSummary) : ""}
     ${offline ? `<p class="offline-note">You're offline. This trip is saved on this device, including what you've checked off.</p>` : ""}
     ${!planLimited("multiStoreSplit") && tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
     <div class="trip-actions">
@@ -1376,7 +1421,7 @@ function paintTrip() {
     </div>
     ${lastOptimize?.pricingWarning ? `<p class="muted">${escapeHtml(lastOptimize.pricingWarning)}</p>` : ""}
     <div class="store-grid">
-      ${stores.map((store) => renderStore(store, checks)).join("")}
+      ${stores.map((store, index) => renderStore(store, checks, coupons, couponSummary, index === 0)).join("")}
     </div>
     ${(lastOptimize?.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(lastOptimize.unavailable.join(", "))}</p>` : ""}
     ${checkedStoresHtml(lastOptimize || {}, stores)}
@@ -1388,7 +1433,7 @@ function paintTrip() {
   };
 }
 
-function renderStore(store, checks) {
+function renderStore(store, checks, coupons, couponSummary, openCoupons) {
   const rows = (store.items ?? [])
     .map((item) => {
       const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
@@ -1405,6 +1450,7 @@ function renderStore(store, checks) {
         </label>
         <span class="item-price">
           <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
+          ${saleBadgeMarkup(item)}
           <span>${money(item.price)} each</span>
           <strong>${money(item.itemTotal ?? item.price)}</strong>
         </span>
@@ -1433,6 +1479,15 @@ function renderStore(store, checks) {
       <p class="store-total"><span>Store total</span><strong>${money(store.subtotal)}</strong></p>
     </header>
     <ul class="item-list">${rows}</ul>
+    ${storeCouponMarkup(store, {
+      page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
+      rows: (couponSummary?.byStore || []).find((row) => row.storeName === store.storeName)?.rows || [],
+      storeSummary: (couponSummary?.byStore || []).find((row) => row.storeName === store.storeName),
+      clipped: isClipped(localStorage, tripId(), store.storeName),
+      canEnter: !planLimited("ownCoupons"),
+      open: openCoupons,
+      coupons,
+    })}
     <footer class="store-handoff">
       ${primaryAction(store)}
       ${action?.detail ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>` : ""}
@@ -1500,6 +1555,15 @@ function openChecklist(storeName) {
   if (!dialog.open) dialog.showModal();
 }
 
+function couponExportText(stores) {
+  const summary = couponSavingsSummary(stores, readCoupons(localStorage), todayKey());
+  const lines = [];
+  for (const store of summary.byStore) {
+    for (const row of store.rows) lines.push(`${store.storeName}: ${couponLineLabel(row)}`);
+  }
+  return lines.length ? `\n\nYour coupons (estimated)\n${lines.join("\n")}` : "";
+}
+
 function storesForExport(storeName) {
   const view = currentTrip();
   if (!view) return [];
@@ -1552,7 +1616,7 @@ async function exportTrip(kind, storeName) {
   const stores = storesForExport(storeName);
   if (!stores.length) return;
   const title = storeName ? `${storeName} list` : "Grocery Gitter trip";
-  const text = formatTripText(stores, { headed: !storeName });
+  const text = `${formatTripText(stores, { headed: !storeName })}${couponExportText(stores)}`;
   if (kind === "copy") {
     await copyText(text);
     toast("List copied.");
@@ -2366,6 +2430,26 @@ document.addEventListener("click", (event) => {
     chooseSuggestion(Number(suggest.getAttribute("data-suggest")));
     return;
   }
+  const couponLink = target.closest("[data-coupon-link]");
+  if (couponLink) {
+    event.preventDefault();
+    void openExternal(couponLink.getAttribute("data-coupon-link"));
+    return;
+  }
+  if (target.closest("[data-coupon-remove]")) {
+    removeCoupon(localStorage, target.closest("[data-coupon-remove]").getAttribute("data-coupon-remove"));
+    scheduleAccountSync();
+    paintTrip();
+    return;
+  }
+  if (target.closest("[data-add-coupon]")) {
+    if (planLimited("ownCoupons")) {
+      openPaywall();
+      return;
+    }
+    addOwnCoupon(target.closest("[data-add-coupon]"));
+    return;
+  }
   if (target.closest("[data-kroger]")) {
     void startKroger(target.closest("[data-kroger]").getAttribute("data-kroger"), target.closest("[data-kroger]"));
     return;
@@ -2445,6 +2529,10 @@ document.addEventListener("change", (event) => {
     tripEdits = { ...tripEdits, moves };
     rememberTrip();
     paintTrip();
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.dataset.couponClipped) {
+    writeClipped(localStorage, tripId(), target.dataset.couponClipped, target.checked);
     return;
   }
   if (target instanceof HTMLInputElement && target.dataset.tripCheck) {
@@ -2927,6 +3015,7 @@ function personalListPayload() {
     items: items.filter((item) => item?.id && item?.name).slice(0, 100),
     removed: shareState?.shareToken ? [] : readRemoved(),
     baseRevision: listRevision || null,
+    coupons: readCoupons(localStorage),
   };
 }
 
@@ -2997,6 +3086,7 @@ async function pushAccountList() {
       localStorage.setItem(REVISION_KEY, String(listRevision));
     }
     if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
+    if (Array.isArray(body.list?.coupons)) writeCoupons(localStorage, body.list.coupons);
     localStorage.removeItem(REMOVED_KEY);
   } catch {
     /* the list stays on this device and tries again on the next edit */
@@ -3005,6 +3095,7 @@ async function pushAccountList() {
 
 function rememberServerList(server) {
   if (!server) return;
+  if (Array.isArray(server.coupons)) writeCoupons(localStorage, server.coupons);
   listRevision = server.revision || listRevision;
   if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
   if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
@@ -3081,7 +3172,7 @@ function paintPlan() {
   }
   status.textContent = billingStatus.pro
     ? "Grocery Gitter Pro is active on this account."
-    : "One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.";
+    : "One store and one shared list are free. Coupon links stay free. Pro adds the multi-store split, price alerts, unlimited shared lists, cart handoffs, and typing in a coupon you already have.";
 }
 
 function paintPaywall() {

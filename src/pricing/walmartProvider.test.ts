@@ -68,12 +68,34 @@ describe("WalmartPricingProvider", () => {
     assert.equal(products[0].productId, "554433");
     assert.equal(products[0].upc, "078742000012");
     assert.equal(products[0].priceSource, "live");
+    assert.equal(products[0].onSale, undefined);
+    assert.equal(products[0].regularPrice, undefined);
     assert.equal(products[0].unit, "gal");
     assert.equal(products[0].size, "1 gal");
     assert.ok(calls[0].startsWith(`${WALMART_AFFILIATE_BASE}/search?`));
     assert.match(calls[0], /query=milk/);
     assert.match(calls[0], /publisherId=impact-123/);
     assert.match(calls[0], /numItems=25/);
+  });
+
+  it("marks a rollback only when msrp is higher than the selling price", async () => {
+    installWalmartKeys();
+    globalThis.fetch = async () =>
+      Response.json({
+        items: [
+          { itemId: 1, name: "Great Value Large Eggs", salePrice: 2.14, msrp: 2.64 },
+          { itemId: 2, name: "Great Value Whole Milk", salePrice: 2.44, msrp: 2.44 },
+        ],
+      });
+    const products = await new WalmartPricingProvider().searchProducts("eggs");
+    const eggs = products.find((row) => row.name.includes("Eggs"));
+    const milk = products.find((row) => row.name.includes("Milk"));
+    assert.equal(eggs?.price, 2.14);
+    assert.equal(eggs?.onSale, true);
+    assert.equal(eggs?.regularPrice, 2.64);
+    assert.equal(milk?.price, 2.44);
+    assert.equal(milk?.onSale, undefined);
+    assert.equal(milk?.regularPrice, undefined);
   });
 
   it("throws a structured HTTP error when the Affiliate API rejects the app", async () => {

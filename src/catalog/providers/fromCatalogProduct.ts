@@ -21,6 +21,8 @@ export function rawFromCatalogProduct(
     ...(product.imageUrls && product.imageUrls.length > 0 ? { imageUrls: product.imageUrls } : {}),
     ...(product.categories && product.categories.length > 0 ? { categories: product.categories } : {}),
     ...(product.onSale ? { onSale: true } : {}),
+    ...(product.regularPrice != null ? { regularPrice: product.regularPrice } : {}),
+    ...(product.saleEndsOn ? { saleEndsOn: product.saleEndsOn } : {}),
     availability: product.availability ?? "unknown",
   };
 }

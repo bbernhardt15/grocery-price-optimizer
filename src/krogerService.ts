@@ -1,5 +1,6 @@
 import { krogerStartParam } from "./ingest/krogerTerms";
 import type { CatalogProduct } from "./optimizeGroceryList";
+import { krogerSale } from "./pricing/saleFacts";
 
 const KROGER_API_BASE = "https://api.kroger.com/v1";
 const TOKEN_ENDPOINT = `${KROGER_API_BASE}/connect/oauth2/token`;
@@ -176,7 +177,7 @@ function toCatalogProduct(
   const imageUrls = krogerImageUrls(product.images);
   const regular = item?.price?.regular ?? item?.nationalPrice?.regular;
   const promo = item?.price?.promo ?? item?.nationalPrice?.promo;
-  const onSale = typeof promo === "number" && promo > 0 && (typeof regular !== "number" || promo < regular);
+  const sale = krogerSale(price, regular, promo);
   return {
     name,
     brand: product.brand?.trim() || "Kroger",
@@ -187,7 +188,7 @@ function toCatalogProduct(
     ...(size ? { size } : {}),
     ...(categories.length > 0 ? { categories } : {}),
     ...(imageUrls.length > 0 ? { imageUrls } : {}),
-    ...(onSale ? { onSale: true } : {}),
+    ...(sale ?? {}),
     availability: krogerAvailability(item),
     price,
     unit,

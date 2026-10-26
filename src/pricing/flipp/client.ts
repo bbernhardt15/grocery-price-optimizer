@@ -8,6 +8,7 @@ import {
   type FlippMerchantMapping,
 } from "./merchants";
 import { parseFlippPrice } from "./parsePrice";
+import { publishSale, saleEndDay } from "../saleFacts";
 
 export const FLIPP_CONSUMER_SEARCH =
   "https://backflipp.wishabi.com/flipp/items/search";
@@ -85,6 +86,10 @@ export type NormalizedFlippDeal = {
   postPriceText?: string;
   saleStory?: string;
   imageUrl?: string;
+  /** Flyer original price when it is higher than the sale price. */
+  regularPrice?: number;
+  /** Flyer valid_to day, when the circular sent one. */
+  saleEndsOn?: string;
 };
 
 type CacheEntry = {
@@ -380,6 +385,16 @@ function flyerPrice(item: FlippFlyerItem): unknown {
   return item.price;
 }
 
+/** A plain dollar amount only. "2 for $5" and "Save $1" are not a was-price. */
+function flyerWasPrice(item: FlippFlyerItem): number | undefined {
+  const original = parseFlippPrice(item.original_price);
+  if (original != null && original > 0) return original;
+  const text = item.pre_price_text?.trim() ?? "";
+  if (!/^\$?\s*\d+(?:\.\d{1,2})?$/.test(text)) return undefined;
+  const parsed = parseFlippPrice(text);
+  return parsed != null && parsed > 0 ? parsed : undefined;
+}
+
 function httpsImage(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -418,6 +433,13 @@ export function normalizeFlippDeal(
     item.clean_image_url || item.clipping_image_url || item.cutout_image_url
   );
 
+  const sale = publishSale({
+    price,
+    onSale: true,
+    regularPrice: flyerWasPrice(item),
+    saleEndsOn: saleEndDay(item.valid_to),
+  });
+
   return {
     name,
     brand: item.brand?.trim() || merchantName,
@@ -430,6 +452,8 @@ export function normalizeFlippDeal(
       : {}),
     ...(item.sale_story?.trim() ? { saleStory: item.sale_story.trim() } : {}),
     ...(imageUrl ? { imageUrl } : {}),
+    ...(sale?.regularPrice != null ? { regularPrice: sale.regularPrice } : {}),
+    ...(sale?.saleEndsOn ? { saleEndsOn: sale.saleEndsOn } : {}),
   };
 }
 

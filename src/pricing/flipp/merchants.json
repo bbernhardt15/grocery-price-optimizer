@@ -1,28 +1,63 @@
 [
   {
     "storeName": "Aldi",
-    "merchantIds": [2353],
-    "nameAliases": ["aldi"],
+    "merchantIds": [
+      2353
+    ],
+    "nameAliases": [
+      "aldi"
+    ],
     "searchName": "ALDI",
-    "flyerKitSlug": "aldi"
+    "flyerKitSlug": "aldi",
+    "couponUrl": "https://www.aldi.us/store/aldi/pages/weekly-specials"
   },
   {
     "storeName": "Target",
-    "merchantIds": [2040],
-    "nameAliases": ["target"],
+    "merchantIds": [
+      2040
+    ],
+    "nameAliases": [
+      "target"
+    ],
     "searchName": "Target",
-    "flyerKitSlug": "target"
+    "flyerKitSlug": "target",
+    "couponUrl": "https://www.target.com/circle"
   },
   {
     "storeName": "Walmart",
-    "merchantIds": [2175],
-    "nameAliases": ["walmart", "walmart supercenter", "walmart neighborhood market"],
+    "merchantIds": [
+      2175
+    ],
+    "nameAliases": [
+      "walmart",
+      "walmart supercenter",
+      "walmart neighborhood market"
+    ],
     "searchName": "Walmart",
-    "flyerKitSlug": "walmart"
+    "flyerKitSlug": "walmart",
+    "couponUrl": "https://www.walmart.com/walmartcash"
   },
   {
     "storeName": "Kroger",
-    "merchantIds": [2437, 2449, 2550, 2706, 2707, 2774, 2775, 2776, 2777, 2778, 2779, 2780, 2781, 3883, 4359, 5927, 6133],
+    "merchantIds": [
+      2437,
+      2449,
+      2550,
+      2706,
+      2707,
+      2774,
+      2775,
+      2776,
+      2777,
+      2778,
+      2779,
+      2780,
+      2781,
+      3883,
+      4359,
+      5927,
+      6133
+    ],
     "nameAliases": [
       "kroger",
       "ralphs",
@@ -50,147 +85,224 @@
       "foods co"
     ],
     "searchName": "Kroger",
-    "flyerKitSlug": "kroger"
+    "flyerKitSlug": "kroger",
+    "couponUrl": "https://www.kroger.com/savings/cl/coupons/"
   },
   {
     "storeName": "Publix",
-    "merchantIds": [2361],
-    "nameAliases": ["publix"],
+    "merchantIds": [
+      2361
+    ],
+    "nameAliases": [
+      "publix"
+    ],
     "searchName": "Publix",
     "flyerKitSlug": "publix",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.publix.com/search?searchTerm={q}"
+    "searchUrl": "https://www.publix.com/search?searchTerm={q}",
+    "couponUrl": "https://www.publix.com/savings/digital-coupons"
   },
   {
     "storeName": "Meijer",
-    "merchantIds": [2281],
-    "nameAliases": ["meijer"],
+    "merchantIds": [
+      2281
+    ],
+    "nameAliases": [
+      "meijer"
+    ],
     "searchName": "Meijer",
     "flyerKitSlug": "meijer",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.meijer.com/shopping/search.html?text={q}"
+    "searchUrl": "https://www.meijer.com/shopping/search.html?text={q}",
+    "couponUrl": "https://www.meijer.com/shopping/coupons.html"
   },
   {
     "storeName": "H-E-B",
-    "merchantIds": [2467],
-    "nameAliases": ["h-e-b", "heb"],
+    "merchantIds": [
+      2467
+    ],
+    "nameAliases": [
+      "h-e-b",
+      "heb"
+    ],
     "searchName": "H-E-B",
     "flyerKitSlug": "heb",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.heb.com/search/?q={q}"
+    "searchUrl": "https://www.heb.com/search/?q={q}",
+    "couponUrl": "https://www.heb.com/digital-coupon/coupon-selection/all-coupons"
   },
   {
     "storeName": "Albertsons",
-    "merchantIds": [5661],
-    "nameAliases": ["albertsons"],
+    "merchantIds": [
+      5661
+    ],
+    "nameAliases": [
+      "albertsons"
+    ],
     "searchName": "Albertsons",
     "flyerKitSlug": "albertsons",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.albertsons.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.albertsons.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.albertsons.com/rewards/all-coupons"
   },
   {
     "storeName": "Vons",
-    "merchantIds": [2375],
-    "nameAliases": ["vons"],
+    "merchantIds": [
+      2375
+    ],
+    "nameAliases": [
+      "vons"
+    ],
     "searchName": "Vons",
     "flyerKitSlug": "vons",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.vons.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.vons.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.vons.com/rewards/all-coupons"
   },
   {
     "storeName": "Jewel-Osco",
-    "merchantIds": [2364],
-    "nameAliases": ["jewel-osco", "jewel osco"],
+    "merchantIds": [
+      2364
+    ],
+    "nameAliases": [
+      "jewel-osco",
+      "jewel osco"
+    ],
     "searchName": "Jewel-Osco",
     "flyerKitSlug": "jewelosco",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.jewelosco.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.jewelosco.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.jewelosco.com/rewards/all-coupons"
   },
   {
     "storeName": "Acme",
-    "merchantIds": [2365],
-    "nameAliases": ["acme", "acme markets"],
+    "merchantIds": [
+      2365
+    ],
+    "nameAliases": [
+      "acme",
+      "acme markets"
+    ],
     "searchName": "Acme Markets",
     "flyerKitSlug": "acme",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.acmemarkets.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.acmemarkets.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.acmemarkets.com/rewards/all-coupons"
   },
   {
     "storeName": "Tom Thumb",
-    "merchantIds": [2381],
-    "nameAliases": ["tom thumb"],
+    "merchantIds": [
+      2381
+    ],
+    "nameAliases": [
+      "tom thumb"
+    ],
     "searchName": "Tom Thumb",
     "flyerKitSlug": "tomthumb",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.tomthumb.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.tomthumb.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.tomthumb.com/rewards/all-coupons"
   },
   {
     "storeName": "Randalls",
-    "merchantIds": [2378],
-    "nameAliases": ["randalls"],
+    "merchantIds": [
+      2378
+    ],
+    "nameAliases": [
+      "randalls"
+    ],
     "searchName": "Randalls",
     "flyerKitSlug": "randalls",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.randalls.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.randalls.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.randalls.com/rewards/all-coupons"
   },
   {
     "storeName": "Pavilions",
-    "merchantIds": [2377],
-    "nameAliases": ["pavilions"],
+    "merchantIds": [
+      2377
+    ],
+    "nameAliases": [
+      "pavilions"
+    ],
     "searchName": "Pavilions",
     "flyerKitSlug": "pavilions",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.pavilions.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://www.pavilions.com/shop/search-results.html?q={q}",
+    "couponUrl": "https://www.pavilions.com/rewards/all-coupons"
   },
   {
     "storeName": "Stop & Shop",
-    "merchantIds": [2393],
-    "nameAliases": ["stop & shop", "stop and shop"],
+    "merchantIds": [
+      2393
+    ],
+    "nameAliases": [
+      "stop & shop",
+      "stop and shop"
+    ],
     "searchName": "Stop & Shop",
     "flyerKitSlug": "stopandshop",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://stopandshop.com/"
+    "searchUrl": "https://stopandshop.com/",
+    "couponUrl": "https://stopandshop.com/savings/coupons/browse"
   },
   {
     "storeName": "Sprouts",
-    "merchantIds": [2419],
-    "nameAliases": ["sprouts", "sprouts farmers market"],
+    "merchantIds": [
+      2419
+    ],
+    "nameAliases": [
+      "sprouts",
+      "sprouts farmers market"
+    ],
     "searchName": "Sprouts Farmers Market",
     "flyerKitSlug": "sprouts",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://shop.sprouts.com/"
+    "searchUrl": "https://shop.sprouts.com/",
+    "couponUrl": "https://shop.sprouts.com/store/sprouts/pages/in-store-deals"
   },
   {
     "storeName": "Winn-Dixie",
-    "merchantIds": [2415],
-    "nameAliases": ["winn-dixie", "winn dixie"],
+    "merchantIds": [
+      2415
+    ],
+    "nameAliases": [
+      "winn-dixie",
+      "winn dixie"
+    ],
     "searchName": "Winn-Dixie",
     "flyerKitSlug": "winndixie",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.winndixie.com/"
+    "searchUrl": "https://www.winndixie.com/",
+    "couponUrl": "https://www.winndixie.com/coupons"
   },
   {
     "storeName": "Costco",
-    "merchantIds": [2519],
-    "nameAliases": ["costco"],
+    "merchantIds": [
+      2519
+    ],
+    "nameAliases": [
+      "costco"
+    ],
     "searchName": "Costco",
     "flyerKitSlug": "costco",
     "exactName": true,
     "dealsOnly": true,
     "club": true,
-    "searchUrl": "https://www.costco.com/CatalogSearch?keyword={q}"
+    "searchUrl": "https://www.costco.com/CatalogSearch?keyword={q}",
+    "couponUrl": "https://www.costco.com/whse-savings.html"
   }
 ]
