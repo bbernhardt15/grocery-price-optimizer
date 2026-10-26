@@ -198,8 +198,12 @@ img { max-width: 100%; display: block; }
 .card.just-added { animation: pop 420ms ease; }
 .card-open {
   border: 0; background: var(--bg-accent); padding: 0; text-align: left; position: relative;
+  display: flex; align-items: center; justify-content: center; min-height: 180px;
 }
-.card-open img { width: 100%; height: 132px; object-fit: cover; }
+.card-open img {
+  width: 100%; height: 180px; object-fit: contain; padding: 12px;
+  background: var(--surface);
+}
 .badge {
   position: absolute; top: 8px; left: 8px; background: var(--sale); color: var(--sale-ink);
   border-radius: 999px; padding: 4px 8px; font-size: 0.75rem; font-weight: 700;
@@ -399,7 +403,7 @@ img { max-width: 100%; display: block; }
 .sheet { border: 0; border-radius: 20px; padding: 0; background: var(--surface); color: var(--ink); width: min(560px, calc(100% - 24px)); }
 .sheet::backdrop { background: var(--backdrop); }
 .sheet-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.sheet-body img.hero { width: 100%; height: 180px; object-fit: cover; border-radius: 14px; background: var(--bg-accent); }
+.sheet-body img.hero { width: 100%; height: 200px; object-fit: contain; padding: 12px; border-radius: 14px; background: var(--bg-accent); }
 .offer-list, .sub-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .offer-list li, .sub-list li {
   display: flex; justify-content: space-between; gap: 8px; align-items: center;

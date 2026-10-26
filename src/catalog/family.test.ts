@@ -9,6 +9,7 @@ import {
   groupBrowseFamilies,
   groupingStats,
   identifyFamily,
+  rankProductImages,
   summarizeFamilyRows,
   type BrowseVariant,
 } from "./family";
@@ -33,6 +34,7 @@ function product(input: {
   size?: string;
   price?: number;
   departmentId?: string;
+  imageUrls?: string[];
   offers?: CatalogOffer[];
 }): BrowseProduct {
   const offers = input.offers ?? [offer(input.price ?? 1, "Walmart")];
@@ -41,7 +43,7 @@ function product(input: {
     id: input.id,
     name: input.name,
     brand: input.brand,
-    imageUrls: [`/img/${input.id}.jpg`],
+    imageUrls: input.imageUrls ?? [`/img/${input.id}.jpg`],
     departmentId: input.departmentId ?? "beverages",
     departmentName: "Beverages",
     ...(input.size ? { sizeLabel: input.size } : {}),
@@ -124,6 +126,7 @@ describe("family identity", () => {
     assert.equal(ranch.flavorLabel, "Cool Ranch");
     assert.equal(nacho.flavorLabel, "Nacho Cheese");
     assert.equal(ranch.variant.label, "9.25 oz bag");
+    assert.equal(party.variant.label, "14.5 oz · Party size");
     assert.match(party.familyName, /Cool Ranch/);
     assert.doesNotMatch(party.familyName, /Party/);
   });
@@ -237,6 +240,33 @@ describe("family identity", () => {
     assert.equal(tiles.length, 1);
     assert.equal(tiles[0]?.familyName, "Oreo Cookies");
     assert.ok((tiles[0]?.flavors.length ?? 0) >= 8);
+    assert.equal(
+      identifyFamily({
+        name: "OREO Double Stuf Chocolate Sandwich Cookies, King Size Snack Pack, 4.1 oz",
+        brand: "Oreo",
+        size: "4.1 oz",
+        departmentId: "snacks",
+      }).variant.label,
+      "4.1 oz · King size"
+    );
+    assert.equal(
+      identifyFamily({
+        name: "OREO Double Stuf Chocolate Sandwich Cookies Family Size",
+        brand: "Oreo",
+        size: "1.11 lb",
+        departmentId: "snacks",
+      }).variant.label,
+      "1.11 lb · Family size"
+    );
+    assert.equal(
+      identifyFamily({
+        name: "OREO Double Stuf Chocolate Sandwich Cookies Family Size",
+        brand: "Oreo",
+        size: "1.11 lb",
+        departmentId: "snacks",
+      }).flavorLabel,
+      "Double Stuf"
+    );
     const ice = product({
       id: "upc:oreoice",
       name: "OREO Ice Cream Cookies and Cream",
@@ -259,8 +289,66 @@ describe("family identity", () => {
     assert.equal(split.length, 3);
     assert.equal(new Set(split.map((tile) => tile.familyKey)).size, 3);
     assert.ok(split.some((tile) => tile.line === "cookies"));
-    assert.ok(split.some((tile) => tile.line === "ice cream"));
+    assert.equal(split.find((tile) => tile.line === "ice cream")?.familyName, "Oreo Ice Cream");
     assert.ok(split.some((tile) => tile.line === "cereal"));
+    const shouted = groupBrowseFamilies([
+      product({
+        id: "upc:shout",
+        name: "OREO Chocolate Sandwich Cookies",
+        brand: "OREO",
+        size: "13.29 oz",
+        departmentId: "snacks",
+      }),
+      product({
+        id: "upc:shout2",
+        name: "OREO Mint Chocolate Sandwich Cookies",
+        brand: "OREO",
+        size: "13.2 oz",
+        departmentId: "snacks",
+      }),
+    ]);
+    assert.equal(shouted[0]?.familyName, "Oreo Cookies");
+  });
+
+  it("uses a front-of-pack photo and skips a nutrition panel for the same flavor", () => {
+    const front = "https://www.kroger.com/product/images/xlarge/front/0004400003111";
+    const nutrition = "https://www.kroger.com/product/images/xlarge/nutrition/0004400003111";
+    const banner = "https://cdn.example/banner/oreo-sale.jpg";
+    const ranked = rankProductImages([nutrition, banner, front]);
+    assert.equal(ranked[0], front);
+    const tiles = groupBrowseFamilies([
+      product({
+        id: "upc:king",
+        name: "OREO Double Stuf Chocolate Sandwich Cookies, King Size Snack Pack, 4.1 oz",
+        brand: "Oreo",
+        size: "4.1 oz",
+        price: 0.99,
+        departmentId: "snacks",
+        imageUrls: [nutrition],
+      }),
+      product({
+        id: "upc:bag",
+        name: "OREO Double Stuf Chocolate Sandwich Cookies, 14.03 oz",
+        brand: "Oreo",
+        size: "14.03 oz",
+        price: 4.48,
+        departmentId: "snacks",
+        imageUrls: [front],
+      }),
+      product({
+        id: "upc:golden",
+        name: "OREO Double Stuf Golden Sandwich Cookies, 14.03 oz",
+        brand: "Oreo",
+        size: "14.03 oz",
+        price: 4.48,
+        departmentId: "snacks",
+        imageUrls: ["https://www.kroger.com/product/images/xlarge/front/golden"],
+      }),
+    ]);
+    assert.equal(tiles.length, 1);
+    assert.equal(tiles[0]?.imageUrls[0], front);
+    const golden = tiles[0]?.variants.find((variant) => variant.flavorLabel === "Double Stuf Golden");
+    assert.match(golden?.imageUrls[0] ?? "", /golden/);
   });
 });
 

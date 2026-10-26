@@ -286,7 +286,7 @@ function describeVariant(name: string, size?: string | null): FamilyVariantShape
   const unit = structured.unit;
   const count = structured.count;
   const container = containerOf(combined, unit);
-  const sizeCodeMatch = combined.match(/\bsize\s+(\d+)\b/i);
+  const sizeCodeMatch = combined.match(/\bsize\s+(\d+)\b(?!\s*\.\d)(?!\s*(?:oz|lb|fl|ml|g|gal|kg|pk|ct|l)\b)/i);
   const sizeCode = sizeCodeMatch ? `Size ${sizeCodeMatch[1]}` : null;
   const unitLabel = unit?.label ?? null;
   const totalAmount = unit && count && count > 1 ? round2(unit.amount * count) : unit ? round2(unit.amount) : count;
@@ -307,6 +307,8 @@ function describeVariant(name: string, size?: string | null): FamilyVariantShape
   } else if (shownContainer) {
     bits.push(shownContainer);
   }
+  const tier = packTier(combined);
+  if (tier) bits.push(tier);
   const label = bits.filter(Boolean).join(" · ") || "Standard";
   const signature = [
     count ?? "",
@@ -332,6 +334,14 @@ function describeVariant(name: string, size?: string | null): FamilyVariantShape
 
 function trimNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(round2(value));
+}
+
+/** Shoppers pick these as a size, not as a flavor (King size, Family size, Snack pack). */
+function packTier(text: string): string | null {
+  const named = text.match(/\b(king|family|party|share|mega|value|super)\s+size\b/i);
+  if (named?.[1]) return `${named[1].charAt(0).toUpperCase()}${named[1].slice(1).toLowerCase()} size`;
+  if (/\bsnack\s+packs?\b/i.test(text)) return "Snack pack";
+  return null;
 }
 
 const PACKAGING_PATTERNS: RegExp[] = [
@@ -491,21 +501,44 @@ export function identifyFamily(input: {
   };
 }
 
-const BAD_IMAGE = /nutrition|nutrient|facts|ingredient|barcode|banner|swatch|lifestyle|drug.?fact|supplement/i;
+const BAD_IMAGE =
+  /nutrition|nutrient|facts|ingredient|barcode|banner|swatch|lifestyle|drug.?fact|supplement|[/_-](?:back|left|right|top|bottom)(?:[^\w]|$)/i;
 const GOOD_IMAGE = /(?:^|[^\w])(?:front|primary|hero|main)(?:[^\w]|$)/i;
+
+function imageQuality(url: string): number {
+  let score = 0;
+  if (BAD_IMAGE.test(url)) score -= 30;
+  if (GOOD_IMAGE.test(url)) score += 10;
+  return score;
+}
 
 /** Prefer a front-of-pack photo over a nutrition panel, banner, or ingredient shot. */
 export function rankProductImages(urls: string[]): string[] {
   const list = urls.filter((url) => url.trim().length > 0);
   return list
-    .map((url, index) => {
-      let score = 0;
-      if (BAD_IMAGE.test(url)) score -= 30;
-      if (GOOD_IMAGE.test(url)) score += 10;
-      return { url, score, index };
-    })
+    .map((url, index) => ({ url, score: imageQuality(url), index }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((row) => row.url);
+}
+
+/**
+ * Use this variant's own photo when it looks like a package front. If every
+ * shot is a nutrition panel or banner, borrow a front from the same flavor.
+ */
+function frontImages(variant: BrowseVariant, siblings: BrowseVariant[]): string[] {
+  const own = rankProductImages(variant.imageUrls);
+  if (own[0] && imageQuality(own[0]) >= 0) return own;
+  const donated = rankProductImages(
+    siblings.filter((other) => other.flavorKey === variant.flavorKey).flatMap((other) => other.imageUrls)
+  ).filter((url) => imageQuality(url) > 0);
+  const rest = own.filter((url) => !donated.includes(url));
+  return donated.length > 0 ? [...donated, ...rest] : own;
+}
+
+function calmBrand(brand: string): string {
+  const trimmed = brand.trim();
+  if (!trimmed || trimmed !== trimmed.toUpperCase() || !/[A-Za-z]/.test(trimmed)) return trimmed;
+  return trimmed.toLowerCase().replace(/(^|[^a-z0-9])([a-z])/g, (_, sep: string, letter: string) => `${sep}${letter.toUpperCase()}`);
 }
 
 function typicalPrice(product: BrowseProduct): number {
@@ -644,10 +677,12 @@ function variantOrder(a: BrowseVariant, b: BrowseVariant): number {
 function disambiguateLabels(variants: BrowseVariant[]): BrowseVariant[] {
   const seen = new Map<string, number>();
   for (const variant of variants) {
-    seen.set(variant.label, (seen.get(variant.label) ?? 0) + 1);
+    const key = `${variant.flavorKey}|${variant.label}`;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   return variants.map((variant) => {
-    if ((seen.get(variant.label) ?? 0) < 2) return variant;
+    const key = `${variant.flavorKey}|${variant.label}`;
+    if ((seen.get(key) ?? 0) < 2) return variant;
     return { ...variant, label: `${variant.label} · $${variant.price.toFixed(2)}` };
   });
 }
@@ -681,7 +716,11 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
         departmentId: product.departmentId,
       })
     );
-    let variants = disambiguateLabels(members.map(toVariant).sort(variantOrder));
+    const labeled = disambiguateLabels(members.map(toVariant).sort(variantOrder));
+    let variants = labeled.map((variant) => ({
+      ...variant,
+      imageUrls: frontImages(variant, labeled),
+    }));
     const fallback = variants[0];
     if (!fallback) continue;
     const chosen = chooseDefaultVariant(variants);
@@ -695,13 +734,19 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
     const flavors = [...flavorCounts.entries()]
       .map(([key, row]) => ({ key, label: row.label, count: row.count }))
       .sort((a, b) => Number(b.key === "") - Number(a.key === "") || a.label.localeCompare(b.label));
-    const brandName = members.find((member) => member.brand.trim())?.brand.trim() || "";
+    const brandName = calmBrand(members.find((member) => member.brand.trim())?.brand.trim() || "");
+    const lineTitle = !line
+      ? ""
+      : brandName.toLowerCase().includes(line.lineLabel.toLowerCase())
+        ? brandName
+        : `${brandName} ${line.lineLabel}`.trim();
+    const cleaned = preferredName(identities.map((identity) => identity.familyName));
     const familyName =
       line && flavors.length > 1
-        ? brandName.toLowerCase().includes(line.lineLabel.toLowerCase())
-          ? brandName
-          : `${brandName} ${line.lineLabel}`.trim()
-        : preferredName(identities.map((identity) => identity.familyName));
+        ? lineTitle
+        : line?.line === "ice cream" && /and cream/i.test(cleaned)
+          ? lineTitle
+          : cleaned;
     const prices = variants.map((variant) => variant.price).filter((price) => Number.isFinite(price));
     const priceFrom = prices.length ? Math.min(...prices) : chosen.price;
     const priceTo = prices.length ? Math.max(...prices) : chosen.price;
@@ -726,7 +771,7 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
       typicalPrice: typicalPrice(chosen),
       priceFrom,
       priceTo,
-      imageUrls: rankProductImages(chosen.imageUrls.length > 0 ? chosen.imageUrls : fallback.imageUrls),
+      imageUrls: (variants.find((variant) => variant.id === chosen.id) ?? fallback).imageUrls,
     });
   }
   return tiles;

@@ -568,14 +568,8 @@ function renderListRows() {
   const locked = listIsLocked();
   listItemsEl.innerHTML = [...list.values()]
     .map((entry) => {
-      const offer = entry.product.offers?.length ? bestOffer(entry.product) : null;
-      const gap = (entry.product.gaps ?? []).find((item) => item.substitute);
-      const sub = gap?.substitute
-        ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
-        : "";
       const watched = itemWatched(Boolean(listAlertsEl?.checked), entry.watch || "inherit");
       const targetValue = entry.targetPrice ? String(entry.targetPrice) : "";
-      const price = offer ? `<p class="muted">${money(offer.price)} at ${escapeHtml(offer.storeName)}</p>` : "";
       const credit = attributionLine(entry);
       const itemId = entry.itemId || entry.product.id;
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
@@ -588,9 +582,7 @@ function renderListRows() {
             <strong>${escapeHtml(heading.title)}</strong>
           </label>
           <p class="muted">${escapeHtml(heading.detail)}</p>
-          ${price}
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
-          ${sub}
           <div class="alert-controls">
             <label class="check-row item-watch">
               <input type="checkbox" data-watch="${escapeHtml(entry.product.id)}" ${watched ? "checked" : ""} />
@@ -1150,29 +1142,15 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
 }
 
-function itemCompareNote(product) {
-  const meter = estimateSavings([{ quantity: 1, quotes: quotesForProduct(product, false) }]);
-  if (meter.status !== "ready") return "";
-  return `<p class="compare-note">${escapeHtml(describeSavings(meter, { subject: "item" }).note)}</p>`;
-}
-
 function openProduct(product) {
-  const offers = [...product.offers].sort((a, b) => a.price - b.price);
+  const title = product.familyName || product.name;
+  const note = product.variantLabel || product.sizeLabel || "";
   productDialog.innerHTML = `<div class="sheet-body">
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
-    <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
-    <h2 id="dialog-title">${escapeHtml(product.familyName || product.name)}</h2>
-    <p class="muted">${escapeHtml(product.variantLabel || product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
-    ${itemCompareNote(product)}
-    <h3>Prices</h3>
-    <ul class="offer-list">
-      ${offers
-        .map(
-          (offer) => `<li><span>${escapeHtml(offer.storeName)} · ${escapeHtml(sourceLabel(offer.priceSource))}${offer.onSale ? " · sale" : ""}</span><strong>${money(offer.price)} ${escapeHtml(offer.unitPriceText || "")}</strong></li>`
-        )
-        .join("")}
-    </ul>
-    <p class="muted">Pick the flavor and size here. Grocery Gitter chooses the store when you plan the trip.</p>
+    <h2 id="dialog-title">${escapeHtml(title)}</h2>
+    ${note ? `<p class="muted">${escapeHtml(note)}${product.storeBrand ? " · store brand" : ""}</p>` : ""}
+    <p class="price">${escapeHtml(aboutMoney(product))}</p>
+    <p class="muted">Pick the flavor and size on the shelf. Grocery Gitter chooses the store when you plan the trip.</p>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
     <button type="button" class="ghost" id="dialog-close">Close</button>
   </div>`;
@@ -1182,18 +1160,6 @@ function openProduct(product) {
     productDialog.close();
   };
   productDialog.querySelector("#dialog-close").onclick = () => productDialog.close();
-  productDialog.querySelectorAll("[data-add-sub]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const id = button.getAttribute("data-add-sub");
-      const known = productsById.get(id);
-      const productToAdd = known || (await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`)).then((r) => r.json())).product;
-      if (productToAdd?.id) {
-        productsById.set(productToAdd.id, productToAdd);
-        addProduct(productToAdd, 1);
-        productDialog.close();
-      }
-    });
-  });
 }
 
 function openCoverage() {
@@ -1303,6 +1269,13 @@ function exportRow(scope, storeName, actionType) {
     <button type="button" class="ghost" data-export="link"${storeAttr}>Shareable link</button>
     ${instacart}
   </div>`;
+}
+
+function changeControl(item) {
+  const move = moveControl(item);
+  if (!move) return "";
+  const label = item.matchKind === "substitute" ? "Change this swap" : "Change store";
+  return `<details class="move-details"><summary>${label}</summary>${move}</details>`;
 }
 
 function moveControl(item) {
@@ -1446,7 +1419,7 @@ function renderStore(store, checks) {
           <span>${money(item.price)} each</span>
           <strong>${money(item.itemTotal ?? item.price)}</strong>
         </span>
-        <details class="move-details"><summary>Change store</summary>${moveControl(item)}</details>
+        ${changeControl(item)}
       </li>`;
     })
     .join("");
