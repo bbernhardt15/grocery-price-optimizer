@@ -94,6 +94,8 @@ export function findBrowseProduct(
  * seed catalog cannot swap in a different food that merely shares a keyword.
  * Substitutes are added only for stores that do not carry the UPC, and only
  * when the shopper allowed them. They stay labeled `offerRole: "substitute"`.
+ * The planner keeps the chosen item when any in-scope store sells it, and
+ * uses these rows only when that item is missing.
  */
 export function pinnedRowsForSelections(
   selections: BrowseSelection[],

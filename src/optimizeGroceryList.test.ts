@@ -484,11 +484,16 @@ describe("optimizeGroceryList", () => {
     );
     const picked = withSubstitutes.stores.flatMap((store) => store.items);
     assert.equal(picked.length, 1);
-    assert.equal(picked[0]?.storeName, "Aldi");
-    assert.equal(picked[0]?.matchKind, "substitute");
+    assert.equal(picked[0]?.storeName, "Walmart");
+    assert.equal(picked[0]?.matchKind, undefined);
     assert.equal(picked[0]?.name, "Whole Milk");
-    assert.equal(picked[0]?.brand, "Friendly Farms");
-    assert.equal(picked[0]?.substitutedFor, "Whole Milk");
+    assert.equal(picked[0]?.brand, "Dairy Pure");
+    assert.equal(picked[0]?.price, 3.18);
+    assert.equal(picked[0]?.exactStore, "Walmart");
+    const aldiMilk = picked[0]?.offers?.find((offer) => offer.storeName === "Aldi");
+    assert.equal(aldiMilk?.matchKind, "swap");
+    assert.equal(aldiMilk?.price, 2.19);
+    assert.match(aldiMilk?.swapNote ?? "", /Swapped: Whole Milk is not sold at Aldi, using Whole Milk/);
 
     const pasta = products.find((product) => product.brand === "Barilla" && product.name === "Spaghetti Pasta");
     assert.ok(pasta);
@@ -502,10 +507,250 @@ describe("optimizeGroceryList", () => {
       )
     );
     const pastaPick = pastaPlan.stores.flatMap((store) => store.items)[0];
-    assert.equal(pastaPick?.storeName, "Aldi");
-    assert.equal(pastaPick?.brand, "Reggano");
-    assert.equal(pastaPick?.matchKind, "substitute");
-    assert.equal(pastaPick?.price, 0.95);
+    assert.equal(pastaPick?.storeName, "Walmart");
+    assert.equal(pastaPick?.brand, "Barilla");
+    assert.equal(pastaPick?.matchKind, undefined);
+    assert.equal(pastaPick?.price, 1.48);
+    const aldiPasta = pastaPick?.offers?.find((offer) => offer.storeName === "Aldi");
+    assert.equal(aldiPasta?.matchKind, "swap");
+    assert.equal(aldiPasta?.brand, "Reggano");
+    assert.equal(aldiPasta?.price, 0.95);
+  });
+
+  it("keeps a selected product off a store that does not sell it when substitutes are off", () => {
+    const products = demoBrowseProducts();
+    const milk = products.find(
+      (product) => product.brand === "Dairy Pure" && product.sizeLabel === "1 gal" && product.name === "Whole Milk"
+    );
+    assert.ok(milk);
+    const rows = pinnedRowsForSelections(
+      [{ name: milk.name, quantity: 1, catalogId: milk.id, brand: milk.brand }],
+      products,
+      { allowSubstitutes: false }
+    );
+    assert.equal(rows.some((row) => row.offerRole === "substitute"), false);
+    const aldiOnly = optimizeGroceryList(["1x Whole Milk"], ["Aldi"], rows);
+    assert.deepEqual(aldiOnly.unavailable, ["Whole Milk"]);
+    assert.equal(aldiOnly.stores.length, 0);
+
+    const withSwap = optimizeGroceryList(
+      ["1x Whole Milk"],
+      ["Aldi"],
+      pinnedRowsForSelections(
+        [{ name: milk.name, quantity: 1, catalogId: milk.id, brand: milk.brand }],
+        products,
+        { allowSubstitutes: true }
+      )
+    );
+    const swapped = withSwap.stores[0]?.items[0];
+    assert.equal(swapped?.storeName, "Aldi");
+    assert.equal(swapped?.matchKind, "swap");
+    assert.match(swapped?.swapNote ?? "", /Swapped: Whole Milk is not sold at Aldi, using /);
+    assert.equal(swapped?.exactStore, undefined);
+  });
+});
+
+describe("selected Coca-Cola packs", () => {
+  const sixPack = "Coca-Cola Zero Sugar Soda Pop Bottles, 16.9 fl oz, 6 Pack";
+  const cans = "Coca-Cola Zero Sugar Soda Pop Cans, 12 fl oz, 24 Pack";
+  const twoLiter = "Coca-Cola Soda Pop Bottle, 2 Liters";
+
+  function coke(partial: CatalogProduct): CatalogProduct {
+    return {
+      brand: "Coca-Cola",
+      unit: "floz",
+      normalizedUnit: "floz",
+      ...partial,
+    };
+  }
+
+  it("puts the same UPC at the cheaper store even when size text disagrees", () => {
+    const result = optimizeGroceryList(
+      [`1x ${sixPack}`],
+      ["Kroger", "Walmart"],
+      [
+        coke({
+          name: sixPack,
+          storeName: "Kroger",
+          price: 2.89,
+          upc: "0004900004256",
+          size: "16.9 fl oz",
+          pinned: true,
+          offerRole: "exact",
+          sourceQuery: sixPack,
+        }),
+        coke({
+          name: sixPack,
+          storeName: "Walmart",
+          price: 5.52,
+          upc: "049000042566",
+          size: "16.9 fl oz, 6 Pack",
+          pinned: true,
+          offerRole: "exact",
+          sourceQuery: sixPack,
+        }),
+      ]
+    );
+    const pick = result.stores.flatMap((store) => store.items)[0];
+    assert.equal(pick?.storeName, "Kroger");
+    assert.equal(pick?.price, 2.89);
+    assert.equal(pick?.name, sixPack);
+    assert.equal(pick?.matchKind, undefined);
+    assert.equal(pick?.swapNote, undefined);
+    assert.deepEqual(
+      pick?.offers?.map((offer) => ({ store: offer.storeName, price: offer.price, kind: offer.matchKind ?? "exact" })),
+      [
+        { store: "Kroger", price: 2.89, kind: "exact" },
+        { store: "Walmart", price: 5.52, kind: "exact" },
+      ]
+    );
+  });
+
+  it("does not tag the same 6-pack as a substitute or lose it to a pricier Walmart row", () => {
+    const lines = [
+      { name: sixPack, kroger: 2.89, walmart: 5.52, krogerSize: "16.9 fl oz", walmartSize: "16.9 fl oz, 6 Pack", upc: "049000042566" },
+      { name: cans, kroger: 8.99, walmart: 15.52, krogerSize: "12 fl oz", walmartSize: "12 fl oz, 24 Pack", upc: "049000028911" },
+      { name: twoLiter, kroger: 1.67, walmart: 2.97, krogerSize: "2 L", walmartSize: "2 Liters", upc: "049000028904" },
+    ];
+    const catalog = lines.flatMap((line) => [
+      coke({
+        name: line.name,
+        storeName: "Kroger",
+        price: line.kroger,
+        upc: `000${line.upc.slice(0, -1)}`,
+        size: line.krogerSize,
+        pinned: true,
+        offerRole: "exact",
+        sourceQuery: line.name,
+      }),
+      coke({
+        name: line.name,
+        storeName: "Walmart",
+        price: line.walmart,
+        upc: line.upc,
+        size: line.walmartSize,
+        offerRole: "substitute",
+        substitutedFor: line.name,
+        sourceQuery: line.name,
+      }),
+    ]);
+    const result = optimizeGroceryList(
+      lines.map((line) => `1x ${line.name}`),
+      ["Kroger", "Walmart"],
+      catalog
+    );
+    const picks = result.stores.flatMap((store) => store.items);
+    assert.equal(picks.length, 3);
+    for (const pick of picks) {
+      assert.equal(pick.storeName, "Kroger", pick.name);
+      assert.equal(pick.matchKind, undefined, pick.name);
+      assert.equal(pick.swapNote, undefined, pick.name);
+      const walmart = pick.offers?.find((offer) => offer.storeName === "Walmart");
+      assert.equal(walmart?.matchKind, undefined, pick.name);
+      assert.ok((walmart?.price ?? 0) > pick.price);
+    }
+    assert.equal(picks.find((pick) => pick.name === sixPack)?.price, 2.89);
+    assert.equal(picks.find((pick) => pick.name === cans)?.price, 8.99);
+    assert.equal(picks.find((pick) => pick.name === twoLiter)?.price, 1.67);
+  });
+
+  it("keeps a different pack out of the winning slot and labels it as a swap", () => {
+    const result = optimizeGroceryList(
+      [`1x ${sixPack}`],
+      ["Kroger", "Walmart"],
+      [
+        coke({
+          name: sixPack,
+          storeName: "Walmart",
+          price: 5.52,
+          upc: "049000042566",
+          size: "16.9 fl oz, 6 Pack",
+          pinned: true,
+          offerRole: "exact",
+          sourceQuery: sixPack,
+        }),
+        coke({
+          name: twoLiter,
+          storeName: "Kroger",
+          price: 2.89,
+          upc: "049000028904",
+          size: "2 L",
+          offerRole: "substitute",
+          substitutedFor: sixPack,
+          sourceQuery: sixPack,
+        }),
+        coke({
+          name: cans,
+          storeName: "Walmart",
+          price: 15.52,
+          upc: "049000028911",
+          size: "12 fl oz, 24 Pack",
+          offerRole: "substitute",
+          substitutedFor: sixPack,
+          sourceQuery: sixPack,
+        }),
+      ]
+    );
+    const pick = result.stores.flatMap((store) => store.items)[0];
+    assert.equal(pick?.storeName, "Walmart");
+    assert.equal(pick?.name, sixPack);
+    assert.equal(pick?.price, 5.52);
+    assert.equal(pick?.matchKind, undefined);
+    assert.equal(pick?.exactStore, "Walmart");
+    const kroger = pick?.offers?.find((offer) => offer.storeName === "Kroger");
+    assert.equal(kroger?.name, twoLiter);
+    assert.equal(kroger?.price, 2.89);
+    assert.equal(kroger?.matchKind, "swap");
+    assert.equal(
+      kroger?.swapNote,
+      `Swapped: ${sixPack} is not sold at Kroger, using ${twoLiter}`
+    );
+    assert.equal(
+      pick?.offers?.some((offer) => offer.storeName === "Walmart" && offer.name === cans),
+      false
+    );
+  });
+
+  it("uses a different pack only when the chosen item is not sold in scope", () => {
+    const rows = [
+      coke({
+        name: sixPack,
+        storeName: "Kroger",
+        price: 2.89,
+        upc: "049000042566",
+        size: "16.9 fl oz, 6 Pack",
+        pinned: true,
+        offerRole: "exact",
+        sourceQuery: sixPack,
+      }),
+      coke({
+        name: cans,
+        storeName: "Walmart",
+        price: 15.52,
+        upc: "049000028911",
+        size: "12 fl oz, 24 Pack",
+        offerRole: "substitute",
+        substitutedFor: sixPack,
+        sourceQuery: sixPack,
+      }),
+    ];
+    const missing = optimizeGroceryList([`1x ${sixPack}`], ["Walmart"], rows);
+    const swap = missing.stores[0]?.items[0];
+    assert.equal(swap?.storeName, "Walmart");
+    assert.equal(swap?.name, cans);
+    assert.equal(swap?.price, 15.52);
+    assert.equal(swap?.matchKind, "swap");
+    assert.equal(
+      swap?.swapNote,
+      `Swapped: ${sixPack} is not sold at Walmart, using ${cans}`
+    );
+    assert.equal(swap?.offers?.[0]?.matchKind, "swap");
+
+    const stocked = optimizeGroceryList([`1x ${sixPack}`], ["Kroger", "Walmart"], rows);
+    const exact = stocked.stores.flatMap((store) => store.items)[0];
+    assert.equal(exact?.storeName, "Kroger");
+    assert.equal(exact?.price, 2.89);
+    assert.equal(exact?.matchKind, undefined);
   });
 });
 

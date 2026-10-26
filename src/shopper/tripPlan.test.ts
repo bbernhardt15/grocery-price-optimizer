@@ -8,6 +8,7 @@ import {
   formatItemLine,
   formatTripText,
   groupForAisle,
+  moveOptionLabel,
   priceSourceLabel,
   readChecks,
   readTripSnapshot,
@@ -17,6 +18,7 @@ import {
   segmentPriceLabel,
   singleStoreSavings,
   storeTiers,
+  swapSentence,
   tierForStore,
   tripFingerprint,
   walmartCartUrl,
@@ -353,6 +355,78 @@ describe("in-store checklist", () => {
   it("builds a shared-list id the list API will accept", () => {
     assert.equal(shareItemId({ lineId: "0:whole milk" }, 0), "0:whole-milk");
     assert.match(shareItemId({ name: "Café latte!!" }, 3), /^caf-latte/);
+  });
+});
+
+describe("move menu and swap labels", () => {
+  const sixPack = "Coca-Cola Zero Sugar Soda Pop Bottles, 16.9 fl oz, 6 Pack";
+  const twoLiter = "Coca-Cola Soda Pop Bottle, 2 Liters";
+  const coke = {
+    query: sixPack,
+    lineId: "0:coke",
+    name: sixPack,
+    brand: "Coca-Cola",
+    storeName: "Walmart",
+    price: 5.52,
+    quantity: 1,
+    itemTotal: 5.52,
+    unit: "floz",
+    normalizedUnit: "floz",
+    size: "16.9 fl oz, 6 Pack",
+    exactStore: "Walmart",
+    offers: [
+      {
+        storeName: "Walmart",
+        name: sixPack,
+        brand: "Coca-Cola",
+        price: 5.52,
+        size: "16.9 fl oz, 6 Pack",
+      },
+      {
+        storeName: "Kroger",
+        name: twoLiter,
+        brand: "Coca-Cola",
+        price: 2.89,
+        size: "2 L",
+        matchKind: "swap",
+        substitutedFor: sixPack,
+        swapNote: `Swapped: ${sixPack} is not sold at Kroger, using ${twoLiter}`,
+      },
+    ],
+  };
+
+  it("shows the savings against the current store and labels a different pack", () => {
+    assert.equal(moveOptionLabel(coke.offers[1], 5.52), "Kroger · $2.89 swap (save $2.63)");
+    assert.equal(moveOptionLabel(coke.offers[0], 5.52), "Walmart · $5.52");
+    assert.equal(moveOptionLabel({ storeName: "Kroger", price: 2.89 }, 5.52), "Kroger · $2.89 (save $2.63)");
+    assert.equal(moveOptionLabel({ storeName: "Walmart", price: 5.52 }, 2.89), "Walmart · $5.52 ($2.63 more)");
+    assert.equal(
+      swapSentence(sixPack, "Walmart", "Coca-Cola Zero Sugar Soda Pop Cans, 12 fl oz, 24 Pack"),
+      "Swapped: Coca-Cola Zero Sugar Soda Pop Bottles, 16.9 fl oz, 6 Pack is not sold at Walmart, using Coca-Cola Zero Sugar Soda Pop Cans, 12 fl oz, 24 Pack"
+    );
+  });
+
+  it("keeps the swap sentence after a move and can switch back to the exact item", () => {
+    const moved = applyTripEdits([{ storeName: "Walmart", items: [coke], subtotal: 5.52 }], { moves: { "0:coke": "Kroger" } }, {});
+    const line = moved.stores.find((store) => store.storeName === "Kroger")?.items[0];
+    assert.equal(line?.name, twoLiter);
+    assert.equal(line?.price, 2.89);
+    assert.equal(line?.matchKind, "swap");
+    assert.match(line?.swapNote ?? "", /is not sold at Kroger, using Coca-Cola Soda Pop Bottle, 2 Liters/);
+    assert.equal(line?.exactStore, "Walmart");
+
+    const back = applyTripEdits([{ storeName: "Walmart", items: [coke], subtotal: 5.52 }], { moves: {} }, {});
+    const exact = back.stores[0]?.items[0];
+    assert.equal(exact?.storeName, "Walmart");
+    assert.equal(exact?.name, sixPack);
+    assert.equal(exact?.matchKind, undefined);
+    assert.equal(exact?.swapNote, undefined);
+    assert.equal(exact?.exactStore, "Walmart");
+  });
+
+  it("does not treat a labeled swap as the store carrying the chosen item", () => {
+    const comparison = singleStoreSavings([coke, bread]);
+    assert.equal(comparison.singleStore, null);
   });
 });
 
