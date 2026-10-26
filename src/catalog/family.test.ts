@@ -344,19 +344,19 @@ describe("family identity", () => {
       name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
       brand: "Way To Celebrate",
       size: "XS",
-      departmentId: "pets",
+      departmentId: "pet",
     });
     const medium = identifyFamily({
       name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
       brand: "Way To Celebrate",
       size: "Medium",
-      departmentId: "pets",
+      departmentId: "pet",
     });
     const dress = identifyFamily({
       name: "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
       brand: "Way To Celebrate",
       size: "XS",
-      departmentId: "pets",
+      departmentId: "pet",
     });
     assert.equal(xs.familyKey, medium.familyKey);
     assert.notEqual(xs.familyKey, dress.familyKey);
@@ -370,7 +370,7 @@ describe("family identity", () => {
         brand: "Way To Celebrate",
         size: "XS",
         price: 0.75,
-        departmentId: "pets",
+        departmentId: "pet",
       }),
       product({
         id: "upc:med",
@@ -378,7 +378,7 @@ describe("family identity", () => {
         brand: "Way To Celebrate",
         size: "Medium",
         price: 0.75,
-        departmentId: "pets",
+        departmentId: "pet",
       }),
       product({
         id: "upc:dress",
@@ -386,7 +386,7 @@ describe("family identity", () => {
         brand: "Way To Celebrate",
         size: "XS",
         price: 0.75,
-        departmentId: "pets",
+        departmentId: "pet",
       }),
     ]);
     assert.equal(pets.length, 2);
