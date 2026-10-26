@@ -87,11 +87,11 @@ export function parseSavedCoupon(value: unknown): SavedCoupon | null {
   const row = value as Record<string, unknown>;
   const id = cleanText(row.id, 80);
   const storeName = cleanText(row.storeName, 80);
-  const lineId = cleanText(row.lineId, 80);
+  const lineId = cleanText(row.lineId, 80).replace(/\s+/g, " ");
   const itemName = cleanText(row.itemName, MAX_NAME);
   const kind = row.kind === "percent" ? "percent" : row.kind === "dollars" ? "dollars" : "";
   const amount = typeof row.amount === "number" && Number.isFinite(row.amount) ? Math.round(row.amount * 100) / 100 : 0;
-  if (!COUPON_ID.test(id) || !storeName || !COUPON_ID.test(lineId) || !itemName || !kind || !(amount > 0)) return null;
+  if (!COUPON_ID.test(id) || !storeName || !lineId || /[\u0000-\u001f<>]/.test(lineId) || !itemName || !kind || !(amount > 0)) return null;
   if (kind === "percent" && amount > 100) return null;
   if (kind === "dollars" && amount > 500) return null;
   const expiresOn = typeof row.expiresOn === "string" && COUPON_DAY.test(row.expiresOn) ? row.expiresOn : "";

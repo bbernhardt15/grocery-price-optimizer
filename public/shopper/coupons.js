@@ -156,12 +156,19 @@ function cleanId(value) {
   return /^[A-Za-z0-9:_-]{1,80}$/.test(id) ? id : "";
 }
 
+/** Trip line ids look like "0:large eggs". Keep the words; drop only control characters. */
+function cleanLineId(value) {
+  const id = String(value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+  if (!id || /[\u0000-\u001f<>]/.test(id)) return "";
+  return id;
+}
+
 export function normalizeCoupon(value) {
   if (!value || typeof value !== "object") return null;
   const id = cleanId(value.id);
   const storeName = String(value.storeName || "").trim().slice(0, 80);
   const itemName = String(value.itemName || "").replace(/\s+/g, " ").trim().slice(0, 120);
-  const lineId = cleanId(value.lineId);
+  const lineId = cleanLineId(value.lineId);
   const kind = value.kind === "percent" ? "percent" : value.kind === "dollars" ? "dollars" : "";
   const amount = roundMoney(value.amount);
   const expiresOn = DAY.test(String(value.expiresOn || "")) ? String(value.expiresOn) : "";

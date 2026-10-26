@@ -434,6 +434,30 @@ describe("optimizeGroceryList", () => {
     assert.equal(result.stores[0]?.items[0]?.unitPriceText, "$6.49/lb");
   });
 
+  it("keeps a pinned sale's was-price and end date on the trip line", () => {
+    const products = demoBrowseProducts();
+    const eggs = products.find((product) => product.brand === "Great Value" && product.name === "Large Eggs");
+    assert.ok(eggs);
+    assert.equal(eggs.offers[0]?.onSale, true);
+    assert.equal(eggs.offers[0]?.regularPrice, 2.64);
+    assert.equal(eggs.offers[0]?.saleEndsOn, "2026-11-08");
+    const result = optimizeGroceryList(
+      ["Large Eggs"],
+      [],
+      pinnedRowsForSelections(
+        [{ name: eggs.name, quantity: 1, catalogId: eggs.id, brand: eggs.brand }],
+        products,
+        { allowSubstitutes: false }
+      )
+    );
+    const line = result.stores[0]?.items[0];
+    assert.equal(line?.storeName, "Walmart");
+    assert.equal(line?.price, 2.14);
+    assert.equal(line?.onSale, true);
+    assert.equal(line?.regularPrice, 2.64);
+    assert.equal(line?.saleEndsOn, "2026-11-08");
+  });
+
   it("prices the pinned browse product and can fill a missing store with a labeled substitute", () => {
     const products = demoBrowseProducts();
     const milk = products.find(

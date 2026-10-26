@@ -146,6 +146,20 @@ describe("coupon checklist and savings", () => {
     assert.match(couponLineLabel(summary.byStore[0].rows[0]), /expired Oct 1/);
   });
 
+  it("accepts a trip line id that includes the item words", () => {
+    const parsed = parseCouponForm({
+      storeName: "Walmart",
+      lineId: "0:large eggs",
+      itemName: "Large Eggs",
+      kind: "dollars",
+      amount: "1",
+      id: "c-eggs",
+    });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.coupon.lineId, "0:large eggs");
+  });
+
   it("rejects a blank amount and a percent over 100", () => {
     assert.equal(parseCouponForm({ storeName: "Kroger", lineId: "0:oreo", itemName: "Oreo", amount: "0" }).ok, false);
     assert.equal(

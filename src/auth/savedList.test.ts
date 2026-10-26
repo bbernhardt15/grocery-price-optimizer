@@ -39,7 +39,7 @@ describe("saved list merge", () => {
     const coupon = {
       id: "c-oreo",
       storeName: "Kroger",
-      lineId: "0:oreo",
+      lineId: "0:large eggs",
       itemName: "Oreo",
       kind: "dollars",
       amount: 1,
