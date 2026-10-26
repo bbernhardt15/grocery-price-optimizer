@@ -1831,6 +1831,13 @@ async function planTrip() {
   if (!ZIP_PATTERN.test(zip)) {
     planErrorEl.hidden = false;
     planErrorEl.textContent = "Enter a 5-digit ZIP so the trip can use your nearest stores.";
+    // On a phone the list sheet covers the header ZIP, and the error sits below the sheet.
+    const sheetCoversZip =
+      window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");
+    if (sheetCoversZip) {
+      openList(false);
+      toast(planErrorEl.textContent, 4200);
+    }
     zipEl.focus();
     return;
   }
