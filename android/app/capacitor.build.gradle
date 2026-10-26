@@ -12,6 +12,7 @@ dependencies {
     implementation project(':capacitor-share')
     implementation project(':revenuecat-purchases-capacitor')
     implementation project(':capacitor-browser')
+    implementation project(':capacitor-geolocation')
     implementation project(':capacitor-splash-screen')
     implementation project(':sentry-capacitor')
 

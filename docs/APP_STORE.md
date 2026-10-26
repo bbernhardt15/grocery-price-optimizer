@@ -72,13 +72,30 @@ Also upload a large iPhone size if you do not want the biggest phones to use a s
 
 ## Privacy answers, from the code
 
-Sign-in is optional and stays off until the account variables in `docs/ACCOUNTS.md` are set. With no account configured, the app does not ask for an email. There is no analytics SDK, no advertising identifier, and no GPS permission. The iOS app does not declare a location usage string. Android asks only for `INTERNET`.
+Sign-in is optional and stays off until the account variables in `docs/ACCOUNTS.md` are set. With no account configured, the app does not ask for an email. There is no analytics SDK and no advertising identifier.
 
 Crash reporting is Sentry, and only when `SENTRY_DSN` is set. With that variable unset, the app does not initialize Sentry and does not send crash reports. The store answers below assume the build you ship has the DSN set. If you leave it unset, answer “No” for crash data and crash logs.
 
+The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Use my location** on the welcome ZIP step. That is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET` and `ACCESS_COARSE_LOCATION` only. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required.
+
+### Location questions
+
+Answer these the same way on App Store Connect and in the Play Console.
+
+| Question | Answer |
+| --- | --- |
+| Does the app use location? | Yes. Approximate location only, and only after **Use my location** |
+| Precise location | No. Do not mark Precise Location. Android does not declare `ACCESS_FINE_LOCATION` |
+| When is it used? | When In Use. Once, to fill a ZIP. Not in the background |
+| Is it stored? | No. Coordinates are sent to `GET /api/geo/zip`, which asks the Census geocoder and then drops them |
+| Linked to the user? | No. Not linked to the account, the email, or the random alert id |
+| iOS purpose string | `NSLocationWhenInUseUsageDescription`: approximate location, once, to look up a ZIP, not stored, not linked. The Always-and-When-In-Use key uses the same sentence and is not a background request |
+| Android permissions | `INTERNET` and `ACCESS_COARSE_LOCATION`. `android.hardware.location.network` is `required=false` |
+
 What the app actually handles:
 
-- **ZIP code.** Saved on the device. Also sent with browse, search, and trip planning. The 5-digit ZIP is stored in MongoDB (`ShopperZip`) with a hit count, last-seen time, and sometimes a Kroger location id. It is not tied to a name. The catalog job keeps a short list of recent shopper ZIPs. A price watch can store the same ZIP again, on that watch.
+- **ZIP code.** Saved on the device. Also sent with browse, search, and trip planning. The 5-digit ZIP is stored in MongoDB (`ShopperZip`) with a hit count, last-seen time, and sometimes a Kroger location id. It is not tied to a name. The catalog job keeps a short list of recent shopper ZIPs. A price watch can store the same ZIP again, on that watch. In the phone shells, Use my location may send coordinates to `GET /api/geo/zip` so the server can ask the Census geocoder for that ZIP. The coordinates are not stored.
+- **Welcome flag.** `gg-onboarding-done` on the device, so the intro is not shown again. Settings can open it anyway. Not sent to the server.
 - **My list, before sharing.** Saved on the device: items (name, brand, size, quantity), substitute choice, and any per-item alert setting. Plan the trip sends name, brand, quantity, catalog id, UPC, and the substitute choice for that request only. That request is not stored as the list.
 - **Shared lists.** After Share list, the server stores a `SharedList`: items (name, brand, size, quantity, catalog id, checked, and a deletion marker for removed items), an optional display name on items the shopper adds or checks (max 40 characters; blank means no name), a title, edit or view-only, list and item timestamps, and SHA-256 hashes of the share secret and the owner secret. The raw secrets stay in the browser and in the link. Replacing a link keeps up to 10 retired share hashes. There is no expiry. Revoke link sets `revokedAt` and keeps the items. Guests then get “This link was turned off.” The owner can still open the list and can share a new link, which retires the old hash. Neither revoke nor a new link deletes the document. Delete my data removes lists created on this device and invalidates the link. There is no separate control that deletes one list and leaves another.
 - **Price alerts.** A watch is saved when the list checkbox is on, or when one item is watched on its own. `PriceWatch` stores a random id created in the browser (`gg-device`, not a hardware id and not an advertising id), the list id and name, the ZIP, whether the list checkbox is on, and the watched items: product id, name, brand, watch mode, baseline price, baseline store, and an optional target price. Turning the checkbox off sets `enabled` to false and still uploads the current items. It does not delete the watch. An item set to watch on its own can still be checked. Switching lists sets the previous watch to disabled and clears its items; the watch row stays. `PriceAlert` records (item, store, old and new price, savings, baseline, target, seen time) stay until Delete my data. Opening the panel sets `seenAt`. The API returns the latest 40. There is no expiry.
@@ -112,8 +129,8 @@ Data Not Linked to You:
 | --- | --- | --- |
 | Contact Info → Name | Yes, if the form has no better row for it | The optional display name on a shared list, only when the shopper types one. App Functionality. People with the link can see it. This row is not the account name |
 | Other Contact Info, Health, Financial, Contacts, Sensitive Info | No | |
-| Precise Location | No | Do not turn on Location Services |
-| Coarse Location | Yes | The typed ZIP, including the copy stored on a price watch. App Functionality |
+| Precise Location | No | The shells request approximate location only. Do not mark precise location |
+| Coarse Location | Yes | The typed ZIP, including the copy stored on a price watch, plus an optional one-time approximate device location in the iOS/Android shells used only to fill that ZIP. App Functionality. Coordinates are not stored and are not linked to the user |
 | User Content → Other User Content | Yes | The grocery list sent when planning a trip, and the shared list stored on the server (items, optional display names, timestamps). App Functionality |
 | Search History | Yes | Search words sent to price a shelf. App Functionality. Not kept as a profile |
 | Identifiers → Device ID | Yes | The random id created in the browser and stored with watches, alerts, and an optional push subscription. App Functionality. Not an advertising identifier |
@@ -139,8 +156,8 @@ Export compliance: `Info.plist` sets `ITSAppUsesNonExemptEncryption` to false. T
 
 | Play data type | Collected | Shared | Why |
 | --- | --- | --- | --- |
-| Location → Approximate | Yes | Yes, with the retailer APIs that need a ZIP (Kroger, Walmart, Flipp, Instacart, and a Target feed if you configured one) | Typed ZIP, for prices, the catalog refresh, and a price watch. Also stored as `ShopperZip` |
-| Location → Precise | No | No | |
+| Location → Approximate | Yes | Yes, with the retailer APIs that need a ZIP (Kroger, Walmart, Flipp, Instacart, and a Target feed if you configured one). The Census geocoder receives coordinates only for the optional shell lookup, and that request is not stored | Typed ZIP, for prices, the catalog refresh, and a price watch. Also stored as `ShopperZip`. Optional approximate device location in the shells, used once to fill a ZIP, not stored, not linked to the user |
+| Location → Precise | No | No | Android declares `ACCESS_COARSE_LOCATION` only. The app does not declare `ACCESS_FINE_LOCATION` |
 | Personal info → Name | Yes | The shared-list display name is shared with people who open the link, not with advertisers. The account name is not shared | Optional display name on a shared list. When sign-in is on, the account name is also stored and linked to the user for app functionality |
 | Personal info → Email address | Only if sign-in is on | No | Linked to the user for app functionality. Apple, Google, or the email link. Not sold. Deleted with the account |
 | Personal info → User IDs | Only if sign-in is on | No | The account id, linked to the user for app functionality. Leave this off the form while sign-in stays unset |

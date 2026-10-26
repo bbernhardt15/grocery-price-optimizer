@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=store-4" />
+    <link rel="stylesheet" href="/styles.css?v=onboard-5" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -80,6 +80,7 @@
           <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
             <span aria-hidden="true" id="theme-glyph">◐</span>
           </button>
+          <button id="settings-open" type="button" class="ghost" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="alerts-toggle" type="button" class="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts">
             Alerts
             <span id="alerts-badge" class="count-pill" hidden>0</span>
@@ -183,15 +184,23 @@
             <span>Alert me when prices on this list drop</span>
           </label>
           <p class="muted sub-note">Compares the best price across stores with the price when you saved each item. Watch one item on its own, or set a target under today's price.</p>
-          <p id="list-empty" class="muted">Check items while you browse. Quantities stay on this device until you share.</p>
+          <div id="list-empty" class="empty-state">
+            <h3>Your list is empty</h3>
+            <p>Check items while you browse. They stay on this device until you share.</p>
+            <button type="button" class="primary" data-empty-action="browse">Browse the aisle</button>
+          </div>
           <ul id="list-items" class="list-items"></ul>
           <section id="share-box" class="share-box" aria-label="Share this list">
             <label>Your name on this list
               <input id="display-name" maxlength="40" placeholder="Optional" autocomplete="nickname" />
             </label>
+            <div id="share-empty" class="empty-state">
+              <h3>No shared lists</h3>
+              <p id="share-empty-body">Share a link so someone else can shop this list with you.</p>
+            </div>
             <p id="share-status" class="muted">Share a link so someone else can shop this list with you.</p>
             <div class="share-actions">
-              <button type="button" id="share-btn" class="ghost">Share list</button>
+              <button type="button" id="share-btn" class="primary" aria-describedby="share-empty-body">Share list</button>
               <button type="button" id="share-viewonly" class="ghost" hidden>Make view-only</button>
               <button type="button" id="share-revoke" class="ghost" hidden>Revoke link</button>
               <button type="button" id="share-own" class="ghost" hidden>My own list</button>
@@ -252,7 +261,11 @@
           <h2 id="alerts-title">Price alerts</h2>
           <button type="button" class="text-btn" id="alerts-close">Close</button>
         </div>
-        <p id="alerts-empty" class="muted">No price drops yet. Turn on alerts for My list. Grocery Gitter checks the saved catalog each time prices refresh.</p>
+        <div id="alerts-empty" class="empty-state">
+          <h3>No price alerts</h3>
+          <p>No drops yet. Turn on alerts for My list and we’ll watch the saved prices.</p>
+          <button type="button" class="primary" data-empty-action="enable-alerts">Turn on list alerts</button>
+        </div>
         <ul id="alerts-list" class="alert-list"></ul>
         <div id="push-row" hidden>
           <button type="button" class="ghost" id="push-btn">Notify this browser</button>
@@ -260,10 +273,39 @@
         </div>
       </div>
     </dialog>
+    <dialog id="onboarding" class="sheet onboard" aria-labelledby="onboard-title">
+      <form id="onboard-form" class="sheet-body">
+        <p id="onboard-progress" class="onboard-progress">1 of 5</p>
+        <div id="onboard-dots" class="onboard-dots" aria-hidden="true"></div>
+        <h2 id="onboard-title" tabindex="-1">Pick items</h2>
+        <p id="onboard-body">Check groceries as you browse. Your list stays on this device.</p>
+        <div id="onboard-extra">
+          <div id="onboard-account-fields" hidden>
+            <button type="button" id="onboard-sign-in" class="ghost" hidden>Sign in</button>
+          </div>
+          <div id="onboard-zip-fields" hidden>
+            <label for="onboard-zip">ZIP code</label>
+            <input id="onboard-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" aria-describedby="onboard-zip-hint" />
+            <p id="onboard-zip-hint" class="muted">Optional. Add it now, or later in Settings.</p>
+            <button type="button" id="onboard-location" class="ghost" hidden>Use my location</button>
+            <p id="onboard-loc-note" class="muted" role="status"></p>
+            <p id="onboard-zip-error" class="status" role="alert" hidden></p>
+          </div>
+          <div id="onboard-kroger-fields" hidden>
+            <button type="button" id="onboard-kroger" class="ghost" hidden>Connect Kroger</button>
+          </div>
+        </div>
+        <div class="onboard-actions">
+          <button type="button" id="onboard-back" class="ghost" hidden>Back</button>
+          <button type="button" id="onboard-skip" class="text-btn">Skip</button>
+          <button type="submit" id="onboard-next" class="primary">Next</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-title">
       <div class="sheet-body">
         <div class="list-head">
-          <h2 id="settings-title">Settings</h2>
+          <h2 id="settings-title" tabindex="-1">Settings</h2>
           <button type="button" class="text-btn" id="settings-close">Close</button>
         </div>
         <section id="account-box" class="account-box" hidden>
@@ -293,6 +335,14 @@
           <p id="plan-status" class="muted">One store and one shared list are free. Pro adds the multi-store split, price alerts, unlimited shared lists, and cart handoffs.</p>
           <button type="button" class="ghost" id="open-paywall">See Pro</button>
         </section>
+        <div class="settings-list">
+          <button type="button" class="ghost" id="settings-theme">Theme</button>
+          <p id="settings-zip" class="muted">No ZIP saved yet.</p>
+          <button type="button" class="ghost" id="settings-zip-edit">Change ZIP</button>
+          <p id="settings-kroger" class="muted">Kroger connect is optional.</p>
+          <button type="button" class="ghost" id="settings-kroger-connect" hidden>Connect Kroger</button>
+          <button type="button" class="primary" id="settings-welcome">Show welcome</button>
+        </div>
         <section class="delete-box" aria-labelledby="delete-data-title">
           <h3 id="delete-data-title">Delete my data</h3>
           <p class="muted">
@@ -337,6 +387,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=handoff-5"></script>
+    <script type="module" src="/app.js?v=onboard-5"></script>
   </body>
 </html>

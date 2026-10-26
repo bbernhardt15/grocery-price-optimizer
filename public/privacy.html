@@ -50,6 +50,7 @@
         <li>Whether you allow substitutes in the trip plan.</li>
         <li>Whether you turned on price alerts for the list.</li>
         <li>Your theme: light, dark, or match this device.</li>
+        <li>Whether you have already seen the welcome screens. Settings can show them again.</li>
         <li>A random id this browser creates for price alerts. It is not a hardware id and not an advertising id.</li>
         <li>The optional display name, if you typed one.</li>
         <li>If you shared a list, the share link and the owner secret for that list.</li>
@@ -82,8 +83,14 @@
         product data, not a profile of you.
       </p>
       <p>
-        The ZIP is something you type. Grocery Gitter does not request GPS or other device location permission.
-        The same ZIP can also be saved on a price watch, as described under price alerts.
+        The ZIP is something you type. On the website, Grocery Gitter does not ask for location.
+        In the iOS and Android apps, Use my location is optional. It appears in the welcome screens and only
+        after you tap it. The apps ask for approximate location while you are using them, once, to look up a
+        ZIP. iOS shows the When In Use prompt. Android asks for approximate location only and does not ask
+        for precise location. The coordinates are sent to Grocery Gitter, which asks the U.S. Census Bureau
+        geocoder for a 5-digit ZIP, then drops the coordinates. We do not store them, and we do not link them
+        to you or to an account. If you deny location, type the ZIP instead.
+        The ZIP itself can also be saved on a price watch, as described under price alerts.
       </p>
 
       <h2>Shared lists</h2>
@@ -132,7 +139,9 @@
       <p>
         While you approve that cart, the item UPCs, quantities, names, and store location travel in a signed
         link that expires after 15 minutes. A copy may sit in the memory of the server that started the login,
-        for that same window. It is not a saved list.
+        for that same window. It is not a saved list. You can also connect Kroger from the welcome screens or
+        Settings before a cart has items. That sign-in uses the same cookie and does not add anything until
+        you send items.
       </p>
 
       <h2>Retailer handoffs</h2>
@@ -276,6 +285,8 @@
       <h2>Your choices</h2>
       <ul>
         <li>You can browse without a ZIP. Nearby-store and weekly-ad prices will be limited, and Plan the trip asks for one.</li>
+        <li>You can skip the welcome screens. Settings can open them again.</li>
+        <li>On the iOS and Android apps, you can deny approximate location. The website never asks for it. A lookup is used once to fill a ZIP, then the coordinates are dropped. They are not stored and not linked to you. Type a ZIP instead.</li>
         <li>You can skip sharing. An unshared list stays on this device.</li>
         <li>Revoke link turns that link off. It does not delete the stored list.</li>
         <li>You can leave price alerts off. Turning the checkbox off disables the watch. It does not delete the watch or past alerts.</li>

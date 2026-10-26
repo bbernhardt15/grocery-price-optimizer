@@ -12,6 +12,7 @@ import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
+import geoZipRouter from "./routes/geoZip";
 import authRouter from "./routes/auth";
 import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
@@ -69,7 +70,11 @@ app.get("/api", (_req, res) => {
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":
-        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway).",
+        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway), and whether this browser’s shopper cookie is still signed in.",
+      "POST /api/kroger/connect":
+        "Optional Kroger sign-in with no cart items. Returns an authorize URL, or status connected when the shopper cookie is still valid. Does not call the Cart API.",
+      "GET /api/geo/zip":
+        "Looks up a 5-digit ZIP from lat and lng for the phone shells. Coordinates are not stored.",
       "POST /api/kroger/cart/start":
         "Starts shopper OAuth for PUT /v1/cart/add, or reuses a shopper cookie. Does nothing without KROGER_REDIRECT_URI and a UPC. Success is only claimed after Kroger HTTP 2xx.",
       "GET /api/kroger/oauth/callback":
@@ -140,6 +145,7 @@ app.use("/api", browseCatalogRouter);
 app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
+app.use("/api", geoZipRouter);
 app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);

@@ -32,5 +32,8 @@ describe("account session handoff", () => {
     assert.match(app, /\/api\/me\/list/);
     assert.match(app, /SignInWithApple/);
     assert.match(html, /Delete my data/);
+    const css = readFileSync(new URL("../../public/styles.css", import.meta.url), "utf8");
+    assert.match(css, /\.account-box\[hidden\][\s\S]*display:\s*none/);
+    assert.match(css, /\.magic-form\[hidden\][\s\S]*display:\s*none/);
   });
 });

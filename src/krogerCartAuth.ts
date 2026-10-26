@@ -41,6 +41,8 @@ export type ShopperToken = {
 export type PendingKrogerCart = {
   items: KrogerCartLine[];
   locationId?: string;
+  /** "connect" signs the shopper in without a cart write. */
+  purpose?: "cart" | "connect";
   createdAtMs: number;
 };
 
@@ -50,6 +52,7 @@ export type SignedCartState = {
   exp: number;
   items: KrogerCartLine[];
   locationId?: string;
+  purpose?: "cart" | "connect";
 };
 
 type TokenResponse = {
@@ -154,6 +157,7 @@ export function signCartState(
     exp: nowMs + PENDING_TTL_MS,
     items: cart.items,
     ...(cart.locationId ? { locationId: cart.locationId } : {}),
+    ...(cart.purpose === "connect" ? { purpose: "connect" as const } : {}),
   };
   const encodedBody = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${encodedBody}.${signPayload(config.clientSecret, encodedBody)}`;
@@ -188,7 +192,12 @@ export function verifyCartState(
     const parsed = JSON.parse(
       Buffer.from(encodedBody, "base64url").toString("utf8")
     ) as SignedCartState;
-    if (parsed.v !== 1 || !Array.isArray(parsed.items) || parsed.items.length === 0) {
+    if (parsed.v !== 1 || !Array.isArray(parsed.items)) {
+      return null;
+    }
+    if (parsed.purpose === "connect") {
+      if (parsed.items.length !== 0) return null;
+    } else if (parsed.items.length === 0 || (parsed.purpose !== undefined && parsed.purpose !== "cart")) {
       return null;
     }
     if (typeof parsed.exp !== "number" || parsed.exp <= nowMs) {
