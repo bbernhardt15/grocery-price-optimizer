@@ -1,10 +1,11 @@
 /**
  * Product families for the shelf.
  *
- * A family is one tile: brand + flavor/variety, with pack count, unit size,
- * and container as variants inside the tile. Diet Coke, Coke Zero, and Cherry
- * Coke stay separate families. A 12-pack of 12 fl oz cans and a 2 L bottle of
- * the same flavor collapse onto one tile.
+ * A family is one tile: a brand's product line (Oreo cookies, not Oreo ice
+ * cream). Flavor and variety are chips inside that tile. Pack count, unit
+ * size, and container are the size chips. A name with no shared product line
+ * stays strict, so Diet Coke does not join Coca-Cola and club soda does not
+ * join tonic water.
  *
  * The key is computed from the name at read time, so browse does not need a
  * precomputed column to be correct. Catalog upserts also store `familyKey`
@@ -106,13 +107,19 @@ export type FamilyVariantShape = {
 export type FamilyIdentity = {
   familyKey: string;
   familyName: string;
+  /** Product line such as cookies or ice cream. Empty when the name has none. */
+  line: string;
+  lineLabel: string;
   /** Flavor line with the brand removed. Empty means the flagship. */
   flavor: string;
+  flavorLabel: string;
   variant: FamilyVariantShape;
 };
 
 export type BrowseVariant = BrowseProduct & {
   label: string;
+  flavorKey: string;
+  flavorLabel: string;
   count: number | null;
   unitSize: PackageSizeSummary | null;
   totalSize: PackageSizeSummary | null;
@@ -126,14 +133,25 @@ export type BrowseVariant = BrowseProduct & {
   gaps?: CatalogGap[];
 };
 
+export type FamilyFlavor = {
+  key: string;
+  label: string;
+  count: number;
+};
+
 export type BrowseTile = BrowseProduct & {
   familyKey: string;
   familyName: string;
   /** Retailer title of the default variant, kept for list pins. */
   catalogName: string;
   variantLabel: string;
+  flavorLabel: string;
+  line: string;
+  flavors: FamilyFlavor[];
   variants: BrowseVariant[];
   defaultVariantId: string;
+  /** Median shelf price of the default variant. The tile does not name a store. */
+  typicalPrice: number;
   priceFrom: number;
   priceTo: number;
   gaps?: CatalogGap[];
@@ -322,6 +340,7 @@ const PACKAGING_PATTERNS: RegExp[] = [
   /\b\d+(?:\.\d+)?\s*(?:packs?|pk)\b/gi,
   /\b\d+(?:\.\d+)?\s*(?:counts?|ct)\b/gi,
   /\b(?:party|family|snack|share|king|value|mega|super)\s+size\b/gi,
+  /\bsnack\s+packs?\b/gi,
   /\bgrab\s+bags?\b/gi,
   /\bsingle[\s-]*serve\b/gi,
   /\bfridge\s+packs?\b/gi,
@@ -360,17 +379,82 @@ function cleanedName(name: string, variant: FamilyVariantShape): string {
   return text;
 }
 
-function flavorOf(display: string, brand: string): string {
+const PRODUCT_LINES: Array<{ pattern: RegExp; line: string; label: string }> = [
+  { pattern: /\bice\s+creams?\b/i, line: "ice cream", label: "Ice Cream" },
+  { pattern: /\bcereals?\b/i, line: "cereal", label: "Cereal" },
+  { pattern: /\bcookies?\b/i, line: "cookies", label: "Cookies" },
+  { pattern: /\b(?:tortilla\s+|potato\s+)?chips\b/i, line: "chips", label: "Chips" },
+  { pattern: /\bcrackers?\b/i, line: "crackers", label: "Crackers" },
+  { pattern: /\bmilks?\b/i, line: "milk", label: "Milk" },
+  { pattern: /\beggs?\b/i, line: "eggs", label: "Eggs" },
+  { pattern: /\byogurts?\b/i, line: "yogurt", label: "Yogurt" },
+  { pattern: /\bclub\s+sodas?\b/i, line: "club soda", label: "Club Soda" },
+  { pattern: /\bbaking\s+sodas?\b/i, line: "baking soda", label: "Baking Soda" },
+  { pattern: /\bcream\s+sodas?\b/i, line: "cream soda", label: "Cream Soda" },
+  { pattern: /\btonic(?:\s+water)?\b/i, line: "tonic water", label: "Tonic Water" },
+  { pattern: /\bsoft\s+drinks?\b/i, line: "soda", label: "Soda" },
+  { pattern: /(?<!club\s)(?<!baking\s)(?<!cream\s)(?<!caustic\s)(?<!washing\s)\bsodas?\b/i, line: "soda", label: "Soda" },
+];
+
+const LINE_WORDS: Record<string, Set<string>> = {
+  cookies: new Set(["cookie", "cookies", "sandwich"]),
+  chips: new Set(["chip", "chips", "tortilla", "potato", "crisps"]),
+  crackers: new Set(["cracker", "crackers"]),
+  milk: new Set(["milk"]),
+  eggs: new Set(["egg", "eggs"]),
+  yogurt: new Set(["yogurt", "yoghurt"]),
+  "ice cream": new Set(["ice", "cream", "icecream"]),
+  cereal: new Set(["cereal"]),
+  soda: new Set(["soda", "soft", "drink"]),
+  "club soda": new Set(["club", "soda"]),
+  "baking soda": new Set(["baking", "soda"]),
+  "cream soda": new Set(["cream", "soda"]),
+  "tonic water": new Set(["tonic", "water"]),
+};
+
+function brandLine(brandKey: string, departmentId: string): { line: string; label: string } | null {
+  if (brandKey === "doritos" && departmentId === "snacks") return { line: "chips", label: "Chips" };
+  if (brandKey === "oreo" && departmentId === "snacks") return { line: "cookies", label: "Cookies" };
+  return null;
+}
+
+function detectLine(text: string): { line: string; label: string } | null {
+  for (const rule of PRODUCT_LINES) {
+    rule.pattern.lastIndex = 0;
+    if (rule.pattern.test(text)) return { line: rule.line, label: rule.label };
+  }
+  return null;
+}
+
+function flavorLabelOf(key: string): string {
+  if (!key) return "Original";
+  return key
+    .split(" ")
+    .map((word) => {
+      if (word === "stuf" || word === "stuff") return "Stuf";
+      if (word === "2%" || /^\d/.test(word)) return word.toUpperCase() === word ? word : word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
+function flavorOf(display: string, brand: string, line: string): string {
   const parent = parentBrand(brand);
   const drop = removableBrandTokens(parent.key);
-  let parts = tokens(display).filter((token) => !drop.has(token) && !SIZE_TOKENS.has(token));
-  if (parts.includes("zero")) {
+  const stop = new Set(["and", "n", "with", "the", "of", "style", "flavored", "flavor"]);
+  let parts = tokens(display).filter(
+    (token) => !drop.has(token) && !SIZE_TOKENS.has(token) && !stop.has(token) && !/^\d+$/.test(token)
+  );
+  if (line === "cookies") {
+    parts = tokens(parts.join(" ").replace(/\bchocolate\s+sandwich\b/g, " "));
+  }
+  const lineWords = LINE_WORDS[line] ?? new Set<string>();
+  parts = parts.filter((token) => !lineWords.has(token));
+  if ((!line || line === "soda") && parts.includes("zero")) {
     parts = parts.filter((token) => token !== "sugar");
   }
   const specific = parts.filter((token) => !FORM_TOKENS.has(token));
-  if (specific.length > 0) {
-    parts = specific;
-  }
+  if (specific.length > 0) parts = specific;
   const flavor = [...parent.flavor];
   for (const token of parts) {
     if (!flavor.includes(token)) flavor.push(token);
@@ -389,15 +473,74 @@ export function identifyFamily(input: {
   const variant = describeVariant(name, input.size);
   const display = cleanedName(name, variant) || brand || name;
   const parent = parentBrand(brand);
-  const flavor = flavorOf(display, brand);
   const departmentId = input.departmentId?.trim().toLowerCase() || "";
-  const familyKey = `${departmentId}|${parent.key}|${flavor}`;
+  const found = detectLine(`${name} ${display}`) ?? brandLine(parent.key, departmentId);
+  const flavor = flavorOf(display, brand, found?.line ?? "");
+  const familyKey = found
+    ? `${departmentId}|${parent.key}|line:${found.line}`
+    : `${departmentId}|${parent.key}|${flavor}`;
+  const familyName = display || brand || "Product";
   return {
     familyKey,
-    familyName: display || brand || "Product",
+    familyName: familyName.replace(/\s+/g, " ").trim() || brand || "Product",
+    line: found?.line ?? "",
+    lineLabel: found?.label ?? "",
     flavor,
+    flavorLabel: flavorLabelOf(flavor),
     variant,
   };
+}
+
+const BAD_IMAGE = /nutrition|nutrient|facts|ingredient|barcode|banner|swatch|lifestyle|drug.?fact|supplement/i;
+const GOOD_IMAGE = /(?:^|[^\w])(?:front|primary|hero|main)(?:[^\w]|$)/i;
+
+/** Prefer a front-of-pack photo over a nutrition panel, banner, or ingredient shot. */
+export function rankProductImages(urls: string[]): string[] {
+  const list = urls.filter((url) => url.trim().length > 0);
+  return list
+    .map((url, index) => {
+      let score = 0;
+      if (BAD_IMAGE.test(url)) score -= 30;
+      if (GOOD_IMAGE.test(url)) score += 10;
+      return { url, score, index };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((row) => row.url);
+}
+
+function typicalPrice(product: BrowseProduct): number {
+  const prices = product.offers
+    .map((offer) => offer.price)
+    .filter((price) => Number.isFinite(price) && price >= 0)
+    .sort((a, b) => a - b);
+  if (prices.length === 0) return product.bestOffer.price;
+  const mid = Math.floor((prices.length - 1) / 2);
+  return prices.length % 2 === 1 ? prices[mid]! : round2((prices[mid]! + prices[mid + 1]!) / 2);
+}
+
+/**
+ * Keep the first screen from filling up with one brand. Later tiles stay
+ * available behind the next page.
+ */
+export function diversifyFamilies<T extends { brand?: string; familyName?: string }>(
+  tiles: T[],
+  pageSize = 8,
+  maxPerBrand = 3
+): T[] {
+  const first: T[] = [];
+  const rest: T[] = [];
+  const counts = new Map<string, number>();
+  for (const tile of tiles) {
+    const brand = (tile.brand || tile.familyName || "").trim().toLowerCase() || "other";
+    const seen = counts.get(brand) ?? 0;
+    if (first.length < pageSize && seen < maxPerBrand) {
+      first.push(tile);
+      counts.set(brand, seen + 1);
+    } else {
+      rest.push(tile);
+    }
+  }
+  return [...first, ...rest];
 }
 
 function sizeSummary(amount: number | null, dimension: SizeDimension | null, label: string | null): PackageSizeSummary | null {
@@ -421,7 +564,10 @@ function toVariant(product: BrowseProduct): BrowseVariant {
   const offer = product.bestOffer;
   return {
     ...product,
+    imageUrls: rankProductImages(product.imageUrls),
     label: shape.label,
+    flavorKey: identity.flavor,
+    flavorLabel: identity.flavorLabel,
     count: shape.count,
     unitSize: sizeSummary(shape.unitAmount, shape.unitDimension, shape.unitLabel),
     totalSize: sizeSummary(shape.totalAmount, shape.totalDimension, shape.totalLabel),
@@ -468,6 +614,12 @@ export function chooseDefaultVariant(variants: BrowseVariant[]): BrowseVariant {
       const right = median == null || b.totalSize?.amount == null ? Number.POSITIVE_INFINITY : Math.abs(b.totalSize.amount - median);
       return left - right || b.offers.length - a.offers.length || a.price - b.price || a.label.localeCompare(b.label);
     })[0]!;
+}
+
+function shopperVariantLabel(flavor: string, size: string, showFlavor: boolean): string {
+  if (!showFlavor || !flavor || flavor === "Original") return size;
+  if (size && size !== "Standard") return `${flavor} · ${size}`;
+  return flavor;
 }
 
 function preferredName(names: string[]): string {
@@ -533,23 +685,48 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
     const fallback = variants[0];
     if (!fallback) continue;
     const chosen = chooseDefaultVariant(variants);
-    const familyName = preferredName(identities.map((identity) => identity.familyName));
+    const line = identities.find((identity) => identity.line);
+    const flavorCounts = new Map<string, { label: string; count: number }>();
+    for (const variant of variants) {
+      const row = flavorCounts.get(variant.flavorKey) ?? { label: variant.flavorLabel, count: 0 };
+      row.count += 1;
+      flavorCounts.set(variant.flavorKey, row);
+    }
+    const flavors = [...flavorCounts.entries()]
+      .map(([key, row]) => ({ key, label: row.label, count: row.count }))
+      .sort((a, b) => Number(b.key === "") - Number(a.key === "") || a.label.localeCompare(b.label));
+    const brandName = members.find((member) => member.brand.trim())?.brand.trim() || "";
+    const familyName =
+      line && flavors.length > 1
+        ? brandName.toLowerCase().includes(line.lineLabel.toLowerCase())
+          ? brandName
+          : `${brandName} ${line.lineLabel}`.trim()
+        : preferredName(identities.map((identity) => identity.familyName));
     const prices = variants.map((variant) => variant.price).filter((price) => Number.isFinite(price));
     const priceFrom = prices.length ? Math.min(...prices) : chosen.price;
     const priceTo = prices.length ? Math.max(...prices) : chosen.price;
+    const shownLabel = shopperVariantLabel(chosen.flavorLabel, chosen.label, flavors.length > 1);
     tiles.push({
       ...chosen,
       name: familyName,
       catalogName: chosen.name,
       familyKey: key,
       familyName,
-      variantLabel: chosen.label,
-      sizeLabel: chosen.label,
-      variants,
+      line: line?.line ?? "",
+      flavors,
+      flavorLabel: flavors.length > 1 ? chosen.flavorLabel : "",
+      variantLabel: shownLabel,
+      sizeLabel: shownLabel,
+      variants: variants.map((variant) => ({
+        ...variant,
+        flavorLabel: flavors.length > 1 ? variant.flavorLabel : "",
+        variantLabel: shopperVariantLabel(variant.flavorLabel, variant.label, flavors.length > 1),
+      })),
       defaultVariantId: chosen.id,
+      typicalPrice: typicalPrice(chosen),
       priceFrom,
       priceTo,
-      imageUrls: chosen.imageUrls.length > 0 ? chosen.imageUrls : fallback.imageUrls,
+      imageUrls: rankProductImages(chosen.imageUrls.length > 0 ? chosen.imageUrls : fallback.imageUrls),
     });
   }
   return tiles;
@@ -642,6 +819,7 @@ export function annotateBrowseProduct<T extends BrowseProduct>(product: T): T & 
   familyKey: string;
   familyName: string;
   variantLabel: string;
+  flavorLabel: string;
   catalogName: string;
 } {
   const identity = identifyFamily({
@@ -652,9 +830,11 @@ export function annotateBrowseProduct<T extends BrowseProduct>(product: T): T & 
   });
   return {
     ...product,
+    imageUrls: rankProductImages(product.imageUrls),
     catalogName: product.name,
     familyKey: identity.familyKey,
     familyName: identity.familyName,
+    flavorLabel: identity.flavorLabel,
     variantLabel: identity.variant.label,
   };
 }

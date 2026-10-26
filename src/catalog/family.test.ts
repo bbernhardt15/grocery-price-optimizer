@@ -98,24 +98,34 @@ describe("family identity", () => {
     assert.notEqual(twoLiter.familyKey, keyOf("Diet Pepsi 2 L Bottle", "Pepsi", "2 L"));
   });
 
-  it("groups Doritos Cool Ranch bag sizes and leaves Nacho Cheese alone", () => {
-    const ranch = keyOf("Doritos Cool Ranch Tortilla Chips 9.25 oz Bag", "Doritos", "9.25 oz", "snacks");
-    const party = keyOf("Doritos Cool Ranch Party Size 14.5 oz", "Doritos", "14.5 oz", "snacks");
-    const nacho = keyOf("Doritos Nacho Cheese 9.25 oz Bag", "Doritos", "9.25 oz", "snacks");
-    assert.equal(ranch, party);
-    assert.notEqual(ranch, nacho);
-    assert.equal(
-      identifyFamily({ name: "Doritos Cool Ranch Tortilla Chips 9.25 oz Bag", brand: "Doritos", departmentId: "snacks" }).variant.label,
-      "9.25 oz bag"
-    );
-    assert.match(
-      identifyFamily({ name: "Doritos Cool Ranch Party Size 14.5 oz", brand: "Doritos", departmentId: "snacks" }).familyName,
-      /Cool Ranch/
-    );
-    assert.doesNotMatch(
-      identifyFamily({ name: "Doritos Cool Ranch Party Size 14.5 oz", brand: "Doritos", departmentId: "snacks" }).familyName,
-      /Party/
-    );
+  it("groups Doritos chips and keeps Cool Ranch and Nacho Cheese as flavors", () => {
+    const ranch = identifyFamily({
+      name: "Doritos Cool Ranch Tortilla Chips 9.25 oz Bag",
+      brand: "Doritos",
+      size: "9.25 oz",
+      departmentId: "snacks",
+    });
+    const party = identifyFamily({
+      name: "Doritos Cool Ranch Party Size 14.5 oz",
+      brand: "Doritos",
+      size: "14.5 oz",
+      departmentId: "snacks",
+    });
+    const nacho = identifyFamily({
+      name: "Doritos Nacho Cheese 9.25 oz Bag",
+      brand: "Doritos",
+      size: "9.25 oz",
+      departmentId: "snacks",
+    });
+    assert.equal(ranch.familyKey, party.familyKey);
+    assert.equal(ranch.familyKey, nacho.familyKey);
+    assert.equal(ranch.flavor, party.flavor);
+    assert.notEqual(ranch.flavor, nacho.flavor);
+    assert.equal(ranch.flavorLabel, "Cool Ranch");
+    assert.equal(nacho.flavorLabel, "Nacho Cheese");
+    assert.equal(ranch.variant.label, "9.25 oz bag");
+    assert.match(party.familyName, /Cool Ranch/);
+    assert.doesNotMatch(party.familyName, /Party/);
   });
 
   it("groups milk and eggs by fat or grade, not by the jug or the carton count", () => {
@@ -125,9 +135,17 @@ describe("family identity", () => {
     const store = keyOf("Whole Milk", "Great Value", "1 gal", "dairy-eggs");
     const organic = keyOf("Organic Whole Milk", "Dairy Pure", "1 gal", "dairy-eggs");
     assert.equal(gallon, half);
-    assert.notEqual(gallon, twoPercent);
+    assert.equal(gallon, twoPercent);
+    assert.equal(gallon, organic);
     assert.notEqual(gallon, store);
-    assert.notEqual(gallon, organic);
+    assert.notEqual(
+      identifyFamily({ name: "Whole Milk", brand: "Dairy Pure", size: "1 gal", departmentId: "dairy-eggs" }).flavor,
+      identifyFamily({ name: "2% Milk", brand: "Dairy Pure", size: "1 gal", departmentId: "dairy-eggs" }).flavor
+    );
+    assert.equal(
+      identifyFamily({ name: "Organic Whole Milk", brand: "Dairy Pure", size: "1 gal", departmentId: "dairy-eggs" }).flavorLabel,
+      "Organic Whole"
+    );
     assert.equal(identifyFamily({ name: "Whole Milk", brand: "Dairy Pure", size: "1 gal", departmentId: "dairy-eggs" }).variant.label, "1 gal");
     assert.equal(identifyFamily({ name: "Whole Milk", brand: "Dairy Pure", size: "0.5 gal", departmentId: "dairy-eggs" }).variant.label, "0.5 gal");
 
@@ -136,8 +154,12 @@ describe("family identity", () => {
     const brown = keyOf("Large Brown Eggs", "Eggland's Best", "12 ct", "dairy-eggs");
     const jumbo = keyOf("Jumbo Eggs", "Eggland's Best", "12 ct", "dairy-eggs");
     assert.equal(dozen, eighteen);
-    assert.notEqual(dozen, brown);
-    assert.notEqual(dozen, jumbo);
+    assert.equal(dozen, brown);
+    assert.equal(dozen, jumbo);
+    assert.notEqual(
+      identifyFamily({ name: "Large White Eggs", brand: "Eggland's Best", size: "12 ct", departmentId: "dairy-eggs" }).flavor,
+      identifyFamily({ name: "Large Brown Eggs", brand: "Eggland's Best", size: "12 ct", departmentId: "dairy-eggs" }).flavor
+    );
     assert.equal(
       identifyFamily({ name: "Large White Eggs", brand: "Eggland's Best", size: "12 ct", departmentId: "dairy-eggs" }).variant.label,
       "12 ct"
@@ -159,10 +181,86 @@ describe("family identity", () => {
     );
     assert.match(identifyFamily({ name: "Club Soda 1 L Bottle", brand: "Canada Dry", size: "1 L" }).familyName, /Club Soda/);
     assert.match(identifyFamily({ name: "Baking Soda 1 lb", brand: "Arm & Hammer", size: "1 lb", departmentId: "pantry" }).familyName, /Baking Soda/);
+    const original = identifyFamily({
+      name: "Oreo Chocolate Sandwich Cookies 14.3 oz",
+      brand: "Oreo",
+      size: "14.3 oz",
+      departmentId: "snacks",
+    });
+    const mini = identifyFamily({
+      name: "Oreo Mini Chocolate Sandwich Cookies 3 oz",
+      brand: "Oreo",
+      size: "3 oz",
+      departmentId: "snacks",
+    });
+    assert.equal(original.familyKey, mini.familyKey);
+    assert.equal(original.flavorLabel, "Original");
+    assert.equal(mini.flavorLabel, "Mini");
     assert.notEqual(
-      keyOf("Oreo Chocolate Sandwich Cookies 14.3 oz", "Oreo", "14.3 oz", "snacks"),
-      keyOf("Oreo Mini Chocolate Sandwich Cookies 3 oz", "Oreo", "3 oz", "snacks")
+      original.familyKey,
+      keyOf("Oreo Ice Cream Cookies and Cream", "Oreo", "1.5 qt", "frozen")
     );
+    assert.notEqual(original.familyKey, keyOf("Oreo O's Cereal", "Oreo", "17 oz", "breakfast"));
+  });
+
+  it("collapses the Oreo cookie wall into one family and keeps flavors as chips", () => {
+    const names = [
+      ["OREO Double Stuf Chocolate Sandwich Cookies, King Size Snack Pack, 4.1 oz", "4.1 oz", "Double Stuf"],
+      ["OREO Double Stuf Chocolate Sandwich Cookies, 14.03 oz", "14.03 oz", "Double Stuf"],
+      ["OREO Double Stuf Chocolate Sandwich Cookies, 15.35 oz", "15.35 oz", "Double Stuf"],
+      ["OREO Double Stuf Golden Sandwich Cookies, 14.03 oz", "14.03 oz", "Double Stuf Golden"],
+      ["OREO Double Stuf Gluten Free Chocolate Sandwich Cookies", "12.47 oz", "Double Stuf Gluten Free"],
+      ["OREO Zero Sugar Chocolate Sandwich Cookies", "12.8 oz", "Zero Sugar"],
+      ["OREO Chocolate Sandwich Cookies", "13.29 oz", "Original"],
+      ["OREO Mint Chocolate Sandwich Cookies", "13.2 oz", "Mint"],
+      ["OREO Thins Chocolate Sandwich Cookies", "10.1 oz", "Thins"],
+      ["OREO Mini Chocolate Sandwich Cookies", "3 oz", "Mini"],
+    ] as const;
+    const keys = names.map(([name, size]) => keyOf(name, "Oreo", size, "snacks"));
+    assert.equal(new Set(keys).size, 1);
+    const flavors = names.map(([name, size]) => identifyFamily({ name, brand: "Oreo", size, departmentId: "snacks" }).flavorLabel);
+    for (const expected of ["Double Stuf", "Double Stuf Golden", "Double Stuf Gluten Free", "Zero Sugar", "Original", "Mint", "Thins", "Mini"]) {
+      assert.ok(flavors.includes(expected), expected);
+    }
+    const tiles = groupBrowseFamilies(
+      names.map(([name, size], index) =>
+        product({
+          id: `upc:oreo${index}`,
+          name,
+          brand: "Oreo",
+          size,
+          price: 3 + index,
+          departmentId: "snacks",
+        })
+      )
+    );
+    assert.equal(tiles.length, 1);
+    assert.equal(tiles[0]?.familyName, "Oreo Cookies");
+    assert.ok((tiles[0]?.flavors.length ?? 0) >= 8);
+    const ice = product({
+      id: "upc:oreoice",
+      name: "OREO Ice Cream Cookies and Cream",
+      brand: "Oreo",
+      size: "1.5 qt",
+      departmentId: "frozen",
+    });
+    const cereal = product({
+      id: "upc:oreocereal",
+      name: "OREO O's Cereal",
+      brand: "Oreo",
+      size: "17 oz",
+      departmentId: "breakfast",
+    });
+    const split = groupBrowseFamilies([
+      product({ id: "upc:oreocookie", name: names[6][0], brand: "Oreo", size: names[6][1], departmentId: "snacks" }),
+      ice,
+      cereal,
+    ]);
+    assert.equal(split.length, 3);
+    assert.equal(new Set(split.map((tile) => tile.familyKey)).size, 3);
+    assert.ok(split.some((tile) => tile.line === "cookies"));
+    assert.ok(split.some((tile) => tile.line === "ice cream"));
+    assert.ok(split.some((tile) => tile.line === "cereal"));
   });
 });
 
@@ -275,8 +373,11 @@ describe("demo shelf grouping", () => {
     assert.ok((coke?.variants.length ?? 0) >= 4);
     assert.ok(coke?.variants.some((variant) => variant.label === "12 pk · 12 fl oz cans"));
     assert.equal(tiles.filter((tile) => tile.brand === "Coca-Cola" && tile.familyName === "Diet Coke").length, 1);
-    const ranch = tiles.find((tile) => tile.familyName.includes("Cool Ranch"));
-    assert.equal(ranch?.variants.length, 2);
+    const doritos = tiles.find((tile) => tile.brand === "Doritos" && tile.familyName === "Doritos Chips");
+    assert.ok(doritos);
+    assert.ok(doritos?.flavors.some((flavor) => flavor.label === "Cool Ranch"));
+    assert.ok(doritos?.flavors.some((flavor) => flavor.label === "Nacho Cheese"));
+    assert.equal(doritos?.variants.filter((variant) => variant.flavorLabel === "Cool Ranch").length, 2);
     const milk = tiles.find((tile) => tile.brand === "Dairy Pure" && tile.familyName === "Whole Milk");
     assert.equal(milk?.variants.length, 2);
     const eggs = tiles.find((tile) => tile.brand === "Eggland's Best" && tile.familyName === "Large Eggs");

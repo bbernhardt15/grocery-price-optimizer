@@ -5,7 +5,7 @@ import { facetsFor, filterProducts, paginateProducts, sortProducts } from "./bro
 import { groupOffersByUpc } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
-import { annotateBrowseProduct, groupBrowseFamilies, type BrowseTile } from "./family";
+import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, type BrowseTile } from "./family";
 import { gapsForProduct } from "./substitutes";
 import type { BrowseProduct, BrowseSort, CatalogGap, RawCatalogRecord, SizeClass, StoreCoverage } from "./types";
 import { CatalogCache } from "../models/CatalogCache";
@@ -495,7 +495,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
   const filtered = filterProducts(scope.products, filters);
   const families = groupBrowseFamilies(filtered);
   const sort = request.sort ?? (query ? "relevance" : "price");
-  const sorted = sortProducts(families, sort, filters);
+  const sorted = query ? diversifyFamilies(sortProducts(families, sort, filters)) : sortProducts(families, sort, filters);
   const offset = Number(request.cursor ?? "0");
   const limit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const page = paginateProducts(sorted, offset, limit);

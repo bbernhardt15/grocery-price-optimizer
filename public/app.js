@@ -34,8 +34,10 @@ import {
   readTripSnapshot,
   saveTripSnapshot,
   shareItemId,
+  consolidateStops,
   singleStoreSavings,
   tripFingerprint,
+  tripStory,
   writeCheck,
 } from "./shopper/tripPlan.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
@@ -693,7 +695,8 @@ function rememberTile(tile) {
       catalogName: variant.catalogName || variant.name,
       familyKey: tile.familyKey || variant.familyKey,
       familyName: tile.familyName || variant.familyName || tile.name,
-      variantLabel: variant.label || variant.variantLabel || tile.variantLabel || variant.sizeLabel,
+      flavorLabel: variant.flavorLabel || "",
+      variantLabel: variant.variantLabel || variant.label || tile.variantLabel || variant.sizeLabel,
     });
   }
 }
@@ -715,38 +718,77 @@ function brandLine(tile, title) {
   return parts.join(" · ");
 }
 
+function aboutMoney(variant) {
+  const amount = variant?.typicalPrice ?? variant?.bestOffer?.price ?? variant?.price;
+  return Number.isFinite(Number(amount)) ? `about ${money(amount)}` : "";
+}
+
+function flavorVariants(family, flavorKey) {
+  const all = family?.variants || [];
+  const matched = all.filter((variant) => (variant.flavorKey || "") === (flavorKey || ""));
+  return matched.length ? matched : all;
+}
+
+function paintChoice(card, selector, value) {
+  card.querySelectorAll(selector).forEach((button) => {
+    const on = button.getAttribute(selector.slice(1, -1)) === value;
+    button.setAttribute("aria-checked", String(on));
+  });
+}
+
+function applyFlavor(card, flavorKey) {
+  if (!card) return;
+  const family = familiesByKey.get(card.dataset.familyKey || "");
+  if (!family) return;
+  const choices = flavorVariants(family, flavorKey);
+  const current = productsById.get(card.dataset.productId);
+  const sameSize = choices.find((variant) => variant.label && variant.label === current?.label);
+  const next = sameSize || choices[0];
+  if (next) applyVariant(card, next.id);
+}
+
 function applyVariant(card, variantId) {
   if (!card) return;
   const family = familiesByKey.get(card.dataset.familyKey || "");
   const variant = family?.variants?.find((item) => item.id === variantId) || productsById.get(variantId);
   if (!variant) return;
+  const showFlavor = (family?.flavors?.length || 0) > 1;
   const stored = {
     ...variant,
     familyKey: family?.familyKey || variant.familyKey,
     familyName: family?.familyName || variant.familyName || variant.name,
-    variantLabel: variant.label || variant.variantLabel,
+    flavorLabel: showFlavor ? variant.flavorLabel || "" : "",
+    variantLabel: variant.variantLabel || variant.label,
   };
   productsById.set(variant.id, stored);
   card.dataset.productId = variant.id;
+  card.dataset.selectedFlavor = variant.flavorKey || "";
   const title = stored.familyName || stored.name;
+  const images = variant.imageUrls?.length ? variant.imageUrls : family?.imageUrls || [];
   const img = card.querySelector("img");
-  if (img) img.src = mediaUrl(variant.imageUrls?.[0] || family?.imageUrls?.[0] || "");
+  if (img) {
+    img.src = mediaUrl(images[0] || "");
+    img.dataset.rest = images.slice(1).join("\n");
+  }
   const open = card.querySelector("[data-open]");
   if (open) {
     open.setAttribute("data-open", variant.id);
     open.setAttribute("aria-label", `Details for ${title}`);
   }
-  const price = variant.bestOffer?.price ?? variant.price;
-  const store = variant.bestOffer?.storeName || variant.storeName || "";
-  const unit = variant.bestOffer?.unitPriceText || variant.unitPriceText || "";
   const priceEl = card.querySelector("[data-price]");
-  if (priceEl) priceEl.innerHTML = `<strong>${money(price)}</strong> <span>${escapeHtml(store)}</span>`;
-  const unitEl = card.querySelector("[data-unit]");
-  if (unitEl) unitEl.textContent = unit;
+  if (priceEl) priceEl.textContent = aboutMoney(variant);
+  const sizeHost = card.querySelector("[data-size-row]");
+  if (sizeHost && family) {
+    const sizes = flavorVariants(family, variant.flavorKey || "");
+    sizeHost.innerHTML = sizeChips(title, sizes, variant.id);
+  }
+  paintChoice(card, "[data-flavor]", variant.flavorKey || "");
+  paintChoice(card, "[data-size-id]", variant.id);
+  const note = stored.variantLabel || variant.label || "selected size";
   const box = card.querySelector("[data-check]");
   if (box) {
     box.setAttribute("data-check", variant.id);
-    box.setAttribute("aria-label", `Add ${title}, ${stored.variantLabel || "selected size"}, to my list`);
+    box.setAttribute("aria-label", `Add ${title}, ${note}, to my list`);
   }
   const dec = card.querySelector("[data-dec]");
   const inc = card.querySelector("[data-inc]");
@@ -758,10 +800,6 @@ function applyVariant(card, variantId) {
     inc.setAttribute("data-inc", variant.id);
     inc.setAttribute("aria-label", `Increase quantity of ${title}`);
   }
-  const onSale = (variant.offers || []).some((item) => item.onSale);
-  const badge = card.querySelector(".badge");
-  if (onSale && !badge && open) open.insertAdjacentHTML("beforeend", '<span class="badge">Sale</span>');
-  if (!onSale && badge) badge.remove();
   syncCards();
 }
 
@@ -790,51 +828,64 @@ function filterQuery() {
   return params;
 }
 
+function choiceChips(title, kind, choices, selected) {
+  return choices
+    .map((choice) => {
+      const on = choice.value === selected;
+      return `<button type="button" class="choice-chip" role="radio" aria-checked="${on}" data-${kind}="${escapeHtml(choice.value)}">${escapeHtml(choice.label)}</button>`;
+    })
+    .join("");
+}
+
+function sizeChips(title, sizes, selectedId) {
+  if (sizes.length <= 1) {
+    const only = sizes[0];
+    const label = only?.label || only?.sizeLabel || "";
+    return label ? `<p class="size">${escapeHtml(label)}</p>` : "";
+  }
+  return `<div class="choice-row" role="radiogroup" aria-label="Size for ${escapeHtml(title)}">${choiceChips(
+    title,
+    "size-id",
+    sizes.map((variant) => ({ value: variant.id, label: variant.label || variant.sizeLabel || "Size" })),
+    selectedId
+  )}</div>`;
+}
+
 function cardHtml(tile) {
   const selected = selectedVariant(tile);
-  const storeFilter = $("filter-store").value;
-  const offer = bestOffer(selected, storeFilter || undefined);
-  const sale = (selected.offers || []).some((item) => item.onSale);
-  const demo = offer.priceSource === "seed";
-  const gap = (selected.gaps ?? tile.gaps ?? []).find((item) => item.substitute);
-  const gapHtml = gap
-    ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
-    : "";
   const entry = findListEntry(selected.id);
   const checked = entry ? "checked" : "";
   const qty = entry?.quantity ?? 1;
   const title = tile.familyName || tile.name;
   const brand = brandLine(tile, title);
-  const variants = variantChoices(tile);
-  const selector =
-    variants.length > 1
-      ? `<label class="variant-field"><span class="sr-only">Size for ${escapeHtml(title)}</span><select class="variant-select" data-variant aria-label="Size for ${escapeHtml(title)}">${variants
-          .map(
-            (variant) =>
-              `<option value="${escapeHtml(variant.id)}"${variant.id === selected.id ? " selected" : ""}>${escapeHtml(variant.label || variant.sizeLabel || "Size")}</option>`
-          )
-          .join("")}</select></label>`
-      : `<p class="size">${escapeHtml(selected.label || selected.variantLabel || tile.variantLabel || tile.sizeLabel || tile.departmentName || "")}</p>`;
-  const from =
-    tile.priceFrom != null && tile.priceTo != null && tile.priceFrom !== tile.priceTo
-      ? `<p class="price-from">from ${money(tile.priceFrom)}</p>`
+  const flavors = Array.isArray(tile.flavors) ? tile.flavors : [];
+  const flavorKey = selected.flavorKey || "";
+  const sizes = flavorVariants(tile, flavorKey);
+  const flavorRow =
+    flavors.length > 1
+      ? `<p class="choice-label">Flavor</p><div class="choice-row" role="radiogroup" aria-label="Flavor for ${escapeHtml(title)}">${choiceChips(
+          title,
+          "flavor",
+          flavors.map((flavor) => ({ value: flavor.key, label: flavor.label })),
+          flavorKey
+        )}</div>`
       : "";
-  const variantNote = selected.label || tile.variantLabel || "";
-  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-qty="1">
+  const sizeRow =
+    sizes.length > 1
+      ? `<p class="choice-label">Size</p><div data-size-row>${sizeChips(title, sizes, selected.id)}</div>`
+      : `<div data-size-row>${sizeChips(title, sizes, selected.id)}</div>`;
+  const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
+  const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
+  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-qty="1">
     <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
-      <img src="${escapeHtml(mediaUrl(selected.imageUrls?.[0] || tile.imageUrls?.[0] || ""))}" alt="" />
-      ${sale ? '<span class="badge">Sale</span>' : ""}
-      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
+      <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
     </button>
     <div class="card-body">
       ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
       <h3>${escapeHtml(title)}</h3>
-      ${selector}
-      <p class="price" data-price><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
-      ${from}
-      ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
-      <p class="unit" data-unit>${escapeHtml(offer.unitPriceText || selected.unitPriceText || "")}</p>
-      ${gapHtml}
+      ${flavorRow}
+      ${sizeRow}
+      <p class="price" data-price>${escapeHtml(aboutMoney(selected))}</p>
     </div>
     <div class="card-actions">
       <label class="check">
@@ -918,6 +969,8 @@ async function loadPage(reset) {
     }
     const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
     resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
+    const more = $("show-more");
+    if (more) more.hidden = !nextCursor;
     const demo = catalogSource === "demo";
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
@@ -1008,7 +1061,7 @@ function renderSuggestionRows(q) {
   suggestionsEl.innerHTML = suggestions
     .map((item, index) => {
       const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
-      const price = suggestionPriceLabel(item.bestPrice, item.bestStore, money);
+      const price = suggestionPriceLabel(item.bestPrice, "", (value) => `about ${money(value)}`);
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
       const thumb = item.imageUrl
         ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
@@ -1105,7 +1158,6 @@ function itemCompareNote(product) {
 
 function openProduct(product) {
   const offers = [...product.offers].sort((a, b) => a.price - b.price);
-  const gaps = product.gaps ?? [];
   productDialog.innerHTML = `<div class="sheet-body">
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
@@ -1120,21 +1172,7 @@ function openProduct(product) {
         )
         .join("")}
     </ul>
-    ${
-      gaps.length
-        ? `<h3>Substitutes <span class="sub-tag">Not an exact match</span></h3>
-      <ul class="sub-list">
-        ${gaps
-          .map((gap) =>
-            gap.substitute
-              ? `<li><span><span class="sub-tag">Substitute</span> Not at ${escapeHtml(gap.storeName)}: ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)}</span>
-            <button type="button" class="ghost" data-add-sub="${escapeHtml(gap.substitute.productId)}">Add</button></li>`
-              : `<li><span>No close substitute at ${escapeHtml(gap.storeName)}</span></li>`
-          )
-          .join("")}
-      </ul>`
-        : "<p class='muted'>Every default store has an exact offer for this item.</p>"
-    }
+    <p class="muted">Pick the flavor and size here. Grocery Gitter chooses the store when you plan the trip.</p>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
     <button type="button" class="ghost" id="dialog-close">Close</button>
   </div>`;
@@ -1214,12 +1252,10 @@ function tripId() {
 
 function currentTrip() {
   if (!lastOptimize) return null;
-  const edited =
-    !planLimited("multiStoreSplit") && Boolean(tripEdits.lockedStore || Object.keys(tripEdits.moves || {}).length);
-  if (!edited) {
-    return { stores: lastOptimize.stores ?? [], total: Number(lastOptimize.total) || 0 };
-  }
-  return applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+  const threshold = tripEdits.fewerStops ? 8 : 2;
+  const base = applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+  if (planLimited("multiStoreSplit")) return base;
+  return consolidateStops(base.stores, threshold, lastOptimize.capabilities || {});
 }
 
 function rememberTrip() {
@@ -1284,9 +1320,18 @@ function moveControl(item) {
   </label>`;
 }
 
+function shopperButtonLabel(store) {
+  const action = store.handoff?.action;
+  const name = store.storeName || "the store";
+  if (action?.type === "kroger_cart") return `Send to ${name} cart`;
+  if (action?.type === "walmart_cart") return `Open ${name} cart`;
+  return `Open ${name} list`;
+}
+
 function primaryAction(store) {
   const action = store.handoff?.action;
   if (!action) return "";
+  const label = shopperButtonLabel(store);
   if (planLimited("cartHandoffs")) {
     return `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
   }
@@ -1294,12 +1339,12 @@ function primaryAction(store) {
     return `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
   }
   if (action.type === "kroger_cart") {
-    return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label || "Send to Kroger cart")}</button>`;
+    return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
   }
   if (action.type === "walmart_cart" && action.url) {
-    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || "Open Walmart cart")}</a>`;
+    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
   }
-  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Shop this list at ${store.storeName}`)}</button>`;
+  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
 }
 
 function renderTrip(payload) {
@@ -1314,22 +1359,41 @@ function paintTrip() {
   if (!view) return;
   const stores = view.stores ?? [];
   const checks = readChecks(localStorage, tripId());
-  const comparison = singleStoreSavings(stores.flatMap((store) => store.items || []));
+  const lines = stores.flatMap((store) => store.items || []);
+  const comparison = singleStoreSavings(lines);
+  const story = tripStory(comparison, { stops: stores.length, fewerStops: Boolean(tripEdits.fewerStops) });
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   gridEl.hidden = true;
   sentinelEl.hidden = true;
   tripEl.hidden = false;
+  const storeLines = (story.completeStores || [])
+    .map(
+      (store) =>
+        `<li><span>All at ${escapeHtml(store.storeName)}</span><strong>${money(store.total)}</strong></li>`
+    )
+    .join("");
+  const missingLines = (story.incompleteStores || [])
+    .map((store) => `<li class="muted">${escapeHtml(store.storeName)} doesn't carry ${escapeHtml(store.missing.join(", "))}, so it isn't in the comparison.</li>`)
+    .join("");
   tripEl.innerHTML = `
     <button type="button" class="ghost" id="trip-back">Back to shelves</button>
-    <div class="trip-banner">
-      <div>
-        <p>Trip plan</p>
-        <p>${escapeHtml(summaryOf(stores))}</p>
-        ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
-      </div>
-      <p class="trip-total">${money(view.total)}</p>
-    </div>
-    <p class="trip-compare">${escapeHtml(comparison.note)}</p>
+    <section class="savings-card">
+      <p class="savings-kicker">Trip plan</p>
+      <h2>${escapeHtml(story.headline)}</h2>
+      <p>${escapeHtml(story.effort)}</p>
+      <ul class="savings-lines">
+        ${storeLines}
+        <li class="trip-now"><span>This trip${stores.length > 1 ? ` · ${stores.length} stores` : ""}</span><strong>${money(view.total)}</strong></li>
+        ${missingLines}
+      </ul>
+      ${story.versus ? `<p class="muted">${escapeHtml(story.versus)}</p>` : ""}
+      ${
+        stores.length > 1 || tripEdits.fewerStops
+          ? `<label class="check-row fewer-stops"><input id="fewer-stops" type="checkbox" ${tripEdits.fewerStops ? "checked" : ""} /> Fewer stops <span class="muted">Only add a store when it saves at least ${tripEdits.fewerStops ? "$8" : "$2"}.</span></label>`
+          : ""
+      }
+      ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list across stores.</p>` : ""}
+    </section>
     ${offline ? `<p class="offline-note">You're offline. This trip is saved on this device, including what you've checked off.</p>` : ""}
     ${!planLimited("multiStoreSplit") && tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
     <div class="trip-actions">
@@ -1348,12 +1412,23 @@ function paintTrip() {
     gridEl.hidden = false;
     sentinelEl.hidden = false;
   };
+  const fewer = $("fewer-stops");
+  if (fewer) {
+    fewer.onchange = () => {
+      tripEdits = { ...tripEdits, fewerStops: fewer.checked };
+      rememberTrip();
+      paintTrip();
+    };
+  }
 }
 
 function renderStore(store, checks) {
   const rows = (store.items ?? [])
     .map((item) => {
-      const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
+      const swapped =
+        item.matchKind === "substitute"
+          ? `<p class="swap">We swapped ${escapeHtml(item.substitutedFor || "a similar item")} for ${escapeHtml(item.name)} at ${escapeHtml(store.storeName)}.</p>`
+          : "";
       const checked = item.lineId && checks[item.lineId] ? " checked" : "";
       const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
       const priceLabel = itemPriceLabel(item, store);
@@ -1361,8 +1436,9 @@ function renderStore(store, checks) {
         <label class="check-line">
           <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
           <span>
-            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}${sub}</span>
+            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}</span>
             <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
+            ${swapped}
           </span>
         </label>
         <span class="item-price">
@@ -1370,7 +1446,7 @@ function renderStore(store, checks) {
           <span>${money(item.price)} each</span>
           <strong>${money(item.itemTotal ?? item.price)}</strong>
         </span>
-        ${moveControl(item)}
+        <details class="move-details"><summary>Change store</summary>${moveControl(item)}</details>
       </li>`;
     })
     .join("");
@@ -1397,7 +1473,6 @@ function renderStore(store, checks) {
     <ul class="item-list">${rows}</ul>
     <footer class="store-handoff">
       ${primaryAction(store)}
-      ${action?.detail ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>` : ""}
       ${lock}
       ${exportRow("store", store.storeName, action?.type)}
     </footer>
@@ -2284,6 +2359,16 @@ document.addEventListener("click", (event) => {
     selectDepartment(dept.getAttribute("data-dept"));
     return;
   }
+  const flavorPick = target.closest("[data-flavor]");
+  if (flavorPick && flavorPick.closest("#grid")) {
+    applyFlavor(flavorPick.closest(".card"), flavorPick.getAttribute("data-flavor") || "");
+    return;
+  }
+  const sizePick = target.closest("[data-size-id]");
+  if (sizePick) {
+    applyVariant(sizePick.closest(".card"), sizePick.getAttribute("data-size-id"));
+    return;
+  }
   const open = target.closest("[data-open]");
   if (open) {
     const product = productsById.get(open.getAttribute("data-open"));
@@ -2446,6 +2531,24 @@ gridEl.addEventListener("change", (event) => {
     setQuantity(entry?.itemId || product.id, 0);
   }
 });
+
+$("show-more")?.addEventListener("click", () => {
+  void loadPage(false);
+});
+
+gridEl.addEventListener(
+  "error",
+  (event) => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    const rest = (img.dataset.rest || "").split("\n").filter(Boolean);
+    const next = rest.shift();
+    if (!next) return;
+    img.dataset.rest = rest.join("\n");
+    img.src = mediaUrl(next);
+  },
+  true
+);
 
 $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();

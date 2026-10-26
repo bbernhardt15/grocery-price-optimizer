@@ -188,7 +188,7 @@ img { max-width: 100%; display: block; }
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 .card {
@@ -211,19 +211,41 @@ img { max-width: 100%; display: block; }
 .card-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .card-body h3 { margin: 0; font-size: 1rem; line-height: 1.25; }
 .brand, .size, .unit, .gap, .muted { margin: 0; color: var(--muted); font-size: 0.85rem; }
-.variant-field { display: block; margin-top: 6px; }
-.variant-select {
-  width: 100%;
-  min-height: 44px;
-  border-radius: 12px;
+.choice-label { margin: 8px 0 0; color: var(--muted); font-size: 0.75rem; font-weight: 650; }
+.choice-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.choice-chip {
+  min-height: 40px;
+  border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--ink);
-  font: inherit;
-  font-size: 0.82rem;
-  padding: 0 8px;
+  padding: 0 12px;
+  font-size: 0.85rem;
 }
-.price-from { margin: 0; color: var(--muted); font-size: 0.78rem; }
+.choice-chip[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.price-from, .price { margin: 8px 0 0; color: var(--muted); font-size: 0.92rem; }
+.show-more { width: 100%; margin: 12px 0; }
+.savings-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.savings-card h2 { margin: 4px 0 8px; font-family: var(--display); font-size: 1.6rem; line-height: 1.2; }
+.savings-kicker { margin: 0; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.savings-lines { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.savings-lines li { display: flex; justify-content: space-between; gap: 12px; }
+.savings-lines .trip-now { font-weight: 700; }
+.fewer-stops { align-items: flex-start; }
+.swap { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
+.move-details { margin-top: 6px; }
+.move-details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); }
+.handoff-btn { min-height: 48px; width: 100%; font-size: 1rem; }
 .price { margin: 4px 0 0; font-size: 1.05rem; }
 .price strong { font-variant-numeric: tabular-nums; }
 .gap { color: var(--sale); }

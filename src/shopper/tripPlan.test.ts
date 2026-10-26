@@ -14,7 +14,9 @@ import {
   shareItemId,
   buildHandoff,
   segmentPriceLabel,
+  consolidateStops,
   singleStoreSavings,
+  tripStory,
   storeTiers,
   tierForStore,
   tripFingerprint,
@@ -236,6 +238,68 @@ describe("single-store savings and list text", () => {
     assert.equal(worse.singleStore?.storeName, "Aldi");
     assert.ok(worse.savings < 0);
     assert.match(worse.note, /more than shopping only at Aldi/);
+  });
+
+  it("drops a stop that saves under $2 and skips a store that cannot price the list", () => {
+    const cookies = {
+      lineId: "a",
+      name: "Cookies",
+      storeName: "Walmart",
+      price: 5,
+      quantity: 1,
+      itemTotal: 5,
+      offers: [
+        { storeName: "Walmart", price: 5, name: "Cookies" },
+        { storeName: "Kroger", price: 5.2, name: "Cookies" },
+      ],
+    };
+    const milkLine = {
+      lineId: "b",
+      name: "Milk",
+      storeName: "Kroger",
+      price: 1,
+      quantity: 1,
+      itemTotal: 1,
+      offers: [
+        { storeName: "Kroger", price: 1, name: "Milk" },
+        { storeName: "Walmart", price: 1.5, name: "Milk" },
+      ],
+    };
+    const merged = consolidateStops(
+      [
+        { storeName: "Walmart", items: [cookies], subtotal: 5 },
+        { storeName: "Kroger", items: [milkLine], subtotal: 1 },
+      ],
+      2
+    );
+    assert.equal(merged.stores.length, 1);
+    assert.equal(merged.stores[0]?.storeName, "Walmart");
+
+    const worthIt = consolidateStops(
+      [
+        { storeName: "Walmart", items: [cookies], subtotal: 5 },
+        {
+          storeName: "Kroger",
+          items: [{ ...milkLine, offers: [
+            { storeName: "Kroger", price: 1, name: "Milk" },
+            { storeName: "Walmart", price: 4, name: "Milk" },
+          ] }],
+          subtotal: 1,
+        },
+      ],
+      2
+    );
+    assert.equal(worthIt.stores.length, 1);
+    assert.equal(worthIt.stores[0]?.storeName, "Kroger");
+
+    const comparison = singleStoreSavings([
+      { ...cookies, offers: [{ storeName: "Walmart", price: 5, name: "Cookies" }] },
+      milkLine,
+    ]);
+    assert.ok(comparison.incompleteStores.some((store) => store.missing.includes("Cookies")));
+    const story = tripStory(singleStoreSavings([cookies, milkLine]), { stops: 2 });
+    assert.match(story.headline, /You saved/);
+    assert.match(story.effort, /extra stop/);
   });
 
   it("pastes one item per line with quantity and size", () => {
