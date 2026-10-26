@@ -123,18 +123,28 @@ router.get("/catalog/suggest", async (req, res) => {
   const limit = readNumber(req.query.limit) ?? 8;
   const suggestions = await suggestCatalog(query, limit);
   res.json({
-    suggestions: suggestions.map((product) => ({
-      id: product.id,
-      name: product.name,
-      brand: product.brand,
-      departmentId: product.departmentId,
-      departmentName: product.departmentName,
-      sizeLabel: product.sizeLabel,
-      imageUrl: product.imageUrls[0],
-      bestPrice: product.bestOffer.price,
-      bestStore: product.bestOffer.storeName,
-      storeBrand: product.storeBrand,
-    })),
+    suggestions: suggestions.map((product) => {
+      const variants = "variants" in product && Array.isArray(product.variants) ? product.variants : [];
+      const flavors = "flavors" in product && Array.isArray(product.flavors) ? product.flavors : [];
+      const familyName = "familyName" in product && typeof product.familyName === "string" ? product.familyName : product.name;
+      const variantLabel = "variantLabel" in product && typeof product.variantLabel === "string" ? product.variantLabel : product.sizeLabel;
+      const sizeLabel =
+        flavors.length > 1 ? `${flavors.length} flavors` : variants.length > 1 ? `${variants.length} sizes` : variantLabel;
+      return {
+        id: product.id,
+        name: familyName,
+        brand: product.brand,
+        departmentId: product.departmentId,
+        departmentName: product.departmentName,
+        sizeLabel,
+        imageUrl: product.imageUrls[0],
+        bestPrice: product.bestOffer.price,
+        bestStore: product.bestOffer.storeName,
+        storeBrand: product.storeBrand,
+        ...(flavors.length > 1 ? { flavorCount: flavors.length } : {}),
+        ...(variants.length > 1 ? { variantCount: variants.length } : {}),
+      };
+    }),
   });
 });
 

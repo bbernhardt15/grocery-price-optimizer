@@ -46,6 +46,7 @@ import {
   readTripSnapshot,
   saveTripSnapshot,
   shareItemId,
+  consolidateStops,
   singleStoreSavings,
   swapSentence,
   tripFingerprint,
@@ -61,6 +62,7 @@ import {
   removeCoupon,
   saleBadgeMarkup,
   couponLineLabel,
+  shopCouponHint,
   storeCouponMarkup,
   todayKey,
   upsertCoupon,
@@ -69,6 +71,13 @@ import {
 } from "./shopper/coupons.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
+import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
+import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
+import { planBarCopy, readFlowStep, shouldAskToSignIn } from "./shopper/flow.js";
+import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
+import { aboutMoney as estimateMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
+import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
+import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -106,6 +115,7 @@ const toastEl = $("toast");
 const productDialog = $("product-dialog");
 const coverageDialog = $("coverage-dialog");
 
+const STEP_KEY = "gg-step";
 const ZIP_KEY = "gg-zip";
 const LIST_KEY = "gg-list";
 const SUBS_KEY = "gg-subs";
@@ -177,6 +187,7 @@ async function hideSplash() {
 const list = new Map();
 /** @type {Map<string, Record<string, any>>} */
 const productsById = new Map();
+const familiesByKey = new Map();
 let departments = [];
 let activeDepartment = "all";
 let query = "";
@@ -330,6 +341,14 @@ function applyZip(zip, { reload = true } = {}) {
 }
 
 let toastTimer = 0;
+let flowStep = "add";
+let planning = false;
+let wakeLock = null;
+let accountAskNext = null;
+let accountAskDeclined = false;
+let pullStart = null;
+let pullTravel = 0;
+let lastBarTotal = 0;
 
 function toast(message, durationMs = 1600) {
   toastEl.textContent = message;
@@ -507,9 +526,12 @@ function saveList() {
     addedBy: entry.addedBy,
     checkedBy: entry.checkedBy,
     writtenAt: entry.writtenAt || 0,
-    name: entry.product.name,
+    name: entry.product.familyName || entry.product.name,
+    catalogName: entry.product.catalogName || entry.product.name,
+    familyName: entry.product.familyName || entry.product.name,
     brand: entry.product.brand,
-    sizeLabel: entry.product.sizeLabel,
+    sizeLabel: entry.product.variantLabel || entry.product.sizeLabel,
+    variantLabel: entry.product.variantLabel || entry.product.sizeLabel,
     baselinePrice: entry.baselinePrice,
     baselineStore: entry.baselineStore,
     watch: entry.watch || "inherit",
@@ -627,7 +649,6 @@ function renderEstimate() {
   const barCaption = $("bar-caption");
   const listBar = $("list-bar");
   listCountEl.textContent = String(count);
-  $("bar-count").textContent = count ? `My list · ${count}` : "My list";
   planBtn.disabled = list.size === 0 || listLoading;
   paintListEmpty();
 
@@ -643,7 +664,9 @@ function renderEstimate() {
     badgeEl.hidden = true;
     barSave.hidden = true;
     barCaption.textContent = "Checking prices…";
+    lastBarTotal = 0;
     renderListRows();
+    paintPlanBar();
     return;
   }
 
@@ -655,7 +678,7 @@ function renderEstimate() {
   loadingNote.hidden = true;
   listBar.dataset.state = meter.status;
   estimateTotalEl.textContent = money(meter.splitTotal);
-  $("bar-total").textContent = money(meter.splitTotal);
+  lastBarTotal = meter.status === "empty" ? 0 : meter.splitTotal;
   estimateNoteEl.textContent = copy.note;
   meterCaptionEl.textContent = copy.caption;
   barCaption.textContent = meter.status === "empty" ? "Add items to see savings" : copy.caption;
@@ -675,6 +698,7 @@ function renderEstimate() {
   }
   renderListRows();
   renderShareChrome();
+  paintPlanBar();
 }
 
 function savingsBlock(total, subject) {
@@ -697,42 +721,36 @@ function renderListRows() {
   const locked = listIsLocked();
   listItemsEl.innerHTML = [...list.values()]
     .map((entry) => {
-      const offer = entry.product.offers?.length ? bestOffer(entry.product) : null;
-      const gap = (entry.product.gaps ?? []).find((item) => item.substitute);
-      const sub = gap?.substitute
-        ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
-        : "";
       const watched = itemWatched(Boolean(listAlertsEl?.checked), entry.watch || "inherit");
       const targetValue = entry.targetPrice ? String(entry.targetPrice) : "";
-      const price = offer ? `<p class="muted">${money(offer.price)} at ${escapeHtml(offer.storeName)}</p>` : "";
       const credit = attributionLine(entry);
       const itemId = entry.itemId || entry.product.id;
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
+      const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
         <img src="${escapeHtml(image)}" alt="" />
         <div>
           <label class="got-it">
-            <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(entry.product.name)}" />
-            <strong>${escapeHtml(entry.product.name)}</strong>
+            <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />
+            <strong>${escapeHtml(heading.title)}</strong>
           </label>
-          <p class="muted">${escapeHtml(entry.product.brand || "")}${entry.product.sizeLabel ? ` · ${escapeHtml(entry.product.sizeLabel)}` : ""}</p>
-          ${price}
+          <p class="muted">${escapeHtml(heading.detail)}</p>
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
-          ${sub}
-          <div class="alert-controls">
+          <button type="button" class="text-btn watch-toggle" data-watch-open="${escapeHtml(itemId)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
+          <div class="alert-controls"${watched || targetValue ? "" : " hidden"}>
             <label class="check-row item-watch">
               <input type="checkbox" data-watch="${escapeHtml(entry.product.id)}" ${watched ? "checked" : ""} />
               Watch price
             </label>
             <label class="target-price">Target $
-              <input data-target="${escapeHtml(entry.product.id)}" inputmode="decimal" value="${escapeHtml(targetValue)}" placeholder="optional" aria-label="Target price for ${escapeHtml(entry.product.name)}" />
+              <input data-target="${escapeHtml(entry.product.id)}" inputmode="decimal" value="${escapeHtml(targetValue)}" placeholder="optional" aria-label="Target price for ${escapeHtml(heading.title)}" />
             </label>
           </div>
         </div>
         <div class="stepper">
-          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>−</button>
+          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>−</button>
           <output>${entry.quantity}</output>
-          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>+</button>
+          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>+</button>
         </div>
       </li>`;
     })
@@ -764,7 +782,7 @@ function setQuantity(id, quantity) {
   syncCards();
 }
 
-function addProduct(product, quantity = 1) {
+function addProduct(product, quantity = 1, options = {}) {
   if (listIsLocked()) {
     toast("This list is view-only.");
     return;
@@ -797,18 +815,158 @@ function addProduct(product, quantity = 1) {
     void card.offsetWidth;
     card.classList.add("just-added");
   }
-  toast(`Added ${product.name}`);
+  const added = listItemTitle(product);
+  if (!options.quiet) toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
+  paintPlanBar();
+  paintUsuals();
 }
 
 function syncCards() {
   for (const card of gridEl.querySelectorAll("[data-product-id]")) {
     const id = card.getAttribute("data-product-id");
-    const entry = list.get(id);
+    const entry = findListEntry(id);
     const box = card.querySelector("input[type=checkbox]");
     const output = card.querySelector("output");
     if (box) box.checked = Boolean(entry);
-    if (output) output.textContent = String(entry?.quantity ?? 1);
+    if (output) output.textContent = String(entry?.quantity ?? card.dataset.qty ?? 1);
   }
+}
+
+function rememberTile(tile) {
+  if (!tile) return;
+  if (tile.familyKey) familiesByKey.set(tile.familyKey, tile);
+  const variants = Array.isArray(tile.variants) && tile.variants.length ? tile.variants : [tile];
+  for (const variant of variants) {
+    if (!variant?.id) continue;
+    productsById.set(variant.id, {
+      ...variant,
+      catalogName: variant.catalogName || variant.name,
+      familyKey: tile.familyKey || variant.familyKey,
+      familyName: tile.familyName || variant.familyName || tile.name,
+      flavorLabel: variant.flavorLabel || "",
+      variantLabel: variant.variantLabel || variant.label || tile.variantLabel || variant.sizeLabel,
+    });
+  }
+}
+
+function variantChoices(tile) {
+  return Array.isArray(tile?.variants) ? tile.variants : [];
+}
+
+function selectedVariant(tile) {
+  const variants = variantChoices(tile);
+  return variants.find((variant) => variant.id === tile.defaultVariantId) || variants[0] || tile;
+}
+
+function brandLine(tile, title) {
+  const brand = String(tile.brand || "").trim();
+  const parts = [];
+  if (brand && !String(title).toLowerCase().startsWith(brand.toLowerCase())) parts.push(brand);
+  if (tile.storeBrand) parts.push("store brand");
+  return parts.join(" · ");
+}
+
+function aboutMoney(variant) {
+  const amount = variant?.typicalPrice ?? variant?.bestOffer?.price ?? variant?.price;
+  return Number.isFinite(Number(amount)) ? `about ${money(amount)}` : "";
+}
+
+function flavorVariants(family, flavorKey) {
+  const all = family?.variants || [];
+  const matched = all.filter((variant) => (variant.flavorKey || "") === (flavorKey || ""));
+  return matched.length ? matched : all;
+}
+
+function paintChoice(card, selector, value) {
+  card.querySelectorAll(selector).forEach((button) => {
+    const on = button.getAttribute(selector.slice(1, -1)) === value;
+    button.setAttribute("aria-checked", String(on));
+  });
+}
+
+function phoneShelf() {
+  return window.matchMedia("(max-width: 1099px)").matches;
+}
+
+/** Nudge a tall card's add row above the plan bar. The row also sticks while the card scrolls. */
+function settleCard(card) {
+  if (!card || !phoneShelf()) return;
+  const actions = card.querySelector(".card-actions");
+  const bar = document.querySelector(".list-bar");
+  if (!actions || !bar || getComputedStyle(bar).display === "none") return;
+  const limit = bar.getBoundingClientRect().top - 8;
+  const rect = actions.getBoundingClientRect();
+  if (rect.bottom > limit + 1) window.scrollBy({ top: rect.bottom - limit, left: 0 });
+}
+
+function applyFlavor(card, flavorKey) {
+  if (!card) return;
+  const family = familiesByKey.get(card.dataset.familyKey || "");
+  if (!family) return;
+  const choices = flavorVariants(family, flavorKey);
+  const current = productsById.get(card.dataset.productId);
+  const sameSize = choices.find((variant) => variant.label && variant.label === current?.label);
+  const verdict = selectBestValue(choices.map(valueRow), card.dataset.sizeSort || "unit");
+  const best = choices.find((variant) => variant.id === verdict.winnerId);
+  const next = sameSize || best || choices[0];
+  if (next) applyVariant(card, next.id);
+  settleCard(card);
+}
+
+function applyVariant(card, variantId) {
+  if (!card) return;
+  const family = familiesByKey.get(card.dataset.familyKey || "");
+  const variant = family?.variants?.find((item) => item.id === variantId) || productsById.get(variantId);
+  if (!variant) return;
+  const showFlavor = (family?.flavors?.length || 0) > 1;
+  const stored = {
+    ...variant,
+    familyKey: family?.familyKey || variant.familyKey,
+    familyName: family?.familyName || variant.familyName || variant.name,
+    flavorLabel: showFlavor ? variant.flavorLabel || "" : "",
+    variantLabel: variant.variantLabel || variant.label,
+  };
+  productsById.set(variant.id, stored);
+  card.dataset.productId = variant.id;
+  card.dataset.selectedFlavor = variant.flavorKey || "";
+  const title = stored.familyName || stored.name;
+  const images = variant.imageUrls?.length ? variant.imageUrls : family?.imageUrls || [];
+  const img = card.querySelector("img");
+  if (img) {
+    img.src = mediaUrl(images[0] || "");
+    img.dataset.rest = images.slice(1).join("\n");
+  }
+  const open = card.querySelector("[data-open]");
+  if (open) {
+    open.setAttribute("data-open", variant.id);
+    open.setAttribute("aria-label", `Details for ${title}`);
+  }
+  const priceEl = card.querySelector("[data-price]");
+  if (priceEl) priceEl.textContent = aboutMoney(variant);
+  const sizeHost = card.querySelector("[data-size-row]");
+  if (sizeHost && family) {
+    const sizes = flavorVariants(family, variant.flavorKey || "");
+    sizeHost.innerHTML = sizePanel(title, sizes, variant.id, card.dataset.sizeSort || "unit");
+  }
+  paintChoice(card, "[data-flavor]", variant.flavorKey || "");
+  paintChoice(card, "[data-size-id]", variant.id);
+  const note = stored.variantLabel || variant.label || "selected size";
+  const box = card.querySelector("[data-check]");
+  if (box) {
+    box.setAttribute("data-check", variant.id);
+    box.setAttribute("aria-label", `Add ${title}, ${note}, to my list`);
+  }
+  const dec = card.querySelector("[data-dec]");
+  const inc = card.querySelector("[data-inc]");
+  if (dec) {
+    dec.setAttribute("data-dec", variant.id);
+    dec.setAttribute("aria-label", `Decrease quantity of ${title}`);
+  }
+  if (inc) {
+    inc.setAttribute("data-inc", variant.id);
+    inc.setAttribute("aria-label", `Increase quantity of ${title}`);
+  }
+  syncCards();
 }
 
 function filterQuery() {
@@ -836,41 +994,97 @@ function filterQuery() {
   return params;
 }
 
-function cardHtml(product) {
-  const store = $("filter-store").value;
-  const offer = bestOffer(product, store || undefined);
-  const sale = product.offers.some((item) => item.onSale);
-  const demo = offer.priceSource === "seed";
-  const gap = (product.gaps ?? []).find((item) => item.substitute);
-  const gapHtml = gap
-    ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
+function choiceChips(title, kind, choices, selected) {
+  return choices
+    .map((choice) => {
+      const on = choice.value === selected;
+      return `<button type="button" class="choice-chip" role="radio" aria-checked="${on}" data-${kind}="${escapeHtml(choice.value)}">${escapeHtml(choice.label)}</button>`;
+    })
+    .join("");
+}
+
+function sizeChips(title, sizes, selectedId) {
+  return sizePanel(title, sizes, selectedId, "unit");
+}
+
+function sizePanel(title, sizes, selectedId, sort) {
+  const list = sizes || [];
+  const rows = list.map(valueRow);
+  const hasUnits = rows.filter((row) => row.totalAmount != null && row.totalDimension).length >= 2;
+  const mode = hasUnits && sort !== "item" ? "unit" : "item";
+  const verdict = selectBestValue(rows, list.length > 1 ? mode : "unit");
+  const byId = new Map(list.map((variant) => [variant.id, variant]));
+  const ordered = (verdict.orderedIds.length ? verdict.orderedIds : list.map((variant) => variant.id))
+    .map((id) => byId.get(id))
+    .filter(Boolean);
+  if (ordered.length <= 1) {
+    const only = ordered[0];
+    const label = only?.label || only?.sizeLabel || "";
+    const unit = only?.valueText ? ` · ${only.valueText}` : "";
+    return label ? `<p class="size">${escapeHtml(label)}${escapeHtml(unit)}</p>` : "";
+  }
+  const basis = verdict.basis && verdict.basis !== "item" ? verdict.basis : ordered.find((variant) => variant.valueBasis)?.valueBasis || null;
+  const showUnitToggle = hasUnits;
+  const active = showUnitToggle && mode === "unit" ? "unit" : "item";
+  const options = ordered
+    .map((variant) => {
+      const on = variant.id === selectedId;
+      const badge = verdict.winnerId === variant.id ? `<span class="best-badge">Best value</span>` : "";
+      const unit = active === "item" ? "" : variant.valueText ? `<span class="size-unit">${escapeHtml(variant.valueText)}</span>` : "";
+      const pack = active === "item" ? `<span class="size-unit">${escapeHtml(money(variant.price))}</span>` : unit;
+      return `<li><button type="button" class="size-option" role="radio" aria-checked="${on}" data-size-id="${escapeHtml(variant.id)}"><span class="size-name">${escapeHtml(variant.label || variant.sizeLabel || "Size")}</span>${badge}${pack}</button></li>`;
+    })
+    .join("");
+  const toggle = showUnitToggle
+    ? `<div class="value-toggle" role="group" aria-label="Sort sizes for ${escapeHtml(title)}"><button type="button" data-value-sort="unit" aria-pressed="${active === "unit"}">${escapeHtml(unitSortLabel(basis))}</button><button type="button" data-value-sort="item" aria-pressed="${active === "item"}">Per item</button></div>`
     : "";
-  const checked = list.has(product.id) ? "checked" : "";
-  const qty = list.get(product.id)?.quantity ?? 1;
-  return `<article class="card" data-product-id="${escapeHtml(product.id)}">
-    <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
-      <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
-      ${sale ? '<span class="badge">Sale</span>' : ""}
-      ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
+  const reason = verdict.reason ? `<p class="value-reason">${escapeHtml(verdict.reason)}</p>` : "";
+  const flag = verdict.largePackNote ? `<p class="value-flag">${escapeHtml(verdict.largePackNote)}</p>` : "";
+  return `${toggle}<ul class="size-list" role="radiogroup" aria-label="Size for ${escapeHtml(title)}">${options}</ul>${reason}${flag}`;
+}
+
+function cardHtml(tile) {
+  const selected = selectedVariant(tile);
+  const entry = findListEntry(selected.id);
+  const checked = entry ? "checked" : "";
+  const qty = entry?.quantity ?? 1;
+  const title = tile.familyName || tile.name;
+  const brand = brandLine(tile, title);
+  const flavors = Array.isArray(tile.flavors) ? tile.flavors : [];
+  const flavorKey = selected.flavorKey || "";
+  const sizes = flavorVariants(tile, flavorKey);
+  const flavorRow =
+    flavors.length > 1
+      ? `<p class="choice-label">Flavor</p><div class="choice-row" role="radiogroup" aria-label="Flavor for ${escapeHtml(title)}">${choiceChips(
+          title,
+          "flavor",
+          flavors.map((flavor) => ({ value: flavor.key, label: flavor.label })),
+          flavorKey
+        )}</div>`
+      : "";
+  const sizeRow = `<p class="choice-label">Size</p><div data-size-row>${sizePanel(title, sizes, selected.id, "unit")}</div>`;
+  const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
+  const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
+  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
+    <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
+      <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
     </button>
     <div class="card-body">
-      <p class="brand">${escapeHtml(product.brand)}${product.storeBrand ? " · store brand" : ""}</p>
-      <h3>${escapeHtml(product.name)}</h3>
-      <p class="size">${escapeHtml(product.sizeLabel || product.departmentName)}</p>
-      <p class="price"><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
-      ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
-      <p class="unit">${escapeHtml(offer.unitPriceText || "")}</p>
-      ${gapHtml}
+      ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
+      <h3>${escapeHtml(title)}</h3>
+      ${flavorRow}
+      ${sizeRow}
+      <p class="price" data-price>${escapeHtml(aboutMoney(selected))}</p>
     </div>
     <div class="card-actions">
       <label class="check">
-        <input type="checkbox" data-check="${escapeHtml(product.id)}" ${checked} aria-label="Add ${escapeHtml(product.name)} to my list" />
+        <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
         Add
       </label>
       <div class="stepper">
-        <button type="button" data-dec="${escapeHtml(product.id)}" aria-label="Decrease quantity of ${escapeHtml(product.name)}">−</button>
+        <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
         <output>${qty}</output>
-        <button type="button" data-inc="${escapeHtml(product.id)}" aria-label="Increase quantity of ${escapeHtml(product.name)}">+</button>
+        <button type="button" data-inc="${escapeHtml(selected.id)}" aria-label="Increase quantity of ${escapeHtml(title)}">+</button>
       </div>
     </div>
   </article>`;
@@ -905,6 +1119,25 @@ function renderDepartments() {
   }
   $("dept-chips").innerHTML = chips.join("");
   $("dept-nav").innerHTML = links.join("");
+  requestAnimationFrame(syncChipHint);
+}
+
+function syncChipHint() {
+  const row = $("dept-chips");
+  const hint = $("chip-hint");
+  if (!row || !hint) return;
+  hint.hidden = !moreChips(row.scrollLeft, row.clientWidth, row.scrollWidth);
+}
+
+function bindKeyboardInset() {
+  const apply = () => {
+    const viewport = window.visualViewport;
+    const overlap = viewport ? keyboardOverlap(window.innerHeight, viewport.height, viewport.offsetTop) : 0;
+    document.documentElement.style.setProperty("--keyboard", `${overlap}px`);
+  };
+  apply();
+  window.visualViewport?.addEventListener("resize", apply);
+  window.visualViewport?.addEventListener("scroll", apply);
 }
 
 function showCatalogError(message) {
@@ -917,10 +1150,8 @@ async function loadPage(reset) {
   if (!reset && !nextCursor) return;
   loading = true;
   if (reset) {
-    skeletons();
+    if (flowStep === "add") skeletons();
     nextCursor = null;
-    tripEl.hidden = true;
-    gridEl.hidden = false;
   }
   showCatalogError("");
   const params = filterQuery();
@@ -936,7 +1167,7 @@ async function loadPage(reset) {
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
     const items = body.items ?? [];
-    for (const product of items) productsById.set(product.id, product);
+    for (const product of items) rememberTile(product);
     const html = items.map(cardHtml).join("");
     gridEl.innerHTML = reset ? html : gridEl.innerHTML + html;
     if (!items.length && reset) {
@@ -948,30 +1179,20 @@ async function loadPage(reset) {
       const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
       resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     }
-    const demo = catalogSource === "demo";
+    const more = $("show-more");
+    if (more) more.hidden = !nextCursor;
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
-    const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
-    const foundNames = weeklyAdBanners.map((banner) => banner.storeName).filter(Boolean);
-    const foundLine = !zipOk
-      ? ""
-      : foundNames.length
-        ? ` Circulars Flipp returned for this ZIP: ${foundNames.join(", ")}. Each of those prices is the weekly ad, not a shelf price.`
-        : Array.isArray(body.weeklyAdBanners)
-          ? " Flipp returned no mapped grocery circular for this ZIP."
-          : "";
-    if (!zipOk && weeklyAds) {
-      coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
-    } else if (demo) {
-      coverageBannerEl.textContent = `Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.${foundLine}`;
-    } else if (catalogSource === "database") {
-      coverageBannerEl.textContent = `Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.${foundLine}`;
-    } else if (catalogSource === "mixed") {
-      coverageBannerEl.textContent = `Live samples are mixed with the demo catalog. Weekly-ad prices are labeled weekly ad, not a shelf price.${foundLine}`;
-    } else {
-      coverageBannerEl.textContent = `Live catalog sample. This is not a full store assortment.${foundLine}`;
+    if (coverageBannerEl) {
+      coverageBannerEl.textContent = shelfNote({
+        demo: catalogSource === "demo",
+        zipOk,
+        weeklyAds,
+      });
     }
-    const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
+    const hardWarnings = (body.warnings ?? [])
+      .map((warning) => shopperCopy(warning))
+      .filter((warning) => warning && !/5-digit US ZIP/i.test(warning));
     if (hardWarnings.length) {
       showCatalogError(hardWarnings.join(" "));
     }
@@ -988,6 +1209,7 @@ async function loadPage(reset) {
     }
   } finally {
     loading = false;
+    syncStepVisibility();
     if (reset && nextCursor && sentinelEl.getBoundingClientRect().top < window.innerHeight + 40) {
       void loadPage(false);
     }
@@ -1046,7 +1268,7 @@ function renderSuggestionRows(q) {
   suggestionsEl.innerHTML = suggestions
     .map((item, index) => {
       const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
-      const price = suggestionPriceLabel(item.bestPrice, item.bestStore, money);
+      const price = suggestionPriceLabel(item.bestPrice, "", (value) => `about ${money(value)}`);
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
       const thumb = item.imageUrl
         ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
@@ -1141,44 +1363,15 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
 }
 
-function itemCompareNote(product) {
-  const meter = estimateSavings([{ quantity: 1, quotes: quotesForProduct(product, false) }]);
-  if (meter.status !== "ready") return "";
-  return `<p class="compare-note">${escapeHtml(describeSavings(meter, { subject: "item" }).note)}</p>`;
-}
-
 function openProduct(product) {
-  const offers = [...product.offers].sort((a, b) => a.price - b.price);
-  const gaps = product.gaps ?? [];
+  const title = product.familyName || product.name;
+  const note = product.variantLabel || product.sizeLabel || "";
   productDialog.innerHTML = `<div class="sheet-body">
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
-    <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
-    <h2 id="dialog-title">${escapeHtml(product.name)}</h2>
-    <p class="muted">${escapeHtml(product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
-    ${itemCompareNote(product)}
-    <h3>Prices</h3>
-    <ul class="offer-list">
-      ${offers
-        .map(
-          (offer) => `<li><span>${escapeHtml(offer.storeName)} · ${escapeHtml(sourceLabel(offer.priceSource))}${offer.onSale ? " · sale" : ""}</span><strong>${money(offer.price)} ${escapeHtml(offer.unitPriceText || "")}</strong></li>`
-        )
-        .join("")}
-    </ul>
-    ${
-      gaps.length
-        ? `<h3>Substitutes <span class="sub-tag">Not an exact match</span></h3>
-      <ul class="sub-list">
-        ${gaps
-          .map((gap) =>
-            gap.substitute
-              ? `<li><span><span class="sub-tag">Substitute</span> Not at ${escapeHtml(gap.storeName)}: ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)}</span>
-            <button type="button" class="ghost" data-add-sub="${escapeHtml(gap.substitute.productId)}">Add</button></li>`
-              : `<li><span>No close substitute at ${escapeHtml(gap.storeName)}</span></li>`
-          )
-          .join("")}
-      </ul>`
-        : "<p class='muted'>Every default store has an exact offer for this item.</p>"
-    }
+    <h2 id="dialog-title">${escapeHtml(title)}</h2>
+    ${note ? `<p class="muted">${escapeHtml(note)}${product.storeBrand ? " · store brand" : ""}</p>` : ""}
+    <p class="price">${escapeHtml(aboutMoney(product))}</p>
+    <p class="muted">Pick the flavor and size on the shelf. Grocery Gitter chooses the store when you plan the trip.</p>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
     <button type="button" class="ghost" id="dialog-close">Close</button>
   </div>`;
@@ -1188,32 +1381,21 @@ function openProduct(product) {
     productDialog.close();
   };
   productDialog.querySelector("#dialog-close").onclick = () => productDialog.close();
-  productDialog.querySelectorAll("[data-add-sub]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const id = button.getAttribute("data-add-sub");
-      const known = productsById.get(id);
-      const productToAdd = known || (await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`)).then((r) => r.json())).product;
-      if (productToAdd?.id) {
-        productsById.set(productToAdd.id, productToAdd);
-        addProduct(productToAdd, 1);
-        productDialog.close();
-      }
-    });
-  });
 }
 
 function openCoverage() {
   const found = weeklyAdBanners.length
-    ? `<p class="muted">Circulars Flipp returned for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Weekly ad, not shelf price.</p>`
+    ? `<p class="muted">This week's ads for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Those prices are the ad, not the shelf.</p>`
     : "";
   coverageDialog.innerHTML = `<div class="sheet-body">
     <h2 id="coverage-title">Catalog coverage</h2>
     ${found}
     <ul class="offer-list">
       ${(coverage || [])
-        .map(
-          (store) => `<li><span><strong>${escapeHtml(store.storeName)}</strong> · ${escapeHtml(store.label)}<br /><span class="muted">${escapeHtml(store.detail)}</span></span></li>`
-        )
+        .map((store) => {
+          const detail = shopperCopy(store.detail);
+          return `<li><span><strong>${escapeHtml(store.storeName)}</strong> · ${escapeHtml(store.label)}${detail ? `<br /><span class="muted">${escapeHtml(detail)}</span>` : ""}</span></li>`;
+        })
         .join("")}
     </ul>
     <button type="button" class="primary" id="coverage-close">Close</button>
@@ -1258,12 +1440,10 @@ function tripId() {
 
 function currentTrip() {
   if (!lastOptimize) return null;
-  const edited =
-    !planLimited("multiStoreSplit") && Boolean(tripEdits.lockedStore || Object.keys(tripEdits.moves || {}).length);
-  if (!edited) {
-    return { stores: lastOptimize.stores ?? [], total: Number(lastOptimize.total) || 0 };
-  }
-  return applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+  const threshold = tripEdits.fewerStops ? 8 : 2;
+  const base = applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+  if (planLimited("multiStoreSplit")) return base;
+  return consolidateStops(base.stores, threshold, lastOptimize.capabilities || {});
 }
 
 function rememberTrip() {
@@ -1313,6 +1493,13 @@ function exportRow(scope, storeName, actionType) {
   </div>`;
 }
 
+function changeControl(item) {
+  const move = moveControl(item);
+  if (!move) return "";
+  const label = item.matchKind === "substitute" || item.matchKind === "swap" ? "Change this swap" : "Change store";
+  return `<details class="move-details"><summary>${label}</summary>${move}</details>`;
+}
+
 function sameStoreName(left, right) {
   return String(left || "").trim().toLowerCase() === String(right || "").trim().toLowerCase();
 }
@@ -1335,6 +1522,7 @@ function moveLine(lineId, storeName) {
   tripEdits = { ...tripEdits, moves };
   rememberTrip();
   paintTrip();
+  if (flowStep === "shop") renderShop();
 }
 
 function moveControl(item) {
@@ -1352,6 +1540,14 @@ function moveControl(item) {
   </label>`;
 }
 
+function shopperButtonLabel(store) {
+  const action = store.handoff?.action;
+  if (action?.label) return action.label;
+  const name = store.storeName || "the store";
+  if (action?.type === "kroger_cart" || action?.type === "walmart_cart") return `Send to ${name} cart`;
+  return `Open ${name} list`;
+}
+
 function swapLine(item) {
   const swapped = item.matchKind === "swap" || item.matchKind === "substitute";
   const note = item.swapNote || (swapped ? swapSentence(item.substitutedFor || item.query || item.name, item.storeName, item.name) : "");
@@ -1366,6 +1562,7 @@ function swapLine(item) {
 function primaryAction(store) {
   const action = store.handoff?.action;
   if (!action) return "";
+  const label = shopperButtonLabel(store);
   if (planLimited("cartHandoffs")) {
     return `<button class="handoff-btn" type="button" data-open-paywall="1">${escapeHtml(action.label || "Grocery Gitter Pro")}</button>`;
   }
@@ -1373,12 +1570,12 @@ function primaryAction(store) {
     return `<button class="handoff-btn" type="button" disabled>${escapeHtml(action.label || "Coming soon")}</button>`;
   }
   if (action.type === "kroger_cart") {
-    return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label || "Send to Kroger cart")}</button>`;
+    return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
   }
   if (action.type === "walmart_cart" && action.url) {
-    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || `Send to ${store.storeName} cart`)}</a>`;
+    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
   }
-  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Open ${store.storeName} list`)}</button>`;
+  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
 }
 
 function addOwnCoupon(button) {
@@ -1413,61 +1610,137 @@ function renderTrip(payload) {
   paintTrip();
 }
 
+function calmItemRow(item) {
+  const swap = plainSwap(item);
+  const rawNote = calmPriceNote(item.priceSource);
+  const note = rawNote === "sample price" ? "" : rawNote;
+  const size = item.size ? `, ${item.size}` : "";
+  const amount = Number(item.itemTotal ?? item.price);
+  const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
+  const change =
+    swap && item.lineId
+      ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(item.lineId)}">${escapeHtml(swap.change)}</button>`
+      : "";
+  const sale = saleBadgeMarkup(item);
+  return `<li class="calm-item">
+    <p class="item-name">${item.quantity} × ${escapeHtml(item.name)}${escapeHtml(size)}${note ? ` <span class="muted">${escapeHtml(note)}</span>` : ""}</p>
+    <p class="item-price">${sale}<strong>${escapeHtml(price)}</strong></p>
+    ${swap ? `<p class="swap-quiet">${escapeHtml(swap.text)}${change}</p>` : ""}
+  </li>`;
+}
+
+function customizeBlock(stores) {
+  const moves = (stores || [])
+    .flatMap((store) => store.items || [])
+    .map((item) => {
+      const control = moveControl(item);
+      if (!control) return "";
+      return `<div data-customize-line="${escapeHtml(item.lineId || "")}">${control}</div>`;
+    })
+    .join("");
+  const locks = planLimited("multiStoreSplit")
+    ? ""
+    : (stores || [])
+        .map((store) =>
+          tripEdits.lockedStore === store.storeName
+            ? `<button type="button" class="ghost" data-unlock-store>Unlock ${escapeHtml(store.storeName)}</button>`
+            : `<button type="button" class="ghost" data-lock-store="${escapeHtml(store.storeName)}">Prefer ${escapeHtml(store.storeName)}</button>`
+        )
+        .join("");
+  return `<details class="customize" id="customize">
+    <summary>Customize</summary>
+    <p class="muted">We already picked the lowest prices. Change a store only if you want to.</p>
+    ${tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is preferred for this trip.</p>` : ""}
+    ${locks}
+    ${moves}
+    <label class="check-row"><input id="customize-subs" type="checkbox" ${allowSubsEl.checked ? "checked" : ""} /> Allow a different product when a store is missing it</label>
+    ${exportRow("trip")}
+  </details>`;
+}
+
 function paintTrip() {
   const view = currentTrip();
   if (!view) return;
   const stores = view.stores ?? [];
-  const checks = readChecks(localStorage, tripId());
-  const comparison = singleStoreSavings(stores.flatMap((store) => store.items || []));
+  const lines = stores.flatMap((store) => store.items || []);
+  const card = savingsCard(singleStoreSavings(lines));
+  const fewer = fewerStopsOffer(stores, lastOptimize?.capabilities || {});
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(stores, coupons, todayKey());
-  const showCouponEstimate = !planLimited("ownCoupons") || couponSummary.savings > 0;
+  const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
+  const showCouponEstimate = hasCoupons;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  gridEl.hidden = true;
-  sentinelEl.hidden = true;
-  tripEl.hidden = false;
+  syncStepVisibility();
   if (tripStoreEmpty(lastOptimize)) {
-    tripEl.innerHTML = `
-      <button type="button" class="ghost" id="trip-back">Back to shelves</button>
-      ${emptyStateMarkup(emptyState("stores"), escapeHtml)}
-    `;
-    $("trip-back").onclick = () => {
-      tripEl.hidden = true;
-      gridEl.hidden = false;
-      sentinelEl.hidden = false;
-    };
+    tripEl.innerHTML = emptyStateMarkup(emptyState("stores"), escapeHtml);
+    paintPlanBar();
     return;
   }
+  const lineItems = (card.lines || [])
+    .map((line) => `<li><span>${escapeHtml(line.label)}</span><strong>${escapeHtml(line.value)}</strong></li>`)
+    .join("");
+  const fewerHtml = fewer
+    ? `<section class="fewer-card"><p>${escapeHtml(fewer.text)}</p><button type="button" class="ghost" id="use-fewer-stops">${escapeHtml(fewer.action)}</button></section>`
+    : "";
+  const storeHtml = stores
+    .map((store) => {
+      const total = Number.isFinite(Number(store.subtotal)) ? estimateMoney(store.subtotal) : "";
+      const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
+      const couponsHtml = storeCouponMarkup(store, {
+        page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
+        rows: storeSummary?.rows || [],
+        storeSummary,
+        clipped: isClipped(localStorage, tripId(), store.storeName),
+        canEnter: !planLimited("ownCoupons"),
+        open: false,
+        coupons,
+      });
+      return `<article class="calm-store">
+        <header><h3>${escapeHtml(store.storeName)}</h3>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
+        <ul class="item-list">${(store.items || []).map(calmItemRow).join("")}</ul>
+        ${couponsHtml}
+      </article>`;
+    })
+    .join("");
+  const missing = (lastOptimize?.unavailable ?? []).length
+    ? `<p class="muted">We couldn't price ${escapeHtml(lastOptimize.unavailable.join(", "))}.</p>`
+    : "";
   tripEl.innerHTML = `
-    <button type="button" class="ghost" id="trip-back">Back to shelves</button>
-    <div class="trip-banner">
-      <div>
-        <p>Trip plan</p>
-        <p>${escapeHtml(summaryOf(stores))}</p>
-        ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> for a multi-store split and cart handoffs.</p>` : ""}
-      </div>
-      <p class="trip-total">${money(view.total)}</p>
-    </div>
-    <p class="trip-compare">${escapeHtml(comparison.note)}</p>
-    ${showCouponEstimate ? couponSummaryMarkup(couponSummary) : ""}
-    ${offline ? `<p class="offline-note">You're offline. This trip is saved on this device, including what you've checked off.</p>` : ""}
-    ${!planLimited("multiStoreSplit") && tripEdits.lockedStore ? `<p class="lock-note">${escapeHtml(tripEdits.lockedStore)} is locked for this trip. Items it sells stay there unless you move one.</p>` : ""}
-    <div class="trip-actions">
-      <button type="button" class="ghost" data-instore="trip">In-store mode</button>
-      ${exportRow("trip")}
-    </div>
-    ${lastOptimize?.pricingWarning ? `<p class="muted">${escapeHtml(lastOptimize.pricingWarning)}</p>` : ""}
-    <div class="store-grid">
-      ${stores.map((store, index) => renderStore(store, checks, coupons, couponSummary, index === 0)).join("")}
-    </div>
-    ${(lastOptimize?.unavailable ?? []).length ? `<p class="status">No price for: ${escapeHtml(lastOptimize.unavailable.join(", "))}</p>` : ""}
-    ${checkedStoresHtml(lastOptimize || {}, stores)}
+    <div class="store-grid">${storeHtml}</div>
+    ${missing}
+    <section class="savings-card">
+      <h2>${escapeHtml(card.title)}</h2>
+      ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
+      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      <p class="muted">${escapeHtml(card.note)}</p>
+    </section>
+    ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
+    ${fewerHtml}
+    ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list.</p>` : ""}
+    ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
+    ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
+    ${customizeBlock(stores)}
   `;
-  $("trip-back").onclick = () => {
-    tripEl.hidden = true;
-    gridEl.hidden = false;
-    sentinelEl.hidden = false;
-  };
+  const fewerButton = $("use-fewer-stops");
+  if (fewerButton && fewer) {
+    fewerButton.onclick = () => {
+      tripEdits = { ...tripEdits, moves: { ...tripEdits.moves, ...fewer.moves } };
+      rememberTrip();
+      paintTrip();
+      if (flowStep === "shop") renderShop();
+      haptic();
+    };
+  }
+  const subs = $("customize-subs");
+  if (subs) {
+    subs.onchange = () => {
+      allowSubsEl.checked = subs.checked;
+      localStorage.setItem(SUBS_KEY, subs.checked ? "1" : "0");
+      renderEstimate();
+      void planTrip();
+    };
+  }
+  paintPlanBar();
 }
 
 function renderStore(store, checks, coupons, couponSummary, openCoupons) {
@@ -1491,7 +1764,7 @@ function renderStore(store, checks, coupons, couponSummary, openCoupons) {
           <span>${money(item.price)} each</span>
           <strong>${money(item.itemTotal ?? item.price)}</strong>
         </span>
-        ${moveControl(item)}
+        ${changeControl(item)}
       </li>`;
     })
     .join("");
@@ -1511,7 +1784,7 @@ function renderStore(store, checks, coupons, couponSummary, openCoupons) {
         <h3>${escapeHtml(store.storeName)}</h3>
         ${nearby}
         <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
-        ${store.pricing?.detail ? `<p class="muted">${escapeHtml(store.pricing.detail)}</p>` : ""}
+        ${shopperCopy(store.pricing?.detail) ? `<p class="muted">${escapeHtml(shopperCopy(store.pricing.detail))}</p>` : ""}
       </div>
       <p class="store-total"><span>Store total</span><strong>${money(store.subtotal)}</strong></p>
     </header>
@@ -1527,7 +1800,6 @@ function renderStore(store, checks, coupons, couponSummary, openCoupons) {
     })}
     <footer class="store-handoff">
       ${primaryAction(store)}
-      ${action?.detail ? `<p class="handoff-detail">${escapeHtml(action.detail)}</p>` : ""}
       ${lock}
       ${exportRow("store", store.storeName, action?.type)}
     </footer>
@@ -1674,38 +1946,71 @@ async function exportTrip(kind, storeName) {
   }
 }
 
-function restoreOfflineTrip() {
-  const saved = readTripSnapshot(localStorage);
-  if (!saved?.payload?.stores?.length) return false;
+function loadCachedTrip() {
+  const saved = cachedTrip(localStorage);
+  if (!saved) return false;
   lastOptimize = saved.payload;
   tripEdits = {
     lockedStore: saved.edits?.lockedStore || null,
     moves: { ...(saved.edits?.moves || {}) },
+    fewerStops: Boolean(saved.edits?.fewerStops),
   };
-  paintTrip();
+  return true;
+}
+
+function restoreOfflineTrip() {
+  if (!loadCachedTrip()) return false;
+  showStep("shop");
   return true;
 }
 
 async function planTrip() {
+  if (planning) return;
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
+  flowStep = "plan";
+  try {
+    localStorage.setItem(STEP_KEY, flowStep);
+  } catch {
+    /* private browsing */
+  }
+  syncStepVisibility();
   if (!ZIP_PATTERN.test(zip)) {
+    planning = false;
+    tripEl.innerHTML = emptyStateMarkup(
+      {
+        title: "Add a ZIP",
+        body: "A ZIP lets us use nearby stores. You can also find them from this phone.",
+        action: "Find nearby stores",
+        actionId: "find-stores",
+      },
+      escapeHtml
+    );
     planErrorEl.hidden = false;
     planErrorEl.textContent = "Enter a 5-digit ZIP so the trip can use your nearest stores.";
+    const sheetCoversZip = window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");
+    if (sheetCoversZip) {
+      openList(false);
+      toast(planErrorEl.textContent, 4200);
+    }
     zipEl.focus();
+    paintPlanBar();
     return;
   }
   localStorage.setItem(ZIP_KEY, zip);
   const items = [...list.values()].map((entry) => ({
-    name: entry.product.name,
+    name: entry.product.catalogName || entry.product.name,
     brand: entry.product.brand,
     quantity: entry.quantity,
     catalogId: entry.product.id,
     upc: entry.product.upc,
   }));
+  planning = true;
   planBtn.disabled = true;
-  planBtn.textContent = "Planning…";
+  planBtn.textContent = "See your plan";
+  tripEl.innerHTML = `<div class="plan-skel" aria-busy="true" aria-label="Making your plan">${Array.from({ length: 3 }, () => '<div class="skeleton" aria-hidden="true"></div>').join("")}</div>`;
+  paintPlanBar();
   try {
     const status = await fetch(apiUrl("/api/instacart/status")).then((response) => response.json().catch(() => ({ enabled: false })));
     instacartEnabled = Boolean(status.enabled);
@@ -1717,20 +2022,28 @@ async function planTrip() {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
+    rememberListAsUsuals();
     openList(false);
-    tripEl.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
+    if (navigator.onLine === false && loadCachedTrip()) {
+      showStep("shop");
+      toast("You're offline. Showing the last plan on this phone.");
+      return;
+    }
     planErrorEl.hidden = false;
     const kind = networkKind(error, navigator.onLine);
     if (kind) {
       const state = emptyState(kind);
       planErrorEl.textContent = `${state.title}. ${state.body}`;
+      tripEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
     } else {
       planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
     }
   } finally {
+    planning = false;
     planBtn.disabled = list.size === 0;
-    planBtn.textContent = "Plan the trip";
+    planBtn.textContent = "See your plan";
+    paintPlanBar();
   }
 }
 
@@ -1831,12 +2144,13 @@ function queueWrite(entry, deleted = false) {
 }
 
 function toWrite(entry, deleted = false) {
+  const heading = listItemTitle(entry.product);
   return {
     itemId: entry.itemId || entry.product.id,
     catalogId: entry.product.id,
-    name: entry.product.name,
+    name: heading.title,
     brand: entry.product.brand || undefined,
-    sizeLabel: entry.product.sizeLabel || undefined,
+    sizeLabel: heading.detail || entry.product.sizeLabel || undefined,
     quantity: Math.max(1, Number(entry.quantity) || 1),
     checked: Boolean(entry.checked),
     writtenAt: entry.writtenAt || Date.now(),
@@ -1845,11 +2159,16 @@ function toWrite(entry, deleted = false) {
 }
 
 function stubFromItem(item) {
+  const retailer = item.catalogName || item.name || "Item";
   return {
     id: item.catalogId || item.itemId || item.id,
-    name: item.name || "Item",
+    name: retailer,
+    catalogName: retailer,
+    familyName: item.familyName || item.name || "Item",
     brand: item.brand || "",
-    sizeLabel: item.sizeLabel || "",
+    sizeLabel: item.sizeLabel || item.variantLabel || "",
+    variantLabel: item.variantLabel || item.sizeLabel || "",
+    familyKey: item.familyKey || "",
     imageUrls: [],
     offers: [],
     gaps: [],
@@ -1940,11 +2259,19 @@ async function hydrateSharedProducts() {
         if (!response.ok) return;
         const body = await response.json();
         if (!body.product?.id) return;
-        productsById.set(body.product.id, body.product);
-        const entry = list.get(body.product.id) || [...list.values()].find((row) => row.product?.id === body.product.id);
+        const previous = [...list.values()].find((row) => row.product?.id === body.product.id)?.product;
+        const merged = {
+          ...body.product,
+          familyName: body.product.familyName || previous?.familyName,
+          variantLabel: body.product.variantLabel || previous?.variantLabel,
+          familyKey: body.product.familyKey || previous?.familyKey,
+          catalogName: body.product.catalogName || body.product.name,
+        };
+        productsById.set(merged.id, merged);
+        const entry = list.get(merged.id) || [...list.values()].find((row) => row.product?.id === merged.id);
         if (entry) {
-          entry.product = body.product;
-          if (!(Number(entry.baselinePrice) > 0)) Object.assign(entry, alertFields(entry, body.product));
+          entry.product = merged;
+          if (!(Number(entry.baselinePrice) > 0)) Object.assign(entry, alertFields(entry, merged));
         }
       } catch {
         /* the shared name still shows if the catalog misses */
@@ -2362,10 +2689,16 @@ async function restoreList() {
           if (row.name) rememberLocalRow(row);
           return;
         }
-        productsById.set(body.product.id, body.product);
-        const itemId = row.itemId || body.product.id;
+        const restored = {
+          ...body.product,
+          familyName: body.product.familyName || row.name,
+          variantLabel: body.product.variantLabel || row.sizeLabel,
+          catalogName: body.product.catalogName || body.product.name,
+        };
+        productsById.set(restored.id, restored);
+        const itemId = row.itemId || restored.id;
         list.set(itemId, {
-          product: body.product,
+          product: restored,
           quantity: Math.max(1, Number(row.quantity) || 1),
           itemId,
           checked: Boolean(row.checked),
@@ -2395,12 +2728,13 @@ async function addSample() {
     { name: "Spaghetti Pasta", brand: "Barilla" },
     { name: "Large Eggs", brand: "Goldhen" },
   ];
-  for (const item of body.items ?? []) {
-    productsById.set(item.id, item);
-  }
+  for (const item of body.items ?? []) rememberTile(item);
   for (const want of wanted) {
-    const product = (body.items ?? []).find((item) => item.name === want.name && item.brand === want.brand);
-    if (product) addProduct(product, 1);
+    const tile = (body.items ?? []).find(
+      (item) => item.brand === want.brand && (item.name === want.name || item.familyName === want.name || item.catalogName === want.name)
+    );
+    const variant = tile ? productsById.get(tile.defaultVariantId || tile.id) || tile : null;
+    if (variant) addProduct(variant, 1);
   }
   openList(true);
 }
@@ -2428,6 +2762,25 @@ document.addEventListener("click", (event) => {
     selectDepartment(dept.getAttribute("data-dept"));
     return;
   }
+  const sortPick = target.closest("button[data-value-sort]");
+  if (sortPick && sortPick.closest("#grid")) {
+    const card = sortPick.closest(".card");
+    if (card) {
+      card.dataset.sizeSort = sortPick.getAttribute("data-value-sort") || "unit";
+      applyVariant(card, card.dataset.productId);
+    }
+    return;
+  }
+  const flavorPick = target.closest("[data-flavor]");
+  if (flavorPick && flavorPick.closest("#grid")) {
+    applyFlavor(flavorPick.closest(".card"), flavorPick.getAttribute("data-flavor") || "");
+    return;
+  }
+  const sizePick = target.closest("[data-size-id]");
+  if (sizePick) {
+    applyVariant(sizePick.closest(".card"), sizePick.getAttribute("data-size-id"));
+    return;
+  }
   const open = target.closest("[data-open]");
   if (open) {
     const product = productsById.get(open.getAttribute("data-open"));
@@ -2437,18 +2790,27 @@ document.addEventListener("click", (event) => {
   const inc = target.closest("[data-inc]");
   if (inc) {
     const id = inc.getAttribute("data-inc");
-    const product = productsById.get(id);
-    if (!product) return;
-    if (!list.has(id)) addProduct(product, 1);
-    else setQuantity(id, list.get(id).quantity + 1);
+    const card = inc.closest(".card");
+    const entry = findListEntry(id);
+    if (entry) setQuantity(entry.itemId || id, entry.quantity + 1);
+    else if (card) {
+      card.dataset.qty = String(stagedQuantity(card.dataset.qty, 1));
+      const output = card.querySelector("output");
+      if (output) output.textContent = card.dataset.qty;
+    }
     return;
   }
   const dec = target.closest("[data-dec]");
   if (dec) {
     const id = dec.getAttribute("data-dec");
-    const entry = list.get(id);
-    if (!entry) return;
-    setQuantity(id, entry.quantity - 1);
+    const card = dec.closest(".card");
+    const entry = findListEntry(id);
+    if (entry) setQuantity(entry.itemId || id, entry.quantity - 1);
+    else if (card) {
+      card.dataset.qty = String(stagedQuantity(card.dataset.qty, -1));
+      const output = card.querySelector("output");
+      if (output) output.textContent = card.dataset.qty;
+    }
     return;
   }
   const listInc = target.closest("[data-list-inc]");
@@ -2480,6 +2842,16 @@ document.addEventListener("click", (event) => {
     paintTrip();
     return;
   }
+  const showCouponForm = target.closest("[data-show-coupon-form]");
+  if (showCouponForm) {
+    const body = showCouponForm.closest(".coupon-body");
+    const wrap = body?.querySelector(".coupon-form-wrap");
+    if (wrap) wrap.hidden = false;
+    showCouponForm.hidden = true;
+    const field = wrap?.querySelector("[data-coupon-line]");
+    if (field instanceof HTMLElement) field.focus();
+    return;
+  }
   if (target.closest("[data-add-coupon]")) {
     if (planLimited("ownCoupons")) {
       openPaywall();
@@ -2488,8 +2860,60 @@ document.addEventListener("click", (event) => {
     addOwnCoupon(target.closest("[data-add-coupon]"));
     return;
   }
+  const flowButton = target.closest("[data-flow]");
+  if (flowButton) {
+    haptic();
+    showStep(flowButton.getAttribute("data-flow"));
+    return;
+  }
+  const watchOpen = target.closest("[data-watch-open]");
+  if (watchOpen) {
+    const panel = watchOpen.closest(".list-row")?.querySelector(".alert-controls");
+    if (panel) {
+      panel.hidden = !panel.hidden;
+      watchOpen.textContent = panel.hidden ? "Price watch" : "Hide price watch";
+    }
+    return;
+  }
+  const starter = target.closest("[data-starter]");
+  if (starter) {
+    void addStarter(starter.getAttribute("data-starter"));
+    return;
+  }
+  const changeLine = target.closest("[data-change-line]");
+  if (changeLine) {
+    const details = $("customize");
+    if (details) details.open = true;
+    const lineId = changeLine.getAttribute("data-change-line") || "";
+    const select = tripEl.querySelector(`[data-move-line="${CSS.escape(lineId)}"]`);
+    if (select instanceof HTMLElement) select.focus();
+    return;
+  }
+  const notHere = target.closest("[data-not-here]");
+  if (notHere) {
+    const choices = notHere.closest(".shop-line")?.querySelector(".swap-choices");
+    if (choices) choices.hidden = !choices.hidden;
+    return;
+  }
+  const shopSwap = target.closest("[data-shop-swap]");
+  if (shopSwap) {
+    moveLine(shopSwap.getAttribute("data-shop-swap"), shopSwap.getAttribute("data-shop-store"));
+    haptic();
+    return;
+  }
+  const walmartCart = target.closest('a.handoff-btn[href*="walmart.com"]');
+  if (walmartCart instanceof HTMLAnchorElement) {
+    event.preventDefault();
+    maybeAskAccount("cart", () => {
+      void openExternal(walmartCart.href);
+    });
+    return;
+  }
   if (target.closest("[data-kroger]")) {
-    void startKroger(target.closest("[data-kroger]").getAttribute("data-kroger"), target.closest("[data-kroger]"));
+    const button = target.closest("[data-kroger]");
+    maybeAskAccount("cart", () => {
+      void startKroger(button.getAttribute("data-kroger"), button);
+    });
     return;
   }
   if (target.closest("[data-open-paywall]")) {
@@ -2505,7 +2929,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target.closest("[data-instore]")) {
-    openChecklist("");
+    showStep("shop");
     return;
   }
   if (target.closest("[data-close-checklist]")) {
@@ -2535,10 +2959,16 @@ document.addEventListener("click", (event) => {
   }
   const exportButton = target.closest("[data-export]");
   if (exportButton) {
-    void exportTrip(exportButton.getAttribute("data-export"), exportButton.getAttribute("data-export-store") || "").catch((error) => {
-      if (isShareCancel(error)) return;
-      toast(error instanceof Error ? error.message : "Could not share that list.");
-    });
+    const kind = exportButton.getAttribute("data-export");
+    const storeName = exportButton.getAttribute("data-export-store") || "";
+    const run = () => {
+      void exportTrip(kind, storeName).catch((error) => {
+        if (isShareCancel(error)) return;
+        toast(error instanceof Error ? error.message : "Could not share that list.");
+      });
+    };
+    if (kind === "link" || kind === "share") maybeAskAccount("save", run);
+    else run();
     return;
   }
   if (target.closest(".instacart-cta")) {
@@ -2546,7 +2976,10 @@ document.addEventListener("click", (event) => {
       openPaywall();
       return;
     }
-    void openInstacart(target.closest(".instacart-cta"));
+    const button = target.closest(".instacart-cta");
+    maybeAskAccount("cart", () => {
+      void openInstacart(button);
+    });
   }
 });
 
@@ -2570,6 +3003,11 @@ document.addEventListener("change", (event) => {
     document.querySelectorAll(`[data-trip-check="${CSS.escape(target.dataset.tripCheck)}"]`).forEach((box) => {
       if (box instanceof HTMLInputElement) box.checked = Boolean(checks[target.dataset.tripCheck]);
     });
+    document.querySelectorAll(`[data-shop-line="${CSS.escape(target.dataset.tripCheck)}"] .shop-row`).forEach((row) => {
+      row.classList.toggle("is-done", Boolean(checks[target.dataset.tripCheck]));
+    });
+    paintShopChrome();
+    haptic();
   }
 });
 
@@ -2580,13 +3018,41 @@ listItemsEl.addEventListener("change", (event) => {
 });
 
 gridEl.addEventListener("change", (event) => {
-  const box = event.target;
+  const target = event.target;
+  if (target instanceof HTMLSelectElement && target.classList.contains("variant-select")) {
+    applyVariant(target.closest(".card"), target.value);
+    return;
+  }
+  const box = target;
   if (!(box instanceof HTMLInputElement) || !box.dataset.check) return;
   const product = productsById.get(box.dataset.check);
   if (!product) return;
-  if (box.checked) addProduct(product, 1);
-  else setQuantity(product.id, 0);
+  if (box.checked) {
+    const card = box.closest(".card");
+    addProduct(product, stagedQuantity(card?.dataset.qty || 1, 0));
+  } else {
+    const entry = findListEntry(product.id);
+    setQuantity(entry?.itemId || product.id, 0);
+  }
 });
+
+$("show-more")?.addEventListener("click", () => {
+  void loadPage(false);
+});
+
+gridEl.addEventListener(
+  "error",
+  (event) => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    const rest = (img.dataset.rest || "").split("\n").filter(Boolean);
+    const next = rest.shift();
+    if (!next) return;
+    img.dataset.rest = rest.join("\n");
+    img.src = mediaUrl(next);
+  },
+  true
+);
 
 $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2668,9 +3134,32 @@ $("list-toggle").addEventListener("click", () => openList(!listPanel.classList.c
 $("list-bar-btn").addEventListener("click", () => openList(true));
 $("list-close").addEventListener("click", () => openList(false));
 $("coverage-open").addEventListener("click", openCoverage);
-planBtn.addEventListener("click", () => void planTrip());
+planBtn.addEventListener("click", () => {
+  haptic();
+  void planTrip();
+});
+$("bar-primary")?.addEventListener("click", onPrimary);
+$("find-stores")?.addEventListener("click", () => void findNearbyStores());
+$("add-usuals")?.addEventListener("click", () => void addUsualList());
+$("account-ask-skip")?.addEventListener("click", () => {
+  accountAskDeclined = true;
+  const next = accountAskNext;
+  accountAskNext = null;
+  $("account-ask")?.close();
+  next?.();
+});
+$("account-ask-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  accountAskNext = null;
+  $("account-ask")?.close();
+  openSettings();
+});
 $("sample-btn").addEventListener("click", () => void addSample());
-$("share-btn")?.addEventListener("click", () => void onShareClick());
+$("share-btn")?.addEventListener("click", () => {
+  maybeAskAccount("save", () => {
+    void onShareClick();
+  });
+});
 $("share-viewonly")?.addEventListener("click", () => {
   if (!shareState) return;
   void postSettings({ mode: shareState.mode === "view" ? "edit" : "view" });
@@ -3024,9 +3513,9 @@ function personalListPayload() {
     : [...list.values()].map((entry) => ({
         id: entry.product.id,
         itemId: entry.itemId || entry.product.id,
-        name: entry.product.name,
+        name: listItemTitle(entry.product).title,
         brand: entry.product.brand || "",
-        sizeLabel: entry.product.sizeLabel || "",
+        sizeLabel: listItemTitle(entry.product).detail || entry.product.sizeLabel || "",
         quantity: entry.quantity,
         checked: Boolean(entry.checked),
         addedBy: entry.addedBy,
@@ -3531,6 +4020,392 @@ function adoptSessionFromUrl() {
   history.replaceState({}, "", next);
 }
 
+function haptic() {
+  const plugins = window.Capacitor?.Plugins;
+  void lightTap({
+    haptics: plugins?.Haptics,
+    vibrate: typeof navigator !== "undefined" && typeof navigator.vibrate === "function" ? (ms) => navigator.vibrate(ms) : undefined,
+  });
+}
+
+async function engageWake() {
+  if (wakeLock?.active) return;
+  const request = typeof navigator !== "undefined" && navigator.wakeLock?.request ? (type) => navigator.wakeLock.request(type) : undefined;
+  wakeLock = await keepAwake({ requestWakeLock: request });
+}
+
+async function releaseWake() {
+  if (wakeLock) await wakeLock.release();
+  wakeLock = null;
+}
+
+function syncStepVisibility() {
+  const start = $("start-here");
+  const shop = $("shop");
+  const add = flowStep === "add";
+  if (gridEl) gridEl.hidden = !add;
+  if (sentinelEl) sentinelEl.hidden = !add;
+  if (start) start.hidden = !add || Boolean(query);
+  const showMore = $("show-more");
+  if (showMore && !add) showMore.hidden = true;
+  if (tripEl) tripEl.hidden = flowStep !== "plan";
+  if (shop) shop.hidden = flowStep !== "shop";
+  const chips = $("dept-chips");
+  const toolbar = document.querySelector(".toolbar");
+  if (chips) chips.hidden = !add;
+  if (toolbar) toolbar.hidden = !add;
+  document.body.dataset.step = flowStep;
+}
+
+function showStep(step) {
+  flowStep = readFlowStep(step);
+  try {
+    localStorage.setItem(STEP_KEY, flowStep);
+  } catch {
+    /* private browsing */
+  }
+  syncStepVisibility();
+  if (flowStep === "plan") {
+    if (lastOptimize) paintTrip();
+    else if (planning) {
+      /* the skeleton stays up while the plan is on its way */
+    } else if (list.size) void planTrip();
+    else if (tripEl) tripEl.innerHTML = emptyStateMarkup(emptyState("list"), escapeHtml);
+  }
+  if (flowStep === "shop") {
+    if (!lastOptimize) loadCachedTrip();
+    renderShop();
+    void engageWake();
+  } else {
+    void releaseWake();
+  }
+  paintUsuals();
+  paintPlanBar();
+}
+
+function paintPlanBar() {
+  const count = [...list.values()].reduce((sum, entry) => sum + entry.quantity, 0);
+  const view = currentTrip();
+  const checks = readChecks(localStorage, tripId());
+  const progress = view ? shopProgress(view.stores || [], checks) : { left: count, complete: false, total: 0 };
+  const total = flowStep === "add" || !view ? lastBarTotal : view.total;
+  const copy = planBarCopy({
+    step: flowStep,
+    itemCount: flowStep === "shop" && progress.total ? progress.total : count,
+    total,
+    hasPlan: Boolean(view?.stores?.length),
+    planning,
+    left: progress.left,
+    complete: progress.complete,
+  });
+  const countEl = $("bar-count");
+  const totalEl = $("bar-total");
+  const primary = $("bar-primary");
+  if (countEl) countEl.textContent = copy.countLabel;
+  if (totalEl) totalEl.textContent = copy.totalLabel;
+  if (primary) {
+    primary.textContent = copy.button;
+    primary.disabled = !copy.enabled;
+  }
+  document.querySelectorAll("[data-flow]").forEach((button) => {
+    if (button.getAttribute("data-flow") === flowStep) button.setAttribute("aria-current", "step");
+    else button.removeAttribute("aria-current");
+  });
+  const title = $("brand-title");
+  if (title) title.textContent = flowStep === "plan" ? "Your plan" : flowStep === "shop" ? "In the store" : "Add items";
+}
+
+function renderShop() {
+  const shop = $("shop");
+  if (!shop) return;
+  const view = currentTrip();
+  if (!view?.stores?.length) {
+    shop.innerHTML = emptyStateMarkup(emptyState("shop"), escapeHtml);
+    paintPlanBar();
+    return;
+  }
+  const checks = readChecks(localStorage, tripId());
+  const progress = shopProgress(view.stores, checks);
+  const done = doneMessage(progress);
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const html = shopSections(view.stores)
+    .map((section) => {
+      const groups = section.groups
+        .map((group) => {
+          const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
+          const rows = group.items
+            .map((item) => {
+              const on = Boolean(item.lineId && checks[item.lineId]);
+              const size = item.size ? `, ${escapeHtml(item.size)}` : "";
+              const amount = Number(item.itemTotal ?? item.price);
+              const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
+              const choices = swapChoices(item);
+              const swap = choices.length
+                ? `<div class="swap-choices" hidden>${choices
+                    .map((choice) => {
+                      const label = Number.isFinite(choice.price)
+                        ? `${choice.name} at ${choice.storeName}, ${estimateMoney(choice.price)}`
+                        : `${choice.name} at ${choice.storeName}`;
+                      return `<button type="button" class="ghost" data-shop-swap="${escapeHtml(item.lineId || "")}" data-shop-store="${escapeHtml(choice.storeName)}">${escapeHtml(label)}</button>`;
+                    })
+                    .join("")}</div>`
+                : "";
+              const notHere = choices.length
+                ? `<button type="button" class="ghost" data-not-here="${escapeHtml(item.lineId || "")}">Not here</button>`
+                : "";
+              return `<div class="shop-line" data-shop-line="${escapeHtml(item.lineId || "")}">
+                <label class="shop-row${on ? " is-done" : ""}">
+                  <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${on ? " checked" : ""} />
+                  <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
+                </label>
+                ${notHere}
+                ${swap}
+              </div>`;
+            })
+            .join("");
+          return `<h3 class="shop-aisle">${escapeHtml(group.department || "Other")}${aisle}</h3>${rows}`;
+        })
+        .join("");
+      const store = (view.stores || []).find((row) => row.storeName === section.storeName);
+      const hintItems = section.groups.flatMap((group) => group.items || []);
+      const hintText = shopCouponHint(hintItems);
+      const showHint = Boolean(hintText) && !hintText.startsWith("Nothing on");
+      const page = store?.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(section.storeName);
+      const couponLink = page?.url
+        ? `<a class="shop-coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}">${escapeHtml(`Open ${page.label}`)}</a>`
+        : "";
+      const hint =
+        showHint || couponLink
+          ? `<p class="shop-coupon-hint">${showHint ? `<span>${escapeHtml(hintText)}</span>` : ""}${couponLink}</p>`
+          : "";
+      return `<section class="shop-store"><h2>${escapeHtml(section.storeName)}</h2>${hint}${groups}<div class="shop-actions">${store ? primaryAction(store) : ""}</div></section>`;
+    })
+    .join("");
+  shop.innerHTML = `
+    ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
+    ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
+    ${html}
+  `;
+  paintPlanBar();
+}
+
+function paintShopChrome() {
+  if (flowStep !== "shop") {
+    paintPlanBar();
+    return;
+  }
+  const view = currentTrip();
+  const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : { complete: false };
+  const shop = $("shop");
+  const existing = shop?.querySelector(".done-banner");
+  if (progress.complete && shop && !existing) renderShop();
+  else if (!progress.complete && existing) existing.remove();
+  paintPlanBar();
+}
+
+function rememberListAsUsuals() {
+  const items = [...list.values()].map((entry) => ({
+    name: entry.product.familyName || entry.product.catalogName || entry.product.name,
+    brand: entry.product.brand,
+    catalogId: entry.product.id,
+    quantity: entry.quantity,
+  }));
+  rememberUsuals(localStorage, items);
+  paintUsuals();
+}
+
+function paintStarterLists() {
+  const host = $("starter-lists");
+  if (!host || host.dataset.ready === "1") return;
+  host.dataset.ready = "1";
+  host.innerHTML = STARTER_LISTS.map(
+    (list) =>
+      `<button type="button" class="starter" data-starter="${escapeHtml(list.id)}"><span>${escapeHtml(list.title)}</span><span class="muted">${escapeHtml(list.blurb)}</span></button>`
+  ).join("");
+}
+
+function paintUsuals() {
+  const block = $("usuals-block");
+  const listEl = $("usuals-list");
+  if (!block || !listEl) return;
+  const rows = readUsuals(localStorage);
+  block.hidden = rows.length === 0;
+  listEl.innerHTML = rows
+    .slice(0, 8)
+    .map((row) => `<li>${escapeHtml(row.name)}</li>`)
+    .join("");
+}
+
+function flattenTiles(tiles) {
+  const rows = [];
+  for (const tile of tiles || []) {
+    const variants = Array.isArray(tile.variants) && tile.variants.length ? tile.variants : [tile];
+    for (const variant of variants) {
+      rows.push({
+        ...variant,
+        name: variant.catalogName || variant.name || tile.name,
+        familyName: variant.familyName || tile.familyName || tile.name,
+        brand: variant.brand || tile.brand,
+      });
+    }
+  }
+  return rows;
+}
+
+async function loadStarterShelf(picks) {
+  const response = await fetch(apiUrl("/api/catalog/browse?limit=80"));
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
+  let tiles = body.items || [];
+  let flat = flattenTiles(tiles);
+  for (const pick of picks || []) {
+    if (matchPick(pick, flat)) continue;
+    const search = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(pick.name)}&limit=12`));
+    const found = await search.json().catch(() => ({}));
+    tiles = tiles.concat(found.items || []);
+    flat = flattenTiles(tiles);
+  }
+  for (const tile of tiles) rememberTile(tile);
+  return flat;
+}
+
+async function addStarter(id) {
+  const listDef = starterList(id);
+  if (!listDef) return;
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
+  try {
+    const shelf = await loadStarterShelf(listDef.picks);
+    let added = 0;
+    const missing = [];
+    for (const pick of listDef.picks) {
+      const product = matchPick(pick, shelf);
+      const stored = product?.id ? productsById.get(product.id) || product : null;
+      if (!stored?.id) {
+        missing.push(pick.name);
+        continue;
+      }
+      if (findListEntry(stored.id)) continue;
+      addProduct(stored, 1, { quiet: true });
+      added += 1;
+    }
+    if (!added && missing.length) toast("Those items aren't on the shelf yet. Try browsing.");
+    else if (missing.length) toast(`Added ${listDef.title}. ${missing.length} weren't on the shelf.`);
+    else if (added) toast(`Added ${listDef.title}.`);
+    else toast(`${listDef.title} is already on your list.`);
+    haptic();
+  } catch (error) {
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) {
+      const state = emptyState(kind);
+      toast(`${state.title}. ${state.body}`);
+    } else toast("Couldn't add that list. Try again.");
+  }
+}
+
+async function resolveUsual(row) {
+  if (row.catalogId && productsById.get(row.catalogId)) return productsById.get(row.catalogId);
+  if (row.catalogId) {
+    try {
+      const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`));
+      const body = await response.json().catch(() => ({}));
+      if (response.ok && body.product?.id) {
+        productsById.set(body.product.id, body.product);
+        return body.product;
+      }
+    } catch {
+      /* search by name */
+    }
+  }
+  const shelf = await loadStarterShelf([{ name: row.name, brand: row.brand }]);
+  return matchPick(row, shelf);
+}
+
+async function addUsualList() {
+  const rows = readUsuals(localStorage);
+  if (!rows.length) return;
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
+  let added = 0;
+  for (const row of rows) {
+    try {
+      const product = await resolveUsual(row);
+      if (!product?.id || findListEntry(product.id)) continue;
+      addProduct(productsById.get(product.id) || product, row.quantity || 1, { quiet: true });
+      added += 1;
+    } catch {
+      /* skip a row the shelf doesn't have */
+    }
+  }
+  if (!added) toast("Those usuals aren't on the shelf right now. Try a starter list.");
+  else toast(added === 1 ? "Added 1 usual." : `Added ${added} usuals.`);
+  haptic();
+}
+
+function maybeAskAccount(intent, next) {
+  if (
+    !shouldAskToSignIn({
+      accountsEnabled: Boolean(authStatus?.enabled),
+      signedIn: Boolean(accountState?.id),
+      intent,
+      declined: accountAskDeclined,
+    })
+  ) {
+    next();
+    return;
+  }
+  accountAskNext = next;
+  const dialog = $("account-ask");
+  if (!dialog) {
+    next();
+    return;
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+async function findNearbyStores() {
+  const button = $("find-stores");
+  if (button) button.disabled = true;
+  try {
+    const coords = await readDeviceCoords();
+    const response = await fetch(apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`));
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !/^\d{5}/.test(String(body.zip || ""))) {
+      toast("Couldn't read a ZIP from this location. Type it instead.");
+      return;
+    }
+    applyZip(body.zip);
+    toast(`Nearby stores for ${body.zip}.`);
+    haptic();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const denied = Number(error?.code) === 1 || /denied|permission/i.test(message);
+    toast(denied ? "Location stayed off. Type a ZIP instead." : "Couldn't use location. Type a ZIP instead.");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function onPrimary() {
+  haptic();
+  if (flowStep === "add") {
+    showStep("plan");
+    return;
+  }
+  if (flowStep === "plan") {
+    if (lastOptimize) showStep("shop");
+    else void planTrip();
+    return;
+  }
+  const view = currentTrip();
+  const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : null;
+  if (progress?.complete) toast("Nice. That trip is done.");
+}
+
 async function boot() {
   try {
     adoptSessionFromUrl();
@@ -3551,6 +4426,11 @@ async function boot() {
 
 async function bootApp() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
+  bindKeyboardInset();
+  $("dept-chips")?.addEventListener("scroll", syncChipHint, { passive: true });
+  paintStarterLists();
+  paintUsuals();
+  paintPlanBar();
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
   if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
@@ -3566,7 +4446,8 @@ async function bootApp() {
   listLoading = !urlToken && Array.isArray(savedRows) && savedRows.some((row) => row?.id || row?.itemId);
   renderEstimate();
   if (typeof navigator !== "undefined" && navigator.onLine === false && restoreOfflineTrip()) {
-    showCatalogError("You're offline. This trip is saved on this device.");
+    showCatalogError("You're offline. This trip is saved on this phone.");
+    if (resultCountEl) resultCountEl.textContent = "Saved on this device";
     listLoading = false;
     listReady = true;
     return;
@@ -3613,16 +4494,66 @@ async function bootApp() {
     });
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
+  const storedStep = readFlowStep(localStorage.getItem(STEP_KEY));
+  if (storedStep !== "add") showStep(storedStep);
+  else syncStepVisibility();
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && flowStep === "shop") void engageWake();
+});
+
+const pullHost = document.querySelector(".catalog");
+pullHost?.addEventListener(
+  "touchstart",
+  (event) => {
+    if (flowStep !== "add" || window.scrollY > 8) {
+      pullStart = null;
+      return;
+    }
+    pullStart = event.touches[0]?.clientY ?? null;
+    pullTravel = 0;
+  },
+  { passive: true }
+);
+pullHost?.addEventListener(
+  "touchmove",
+  (event) => {
+    if (pullStart == null) return;
+    pullTravel = pullDistance(pullStart, event.touches[0]?.clientY ?? pullStart, window.scrollY <= 8);
+    const status = $("pull-status");
+    if (!status) return;
+    status.hidden = pullTravel < 16;
+    status.textContent = pullShouldRefresh(pullTravel) ? "Release to refresh" : "Pull to refresh";
+  },
+  { passive: true }
+);
+pullHost?.addEventListener("touchend", () => {
+  const status = $("pull-status");
+  if (status) status.hidden = true;
+  if (pullShouldRefresh(pullTravel)) void loadPage(true);
+  pullStart = null;
+  pullTravel = 0;
+});
+
+document.addEventListener("focusin", (event) => {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+  if (!field.closest(".filters.open, .list-panel.open, dialog.sheet")) return;
+  field.scrollIntoView({ block: "center" });
+});
 
 document.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
   if (!button) return;
   const action = button.getAttribute("data-empty-action");
-  if (action === "browse") {
+  if (action === "browse" || action === "add-items") {
     openList(false);
     void openAlerts(false);
+    showStep("add");
     searchEl.focus();
+  } else if (action === "find-stores") {
+    $("find-stores")?.click();
   } else if (action === "clear-search") {
     query = "";
     searchEl.value = "";

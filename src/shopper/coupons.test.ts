@@ -16,6 +16,8 @@ import {
   readCoupons,
   removeCoupon,
   saleBadge,
+  shopCouponHint,
+  storeCouponMarkup,
   upsertCoupon,
   writeClipped,
 } from "../../public/shopper/coupons.js";
@@ -80,6 +82,28 @@ describe("coupon checklist and savings", () => {
     assert.deepEqual(couponChecklist(kroger.items), ["Oreo", "Coca-Cola"]);
     assert.equal(checklistSentence(["Oreo", "Coca-Cola"]), "Look for coupons on: Oreo and Coca-Cola.");
     assert.equal(checklistSentence([]), "Nothing on this store’s list yet.");
+    assert.equal(shopCouponHint(kroger.items), "Look for coupons on: Oreo and Coca-Cola.");
+  });
+
+  it("keeps the typed coupon form behind Add a coupon", () => {
+    const summary = couponSavingsSummary(
+      [kroger],
+      [{ id: "c1", storeName: "Kroger", lineId: "0:oreo", itemName: "Oreo", kind: "dollars" as const, amount: 1 }],
+      "2026-10-26"
+    );
+    const html = storeCouponMarkup(kroger, {
+      page: couponPageFor("Kroger"),
+      rows: summary.byStore[0].rows,
+      storeSummary: summary.byStore[0],
+      canEnter: true,
+      open: false,
+    });
+    assert.match(html, /Add a coupon/);
+    assert.match(html, /coupon-form-wrap" hidden/);
+    assert.match(html, /Check Kroger coupons before you shop/);
+    assert.match(html, /Your coupon · Oreo · \$1\.00 off/);
+    assert.ok(html.indexOf("your-coupon") < html.indexOf("<details"));
+    assert.doesNotMatch(html, /<details[^>]* open/);
   });
 
   it("applies one coupon per line and never goes below zero", () => {

@@ -8,16 +8,16 @@ import app from "../app";
 import { browseCatalog } from "../catalog/service";
 import { krogerProductIdForLookup, upcKey, walmartLookupCodes, walmartUpcForLookup } from "../catalog/normalize";
 import type { RawCatalogRecord } from "../catalog/types";
-import { MemoryBudgetStore, MongoBudgetStore } from "./budget";
+import { MemoryBudgetStore, MongoBudgetStore, utcDay } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
-import { CatalogDemand, CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
 import { matchProgress, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
-import { catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "./status";
+import { catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "./status";
 import { nextRefreshPicks } from "./refresh";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import { recordsFromWalmartPage } from "./walmartWalk";
@@ -978,6 +978,62 @@ describe("catalog ingestion", () => {
     assert.equal("error" in missing, true);
   });
 
+  it("groups pack sizes into one family and keeps a different flavor separate", async () => {
+    const rows: RawCatalogRecord[] = [
+      {
+        name: "Tilefam Cola 12 Pack 12 fl oz Cans",
+        brand: "Tilefam",
+        storeName: "Walmart",
+        price: 7.48,
+        upc: "0099998100901",
+        size: "12 pk 12 fl oz",
+        priceSource: "live",
+        departmentId: "beverages",
+      },
+      {
+        name: "Tilefam Cola 2 Liter Bottle",
+        brand: "Tilefam",
+        storeName: "Kroger",
+        price: 2.48,
+        upc: "0099998100918",
+        size: "2 L",
+        priceSource: "live",
+        departmentId: "beverages",
+      },
+      {
+        name: "Tilefam Diet Cola 12 Pack 12 fl oz Cans",
+        brand: "Tilefam",
+        storeName: "Walmart",
+        price: 7.48,
+        upc: "0099998100925",
+        size: "12 pk 12 fl oz",
+        priceSource: "live",
+        departmentId: "beverages",
+      },
+    ];
+    await upsertCatalogRecords(rows, new Date("2026-10-26T12:00:00.000Z"));
+    const classic = await CatalogMaster.findOne({ upc: "0099998100901" }).lean<{ familyKey?: string; familyName?: string; variantLabel?: string } | null>();
+    const bottle = await CatalogMaster.findOne({ upc: "0099998100918" }).lean<{ familyKey?: string; variantLabel?: string } | null>();
+    const diet = await CatalogMaster.findOne({ upc: "0099998100925" }).lean<{ familyKey?: string } | null>();
+    assert.ok(classic?.familyKey);
+    assert.equal(classic?.familyKey, bottle?.familyKey);
+    assert.notEqual(classic?.familyKey, diet?.familyKey);
+    assert.match(classic?.variantLabel ?? "", /12 pk/);
+    assert.match(bottle?.variantLabel ?? "", /2 L/);
+    const sample = await catalogFamilySample({ query: "tilefam", department: "beverages", scan: 20, limit: 10 });
+    assert.equal("error" in sample, false);
+    if ("error" in sample) return;
+    assert.equal(sample.families, 2);
+    assert.equal(sample.groupedFamilies, 1);
+    assert.equal(sample.groupedProducts, 2);
+    assert.equal(sample.complete, true);
+    const grouped = sample.groups.find((group) => group.count === 2);
+    assert.ok(grouped);
+    assert.equal(grouped?.variants.length, 2);
+    const unknown = await catalogFamilySample({ department: "not-a-department" });
+    assert.equal("error" in unknown, true);
+  });
+
   it("shows normalized keys for Kroger-only, Walmart-only, and merged masters", async () => {
     const coke = "049000042566";
     const key = upcKey(coke);
@@ -1725,7 +1781,9 @@ describe("catalog ingestion", () => {
     assert.equal(seen[0]?.[0], walmartUpcForLookup(listUpc));
     assert.equal((await CatalogOffer.findOne({ productKey: listKey, storeName: "Walmart" }))?.status, "active");
     const status = await catalogStatus();
-    assert.equal(status.counts.refreshedToday.walmart >= 1, true);
+    const recorded = await CatalogRefreshDay.findOne({ day: utcDay(now) }).lean<{ walmart?: number } | null>();
+    assert.equal((recorded?.walmart ?? 0) >= 1, true);
+    assert.equal(typeof status.counts.refreshedToday.walmart, "number");
     assert.equal(typeof status.counts.refreshQueue.walmart, "number");
     assert.equal(typeof status.refresh.share, "number");
     assert.equal(status.refresh.shareKroger, ingestConfig().refreshShareKroger);

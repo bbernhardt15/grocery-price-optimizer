@@ -1,3 +1,4 @@
+import { identifyFamily } from "../catalog/family";
 import { formatUnitPrice, parsePackageSize } from "../packageSize";
 import { mapToDepartment } from "../catalog/departments";
 import { upcKey } from "../catalog/normalize";
@@ -154,6 +155,12 @@ export async function upsertCatalogRecords(
       continue;
     }
     const brand = record.brand.trim() || storeName;
+    const family = identifyFamily({
+      brand,
+      name,
+      size: record.size,
+      departmentId: mapped.departmentId,
+    });
     const images = unionCap(existing?.imageUrls, record.imageUrls, 4);
     const paths = unionCap(existing?.categoryPaths, record.categories, 8);
     const walmartItemId =
@@ -179,6 +186,9 @@ export async function upsertCatalogRecords(
           ...(mapped.subcategory ? { subcategory: mapped.subcategory } : {}),
           categoryPaths: paths,
           ...(record.size?.trim() ? { size: record.size.trim() } : {}),
+          familyKey: family.familyKey,
+          familyName: family.familyName,
+          variantLabel: family.variant.label,
           ...(walmartItemId ? { walmartItemId } : {}),
           ...(krogerProductId ? { krogerProductId } : {}),
           ...(bothNow && !hadBoth && !existing?.mergedAt ? { mergedAt: seenAt } : {}),

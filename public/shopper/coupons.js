@@ -411,9 +411,11 @@ export function storeCouponMarkup(store, options) {
     ? `<p class="store-coupon-total"><span>With your coupons</span><strong>${escapeHtml(money(storeSummary.estimated))}</strong><span class="estimate-tag">estimated</span></p>`
     : "";
   const form = options.canEnter
-    ? couponFormMarkup(store)
+    ? `<button type="button" class="text-btn coupon-add-toggle" data-show-coupon-form>Add a coupon</button>
+       <div class="coupon-form-wrap" hidden>${couponFormMarkup(store)}</div>`
     : `<p class="muted">Coupon links stay free. <button type="button" class="linkish" data-open-paywall="1">Grocery Gitter Pro</button> lets you type in a coupon you already have.</p>`;
-  return `<details class="coupon-panel"${open}>
+  const saved = `${lines ? `<ul class="your-coupon-list">${lines}</ul>` : ""}${estimated}`;
+  return `${saved}<details class="coupon-panel"${open}>
     <summary>Check ${storeName} coupons before you shop</summary>
     <div class="coupon-body">
       ${link}
@@ -422,11 +424,14 @@ export function storeCouponMarkup(store, options) {
         <input type="checkbox" data-coupon-clipped="${storeName}"${clipped} />
         <span>I clipped my coupons</span>
       </label>
-      ${lines ? `<ul class="your-coupon-list">${lines}</ul>` : ""}
-      ${estimated}
       ${form}
     </div>
   </details>`;
+}
+
+/** Short in-store reminder. The plan keeps the full coupon section. */
+export function shopCouponHint(items) {
+  return checklistSentence(couponChecklist(items), 4);
 }
 
 function couponFormMarkup(store) {

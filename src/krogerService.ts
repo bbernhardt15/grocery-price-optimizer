@@ -132,8 +132,9 @@ function categoryNames(value: unknown): string[] {
 }
 
 function krogerImageUrls(images: KrogerImage[] | undefined): string[] {
+  const ranked = [...(images ?? [])].sort((a, b) => perspectiveRank(a.perspective) - perspectiveRank(b.perspective));
   const urls: string[] = [];
-  for (const image of images ?? []) {
+  for (const image of ranked) {
     const sizes = [...(image.sizes ?? [])].sort((a, b) => {
       const rank = (size?: string) =>
         size === "xlarge" ? 4 : size === "large" ? 3 : size === "medium" ? 2 : size === "small" ? 1 : 0;
@@ -145,6 +146,14 @@ function krogerImageUrls(images: KrogerImage[] | undefined): string[] {
     }
   }
   return urls.slice(0, 4);
+}
+
+function perspectiveRank(perspective?: string): number {
+  const value = (perspective || "").toLowerCase();
+  if (value.includes("front")) return 0;
+  if (value.includes("nutri") || value.includes("ingredient") || value.includes("drug") || value.includes("barcode")) return 4;
+  if (value.includes("back")) return 3;
+  return 1;
 }
 
 function krogerAvailability(item?: KrogerProductItem): "in_stock" | "out_of_stock" | "unknown" {

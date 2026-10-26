@@ -434,29 +434,34 @@ export function singleStoreSavings(lines) {
     for (const offer of line.offers || []) {
       if (offer?.storeName) names.add(offer.storeName);
     }
+    if (line?.storeName) names.add(line.storeName);
   }
 
-  let best = null;
+  const completeStores = [];
+  const incompleteStores = [];
   for (const storeName of names) {
     let total = 0;
-    let complete = true;
+    const missing = [];
     for (const line of priced) {
       const rows = (line.offers || []).filter((row) => sameStore(row.storeName, storeName));
       const exact = rows.find((row) => !offerIsSwap(row));
       const hasExactSomewhere = (line.offers || []).some((row) => row && !offerIsSwap(row));
       const offer = exact || (hasExactSomewhere ? undefined : rows[0]);
       if (!offer || !Number.isFinite(Number(offer.price))) {
-        complete = false;
-        break;
+        missing.push(String(line.name || "Item"));
+        continue;
       }
       total += Number(line.quantity) * Number(offer.price);
     }
-    if (!complete) continue;
-    total = roundMoney(total);
-    if (!best || total < best.total || (total === best.total && storeName.localeCompare(best.storeName) < 0)) {
-      best = { storeName, total };
-    }
+    if (missing.length > 0) incompleteStores.push({ storeName, missing });
+    else completeStores.push({ storeName, total: roundMoney(total) });
   }
+  completeStores.sort((a, b) => a.total - b.total || a.storeName.localeCompare(b.storeName));
+  const best = completeStores[0] || null;
+  const priciest = completeStores.length ? completeStores[completeStores.length - 1] : null;
+  const average = completeStores.length
+    ? roundMoney(completeStores.reduce((sum, store) => sum + store.total, 0) / completeStores.length)
+    : null;
 
   if (!best) {
     return {
@@ -464,6 +469,12 @@ export function singleStoreSavings(lines) {
       singleStore: null,
       savings: 0,
       note: "No single store carries every item on this trip.",
+      completeStores,
+      incompleteStores,
+      average: null,
+      priciest: null,
+      savedVsAverage: 0,
+      savedVsPriciest: 0,
     };
   }
 
@@ -476,7 +487,125 @@ export function singleStoreSavings(lines) {
   } else {
     note = `Same total as shopping only at ${best.storeName}.`;
   }
-  return { splitTotal, singleStore: best, savings, note };
+  return {
+    splitTotal,
+    singleStore: best,
+    savings,
+    note,
+    completeStores,
+    incompleteStores,
+    average,
+    priciest,
+    savedVsAverage: average == null ? 0 : roundMoney(average - splitTotal),
+    savedVsPriciest: priciest ? roundMoney(priciest.total - splitTotal) : 0,
+  };
+}
+
+export function tripStory(comparison, options = {}) {
+  const stops = Math.max(1, Number(options.stops) || 1);
+  const saved = Number(comparison?.savings) || 0;
+  const cheapest = comparison?.singleStore;
+  let headline = "Your trip";
+  if (saved > 0.009) headline = `You saved ${money(saved)} with Grocery Gitter`;
+  else if (saved < -0.009) headline = `This trip costs ${money(Math.abs(saved))} more than one store`;
+  else if (cheapest) headline = `Same total as shopping at ${cheapest.storeName}`;
+  else headline = "No single store carries this whole list";
+
+  const extra = Math.max(0, stops - 1);
+  let effort = "One stop.";
+  if (!cheapest) {
+    effort = `${stops} ${stops === 1 ? "store" : "stores"}. No one store stocks every item, so the prices below are only the stores that do.`;
+  } else if (extra === 0) {
+    effort = `One stop, at ${cheapest.storeName}.`;
+  } else if (saved > 0.009) {
+    effort =
+      extra === 1
+        ? `The extra stop saves ${money(saved)} versus shopping only at ${cheapest.storeName}.`
+        : `${extra} extra stops save ${money(saved)} versus shopping only at ${cheapest.storeName}.`;
+  } else if (saved < -0.009) {
+    effort = `Shopping only at ${cheapest.storeName} would cost less. Fewer stops can put it back together.`;
+  } else {
+    effort = `${stops} stops, same total as ${cheapest.storeName} alone.`;
+  }
+  if (options.fewerStops) {
+    effort += " Fewer stops is on, so a store is added only when it saves at least $8.";
+  }
+
+  let versus = "";
+  if (comparison?.average != null && comparison.priciest && cheapest && comparison.priciest.storeName !== cheapest.storeName) {
+    versus = `The average one-store total is ${money(comparison.average)} (${money(comparison.savedVsAverage)} ${comparison.savedVsAverage >= 0 ? "less" : "more"} here). The highest is ${money(comparison.priciest.total)} at ${comparison.priciest.storeName}.`;
+  }
+  return {
+    headline,
+    effort,
+    versus,
+    completeStores: comparison?.completeStores || [],
+    incompleteStores: comparison?.incompleteStores || [],
+  };
+}
+
+/**
+ * Drop a stop when moving its items onto stores already in the trip saves
+ * less than `minSavings`. Prices come only from offers the line already has.
+ */
+export function consolidateStops(stores, minSavings = 2, capabilities = {}) {
+  const groups = (stores || []).map((store) => ({
+    storeName: store.storeName,
+    items: (store.items || []).map((item) => ({ ...item, offers: item.offers })),
+  }));
+  const protectedStores = new Set();
+  let moved = false;
+  for (;;) {
+    if (groups.length < 2) break;
+    const open = groups.filter((group) => !protectedStores.has(group.storeName));
+    if (!open.length) break;
+    open.sort(
+      (a, b) =>
+        a.items.reduce((sum, item) => sum + Number(item.itemTotal || 0), 0) -
+          b.items.reduce((sum, item) => sum + Number(item.itemTotal || 0), 0) || a.items.length - b.items.length
+    );
+    const small = open[0];
+    const others = groups.filter((group) => group !== small);
+    let increase = 0;
+    const hops = [];
+    let blocked = false;
+    for (const item of small.items) {
+      const offer = (item.offers || [])
+        .filter((row) => others.some((group) => sameStore(group.storeName, row.storeName)) && Number.isFinite(Number(row.price)))
+        .sort((a, b) => Number(a.price) - Number(b.price))[0];
+      if (!offer) {
+        blocked = true;
+        break;
+      }
+      increase += (Number(offer.price) - Number(item.price)) * Number(item.quantity || 1);
+      hops.push({ item, offer });
+    }
+    if (blocked || increase >= minSavings - 0.001) {
+      protectedStores.add(small.storeName);
+      continue;
+    }
+    for (const hop of hops) {
+      const target = others.find((group) => sameStore(group.storeName, hop.offer.storeName));
+      target.items.push(lineFromOffer(hop.item, hop.offer));
+    }
+    groups.splice(groups.indexOf(small), 1);
+    moved = true;
+  }
+  if (!moved) {
+    return {
+      stores,
+      total: roundMoney((stores || []).reduce((sum, store) => sum + Number(store.subtotal || 0), 0)),
+    };
+  }
+  return applyTripEdits(
+    groups.map((group) => ({
+      storeName: group.storeName,
+      items: group.items,
+      subtotal: roundMoney(group.items.reduce((sum, item) => sum + Number(item.itemTotal || 0), 0)),
+    })),
+    {},
+    capabilities
+  );
 }
 
 export function formatItemLine(item) {
@@ -572,6 +701,7 @@ export function saveTripSnapshot(storage, payload, edits) {
       edits: {
         lockedStore: edits?.lockedStore || null,
         moves: { ...(edits?.moves || {}) },
+        fewerStops: Boolean(edits?.fewerStops),
       },
       savedAt: Date.now(),
     })

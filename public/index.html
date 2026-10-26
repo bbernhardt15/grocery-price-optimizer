@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=coupons-1" />
+    <link rel="stylesheet" href="/styles.css?v=calm-coupons-1" />
   </head>
   <body>
     <a class="skip" href="#catalog">Skip to products</a>
@@ -46,7 +46,7 @@
           <span class="brand-mark" aria-hidden="true">G</span>
           <div>
             <p class="brand-kicker">Grocery Gitter</p>
-            <p class="brand-title">Browse the aisle</p>
+            <p class="brand-title" id="brand-title">Add items</p>
           </div>
         </div>
 
@@ -76,11 +76,10 @@
             <span>ZIP</span>
             <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" aria-describedby="zip-hint" />
           </label>
-          <button type="button" class="settings-btn settings-open">Settings</button>
           <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
             <span aria-hidden="true" id="theme-glyph">◐</span>
           </button>
-          <button id="settings-open" type="button" class="ghost" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
+          <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="alerts-toggle" type="button" class="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts">
             Alerts
             <span id="alerts-badge" class="count-pill" hidden>0</span>
@@ -91,7 +90,7 @@
           </button>
         </div>
       </header>
-      <p id="zip-hint" class="zip-hint">5-digit US ZIP, saved on this device. Target, Aldi, and other weekly ads use this ZIP’s circular, not a national shelf. ZIP+4 is ok.</p>
+      <p id="zip-hint" class="zip-hint">Saved on this phone.</p>
 
       <div class="body">
         <aside class="rail" aria-label="Departments and filters">
@@ -142,7 +141,10 @@
         </aside>
 
         <main id="catalog" class="catalog" tabindex="-1">
-          <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
+          <div class="dept-scroller">
+            <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
+            <span id="chip-hint" class="chip-hint" hidden>More</span>
+          </div>
           <div class="toolbar">
             <p id="result-count" class="result-count" aria-live="polite">Loading shelves…</p>
             <div class="toolbar-actions">
@@ -157,14 +159,28 @@
                 </select>
               </label>
               <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">Filters</button>
-              <button id="coverage-open" type="button" class="text-btn">Coverage</button>
+              <button id="coverage-open" type="button" class="text-btn" hidden>Coverage</button>
             </div>
           </div>
           <p id="coverage-banner" class="coverage-banner"></p>
+          <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
+          <section id="start-here" class="start-here" aria-label="Start from a list">
+            <div id="usuals-block" hidden>
+              <div class="start-head">
+                <h2>Buy again</h2>
+                <button type="button" id="add-usuals" class="primary">Add my usuals</button>
+              </div>
+              <ul id="usuals-list" class="usuals-list"></ul>
+            </div>
+            <h2>Starter lists</h2>
+            <div id="starter-lists" class="starter-row"></div>
+          </section>
           <p id="catalog-error" class="status" role="alert" hidden></p>
           <div id="grid" class="grid" aria-live="polite"></div>
+          <button type="button" id="show-more" class="show-more" hidden>Show more</button>
           <div id="sentinel" class="sentinel" aria-hidden="true"></div>
           <section id="trip" class="trip" hidden aria-label="Trip plan"></section>
+          <section id="shop" class="shop" hidden aria-label="In the store"></section>
           <footer class="site-footer">
             <nav aria-label="Legal">
               <a href="/privacy">Privacy</a>
@@ -186,7 +202,7 @@
           <p class="muted sub-note">Compares the best price across stores with the price when you saved each item. Watch one item on its own, or set a target under today's price.</p>
           <div id="list-empty" class="empty-state">
             <h3>Your list is empty</h3>
-            <p>Check items while you browse. They stay on this device until you share.</p>
+            <p>Tap a starter list, buy again, or browse the aisle. Items stay on this device.</p>
             <button type="button" class="primary" data-empty-action="browse">Browse the aisle</button>
           </div>
           <ul id="list-items" class="list-items"></ul>
@@ -227,7 +243,7 @@
             Allow substitutes in the trip plan
           </label>
           <p class="muted sub-note">A substitute is a different product: same department, similar name and size. It is never shown as an exact match.</p>
-          <button id="plan-btn" type="button" class="primary plan-btn" disabled>Plan the trip</button>
+          <button id="plan-btn" type="button" class="primary plan-btn" disabled>See your plan</button>
           <button id="sample-btn" type="button" class="ghost">Try a sample list</button>
           <p id="plan-error" class="status" role="alert" hidden></p>
           <nav class="panel-legal" aria-label="App information">
@@ -238,16 +254,22 @@
         </aside>
       </div>
 
+      <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
+        <button type="button" data-flow="add" aria-current="step">Add items</button>
+        <button type="button" data-flow="plan">See your plan</button>
+        <button type="button" data-flow="shop">Shop</button>
+      </nav>
       <div class="list-bar" id="list-bar">
         <button type="button" id="list-bar-btn" class="list-bar-btn">
-          <span id="bar-count">My list</span>
+          <span id="bar-count">0 items</span>
           <span class="bar-figures">
             <span id="bar-save" class="bar-save" hidden></span>
-            <span id="bar-total">$0.00</span>
+            <span id="bar-total"></span>
           </span>
         </button>
+        <button type="button" id="bar-primary" class="primary bar-primary">See your plan</button>
         <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
-        <p id="bar-caption" class="bar-caption">Add items to see savings</p>
+        <p id="bar-caption" class="bar-caption" hidden>Add items to see savings</p>
       </div>
     </div>
 
@@ -275,10 +297,10 @@
     </dialog>
     <dialog id="onboarding" class="sheet onboard" aria-labelledby="onboard-title">
       <form id="onboard-form" class="sheet-body">
-        <p id="onboard-progress" class="onboard-progress">1 of 5</p>
+        <p id="onboard-progress" class="onboard-progress">1 of 2</p>
         <div id="onboard-dots" class="onboard-dots" aria-hidden="true"></div>
-        <h2 id="onboard-title" tabindex="-1">Pick items</h2>
-        <p id="onboard-body">Check groceries as you browse. Your list stays on this device.</p>
+        <h2 id="onboard-title" tabindex="-1">Start with what you already buy</h2>
+        <p id="onboard-body">Buy again, tap a starter list, or browse the aisle. Your list stays on this device.</p>
         <div id="onboard-extra">
           <div id="onboard-account-fields" hidden>
             <button type="button" id="onboard-sign-in" class="ghost" hidden>Sign in</button>
@@ -335,16 +357,20 @@
           <p id="plan-status" class="muted">One store and one shared list are free. Coupon links stay free. Pro adds the multi-store split, price alerts, unlimited shared lists, cart handoffs, and typing in a coupon you already have.</p>
           <button type="button" class="ghost" id="open-paywall">See Pro</button>
         </section>
-        <div class="settings-list">
-          <button type="button" class="ghost" id="settings-theme">Theme</button>
-          <p id="settings-zip" class="muted">No ZIP saved yet.</p>
-          <button type="button" class="ghost" id="settings-zip-edit">Change ZIP</button>
-          <p id="settings-kroger" class="muted">Kroger connect is optional.</p>
-          <button type="button" class="ghost" id="settings-kroger-connect" hidden>Connect Kroger</button>
-          <button type="button" class="primary" id="settings-welcome">Show welcome</button>
-        </div>
-        <section class="delete-box" aria-labelledby="delete-data-title">
-          <h3 id="delete-data-title">Delete my data</h3>
+        <section class="settings-group" aria-labelledby="settings-phone-title">
+          <h3 id="settings-phone-title">On this phone</h3>
+          <div class="settings-list">
+            <button type="button" class="ghost" id="settings-theme">Theme</button>
+            <p id="settings-zip" class="muted">No ZIP saved yet.</p>
+            <button type="button" class="ghost" id="settings-zip-edit">Change ZIP</button>
+            <button type="button" id="find-stores" class="ghost">Find nearby stores</button>
+            <p id="settings-kroger" class="muted">Kroger connect is optional.</p>
+            <button type="button" class="ghost" id="settings-kroger-connect" hidden>Connect Kroger</button>
+            <button type="button" class="primary" id="settings-welcome">Show welcome</button>
+          </div>
+        </section>
+        <details class="delete-box">
+          <summary id="delete-data-title">Delete my data</summary>
           <p class="muted">
             This removes the list on this device, shared lists you created, price alerts, and notifications.
             It also signs this browser out of Kroger. If you are signed in, it deletes the Grocery Gitter account too.
@@ -356,7 +382,7 @@
           </label>
           <button type="button" class="danger" id="delete-data-btn" disabled>Delete my data</button>
           <p id="delete-error" class="status" role="alert" hidden></p>
-        </section>
+        </details>
       </div>
     </dialog>
     <dialog id="paywall-dialog" class="sheet" aria-labelledby="paywall-title">
@@ -384,10 +410,20 @@
         <p id="paywall-error" class="status" role="alert" hidden></p>
       </div>
     </dialog>
+    <dialog id="account-ask" class="sheet" aria-labelledby="account-ask-title">
+      <form id="account-ask-form" class="sheet-body">
+        <h2 id="account-ask-title">Save this on your other devices?</h2>
+        <p>You can keep shopping on this phone without an account.</p>
+        <div class="onboard-actions">
+          <button type="button" id="account-ask-skip" class="ghost">Not now</button>
+          <button type="submit" id="account-ask-in" class="primary">Sign in</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=coupons-1"></script>
+    <script type="module" src="/app.js?v=calm-coupons-1"></script>
   </body>
 </html>

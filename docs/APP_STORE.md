@@ -76,7 +76,7 @@ Sign-in is optional and stays off until the account variables in `docs/ACCOUNTS.
 
 Crash reporting is Sentry, and only when `SENTRY_DSN` is set. With that variable unset, the app does not initialize Sentry and does not send crash reports. The store answers below assume the build you ship has the DSN set. If you leave it unset, answer “No” for crash data and crash logs.
 
-The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Use my location** on the welcome ZIP step. That is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET` and `ACCESS_COARSE_LOCATION` only. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required.
+The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Find nearby stores**. That button is not on the launch screen and not in the two-screen welcome. It is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET` and `ACCESS_COARSE_LOCATION` only. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required.
 
 ### Location questions
 
@@ -84,7 +84,7 @@ Answer these the same way on App Store Connect and in the Play Console.
 
 | Question | Answer |
 | --- | --- |
-| Does the app use location? | Yes. Approximate location only, and only after **Use my location** |
+| Does the app use location? | Yes. Approximate location only, and only after **Find nearby stores** |
 | Precise location | No. Do not mark Precise Location. Android does not declare `ACCESS_FINE_LOCATION` |
 | When is it used? | When In Use. Once, to fill a ZIP. Not in the background |
 | Is it stored? | No. Coordinates are sent to `GET /api/geo/zip`, which asks the Census geocoder and then drops them |
@@ -94,7 +94,7 @@ Answer these the same way on App Store Connect and in the Play Console.
 
 What the app actually handles:
 
-- **ZIP code.** Saved on the device. Also sent with browse, search, and trip planning. The 5-digit ZIP is stored in MongoDB (`ShopperZip`) with a hit count, last-seen time, and sometimes a Kroger location id. It is not tied to a name. The catalog job keeps a short list of recent shopper ZIPs. A price watch can store the same ZIP again, on that watch. In the phone shells, Use my location may send coordinates to `GET /api/geo/zip` so the server can ask the Census geocoder for that ZIP. The coordinates are not stored.
+- **ZIP code.** Saved on the device. Also sent with browse, search, and trip planning. The 5-digit ZIP is stored in MongoDB (`ShopperZip`) with a hit count, last-seen time, and sometimes a Kroger location id. It is not tied to a name. The catalog job keeps a short list of recent shopper ZIPs. A price watch can store the same ZIP again, on that watch. In the phone shells, Find nearby stores may send coordinates to `GET /api/geo/zip` so the server can ask the Census geocoder for that ZIP. The coordinates are not stored. The welcome does not request location.
 - **Welcome flag.** `gg-onboarding-done` on the device, so the intro is not shown again. Settings can open it anyway. Not sent to the server.
 - **My list, before sharing.** Saved on the device: items (name, brand, size, quantity), substitute choice, and any per-item alert setting. Plan the trip sends name, brand, quantity, catalog id, UPC, and the substitute choice for that request only. That request is not stored as the list.
 - **Shared lists.** After Share list, the server stores a `SharedList`: items (name, brand, size, quantity, catalog id, checked, and a deletion marker for removed items), an optional display name on items the shopper adds or checks (max 40 characters; blank means no name), a title, edit or view-only, list and item timestamps, and SHA-256 hashes of the share secret and the owner secret. The raw secrets stay in the browser and in the link. Replacing a link keeps up to 10 retired share hashes. There is no expiry. Revoke link sets `revokedAt` and keeps the items. Guests then get “This link was turned off.” The owner can still open the list and can share a new link, which retires the old hash. Neither revoke nor a new link deletes the document. Delete my data removes lists created on this device and invalidates the link. There is no separate control that deletes one list and leaves another.
