@@ -288,11 +288,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     if (ready) {
       action = {
         type: "kroger_cart",
-        label: "Send to Kroger cart",
+        label: `Send to ${storeName} cart`,
         url: KROGER_CART_START,
         status: "needs_shopper_login",
         ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-        detail: "Starts Kroger shopper login, then PUT /v1/cart/add.",
+        detail: "Signs in to Kroger, then adds the items.",
       };
     }
   }
@@ -310,11 +310,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     if (url) {
       action = {
         type: "walmart_cart",
-        label: "Open Walmart cart",
+        label: `Send to ${storeName} cart`,
         url,
         status: "ready",
         ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-        detail: "Opens walmart.com with these item ids. Grocery Gitter does not report the cart as filled.",
+        detail: "Opens walmart.com with the items in the cart link. Grocery Gitter does not report the cart as filled.",
       };
     }
   }
@@ -322,11 +322,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
   if (!action) {
     action = {
       type: "shop_list",
-      label: `Shop this list at ${storeName}`,
+      label: `Open ${storeName} list`,
       status: handoffItems.length ? "ready" : "unavailable",
       ...(firstUrl ? { url: firstUrl } : {}),
       detail: firstUrl
-        ? `Checklist with an Open in ${storeName} link for each item. Not a cart fill.`
+        ? `Checklist with item links. Each line has an Open in ${storeName} link. Not a cart fill.`
         : `Checklist only. ${storeName} has no verified item link.`,
     };
   }
@@ -447,7 +447,8 @@ export function formatTripText(stores, options = {}) {
   for (const store of stores || []) {
     const lines = (store.items || []).map(formatItemLine).filter(Boolean);
     if (!lines.length) continue;
-    blocks.push(options.headed ? [store.storeName, ...lines].join("\n") : lines.join("\n"));
+    const heading = `${store.storeName} list`;
+    blocks.push(options.headed ? [heading, ...lines].join("\n") : lines.join("\n"));
   }
   return blocks.join("\n\n");
 }

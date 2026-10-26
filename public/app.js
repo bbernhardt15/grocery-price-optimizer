@@ -1209,9 +1209,9 @@ function primaryAction(store) {
     return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label || "Send to Kroger cart")}</button>`;
   }
   if (action.type === "walmart_cart" && action.url) {
-    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || "Open Walmart cart")}</a>`;
+    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || `Send to ${store.storeName} cart`)}</a>`;
   }
-  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Shop this list at ${store.storeName}`)}</button>`;
+  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Open ${store.storeName} list`)}</button>`;
 }
 
 function renderTrip(payload) {
@@ -1336,7 +1336,7 @@ function openChecklist(storeName) {
   const items = checklistItems(storeName);
   const groups = groupForAisle(items);
   const checks = readChecks(localStorage, tripId());
-  const title = instore ? "In the store" : `Shop this list at ${storeName}`;
+  const title = instore ? "In the store" : `${storeName} list`;
   const groupsHtml = groups
     .map((group) => {
       const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
