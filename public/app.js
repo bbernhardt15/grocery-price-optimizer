@@ -729,6 +729,26 @@ function paintChoice(card, selector, value) {
   });
 }
 
+function phoneShelf() {
+  return window.matchMedia("(max-width: 1099px)").matches;
+}
+
+/** Bring a tall family card up under the sticky header so size and quantity sit above the list bar. */
+function settleCard(card) {
+  if (!card || !phoneShelf()) return;
+  const bar = document.querySelector(".list-bar");
+  if (!bar || getComputedStyle(bar).display === "none") return;
+  const safeTop = (document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0) + 8;
+  const safeBottom = bar.getBoundingClientRect().top - 8;
+  const covered = [...card.querySelectorAll(".size-option, .choice-chip, .card-actions, .size")].some((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.height > 0 && (rect.bottom > safeBottom + 1 || rect.top < safeTop - 1);
+  });
+  if (!covered) return;
+  const delta = card.getBoundingClientRect().top - safeTop;
+  if (delta > 1) window.scrollBy({ top: delta, left: 0 });
+}
+
 function applyFlavor(card, flavorKey) {
   if (!card) return;
   const family = familiesByKey.get(card.dataset.familyKey || "");
@@ -736,10 +756,11 @@ function applyFlavor(card, flavorKey) {
   const choices = flavorVariants(family, flavorKey);
   const current = productsById.get(card.dataset.productId);
   const sameSize = choices.find((variant) => variant.label && variant.label === current?.label);
-  const verdict = selectBestValue(choices.map(valueRow), card.dataset.valueSort || "unit");
+  const verdict = selectBestValue(choices.map(valueRow), card.dataset.sizeSort || "unit");
   const best = choices.find((variant) => variant.id === verdict.winnerId);
   const next = sameSize || best || choices[0];
   if (next) applyVariant(card, next.id);
+  settleCard(card);
 }
 
 function applyVariant(card, variantId) {
@@ -775,7 +796,7 @@ function applyVariant(card, variantId) {
   const sizeHost = card.querySelector("[data-size-row]");
   if (sizeHost && family) {
     const sizes = flavorVariants(family, variant.flavorKey || "");
-    sizeHost.innerHTML = sizePanel(title, sizes, variant.id, card.dataset.valueSort || "unit");
+    sizeHost.innerHTML = sizePanel(title, sizes, variant.id, card.dataset.sizeSort || "unit");
   }
   paintChoice(card, "[data-flavor]", variant.flavorKey || "");
   paintChoice(card, "[data-size-id]", variant.id);
@@ -894,7 +915,7 @@ function cardHtml(tile) {
   const sizeRow = `<p class="choice-label">Size</p><div data-size-row>${sizePanel(title, sizes, selected.id, "unit")}</div>`;
   const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
   const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
-  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-value-sort="unit" data-qty="1">
+  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
     <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
       <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
     </button>
@@ -989,6 +1010,7 @@ async function loadPage(reset) {
     resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
+    if (reset) settleCard(gridEl.querySelector(".card"));
     const demo = catalogSource === "demo";
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
@@ -2358,11 +2380,11 @@ document.addEventListener("click", (event) => {
     selectDepartment(dept.getAttribute("data-dept"));
     return;
   }
-  const sortPick = target.closest("[data-value-sort]");
+  const sortPick = target.closest("button[data-value-sort]");
   if (sortPick && sortPick.closest("#grid")) {
     const card = sortPick.closest(".card");
     if (card) {
-      card.dataset.valueSort = sortPick.getAttribute("data-value-sort") || "unit";
+      card.dataset.sizeSort = sortPick.getAttribute("data-value-sort") || "unit";
       applyVariant(card, card.dataset.productId);
     }
     return;

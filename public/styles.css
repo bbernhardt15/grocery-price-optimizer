@@ -48,6 +48,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+html { scroll-padding-top: 96px; scroll-padding-bottom: calc(var(--bar-h) + 16px); }
 body {
   font-family: var(--font);
   color: var(--ink);
@@ -504,11 +505,19 @@ img { max-width: 100%; display: block; }
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+@media (max-width: 799px) {
+  .card-open { min-height: 96px; }
+  .card-open img { height: 96px; }
+  .size-option, .choice-chip, .value-toggle button, .card-actions, .stepper button {
+    scroll-margin-bottom: calc(var(--bar-h) + 12px);
+  }
+}
 @media (min-width: 800px) {
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .card-open img { height: 160px; }
 }
 @media (min-width: 1100px) {
+  html { scroll-padding-top: 0; scroll-padding-bottom: 24px; }
   .body {
     grid-template-columns: 240px minmax(0, 1fr) 320px;
     align-items: start;
