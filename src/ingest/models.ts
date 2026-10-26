@@ -150,6 +150,7 @@ const maintenanceJobSchema = new Schema(
     examined: { type: Number, default: 0 },
     updated: { type: Number, default: 0 },
     clearedExclusions: { type: Number, default: 0 },
+    setExclusions: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
     cursor: { type: String, default: "" },
     error: { type: String, default: "" },

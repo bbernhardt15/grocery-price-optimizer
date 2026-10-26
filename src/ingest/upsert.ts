@@ -203,6 +203,8 @@ export async function upsertCatalogRecords(
     const parsed = parsePackageSize(record.size) ?? parsePackageSize(name);
     const unit = parsed ? formatUnitPrice(record.price, parsed) : null;
     const priceSource = record.priceSource === "seed" ? "seed" : "live";
+    const refreshExcluded =
+      mapped.departmentId !== "other" ? false : mapped.signal === "excluded" ? true : undefined;
     await CatalogOffer.updateOne(
       offerFilter,
       {
@@ -212,6 +214,7 @@ export async function upsertCatalogRecords(
           locationId,
           zip: record.zip?.trim() || "",
           price: Math.round(record.price * 100) / 100,
+          ...(refreshExcluded !== undefined ? { refreshExcluded } : {}),
           ...(unit ? { unitPrice: unit.unitPrice, unitPriceText: unit.unitPriceText } : {}),
           ...(record.size?.trim() ? { size: record.size.trim() } : {}),
           onSale: Boolean(record.onSale),
