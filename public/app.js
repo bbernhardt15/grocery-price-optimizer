@@ -40,6 +40,7 @@ import {
 } from "./shopper/tripPlan.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
+import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -148,6 +149,7 @@ async function hideSplash() {
 const list = new Map();
 /** @type {Map<string, Record<string, any>>} */
 const productsById = new Map();
+const familiesByKey = new Map();
 let departments = [];
 let activeDepartment = "all";
 let query = "";
@@ -371,9 +373,12 @@ function saveList() {
     addedBy: entry.addedBy,
     checkedBy: entry.checkedBy,
     writtenAt: entry.writtenAt || 0,
-    name: entry.product.name,
+    name: entry.product.familyName || entry.product.name,
+    catalogName: entry.product.catalogName || entry.product.name,
+    familyName: entry.product.familyName || entry.product.name,
     brand: entry.product.brand,
-    sizeLabel: entry.product.sizeLabel,
+    sizeLabel: entry.product.variantLabel || entry.product.sizeLabel,
+    variantLabel: entry.product.variantLabel || entry.product.sizeLabel,
     baselinePrice: entry.baselinePrice,
     baselineStore: entry.baselineStore,
     watch: entry.watch || "inherit",
@@ -572,14 +577,15 @@ function renderListRows() {
       const credit = attributionLine(entry);
       const itemId = entry.itemId || entry.product.id;
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
+      const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
         <img src="${escapeHtml(image)}" alt="" />
         <div>
           <label class="got-it">
-            <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(entry.product.name)}" />
-            <strong>${escapeHtml(entry.product.name)}</strong>
+            <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />
+            <strong>${escapeHtml(heading.title)}</strong>
           </label>
-          <p class="muted">${escapeHtml(entry.product.brand || "")}${entry.product.sizeLabel ? ` · ${escapeHtml(entry.product.sizeLabel)}` : ""}</p>
+          <p class="muted">${escapeHtml(heading.detail)}</p>
           ${price}
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
           ${sub}
@@ -589,14 +595,14 @@ function renderListRows() {
               Watch price
             </label>
             <label class="target-price">Target $
-              <input data-target="${escapeHtml(entry.product.id)}" inputmode="decimal" value="${escapeHtml(targetValue)}" placeholder="optional" aria-label="Target price for ${escapeHtml(entry.product.name)}" />
+              <input data-target="${escapeHtml(entry.product.id)}" inputmode="decimal" value="${escapeHtml(targetValue)}" placeholder="optional" aria-label="Target price for ${escapeHtml(heading.title)}" />
             </label>
           </div>
         </div>
         <div class="stepper">
-          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>−</button>
+          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>−</button>
           <output>${entry.quantity}</output>
-          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(entry.product.name)}" ${locked ? "disabled" : ""}>+</button>
+          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>+</button>
         </div>
       </li>`;
     })
@@ -661,18 +667,102 @@ function addProduct(product, quantity = 1) {
     void card.offsetWidth;
     card.classList.add("just-added");
   }
-  toast(`Added ${product.name}`);
+  const added = listItemTitle(product);
+  toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
 }
 
 function syncCards() {
   for (const card of gridEl.querySelectorAll("[data-product-id]")) {
     const id = card.getAttribute("data-product-id");
-    const entry = list.get(id);
+    const entry = findListEntry(id);
     const box = card.querySelector("input[type=checkbox]");
     const output = card.querySelector("output");
     if (box) box.checked = Boolean(entry);
-    if (output) output.textContent = String(entry?.quantity ?? 1);
+    if (output) output.textContent = String(entry?.quantity ?? card.dataset.qty ?? 1);
   }
+}
+
+function rememberTile(tile) {
+  if (!tile) return;
+  if (tile.familyKey) familiesByKey.set(tile.familyKey, tile);
+  const variants = Array.isArray(tile.variants) && tile.variants.length ? tile.variants : [tile];
+  for (const variant of variants) {
+    if (!variant?.id) continue;
+    productsById.set(variant.id, {
+      ...variant,
+      catalogName: variant.catalogName || variant.name,
+      familyKey: tile.familyKey || variant.familyKey,
+      familyName: tile.familyName || variant.familyName || tile.name,
+      variantLabel: variant.label || variant.variantLabel || tile.variantLabel || variant.sizeLabel,
+    });
+  }
+}
+
+function variantChoices(tile) {
+  return Array.isArray(tile?.variants) ? tile.variants : [];
+}
+
+function selectedVariant(tile) {
+  const variants = variantChoices(tile);
+  return variants.find((variant) => variant.id === tile.defaultVariantId) || variants[0] || tile;
+}
+
+function brandLine(tile, title) {
+  const brand = String(tile.brand || "").trim();
+  const parts = [];
+  if (brand && !String(title).toLowerCase().startsWith(brand.toLowerCase())) parts.push(brand);
+  if (tile.storeBrand) parts.push("store brand");
+  return parts.join(" · ");
+}
+
+function applyVariant(card, variantId) {
+  if (!card) return;
+  const family = familiesByKey.get(card.dataset.familyKey || "");
+  const variant = family?.variants?.find((item) => item.id === variantId) || productsById.get(variantId);
+  if (!variant) return;
+  const stored = {
+    ...variant,
+    familyKey: family?.familyKey || variant.familyKey,
+    familyName: family?.familyName || variant.familyName || variant.name,
+    variantLabel: variant.label || variant.variantLabel,
+  };
+  productsById.set(variant.id, stored);
+  card.dataset.productId = variant.id;
+  const title = stored.familyName || stored.name;
+  const img = card.querySelector("img");
+  if (img) img.src = mediaUrl(variant.imageUrls?.[0] || family?.imageUrls?.[0] || "");
+  const open = card.querySelector("[data-open]");
+  if (open) {
+    open.setAttribute("data-open", variant.id);
+    open.setAttribute("aria-label", `Details for ${title}`);
+  }
+  const price = variant.bestOffer?.price ?? variant.price;
+  const store = variant.bestOffer?.storeName || variant.storeName || "";
+  const unit = variant.bestOffer?.unitPriceText || variant.unitPriceText || "";
+  const priceEl = card.querySelector("[data-price]");
+  if (priceEl) priceEl.innerHTML = `<strong>${money(price)}</strong> <span>${escapeHtml(store)}</span>`;
+  const unitEl = card.querySelector("[data-unit]");
+  if (unitEl) unitEl.textContent = unit;
+  const box = card.querySelector("[data-check]");
+  if (box) {
+    box.setAttribute("data-check", variant.id);
+    box.setAttribute("aria-label", `Add ${title}, ${stored.variantLabel || "selected size"}, to my list`);
+  }
+  const dec = card.querySelector("[data-dec]");
+  const inc = card.querySelector("[data-inc]");
+  if (dec) {
+    dec.setAttribute("data-dec", variant.id);
+    dec.setAttribute("aria-label", `Decrease quantity of ${title}`);
+  }
+  if (inc) {
+    inc.setAttribute("data-inc", variant.id);
+    inc.setAttribute("aria-label", `Increase quantity of ${title}`);
+  }
+  const onSale = (variant.offers || []).some((item) => item.onSale);
+  const badge = card.querySelector(".badge");
+  if (onSale && !badge && open) open.insertAdjacentHTML("beforeend", '<span class="badge">Sale</span>');
+  if (!onSale && badge) badge.remove();
+  syncCards();
 }
 
 function filterQuery() {
@@ -700,41 +790,61 @@ function filterQuery() {
   return params;
 }
 
-function cardHtml(product) {
-  const store = $("filter-store").value;
-  const offer = bestOffer(product, store || undefined);
-  const sale = product.offers.some((item) => item.onSale);
+function cardHtml(tile) {
+  const selected = selectedVariant(tile);
+  const storeFilter = $("filter-store").value;
+  const offer = bestOffer(selected, storeFilter || undefined);
+  const sale = (selected.offers || []).some((item) => item.onSale);
   const demo = offer.priceSource === "seed";
-  const gap = (product.gaps ?? []).find((item) => item.substitute);
+  const gap = (selected.gaps ?? tile.gaps ?? []).find((item) => item.substitute);
   const gapHtml = gap
     ? `<p class="gap">Not at ${escapeHtml(gap.storeName)} · substitute ${escapeHtml(gap.substitute.brand)} ${escapeHtml(gap.substitute.name)} ${money(gap.substitute.price)}</p>`
     : "";
-  const checked = list.has(product.id) ? "checked" : "";
-  const qty = list.get(product.id)?.quantity ?? 1;
-  return `<article class="card" data-product-id="${escapeHtml(product.id)}">
-    <button class="card-open" type="button" data-open="${escapeHtml(product.id)}" aria-label="Details for ${escapeHtml(product.name)}">
-      <img src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
+  const entry = findListEntry(selected.id);
+  const checked = entry ? "checked" : "";
+  const qty = entry?.quantity ?? 1;
+  const title = tile.familyName || tile.name;
+  const brand = brandLine(tile, title);
+  const variants = variantChoices(tile);
+  const selector =
+    variants.length > 1
+      ? `<label class="variant-field"><span class="sr-only">Size for ${escapeHtml(title)}</span><select class="variant-select" data-variant aria-label="Size for ${escapeHtml(title)}">${variants
+          .map(
+            (variant) =>
+              `<option value="${escapeHtml(variant.id)}"${variant.id === selected.id ? " selected" : ""}>${escapeHtml(variant.label || variant.sizeLabel || "Size")}</option>`
+          )
+          .join("")}</select></label>`
+      : `<p class="size">${escapeHtml(selected.label || selected.variantLabel || tile.variantLabel || tile.sizeLabel || tile.departmentName || "")}</p>`;
+  const from =
+    tile.priceFrom != null && tile.priceTo != null && tile.priceFrom !== tile.priceTo
+      ? `<p class="price-from">from ${money(tile.priceFrom)}</p>`
+      : "";
+  const variantNote = selected.label || tile.variantLabel || "";
+  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-qty="1">
+    <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
+      <img src="${escapeHtml(mediaUrl(selected.imageUrls?.[0] || tile.imageUrls?.[0] || ""))}" alt="" />
       ${sale ? '<span class="badge">Sale</span>' : ""}
       ${demo ? '<span class="demo-badge">Demo</span>' : `<span class="demo-badge">${escapeHtml(badgeLabel(offer.priceSource))}</span>`}
     </button>
     <div class="card-body">
-      <p class="brand">${escapeHtml(product.brand)}${product.storeBrand ? " · store brand" : ""}</p>
-      <h3>${escapeHtml(product.name)}</h3>
-      <p class="size">${escapeHtml(product.sizeLabel || product.departmentName)}</p>
-      <p class="price"><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
+      ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
+      <h3>${escapeHtml(title)}</h3>
+      ${selector}
+      <p class="price" data-price><strong>${money(offer.price)}</strong> <span>${escapeHtml(offer.storeName)}</span></p>
+      ${from}
       ${offer.priceSource === "weekly_ad" ? '<p class="unit">Weekly ad, not shelf price</p>' : ""}
-      <p class="unit">${escapeHtml(offer.unitPriceText || "")}</p>
+      <p class="unit" data-unit>${escapeHtml(offer.unitPriceText || selected.unitPriceText || "")}</p>
       ${gapHtml}
     </div>
     <div class="card-actions">
       <label class="check">
-        <input type="checkbox" data-check="${escapeHtml(product.id)}" ${checked} aria-label="Add ${escapeHtml(product.name)} to my list" />
+        <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
         Add
       </label>
       <div class="stepper">
-        <button type="button" data-dec="${escapeHtml(product.id)}" aria-label="Decrease quantity of ${escapeHtml(product.name)}">−</button>
+        <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
         <output>${qty}</output>
-        <button type="button" data-inc="${escapeHtml(product.id)}" aria-label="Increase quantity of ${escapeHtml(product.name)}">+</button>
+        <button type="button" data-inc="${escapeHtml(selected.id)}" aria-label="Increase quantity of ${escapeHtml(title)}">+</button>
       </div>
     </div>
   </article>`;
@@ -800,7 +910,7 @@ async function loadPage(reset) {
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
     const items = body.items ?? [];
-    for (const product of items) productsById.set(product.id, product);
+    for (const product of items) rememberTile(product);
     const html = items.map(cardHtml).join("");
     gridEl.innerHTML = reset ? html : gridEl.innerHTML + html;
     if (!items.length && reset) {
@@ -999,8 +1109,8 @@ function openProduct(product) {
   productDialog.innerHTML = `<div class="sheet-body">
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <p class="brand">${escapeHtml(product.brand)} · ${escapeHtml(product.departmentName)}</p>
-    <h2 id="dialog-title">${escapeHtml(product.name)}</h2>
-    <p class="muted">${escapeHtml(product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
+    <h2 id="dialog-title">${escapeHtml(product.familyName || product.name)}</h2>
+    <p class="muted">${escapeHtml(product.variantLabel || product.sizeLabel || "Size varies")}${product.storeBrand ? " · store brand" : ""}</p>
     ${itemCompareNote(product)}
     <h3>Prices</h3>
     <ul class="offer-list">
@@ -1448,7 +1558,7 @@ async function planTrip() {
   }
   localStorage.setItem(ZIP_KEY, zip);
   const items = [...list.values()].map((entry) => ({
-    name: entry.product.name,
+    name: entry.product.catalogName || entry.product.name,
     brand: entry.product.brand,
     quantity: entry.quantity,
     catalogId: entry.product.id,
@@ -1575,12 +1685,13 @@ function queueWrite(entry, deleted = false) {
 }
 
 function toWrite(entry, deleted = false) {
+  const heading = listItemTitle(entry.product);
   return {
     itemId: entry.itemId || entry.product.id,
     catalogId: entry.product.id,
-    name: entry.product.name,
+    name: heading.title,
     brand: entry.product.brand || undefined,
-    sizeLabel: entry.product.sizeLabel || undefined,
+    sizeLabel: heading.detail || entry.product.sizeLabel || undefined,
     quantity: Math.max(1, Number(entry.quantity) || 1),
     checked: Boolean(entry.checked),
     writtenAt: entry.writtenAt || Date.now(),
@@ -1589,11 +1700,16 @@ function toWrite(entry, deleted = false) {
 }
 
 function stubFromItem(item) {
+  const retailer = item.catalogName || item.name || "Item";
   return {
     id: item.catalogId || item.itemId || item.id,
-    name: item.name || "Item",
+    name: retailer,
+    catalogName: retailer,
+    familyName: item.familyName || item.name || "Item",
     brand: item.brand || "",
-    sizeLabel: item.sizeLabel || "",
+    sizeLabel: item.sizeLabel || item.variantLabel || "",
+    variantLabel: item.variantLabel || item.sizeLabel || "",
+    familyKey: item.familyKey || "",
     imageUrls: [],
     offers: [],
     gaps: [],
@@ -1684,11 +1800,19 @@ async function hydrateSharedProducts() {
         if (!response.ok) return;
         const body = await response.json();
         if (!body.product?.id) return;
-        productsById.set(body.product.id, body.product);
-        const entry = list.get(body.product.id) || [...list.values()].find((row) => row.product?.id === body.product.id);
+        const previous = [...list.values()].find((row) => row.product?.id === body.product.id)?.product;
+        const merged = {
+          ...body.product,
+          familyName: body.product.familyName || previous?.familyName,
+          variantLabel: body.product.variantLabel || previous?.variantLabel,
+          familyKey: body.product.familyKey || previous?.familyKey,
+          catalogName: body.product.catalogName || body.product.name,
+        };
+        productsById.set(merged.id, merged);
+        const entry = list.get(merged.id) || [...list.values()].find((row) => row.product?.id === merged.id);
         if (entry) {
-          entry.product = body.product;
-          if (!(Number(entry.baselinePrice) > 0)) Object.assign(entry, alertFields(entry, body.product));
+          entry.product = merged;
+          if (!(Number(entry.baselinePrice) > 0)) Object.assign(entry, alertFields(entry, merged));
         }
       } catch {
         /* the shared name still shows if the catalog misses */
@@ -2087,10 +2211,16 @@ async function restoreList() {
           if (row.name) rememberLocalRow(row);
           return;
         }
-        productsById.set(body.product.id, body.product);
-        const itemId = row.itemId || body.product.id;
+        const restored = {
+          ...body.product,
+          familyName: body.product.familyName || row.name,
+          variantLabel: body.product.variantLabel || row.sizeLabel,
+          catalogName: body.product.catalogName || body.product.name,
+        };
+        productsById.set(restored.id, restored);
+        const itemId = row.itemId || restored.id;
         list.set(itemId, {
-          product: body.product,
+          product: restored,
           quantity: Math.max(1, Number(row.quantity) || 1),
           itemId,
           checked: Boolean(row.checked),
@@ -2120,12 +2250,13 @@ async function addSample() {
     { name: "Spaghetti Pasta", brand: "Barilla" },
     { name: "Large Eggs", brand: "Goldhen" },
   ];
-  for (const item of body.items ?? []) {
-    productsById.set(item.id, item);
-  }
+  for (const item of body.items ?? []) rememberTile(item);
   for (const want of wanted) {
-    const product = (body.items ?? []).find((item) => item.name === want.name && item.brand === want.brand);
-    if (product) addProduct(product, 1);
+    const tile = (body.items ?? []).find(
+      (item) => item.brand === want.brand && (item.name === want.name || item.familyName === want.name || item.catalogName === want.name)
+    );
+    const variant = tile ? productsById.get(tile.defaultVariantId || tile.id) || tile : null;
+    if (variant) addProduct(variant, 1);
   }
   openList(true);
 }
@@ -2162,18 +2293,27 @@ document.addEventListener("click", (event) => {
   const inc = target.closest("[data-inc]");
   if (inc) {
     const id = inc.getAttribute("data-inc");
-    const product = productsById.get(id);
-    if (!product) return;
-    if (!list.has(id)) addProduct(product, 1);
-    else setQuantity(id, list.get(id).quantity + 1);
+    const card = inc.closest(".card");
+    const entry = findListEntry(id);
+    if (entry) setQuantity(entry.itemId || id, entry.quantity + 1);
+    else if (card) {
+      card.dataset.qty = String(stagedQuantity(card.dataset.qty, 1));
+      const output = card.querySelector("output");
+      if (output) output.textContent = card.dataset.qty;
+    }
     return;
   }
   const dec = target.closest("[data-dec]");
   if (dec) {
     const id = dec.getAttribute("data-dec");
-    const entry = list.get(id);
-    if (!entry) return;
-    setQuantity(id, entry.quantity - 1);
+    const card = dec.closest(".card");
+    const entry = findListEntry(id);
+    if (entry) setQuantity(entry.itemId || id, entry.quantity - 1);
+    else if (card) {
+      card.dataset.qty = String(stagedQuantity(card.dataset.qty, -1));
+      const output = card.querySelector("output");
+      if (output) output.textContent = card.dataset.qty;
+    }
     return;
   }
   const listInc = target.closest("[data-list-inc]");
@@ -2289,12 +2429,22 @@ listItemsEl.addEventListener("change", (event) => {
 });
 
 gridEl.addEventListener("change", (event) => {
-  const box = event.target;
+  const target = event.target;
+  if (target instanceof HTMLSelectElement && target.classList.contains("variant-select")) {
+    applyVariant(target.closest(".card"), target.value);
+    return;
+  }
+  const box = target;
   if (!(box instanceof HTMLInputElement) || !box.dataset.check) return;
   const product = productsById.get(box.dataset.check);
   if (!product) return;
-  if (box.checked) addProduct(product, 1);
-  else setQuantity(product.id, 0);
+  if (box.checked) {
+    const card = box.closest(".card");
+    addProduct(product, stagedQuantity(card?.dataset.qty || 1, 0));
+  } else {
+    const entry = findListEntry(product.id);
+    setQuantity(entry?.itemId || product.id, 0);
+  }
 });
 
 $("search-form").addEventListener("submit", (event) => {
@@ -2714,9 +2864,9 @@ function personalListPayload() {
     : [...list.values()].map((entry) => ({
         id: entry.product.id,
         itemId: entry.itemId || entry.product.id,
-        name: entry.product.name,
+        name: listItemTitle(entry.product).title,
         brand: entry.product.brand || "",
-        sizeLabel: entry.product.sizeLabel || "",
+        sizeLabel: listItemTitle(entry.product).detail || entry.product.sizeLabel || "",
         quantity: entry.quantity,
         checked: Boolean(entry.checked),
         addedBy: entry.addedBy,

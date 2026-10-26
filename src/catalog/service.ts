@@ -5,6 +5,7 @@ import { facetsFor, filterProducts, paginateProducts, sortProducts } from "./bro
 import { groupOffersByUpc } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
+import { annotateBrowseProduct, groupBrowseFamilies, type BrowseTile } from "./family";
 import { gapsForProduct } from "./substitutes";
 import type { BrowseProduct, BrowseSort, CatalogGap, RawCatalogRecord, SizeClass, StoreCoverage } from "./types";
 import { CatalogCache } from "../models/CatalogCache";
@@ -51,7 +52,7 @@ export type BrowseQuery = {
 };
 
 export type BrowsePage = {
-  items: Array<BrowseProduct & { gaps: CatalogGap[] }>;
+  items: Array<BrowseTile & { gaps: CatalogGap[] }>;
   total: number;
   nextCursor: string | null;
   facets: ReturnType<typeof facetsFor>;
@@ -492,15 +493,13 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     ...(departmentId && departmentId !== "all" ? { departmentId } : {}),
   });
   const filtered = filterProducts(scope.products, filters);
+  const families = groupBrowseFamilies(filtered);
   const sort = request.sort ?? (query ? "relevance" : "price");
-  const sorted = sortProducts(filtered, sort, filters);
+  const sorted = sortProducts(families, sort, filters);
   const offset = Number(request.cursor ?? "0");
   const limit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const page = paginateProducts(sorted, offset, limit);
-  const items = page.items.map((product) => ({
-    ...product,
-    gaps: gapsForProduct(product, scope.products, GAP_STORES),
-  }));
+  const items = page.items.map((family) => withVariantGaps(family, scope.products));
 
   let weeklyAdBanners: WeeklyAdBannerHit[] | undefined;
   if (request.zipCode && flippConsumerEnabled()) {
@@ -534,12 +533,12 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
     const stored = await readStoredRecords({ query: q });
     if (stored.records.length > 0) {
       const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
-      return matches.slice(0, Math.min(Math.max(limit, 1), 12));
+      return groupBrowseFamilies(matches).slice(0, Math.min(Math.max(limit, 1), 12));
     }
   }
   const known = await loadKnownProducts();
   const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q });
-  return matches.slice(0, Math.min(Math.max(limit, 1), 12));
+  return groupBrowseFamilies(matches).slice(0, Math.min(Math.max(limit, 1), 12));
 }
 
 export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { gaps: CatalogGap[] }) | null> {
@@ -551,7 +550,7 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
       const products = groupOffersByUpc(mates.records);
       const product = products.find((entry) => entry.id === id) ?? groupOffersByUpc(records)[0];
       if (product) {
-        return { ...product, gaps: gapsForProduct(product, products, GAP_STORES) };
+        return { ...annotateBrowseProduct(product), gaps: gapsForProduct(product, products, GAP_STORES) };
       }
     }
   }
@@ -560,7 +559,20 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
   if (!product) {
     return null;
   }
-  return { ...product, gaps: gapsForProduct(product, known, GAP_STORES) };
+  return { ...annotateBrowseProduct(product), gaps: gapsForProduct(product, known, GAP_STORES) };
+}
+
+function withVariantGaps(family: BrowseTile, pool: BrowseProduct[]): BrowseTile & { gaps: CatalogGap[] } {
+  const variants = family.variants.map((variant) => ({
+    ...variant,
+    gaps: gapsForProduct(variant, pool, GAP_STORES),
+  }));
+  const selected = variants.find((variant) => variant.id === family.defaultVariantId) ?? variants[0];
+  return {
+    ...family,
+    variants,
+    gaps: selected?.gaps ?? [],
+  };
 }
 
 export function resetBrowseMemoryCache(): void {

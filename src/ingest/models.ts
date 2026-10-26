@@ -11,6 +11,10 @@ const masterSchema = new Schema(
     subcategory: { type: String },
     categoryPaths: { type: [String], default: [] },
     size: { type: String },
+    /** Brand + flavor. Pack, unit size, and container stay off this key. */
+    familyKey: { type: String },
+    familyName: { type: String },
+    variantLabel: { type: String },
     walmartItemId: { type: String },
     krogerProductId: { type: String },
     lastSeenAt: { type: Date, required: true },
@@ -32,6 +36,7 @@ const masterSchema = new Schema(
   { timestamps: true }
 );
 
+masterSchema.index({ familyKey: 1, status: 1 });
 masterSchema.index({ name: "text", brand: "text" });
 masterSchema.index({ departmentId: 1, status: 1, name: 1 });
 masterSchema.index({ matchWalmartAt: 1, departmentId: 1 });
@@ -171,6 +176,9 @@ export type CatalogMasterDoc = {
   subcategory?: string;
   categoryPaths: string[];
   size?: string;
+  familyKey?: string;
+  familyName?: string;
+  variantLabel?: string;
   walmartItemId?: string;
   krogerProductId?: string;
   lastSeenAt: Date;

@@ -47,15 +47,17 @@ app.get("/api", (_req, res) => {
       "GET /api/search-catalog":
         "Accepts query and returns FatSecret catalog matches (id, name, brand).",
       "GET /api/catalog/browse":
-        "Browse the unified catalog by department, search, sort, and filters. Groups offers by UPC. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
+        "Browse the unified catalog by department, search, sort, and filters. Offers that share a UPC are one product. Products that share a brand and flavor are one tile, with pack, size, and container in variants[]. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
       "GET /api/catalog/suggest":
-        "Typeahead over the cached and demo catalog. Does not call retailer APIs.",
+        "Typeahead over the cached and demo catalog, one row per product family. The id is the default variant. Does not call retailer APIs.",
       "GET /api/catalog/departments":
         "Shared department tree.",
       "GET /api/catalog/coverage":
         "Honest per-store catalog coverage (taxonomy sample, search-seeded, weekly ad, or demo).",
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
+      "GET /api/admin/catalog/family-sample":
+        "How master products group into families (brand + flavor). Reports the share that collapsed into a multi-size tile and a few example groups. Same admin token as status. Optional department, q, limit, and scan.",
       "GET /api/admin/catalog/status":
         "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
       "POST /api/admin/catalog/recategorize":

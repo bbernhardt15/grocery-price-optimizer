@@ -211,6 +211,19 @@ img { max-width: 100%; display: block; }
 .card-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .card-body h3 { margin: 0; font-size: 1rem; line-height: 1.25; }
 .brand, .size, .unit, .gap, .muted { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.variant-field { display: block; margin-top: 6px; }
+.variant-select {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0 8px;
+}
+.price-from { margin: 0; color: var(--muted); font-size: 0.78rem; }
 .price { margin: 4px 0 0; font-size: 1.05rem; }
 .price strong { font-variant-numeric: tabular-nums; }
 .gap { color: var(--sale); }
