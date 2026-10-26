@@ -215,10 +215,32 @@ function normalizeZip(value) {
   return digits;
 }
 
-function toast(message) {
+let toastTimer = 0;
+
+function toast(message, durationMs = 1600) {
   toastEl.textContent = message;
   toastEl.classList.add("show");
-  window.setTimeout(() => toastEl.classList.remove("show"), 1600);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+}
+
+/** OAuth callback lands on /?kroger=added|error&message=… after the cart write. */
+function consumeKrogerReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const kind = params.get("kroger");
+  if (kind !== "added" && kind !== "error") return;
+  const message = String(params.get("message") || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+  params.delete("kroger");
+  params.delete("message");
+  const query = params.toString();
+  const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+  history.replaceState({}, "", next);
+  const fallback = kind === "added" ? "Kroger accepted the cart." : "Kroger did not add those items.";
+  toast(message || fallback, 6500);
 }
 
 function readSessionToken() {
@@ -1527,7 +1549,7 @@ async function startKroger(storeName, button) {
   try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
@@ -3220,6 +3242,7 @@ function adoptSessionFromUrl() {
 
 async function boot() {
   adoptSessionFromUrl();
+  consumeKrogerReturn();
   listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
