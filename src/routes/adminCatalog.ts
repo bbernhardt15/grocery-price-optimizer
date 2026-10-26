@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
-import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus } from "../ingest/status";
+import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
 const router = Router();
 
@@ -73,6 +73,19 @@ router.get("/admin/catalog/family-sample", async (req: Request, res: Response) =
       return;
     }
     res.json(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/suspicious", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  const limit = Number(req.query.limit ?? 30);
+  try {
+    res.json(await catalogSuspicious(limit));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });

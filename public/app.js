@@ -26,9 +26,21 @@ import {
   visibleItems,
 } from "./shopper/shareList.js";
 import {
+  alertsEmptyChoice,
+  catalogEmptyKind,
+  emptyState,
+  emptyStateInner,
+  emptyStateMarkup,
+  networkKind,
+  searchEmpty,
+  tripStoreEmpty,
+} from "./shopper/emptyStates.js";
+import { mountWelcome } from "./shopper/onboardingUi.js";
+import {
   applyTripEdits,
   formatTripText,
   groupForAisle,
+  moveOptionLabel,
   priceSourceLabel,
   readChecks,
   readTripSnapshot,
@@ -36,6 +48,7 @@ import {
   shareItemId,
   consolidateStops,
   singleStoreSavings,
+  swapSentence,
   tripFingerprint,
   tripStory,
   writeCheck,
@@ -177,6 +190,7 @@ let deletingData = false;
 let unreadAlerts = 0;
 /** @type {Array<Record<string, any>>} */
 let priceAlerts = [];
+let alertsLoadError = "";
 let pushPublicKey = "";
 /** @type {Array<Record<string, any>>} */
 let suggestions = [];
@@ -186,6 +200,8 @@ let suggestionQuery = "";
 let shareState = null;
 let applyingRemote = false;
 let shareBusy = false;
+let shareProblem = "";
+let shareProblemToken = "";
 /** @type {Map<string, Record<string, any>>} */
 const pendingWrites = new Map();
 let pushTimer = 0;
@@ -220,10 +236,114 @@ function normalizeZip(value) {
   return digits;
 }
 
-function toast(message) {
+function fillEmpty(el, state, role) {
+  if (!el) return;
+  el.className = "empty-state";
+  if (role) el.setAttribute("role", role);
+  else el.removeAttribute("role");
+  el.innerHTML = emptyStateInner(state, escapeHtml);
+}
+
+function hasActiveFilters() {
+  return Boolean(
+    activeDepartment !== "all" ||
+      $("filter-store").value ||
+      $("filter-brand").value ||
+      $("filter-sub").value ||
+      ($("filter-size").value && $("filter-size").value !== "any") ||
+      $("filter-sale").checked ||
+      $("filter-store-brand").checked ||
+      $("filter-min").value.trim() ||
+      $("filter-max").value.trim()
+  );
+}
+
+function paintListEmpty() {
+  if (!listEmptyEl) return;
+  const show = list.size === 0 && !listLoading;
+  listEmptyEl.hidden = !show;
+  if (!show) return;
+  if (listIsLocked()) {
+    fillEmpty(listEmptyEl, {
+      title: "This list is view-only",
+      body: "You can look, but only the owner can add items.",
+      action: "Browse the aisle",
+      actionId: "browse",
+    });
+    return;
+  }
+  fillEmpty(listEmptyEl, emptyState("list"));
+}
+
+async function readDeviceCoords() {
+  const geo = window.Capacitor?.Plugins?.Geolocation;
+  if (geo?.requestPermissions) {
+    const perm = await geo.requestPermissions({ permissions: ["coarseLocation"] });
+    const state = perm?.coarseLocation || perm?.location;
+    if (state === "denied") {
+      const error = new Error("Location permission denied");
+      error.code = 1;
+      throw error;
+    }
+  }
+  if (geo?.getCurrentPosition) {
+    const pos = await geo.getCurrentPosition({ enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 });
+    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  }
+  if (!navigator.geolocation) throw new Error("Location is unavailable");
+  const pos = await new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false,
+      timeout: 12000,
+      maximumAge: 60000,
+    });
+  });
+  return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+}
+
+async function openAuthorize(url) {
+  if (isNative()) {
+    await openExternal(url);
+    return;
+  }
+  window.location.assign(url);
+}
+
+function applyZip(zip, { reload = true } = {}) {
+  const normalized = normalizeZip(zip);
+  zipEl.value = normalized;
+  if (!ZIP_PATTERN.test(normalized)) return;
+  localStorage.setItem(ZIP_KEY, normalized);
+  scheduleWatchSync();
+  if (reload) void loadPage(true);
+}
+
+let toastTimer = 0;
+
+function toast(message, durationMs = 1600) {
   toastEl.textContent = message;
   toastEl.classList.add("show");
-  window.setTimeout(() => toastEl.classList.remove("show"), 1600);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+}
+
+/** OAuth callback lands on /?kroger=added|error&message=… after the cart write. */
+function consumeKrogerReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const kind = params.get("kroger");
+  if (kind !== "added" && kind !== "error") return;
+  const message = String(params.get("message") || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+  params.delete("kroger");
+  params.delete("message");
+  const query = params.toString();
+  const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+  history.replaceState({}, "", next);
+  const fallback = kind === "added" ? "Kroger accepted the cart." : "Kroger did not add those items.";
+  toast(message || fallback, 6500);
 }
 
 function readSessionToken() {
@@ -501,7 +621,7 @@ function renderEstimate() {
   listCountEl.textContent = String(count);
   $("bar-count").textContent = count ? `My list · ${count}` : "My list";
   planBtn.disabled = list.size === 0 || listLoading;
-  listEmptyEl.hidden = list.size > 0 || listLoading;
+  paintListEmpty();
 
   const loadingNote = $("savings-loading");
   if (listLoading) {
@@ -1004,10 +1124,14 @@ async function loadPage(reset) {
     const html = items.map(cardHtml).join("");
     gridEl.innerHTML = reset ? html : gridEl.innerHTML + html;
     if (!items.length && reset) {
-      gridEl.innerHTML = '<p class="muted">Nothing in this aisle matches those filters.</p>';
+      const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
+      const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml);
+      resultCountEl.textContent = state.title;
+    } else {
+      const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
+      resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     }
-    const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
-    resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
     if (reset) settleCard(gridEl.querySelector(".card"));
@@ -1039,8 +1163,16 @@ async function loadPage(reset) {
       showCatalogError(hardWarnings.join(" "));
     }
   } catch (error) {
-    showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
-    if (reset) gridEl.innerHTML = "";
+    const kind = networkKind(error, navigator.onLine);
+    if (reset && kind) {
+      showCatalogError("");
+      const state = emptyState(kind);
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
+      resultCountEl.textContent = state.title;
+    } else {
+      showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
+      if (reset) gridEl.innerHTML = "";
+    }
   } finally {
     loading = false;
     if (reset && nextCursor && sentinelEl.getBoundingClientRect().top < window.innerHeight + 40) {
@@ -1173,6 +1305,12 @@ async function loadSuggestions(text) {
     window.clearTimeout(suggestLoadingTimer);
     if (searchEl.value.trim() !== requestQuery) return;
     suggestions = [];
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) {
+      const state = emptyState(kind);
+      showSuggestStatus(`${state.title}. ${state.body}`);
+      return;
+    }
     showSuggestStatus(`No matches for “${q}”. Press Enter to search the shelves.`);
   }
 }
@@ -1322,8 +1460,32 @@ function exportRow(scope, storeName, actionType) {
 function changeControl(item) {
   const move = moveControl(item);
   if (!move) return "";
-  const label = item.matchKind === "substitute" ? "Change this swap" : "Change store";
+  const label = item.matchKind === "substitute" || item.matchKind === "swap" ? "Change this swap" : "Change store";
   return `<details class="move-details"><summary>${label}</summary>${move}</details>`;
+}
+
+function sameStoreName(left, right) {
+  return String(left || "").trim().toLowerCase() === String(right || "").trim().toLowerCase();
+}
+
+function moveLine(lineId, storeName) {
+  if (!lineId || !storeName) return;
+  if (planLimited("multiStoreSplit")) {
+    openPaywall();
+    return;
+  }
+  const moves = { ...tripEdits.moves };
+  const original = (lastOptimize?.stores || [])
+    .flatMap((store) => store.items || [])
+    .find((item) => item.lineId === lineId);
+  const locked = tripEdits.lockedStore;
+  const backToOriginal = original && sameStoreName(storeName, original.storeName) && !locked;
+  const backToLock = locked && sameStoreName(storeName, locked);
+  if (backToOriginal || backToLock) delete moves[lineId];
+  else moves[lineId] = storeName;
+  tripEdits = { ...tripEdits, moves };
+  rememberTrip();
+  paintTrip();
 }
 
 function moveControl(item) {
@@ -1332,8 +1494,8 @@ function moveControl(item) {
   if (offers.length < 2 || !item.lineId) return "";
   const options = offers
     .map((offer) => {
-      const selected = offer.storeName === item.storeName ? " selected" : "";
-      return `<option value="${escapeHtml(offer.storeName)}"${selected}>${escapeHtml(offer.storeName)} · ${money(offer.price)}</option>`;
+      const selected = sameStoreName(offer.storeName, item.storeName) ? " selected" : "";
+      return `<option value="${escapeHtml(offer.storeName)}"${selected}>${escapeHtml(moveOptionLabel(offer, item.price))}</option>`;
     })
     .join("");
   return `<label class="move">Move
@@ -1343,10 +1505,21 @@ function moveControl(item) {
 
 function shopperButtonLabel(store) {
   const action = store.handoff?.action;
+  if (action?.label) return action.label;
   const name = store.storeName || "the store";
-  if (action?.type === "kroger_cart") return `Send to ${name} cart`;
-  if (action?.type === "walmart_cart") return `Open ${name} cart`;
+  if (action?.type === "kroger_cart" || action?.type === "walmart_cart") return `Send to ${name} cart`;
   return `Open ${name} list`;
+}
+
+function swapLine(item) {
+  const swapped = item.matchKind === "swap" || item.matchKind === "substitute";
+  const note = item.swapNote || (swapped ? swapSentence(item.substitutedFor || item.query || item.name, item.storeName, item.name) : "");
+  if (!note) return "";
+  const back =
+    item.exactStore && item.lineId && !sameStoreName(item.exactStore, item.storeName)
+      ? `<button type="button" class="text-btn" data-switch-back="${escapeHtml(item.lineId)}" data-switch-store="${escapeHtml(item.exactStore)}">Switch back</button>`
+      : "";
+  return `<span class="swap-note">${escapeHtml(note)}${back}</span>`;
 }
 
 function primaryAction(store) {
@@ -1387,6 +1560,18 @@ function paintTrip() {
   gridEl.hidden = true;
   sentinelEl.hidden = true;
   tripEl.hidden = false;
+  if (tripStoreEmpty(lastOptimize)) {
+    tripEl.innerHTML = `
+      <button type="button" class="ghost" id="trip-back">Back to shelves</button>
+      ${emptyStateMarkup(emptyState("stores"), escapeHtml)}
+    `;
+    $("trip-back").onclick = () => {
+      tripEl.hidden = true;
+      gridEl.hidden = false;
+      sentinelEl.hidden = false;
+    };
+    return;
+  }
   const storeLines = (story.completeStores || [])
     .map(
       (store) =>
@@ -1446,10 +1631,6 @@ function paintTrip() {
 function renderStore(store, checks) {
   const rows = (store.items ?? [])
     .map((item) => {
-      const swapped =
-        item.matchKind === "substitute"
-          ? `<p class="swap">We swapped ${escapeHtml(item.substitutedFor || "a similar item")} for ${escapeHtml(item.name)} at ${escapeHtml(store.storeName)}.</p>`
-          : "";
       const checked = item.lineId && checks[item.lineId] ? " checked" : "";
       const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
       const priceLabel = itemPriceLabel(item, store);
@@ -1459,9 +1640,9 @@ function renderStore(store, checks) {
           <span>
             <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}</span>
             <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
-            ${swapped}
           </span>
         </label>
+        ${swapLine(item)}
         <span class="item-price">
           <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
           <span>${money(item.price)} each</span>
@@ -1520,7 +1701,7 @@ function openChecklist(storeName) {
   const items = checklistItems(storeName);
   const groups = groupForAisle(items);
   const checks = readChecks(localStorage, tripId());
-  const title = instore ? "In the store" : `Shop this list at ${storeName}`;
+  const title = instore ? "In the store" : `${storeName} list`;
   const groupsHtml = groups
     .map((group) => {
       const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
@@ -1528,6 +1709,7 @@ function openChecklist(storeName) {
         .map((item) => {
           const checked = item.lineId && checks[item.lineId] ? " checked" : "";
           const size = item.size ? `, ${escapeHtml(item.size)}` : "";
+          const swap = item.swapNote ? `<span class="swap-note">${escapeHtml(item.swapNote)}</span>` : "";
           const where = instore ? `<span class="muted">${escapeHtml(item.storeName)}</span>` : "";
           const url = itemUrl(item);
           const link = url
@@ -1536,7 +1718,7 @@ function openChecklist(storeName) {
           return `<li class="check-row-line">
             <label class="check-line">
               <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
-              <span>${item.quantity}× ${escapeHtml(item.name)}${size}</span>
+              <span>${item.quantity}× ${escapeHtml(item.name)}${size}${swap}</span>
             </label>
             ${where}
             <strong>${money(item.itemTotal ?? item.price)}</strong>
@@ -1677,7 +1859,13 @@ async function planTrip() {
     tripEl.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     planErrorEl.hidden = false;
-    planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) {
+      const state = emptyState(kind);
+      planErrorEl.textContent = `${state.title}. ${state.body}`;
+    } else {
+      planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
+    }
   } finally {
     planBtn.disabled = list.size === 0;
     planBtn.textContent = "Plan the trip";
@@ -1733,7 +1921,7 @@ async function startKroger(storeName, button) {
   try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
@@ -2083,10 +2271,18 @@ async function openSharedList(token, { mergeLocal = false } = {}) {
   let response;
   try {
     response = await apiFetch(`/api/lists/${encodeURIComponent(token)}`, { headers: ownerHeaders(token) });
-  } catch {
-    toast("Could not open that shared list.");
+  } catch (error) {
+    const kind = networkKind(error, navigator.onLine) || "network";
+    shareProblem = kind;
+    shareProblemToken = token;
+    const state = emptyState(kind);
+    toast(`${state.title}. ${state.body}`);
+    renderShareChrome();
+    openList(true);
     return;
   }
+  shareProblem = "";
+  shareProblemToken = "";
   const body = await response.json().catch(() => ({}));
   if (response.status === 410) {
     handleRevoked(token);
@@ -2182,13 +2378,24 @@ function renderShareChrome() {
   if (ownBtn) ownBtn.hidden = !(localStorage.getItem(PERSONAL_KEY) && shared && !owner);
   shareBtn.disabled = shareBusy;
   shareBtn.textContent = shareState?.revoked && owner ? "Share a new link" : "Share list";
-  if (listEmptyEl) {
-    listEmptyEl.textContent = listIsLocked()
-      ? "This list is view-only."
-      : shared
-        ? "Changes here show up for everyone on the link."
-        : "Check items while you browse. Quantities stay on this device until you share.";
+  const shareEmpty = $("share-empty");
+  if (shareEmpty) {
+    if (shareProblem && !shared) {
+      const state = emptyState(shareProblem);
+      state.actionId = "retry-share";
+      fillEmpty(shareEmpty, state, "alert");
+      shareEmpty.hidden = false;
+    } else if (!shared) {
+      const state = emptyState("shared");
+      state.action = "";
+      state.bodyId = "share-empty-body";
+      fillEmpty(shareEmpty, state);
+      shareEmpty.hidden = false;
+    } else {
+      shareEmpty.hidden = true;
+    }
   }
+  paintListEmpty();
 }
 
 async function onShareClick() {
@@ -2488,6 +2695,11 @@ document.addEventListener("click", (event) => {
     paintTrip();
     return;
   }
+  const switchBack = target.closest("[data-switch-back]");
+  if (switchBack) {
+    moveLine(switchBack.getAttribute("data-switch-back"), switchBack.getAttribute("data-switch-store"));
+    return;
+  }
   const exportButton = target.closest("[data-export]");
   if (exportButton) {
     void exportTrip(exportButton.getAttribute("data-export"), exportButton.getAttribute("data-export-store") || "").catch((error) => {
@@ -2513,20 +2725,7 @@ document.addEventListener("change", (event) => {
       openPaywall();
       return;
     }
-    const lineId = target.dataset.moveLine;
-    const storeName = target.value;
-    const moves = { ...tripEdits.moves };
-    const original = (lastOptimize?.stores || [])
-      .flatMap((store) => store.items || [])
-      .find((item) => item.lineId === lineId);
-    const locked = tripEdits.lockedStore;
-    const backToOriginal = original && storeName === original.storeName && !locked;
-    const backToLock = locked && storeName === locked;
-    if (backToOriginal || backToLock) delete moves[lineId];
-    else moves[lineId] = storeName;
-    tripEdits = { ...tripEdits, moves };
-    rememberTrip();
-    paintTrip();
+    moveLine(target.dataset.moveLine, target.value);
     return;
   }
   if (target instanceof HTMLInputElement && target.dataset.tripCheck) {
@@ -2768,7 +2967,21 @@ function paintAlertBadge() {
 
 function paintAlertList() {
   if (!alertsListEl || !alertsEmptyEl) return;
+  if (alertsLoadError && priceAlerts.length === 0) {
+    alertsEmptyEl.hidden = false;
+    const state = emptyState(alertsLoadError);
+    state.actionId = "retry-alerts";
+    fillEmpty(alertsEmptyEl, state, "alert");
+    alertsListEl.innerHTML = "";
+    return;
+  }
   alertsEmptyEl.hidden = priceAlerts.length > 0;
+  if (priceAlerts.length === 0) {
+    fillEmpty(
+      alertsEmptyEl,
+      alertsEmptyChoice({ billing: billingStatus, alertsOn: Boolean(listAlertsEl?.checked) })
+    );
+  }
   alertsListEl.innerHTML = priceAlerts
     .map((alert) => {
       const target = alert.hitTarget ? `<p class="muted">Under your target</p>` : "";
@@ -2791,14 +3004,19 @@ function paintAlertList() {
 async function refreshAlerts() {
   try {
     const response = await apiFetch(`/api/price-alerts?deviceId=${encodeURIComponent(deviceId())}`);
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`Alerts failed (${response.status})`);
     const body = await response.json();
     priceAlerts = Array.isArray(body.alerts) ? body.alerts : [];
     unreadAlerts = Number(body.unread) || 0;
+    alertsLoadError = "";
     paintAlertBadge();
     if (alertsDialog?.open) paintAlertList();
-  } catch {
-    /* the badge updates on the next pass */
+  } catch (error) {
+    const kind = networkKind(error, navigator.onLine);
+    if (kind) alertsLoadError = kind;
+    else if (priceAlerts.length === 0) alertsLoadError = "network";
+    paintAlertBadge();
+    if (alertsDialog?.open) paintAlertList();
   }
 }
 
@@ -3502,8 +3720,24 @@ function adoptSessionFromUrl() {
 }
 
 async function boot() {
-  adoptSessionFromUrl();
-  listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
+  try {
+    adoptSessionFromUrl();
+    consumeKrogerReturn();
+    listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
+    await bootApp();
+  } finally {
+    welcome.maybeAutoOpen();
+    const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
+    const onboard = $("onboarding");
+    if (wantsAlerts && onboard?.open) {
+      onboard.addEventListener("close", () => void openAlerts(true), { once: true });
+    } else if (wantsAlerts) {
+      void openAlerts(true);
+    }
+  }
+}
+
+async function bootApp() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
@@ -3525,9 +3759,20 @@ async function boot() {
     listReady = true;
     return;
   }
-  const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
-  const deptBody = await deptResponse.json();
-  departments = deptBody.departments ?? [];
+  try {
+    const deptResponse = await fetch(apiUrl("/api/catalog/departments"));
+    if (!deptResponse.ok) throw new Error(`Departments failed (${deptResponse.status})`);
+    const deptBody = await deptResponse.json();
+    departments = deptBody.departments ?? [];
+  } catch (error) {
+    departments = [];
+    const kind = networkKind(error, navigator.onLine) || "network";
+    const state = emptyState(kind);
+    if (gridEl) {
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
+      resultCountEl.textContent = state.title;
+    }
+  }
   renderDepartments();
   const savedShare = readStoredJson(SHARE_KEY)?.shareToken;
   const ownedShare = readOwned()?.shareToken;
@@ -3549,7 +3794,6 @@ async function boot() {
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);
-  if (new URLSearchParams(location.search).get("alerts") === "1") void openAlerts(true);
   if (!isNative() && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (event) => {
@@ -3558,6 +3802,66 @@ async function boot() {
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
 }
+
+document.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
+  if (!button) return;
+  const action = button.getAttribute("data-empty-action");
+  if (action === "browse") {
+    openList(false);
+    void openAlerts(false);
+    searchEl.focus();
+  } else if (action === "clear-search") {
+    query = "";
+    searchEl.value = "";
+    closeSuggestions();
+    void loadPage(true);
+    searchEl.focus();
+  } else if (action === "clear-filters") {
+    activeDepartment = "all";
+    query = "";
+    searchEl.value = "";
+    closeSuggestions();
+    renderDepartments();
+    $("filters-clear")?.click();
+  } else if (action === "retry") {
+    void loadPage(true);
+  } else if (action === "retry-alerts") {
+    void refreshAlerts().then(() => paintAlertList());
+  } else if (action === "retry-share") {
+    if (shareProblemToken) void openSharedList(shareProblemToken);
+  } else if (action === "edit-zip") {
+    $("trip-back")?.click();
+    zipEl.focus();
+  } else if (action === "enable-alerts") {
+    if (listAlertsEl && !listAlertsEl.checked) {
+      listAlertsEl.checked = true;
+      listAlertsEl.dispatchEvent(new Event("change"));
+    }
+    void openAlerts(false);
+    openList(true);
+    listAlertsEl?.focus();
+  } else if (action === "see-pro") {
+    openPaywall();
+  }
+});
+
+const welcome = mountWelcome({
+  isNative,
+  apiUrl,
+  fetch: (...args) => globalThis.fetch(...args),
+  getZip: () => normalizeZip(zipEl.value),
+  setZip: (zip) => applyZip(zip),
+  focusZip: () => zipEl.focus(),
+  readCoords: readDeviceCoords,
+  openAuthorize,
+  toast,
+  themeLabel: () => themeButtonLabel(document.documentElement.dataset.theme || "system", window.matchMedia("(prefers-color-scheme: dark)").matches),
+  cycleTheme: () => applyTheme(nextTheme(document.documentElement.dataset.theme || "system")),
+  accountsEnabled: () => Boolean(authStatus?.enabled),
+  signedIn: () => Boolean(accountState?.id),
+  getBilling: () => billingStatus,
+});
 
 void boot().finally(() => {
   void hideSplash();

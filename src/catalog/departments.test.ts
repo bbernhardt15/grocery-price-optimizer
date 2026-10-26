@@ -259,6 +259,60 @@ describe("mapToDepartment", () => {
       "excluded"
     );
   });
+
+  it("keeps Halloween dog apparel out of Dairy & Eggs", () => {
+    const names = [
+      "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
+      "Way To Celebrate Dog Halloween Dress, Red So Cute It's Scary, (Small)",
+      "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
+      "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
+    ];
+    const paths = [
+      "Food/Dairy, Eggs & Cheese",
+      "Food/Dairy, Eggs & Cheese/Seasonal/Halloween",
+      "Food/Dairy, Eggs & Cheese/Seasonal/Halloween/Dog Sweaters",
+      "Food/Seasonal/Halloween",
+      "Seasonal/Halloween/Costumes",
+      "Party & Occasions/Halloween/Pet Apparel",
+      "Home Decor/Halloween",
+    ];
+    for (const name of names) {
+      assert.equal(/\beggs?\b/i.test(name), false, name);
+      const bare = mapToDepartment(undefined, name);
+      assert.equal(bare.departmentId, "other", name);
+      assert.equal(bare.signal, "excluded", name);
+      assert.equal(bare.generalMerchandise, true, name);
+      assert.match(bare.reason ?? "", /pet-apparel/, name);
+      for (const path of paths) {
+        const mapped = mapToDepartment([path], name, { departmentId: "dairy-eggs" });
+        assert.equal(mapped.departmentId, "other", `${path} :: ${name}`);
+        assert.equal(mapped.signal, "excluded", `${path} :: ${name}`);
+        assert.equal(mapped.generalMerchandise, true, `${path} :: ${name}`);
+      }
+    }
+
+    const costume = mapToDepartment(["Food/Dairy, Eggs & Cheese"], "Way To Celebrate Dog Costume, Pumpkin");
+    assert.equal(costume.departmentId, "other");
+    assert.match(costume.reason ?? "", /pet-apparel|costume/);
+    const decor = mapToDepartment(["Food/Dairy, Eggs & Cheese/Seasonal/Halloween"], "Way To Celebrate Pumpkin Decor");
+    assert.equal(decor.departmentId, "other");
+    assert.match(decor.reason ?? "", /decor|seasonal/);
+    const toy = mapToDepartment(["Food/Snacks"], "Vibrant Life Plush Dog Toy");
+    assert.equal(toy.departmentId, "other");
+
+    const juice = mapToDepartment(["Food/Dairy, Eggs & Cheese"], "Gerber Gerber Juice, 4 oz", {
+      departmentId: "dairy-eggs",
+    });
+    assert.notEqual(juice.departmentId, "other");
+    assert.equal(mapToDepartment(["Food/Beverages/Juice"], "Gerber Gerber Juice, 4 oz").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Food/Beverages/Juice"], "Gerber Juice, 4 fl oz").departmentId, "beverages");
+    assert.equal(mapToDepartment(["Food/Pantry/Canned Goods"], "Libby's 100% Pure Pumpkin").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Food/Seasonal/Halloween Candy"], "Reese's Pumpkin").departmentId, "snacks");
+    assert.equal(mapToDepartment(["Food/Dairy, Eggs & Cheese/Seasonal/Eggnog"], "Southern Comfort Eggnog").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(["Food/Dairy, Eggs & Cheese/Milk"], "Great Value Whole Milk").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(["Condiments"], "Salad Dressing").departmentId, "pantry");
+    assert.equal(mapToDepartment(["Toys/Dog Food"], "Iams Dog Food").departmentId, "pet");
+  });
 });
 
 const NATURE_MADE =

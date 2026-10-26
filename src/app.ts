@@ -12,6 +12,7 @@ import browseCatalogRouter from "./routes/browseCatalog";
 import adminCatalogRouter from "./routes/adminCatalog";
 import priceAlertsRouter from "./routes/priceAlerts";
 import sharedListsRouter from "./routes/sharedLists";
+import geoZipRouter from "./routes/geoZip";
 import authRouter from "./routes/auth";
 import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
@@ -59,9 +60,11 @@ app.get("/api", (_req, res) => {
       "GET /api/admin/catalog/family-sample":
         "How master products group into families (brand + flavor). Reports the share that collapsed into a multi-size tile and a few example groups. Same admin token as status. Optional department, q, limit, and scan.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, the stale ratio, the effective refresh and match shares, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+      "GET /api/admin/catalog/suspicious":
+        "Read-only audit of grocery departments for names that look like pet apparel, costumes, sweaters, dresses, toys, or decor. Returns a count per department plus examples. Same admin token as status. Nothing is deleted.",
       "POST /api/admin/catalog/recategorize":
-        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route. A product that leaves Other has refresh exclusion cleared. Nothing is deleted.',
+        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route (`clearedExclusions` and `setExclusions`). A grocery department clears refresh exclusion. Other sets it. Nothing is deleted.',
       "GET /api/admin/catalog/other-breakdown":
         "Top stored category paths in Other, with counts, three example names, and how many Other products have a Kroger id. Same admin token as status.",
       "GET /api/admin/catalog/match-queue":
@@ -71,11 +74,15 @@ app.get("/api", (_req, res) => {
       "POST /api/optimize-list":
         "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":
-        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway).",
+        "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway), and whether this browser’s shopper cookie is still signed in.",
+      "POST /api/kroger/connect":
+        "Optional Kroger sign-in with no cart items. Returns an authorize URL, or status connected when the shopper cookie is still valid. Does not call the Cart API.",
+      "GET /api/geo/zip":
+        "Looks up a 5-digit ZIP from lat and lng for the phone shells. Coordinates are not stored.",
       "POST /api/kroger/cart/start":
         "Starts shopper OAuth for PUT /v1/cart/add, or reuses a shopper cookie. Does nothing without KROGER_REDIRECT_URI and a UPC. Success is only claimed after Kroger HTTP 2xx.",
       "GET /api/kroger/oauth/callback":
-        "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add. Falls back to Open at Kroger search links on cancel or API rejection.",
+        "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add, then sends the shopper back to the app with a success or error message. Cancel and API rejection pages also include Open at Kroger search links.",
       "GET /api/instacart/status":
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":
@@ -142,6 +149,7 @@ app.use("/api", browseCatalogRouter);
 app.use("/api", adminCatalogRouter);
 app.use("/api", optimizeListRouter);
 app.use("/api", krogerCartRouter);
+app.use("/api", geoZipRouter);
 app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);

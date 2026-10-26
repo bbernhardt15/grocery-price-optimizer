@@ -68,5 +68,9 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Grocery Gitter uses your approximate location once, only after you tap Use my location, to look up a ZIP. It is not stored and not linked to you. You can type a ZIP instead.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Grocery Gitter uses your approximate location once, only after you tap Use my location, to look up a ZIP. It is not stored and not linked to you. You can type a ZIP instead. The app does not track you in the background.</string>
 </dict>
 </plist>

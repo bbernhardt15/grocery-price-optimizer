@@ -65,6 +65,7 @@ export type RecategorizeJob = {
   examined: number;
   updated: number;
   clearedExclusions: number;
+  setExclusions: number;
   total: number;
   cursor: string;
   error: string;
@@ -78,6 +79,7 @@ const IDLE_JOB: RecategorizeJob = {
   examined: 0,
   updated: 0,
   clearedExclusions: 0,
+  setExclusions: 0,
   total: 0,
   cursor: "",
   error: "",
@@ -93,6 +95,7 @@ function presentJob(row: {
   examined?: number;
   updated?: number;
   clearedExclusions?: number;
+  setExclusions?: number;
   total?: number;
   cursor?: string;
   error?: string;
@@ -109,6 +112,7 @@ function presentJob(row: {
     examined: row.examined ?? 0,
     updated: row.updated ?? 0,
     clearedExclusions: row.clearedExclusions ?? 0,
+    setExclusions: row.setExclusions ?? 0,
     total: row.total ?? 0,
     cursor: row.cursor ?? "",
     error: row.error ?? "",
@@ -124,6 +128,7 @@ async function loadRecategorizeJob(): Promise<RecategorizeJob> {
     examined?: number;
     updated?: number;
     clearedExclusions?: number;
+    setExclusions?: number;
     total?: number;
     cursor?: string;
     error?: string;
@@ -171,9 +176,22 @@ async function clearRefreshExclusions(keys: string[]): Promise<number> {
   return cleared;
 }
 
+async function setRefreshExclusions(keys: string[]): Promise<number> {
+  let set = 0;
+  for (let index = 0; index < keys.length; index += 500) {
+    const chunk = keys.slice(index, index + 500);
+    const result = await CatalogOffer.updateMany(
+      { productKey: { $in: chunk }, refreshExcluded: { $ne: true } },
+      { $set: { refreshExcluded: true } }
+    );
+    set += result.modifiedCount ?? 0;
+  }
+  return set;
+}
+
 /**
  * Walk masters in key order and remap departments from the stored path.
- * A product that leaves Other has refreshExcluded cleared on its offers.
+ * A grocery department clears refreshExcluded. Other sets it.
  * The cursor is saved after each batch so a restarted process resumes.
  */
 async function runRecategorize(jobId: string): Promise<void> {
@@ -182,6 +200,7 @@ async function runRecategorize(jobId: string): Promise<void> {
   let examined = resume ? existing.examined : 0;
   let updated = resume ? existing.updated : 0;
   let clearedExclusions = resume ? existing.clearedExclusions : 0;
+  let setExclusions = resume ? existing.setExclusions : 0;
   let cursor = resume ? existing.cursor : "";
   const total = await CatalogMaster.countDocuments();
   await saveJob({
@@ -190,6 +209,7 @@ async function runRecategorize(jobId: string): Promise<void> {
     examined,
     updated,
     clearedExclusions,
+    setExclusions,
     total,
     cursor,
     error: "",
@@ -212,6 +232,7 @@ async function runRecategorize(jobId: string): Promise<void> {
         };
       }> = [];
       const clearKeys: string[] = [];
+      const excludeKeys: string[] = [];
       for (const row of rows) {
         const mapped = mapToDepartment(row.categoryPaths, row.name);
         const nextSubcategory = mapped.subcategory ?? "";
@@ -227,7 +248,9 @@ async function runRecategorize(jobId: string): Promise<void> {
           });
           updated += 1;
         }
-        if (mapped.departmentId !== "other") {
+        if (mapped.departmentId === "other") {
+          excludeKeys.push(row.key);
+        } else {
           clearKeys.push(row.key);
         }
       }
@@ -235,6 +258,7 @@ async function runRecategorize(jobId: string): Promise<void> {
         await CatalogMaster.bulkWrite(writes, { ordered: false });
       }
       clearedExclusions += await clearRefreshExclusions(clearKeys);
+      setExclusions += await setRefreshExclusions(excludeKeys);
       examined += rows.length;
       cursor = rows[rows.length - 1]?.key ?? cursor;
       await saveJob({
@@ -243,6 +267,7 @@ async function runRecategorize(jobId: string): Promise<void> {
         examined,
         updated,
         clearedExclusions,
+        setExclusions,
         total,
         cursor,
         error: "",
@@ -255,6 +280,7 @@ async function runRecategorize(jobId: string): Promise<void> {
       examined,
       updated,
       clearedExclusions,
+      setExclusions,
       total,
       cursor,
       error: "",
@@ -268,6 +294,7 @@ async function runRecategorize(jobId: string): Promise<void> {
       examined,
       updated,
       clearedExclusions,
+      setExclusions,
       total,
       cursor,
       error: message,
@@ -295,6 +322,7 @@ export async function startRecategorizeJob(): Promise<RecategorizeJob> {
       examined: 0,
       updated: 0,
       clearedExclusions: 0,
+      setExclusions: 0,
       total: 0,
       cursor: "",
       error: "",
@@ -317,6 +345,7 @@ export async function recategorizeCatalog(): Promise<{
   examined: number;
   updated: number;
   clearedExclusions: number;
+  setExclusions: number;
   jobId: string;
   status: RecategorizeJob["status"];
 }> {
@@ -329,6 +358,7 @@ export async function recategorizeCatalog(): Promise<{
     examined: job.examined,
     updated: job.updated,
     clearedExclusions: job.clearedExclusions,
+    setExclusions: job.setExclusions,
     jobId: job.jobId,
     status: job.status,
   };

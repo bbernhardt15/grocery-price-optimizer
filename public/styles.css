@@ -129,6 +129,16 @@ img { max-width: 100%; display: block; }
 }
 .ghost, .text-btn { border: 1px solid var(--line); background: var(--surface); padding: 0 12px; }
 .text-btn { background: transparent; }
+a.text-btn,
+a.text-btn:visited,
+a.text-btn:hover,
+a.text-btn:active {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: transparent; color: var(--ink); font: inherit; font-weight: 700;
+  line-height: 1.2; text-decoration: none; cursor: pointer; text-align: center;
+}
+a.text-btn:hover { background: var(--accent-soft); }
 .count-pill {
   display: inline-grid; place-items: center; min-width: 1.4rem; height: 1.4rem; margin-left: 6px;
   border-radius: 999px; background: var(--accent-ink); color: var(--accent); font-size: 0.8rem;
@@ -145,6 +155,11 @@ img { max-width: 100%; display: block; }
 .delete-box h3, .account-box h3 { margin: 4px 0 0; font-size: 1.05rem; }
 .delete-box label, .account-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
 .account-box { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.account-box[hidden],
+.magic-form[hidden],
+#paywall-manage[hidden],
+#paywall-restore[hidden],
+#auth-message[hidden] { display: none; }
 .paywall-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 6px; }
 .paywall-packages, .paywall-actions { display: flex; flex-direction: column; gap: 8px; }
 .paywall-actions a { min-height: 44px; display: inline-flex; align-items: center; }
@@ -424,7 +439,7 @@ img { max-width: 100%; display: block; }
 }
 .meter-slim { margin-top: 8px; }
 
-.sheet { border: 0; border-radius: 20px; padding: 0; background: var(--surface); color: var(--ink); width: min(560px, calc(100% - 24px)); }
+.sheet { border: 0; border-radius: 20px; padding: 0; background: var(--surface); color: var(--ink); width: min(560px, calc(100% - 24px)); color-scheme: inherit; }
 .sheet::backdrop { background: var(--backdrop); }
 .sheet-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .sheet-body img.hero { width: 100%; height: 200px; object-fit: contain; padding: 12px; border-radius: 14px; background: var(--bg-accent); }
@@ -461,7 +476,14 @@ img { max-width: 100%; display: block; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 46px; padding: 0 16px; border-radius: 999px; text-decoration: none; font-weight: 700;
 }
-.handoff-btn { background: var(--ink); color: var(--bg); border: 0; }
+.handoff-btn {
+  background: var(--ink); color: var(--bg); border: 0; font: inherit; font-weight: 700;
+  line-height: 1.2; cursor: pointer; text-align: center;
+}
+a.handoff-btn,
+a.handoff-btn:visited,
+a.handoff-btn:hover,
+a.handoff-btn:active { color: var(--bg); text-decoration: none; }
 .handoff-btn:disabled { opacity: 0.55; }
 .instacart-cta { background: #003d29; color: #faf1e5; border: 0; }
 .instacart-cta img { width: 22px; height: 22px; }
@@ -480,6 +502,8 @@ img { max-width: 100%; display: block; }
 .check-line input { width: 1.1rem; height: 1.1rem; margin-top: 2px; }
 .item-name { display: block; }
 .item-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
+.swap-note { flex: 1 0 100%; margin-top: 4px; font-size: 0.8rem; line-height: 1.35; }
+.swap-note .text-btn { display: inline-flex; margin-top: 6px; }
 .move { display: flex; flex-direction: column; gap: 2px; font-size: 0.75rem; color: var(--muted); min-width: 9rem; }
 .move select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 0 8px; }
 .checklist-sheet { width: min(640px, calc(100% - 24px)); }
@@ -487,6 +511,10 @@ img { max-width: 100%; display: block; }
 .check-row-line {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
   border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
+}
+.check-row-line > a.text-btn { margin-left: auto; flex: 0 1 auto; max-width: 100%; }
+@media (max-width: 520px) {
+  .check-row-line > a.text-btn { flex: 1 1 100%; margin-left: 0; }
 }
 .print-root { display: none; }
 @media print {
@@ -544,6 +572,46 @@ img { max-width: 100%; display: block; }
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
 }
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 4px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+.empty-state[hidden] { display: none; }
+.empty-state h3 { margin: 0; font-family: var(--display); font-size: 1.2rem; }
+.empty-state p { margin: 0; color: var(--muted); max-width: 36rem; }
+.empty-state .primary { margin-top: 4px; }
+.onboard { width: min(440px, calc(100% - 24px)); max-height: min(92dvh, 720px); }
+.onboard .sheet-body { overflow: auto; }
+.onboard-progress {
+  margin: 0; color: var(--muted); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.onboard-dots { display: flex; gap: 6px; }
+.onboard-dots span { width: 8px; height: 8px; border-radius: 999px; background: var(--line); }
+.onboard-dots span[data-current="true"] { background: var(--accent); }
+#onboard-account-fields, #onboard-zip-fields, #onboard-kroger-fields { display: flex; flex-direction: column; gap: 8px; }
+#onboard-account-fields[hidden], #onboard-zip-fields[hidden], #onboard-kroger-fields[hidden],
+#onboard-location[hidden], #onboard-kroger[hidden], #onboard-sign-in[hidden], #onboard-back[hidden],
+#settings-kroger-connect[hidden] { display: none; }
+#onboard-zip-fields label { font-size: 0.85rem; color: var(--muted); }
+#onboard-zip {
+  width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); padding: 0 12px;
+}
+.onboard-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.onboard-actions .primary { margin-left: auto; }
+.settings-list { display: flex; flex-direction: column; gap: 8px; }
+.settings-list .ghost, .settings-list .primary {
+  width: 100%; text-align: left; height: auto; min-height: 44px; padding: 10px 12px; white-space: normal;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation: none !important;

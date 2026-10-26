@@ -191,12 +191,44 @@ function cleanText(value) {
   return text || undefined;
 }
 
+export function swapSentence(chosen, storeName, replacement) {
+  const item = String(chosen || "This item").replace(/\s+/g, " ").trim();
+  const store = String(storeName || "this store").trim() || "this store";
+  const using = String(replacement || "a different pack").replace(/\s+/g, " ").trim();
+  return `Swapped: ${item} is not sold at ${store}, using ${using}`;
+}
+
+function offerIsSwap(offer) {
+  return offer?.matchKind === "swap" || offer?.matchKind === "substitute";
+}
+
+export function moveOptionLabel(offer, currentPrice) {
+  const price = Number(offer?.price);
+  const current = Number(currentPrice);
+  const base = `${offer?.storeName || "Store"} · ${money(price)}`;
+  const swap = offerIsSwap(offer);
+  let text = swap ? `${base} swap` : base;
+  if (Number.isFinite(price) && Number.isFinite(current)) {
+    const delta = roundMoney(current - price);
+    if (delta > 0) text += ` (save ${money(delta)})`;
+    else if (delta < 0) text += ` (${money(Math.abs(delta))} more)`;
+  }
+  return text;
+}
+
 function lineFromOffer(item, offer) {
   const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
   const price = Number(offer.price);
   const same = sameStore(offer.storeName, item.storeName);
   const size = cleanText(offer.size) || (same ? cleanText(item.size) : undefined);
   const aisle = cleanText(offer.aisle) || (same ? cleanText(item.aisle) : undefined);
+  const swap =
+    offerIsSwap(offer) || (same && offer?.matchKind !== "exact" && (item?.matchKind === "swap" || item?.matchKind === "substitute"));
+  const chosen = offer.substitutedFor || item.substitutedFor || item.query || item.name;
+  const note = swap
+    ? offer.swapNote || (same ? item.swapNote : "") || swapSentence(chosen, offer.storeName, offer.name || item.name)
+    : "";
+  const exactStore = cleanText(item.exactStore);
   return {
     query: item.query,
     lineId: item.lineId,
@@ -216,7 +248,10 @@ function lineFromOffer(item, offer) {
     department: offer.department || item.department,
     ...(aisle ? { aisle } : {}),
     ...(offer.url ? { url: offer.url } : {}),
-    ...(same && item.matchKind ? { matchKind: item.matchKind } : {}),
+    ...(swap ? { matchKind: "swap" } : {}),
+    ...(note ? { swapNote: note } : {}),
+    ...(swap && chosen ? { substitutedFor: chosen } : {}),
+    ...(exactStore ? { exactStore } : {}),
     offers: item.offers,
   };
 }
@@ -288,11 +323,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     if (ready) {
       action = {
         type: "kroger_cart",
-        label: "Send to Kroger cart",
+        label: `Send to ${storeName} cart`,
         url: KROGER_CART_START,
         status: "needs_shopper_login",
         ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-        detail: "Starts Kroger shopper login, then PUT /v1/cart/add.",
+        detail: "Signs in to Kroger, then adds the items.",
       };
     }
   }
@@ -310,11 +345,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     if (url) {
       action = {
         type: "walmart_cart",
-        label: "Open Walmart cart",
+        label: `Send to ${storeName} cart`,
         url,
         status: "ready",
         ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-        detail: "Opens walmart.com with these item ids. Grocery Gitter does not report the cart as filled.",
+        detail: "Opens walmart.com with the items in the cart link. Grocery Gitter does not report the cart as filled.",
       };
     }
   }
@@ -322,11 +357,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
   if (!action) {
     action = {
       type: "shop_list",
-      label: `Shop this list at ${storeName}`,
+      label: `Open ${storeName} list`,
       status: handoffItems.length ? "ready" : "unavailable",
       ...(firstUrl ? { url: firstUrl } : {}),
       detail: firstUrl
-        ? `Checklist with an Open in ${storeName} link for each item. Not a cart fill.`
+        ? `Checklist with item links. Each line has an Open in ${storeName} link. Not a cart fill.`
         : `Checklist only. ${storeName} has no verified item link.`,
     };
   }
@@ -397,7 +432,10 @@ export function singleStoreSavings(lines) {
     let total = 0;
     const missing = [];
     for (const line of priced) {
-      const offer = (line.offers || []).find((row) => sameStore(row.storeName, storeName));
+      const rows = (line.offers || []).filter((row) => sameStore(row.storeName, storeName));
+      const exact = rows.find((row) => !offerIsSwap(row));
+      const hasExactSomewhere = (line.offers || []).some((row) => row && !offerIsSwap(row));
+      const offer = exact || (hasExactSomewhere ? undefined : rows[0]);
       if (!offer || !Number.isFinite(Number(offer.price))) {
         missing.push(String(line.name || "Item"));
         continue;
@@ -576,7 +614,8 @@ export function formatTripText(stores, options = {}) {
   for (const store of stores || []) {
     const lines = (store.items || []).map(formatItemLine).filter(Boolean);
     if (!lines.length) continue;
-    blocks.push(options.headed ? [store.storeName, ...lines].join("\n") : lines.join("\n"));
+    const heading = `${store.storeName} list`;
+    blocks.push(options.headed ? [heading, ...lines].join("\n") : lines.join("\n"));
   }
   return blocks.join("\n\n");
 }

@@ -19,7 +19,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
-import { ingestConfig, tickCallSplit, type IngestConfig } from "./config";
+import { effectiveShares, ingestConfig, refreshShareFor, tickCallSplit, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
   krogerAdvance,
@@ -29,17 +29,19 @@ import {
   sanitizeKrogerParam,
 } from "./krogerTerms";
 import { finishLookups, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
-import { finishRefresh, nextRefreshPicks } from "./refresh";
+import { finishRefresh, loadStaleRatio, nextRefreshPicks } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import {
   WALMART_TAXONOMY_VERSION,
   groceryLeaves,
+  isWalmartEndpointMiss,
+  normalizeWalmartPage,
   recordsFromWalmartPage,
   walmartNextCursor,
-  walmartPagePath,
   type WalmartCategory,
+  type WalmartPagePlan,
 } from "./walmartWalk";
 
 const LOCK_ID = "catalog-ingest";
@@ -54,6 +56,11 @@ export type WalmartCheckpoint = {
   categories: WalmartCategory[];
   index: number;
   nextPage: string | null;
+  /**
+   * The stored nextPage was rejected. The next attempt rebuilds
+   * `/paginated/items` from the category id and page cursor.
+   */
+  pageFallback?: boolean;
   attempts: number;
   rateStrikes: number;
   /** Clean pages since the last 429. Three in a row clear the strike count. */
@@ -376,6 +383,41 @@ function releaseWalmartHalt(cp: WalmartCheckpoint, now: Date): void {
   }
 }
 
+async function tickSplitFor(
+  store: "walmart" | "kroger",
+  maxCalls: number,
+  config: IngestConfig,
+  staleRatio: number | undefined
+): Promise<{ lookup: number; refresh: number; discovery: number }> {
+  const ratio = staleRatio ?? (await loadStaleRatio());
+  const shares = effectiveShares({
+    staleRatio: ratio,
+    lookupShare: config.matchLookupShare,
+    refreshShare: refreshShareFor(config, store),
+  });
+  return tickCallSplit(maxCalls, shares.lookupShare, shares.refreshShare, shares.refreshFirst);
+}
+
+function logWalmartPagePlan(categoryId: string, stored: string | null, plan: WalmartPagePlan): void {
+  if (!plan.note) {
+    return;
+  }
+  const storedText = (stored ?? "").replace(/([?&]publisherId=)[^&]*/gi, "$1[redacted]").slice(0, 160);
+  const line = `Walmart pagination: ${plan.note} category=${categoryId} fallback=${plan.fallback} path=${plan.path} stored=${storedText}`;
+  if (plan.fallback) {
+    console.warn(line);
+  } else {
+    console.info(line);
+  }
+}
+
+function skipWalmartCategory(cp: WalmartCheckpoint): void {
+  cp.index += 1;
+  cp.nextPage = null;
+  cp.attempts = 0;
+  cp.pageFallback = false;
+}
+
 export async function stepWalmart(options: {
   client: WalmartCatalogClient;
   maxCalls: number;
@@ -383,6 +425,8 @@ export async function stepWalmart(options: {
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   config?: IngestConfig;
+  /** Shelf stale ratio. Omit to count offers in Mongo. */
+  staleRatio?: number;
 }): Promise<SliceResult> {
   const config = options.config ?? ingestConfig();
   const nowFn = options.now ?? (() => new Date());
@@ -404,7 +448,7 @@ export async function stepWalmart(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
-  const split = tickCallSplit(options.maxCalls, config.matchLookupShare, config.refreshShare);
+  const split = await tickSplitFor("walmart", options.maxCalls, config, options.staleRatio);
   const lookupBudget = split.lookup;
   const refreshBudget = split.refresh;
   let lookupsDone = 0;
@@ -453,6 +497,7 @@ export async function stepWalmart(options: {
       cp.categories = [];
       cp.index = 0;
       cp.nextPage = null;
+      cp.pageFallback = false;
     }
     if (lookupUpcs && !lookupExhausted && lookupsDone < lookupBudget) {
       const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
@@ -626,9 +671,19 @@ export async function stepWalmart(options: {
     }
 
     const category = cp.categories[cp.index];
-    const path = walmartPagePath(category.id, cp.nextPage);
+    const plan = normalizeWalmartPage(category.id, cp.nextPage, {
+      forceFallback: Boolean(cp.pageFallback) && Boolean(cp.nextPage?.trim()),
+    });
+    logWalmartPagePlan(category.id, cp.nextPage, plan);
+    const pageParams = {
+      request: "paginated/items",
+      categoryId: category?.id ?? null,
+      nextPage: cp.nextPage,
+      path: plan.path,
+      fallback: plan.fallback,
+    };
     try {
-      const charged = await spendCall(gate, () => options.client.page(path), () => {
+      const charged = await spendCall(gate, () => options.client.page(plan.path), () => {
         calls += 1;
       }, stampPace);
       if (charged === "budget") {
@@ -642,11 +697,11 @@ export async function stepWalmart(options: {
       upserted += saved.offers;
       const next = walmartNextCursor(payload);
       noteWalmartSuccess(cp);
+      cp.pageFallback = false;
       if (next && next !== cp.nextPage) {
         cp.nextPage = next;
       } else {
-        cp.index += 1;
-        cp.nextPage = null;
+        skipWalmartCategory(cp);
       }
       if (cp.index >= cp.categories.length) {
         cp.phase = "done";
@@ -655,11 +710,15 @@ export async function stepWalmart(options: {
       }
       await persist("running", { clearError: true });
     } catch (error) {
-      const outcome = await failWalmart(cp, error, sleep, nowFn(), {
-        request: "paginated/items",
-        categoryId: category?.id ?? null,
-        nextPage: cp.nextPage,
-      });
+      if (isWalmartEndpointMiss(error) && !plan.fallback) {
+        cp.pageFallback = true;
+        console.warn(
+          `Walmart pagination: category ${category.id} rejected the nextPage link (${error instanceof Error ? error.message : String(error)}). Next attempt rebuilds /paginated/items from the category id and page cursor.`
+        );
+        await persist("running", { error: ingestErrorDetail("walmart", error, pageParams, nowFn()) });
+        continue;
+      }
+      const outcome = await failWalmart(cp, error, sleep, nowFn(), pageParams);
       cp = outcome.checkpoint;
       paused = outcome.paused;
       await persist(outcome.status, { error: outcome.error });
@@ -692,16 +751,22 @@ async function failWalmart(
     return { checkpoint: cp, paused: "rate", status: "paused", error: detail, stop: true };
   }
   if (kind === "fatal") {
-    cp.index += 1;
-    cp.nextPage = null;
-    cp.attempts = 0;
+    if (params.request === "paginated/items") {
+      console.warn(
+        `Walmart pagination: skipping category ${String(params.categoryId ?? "")} after ${detail.message}`
+      );
+    }
+    skipWalmartCategory(cp);
     return { checkpoint: cp, paused: null, status: "running", error: detail, stop: false };
   }
   cp.attempts += 1;
   if (cp.attempts >= MAX_ATTEMPTS) {
-    cp.index += 1;
-    cp.nextPage = null;
-    cp.attempts = 0;
+    if (params.request === "paginated/items") {
+      console.warn(
+        `Walmart pagination: skipping category ${String(params.categoryId ?? "")} after ${cp.attempts} failures (${detail.message})`
+      );
+    }
+    skipWalmartCategory(cp);
     return { checkpoint: cp, paused: kind, status: "running", error: detail, stop: false };
   }
   await sleep(backoffDelayMs(cp.attempts));
@@ -746,6 +811,8 @@ export async function stepKroger(options: {
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   config?: IngestConfig;
+  /** Shelf stale ratio. Omit to count offers in Mongo. */
+  staleRatio?: number;
 }): Promise<SliceResult> {
   const config = options.config ?? ingestConfig();
   const nowFn = options.now ?? (() => new Date());
@@ -785,7 +852,7 @@ export async function stepKroger(options: {
   let paused: string | null = null;
   let countedCalls = 0;
   let countedUpserts = 0;
-  const split = tickCallSplit(options.maxCalls, config.matchLookupShare, config.refreshShare);
+  const split = await tickSplitFor("kroger", options.maxCalls, config, options.staleRatio);
   const lookupBudget = split.lookup;
   const refreshBudget = split.refresh;
   let lookupsDone = 0;

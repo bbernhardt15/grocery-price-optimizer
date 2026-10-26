@@ -28,13 +28,18 @@ const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
 const KROGER_CART_PAGE = "https://www.kroger.com/cart";
 
-function htmlPage(title: string, body: string): string {
+function htmlPage(title: string, body: string, returnPath = "/"): string {
+  const redirect =
+    returnPath === "/"
+      ? ""
+      : `<script>location.replace(${JSON.stringify(returnPath).replace(/</g, "\\u003c")});</script>`;
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)} — ${PRODUCT_NAME}</title>
+    ${redirect}
     <style>
       body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 40rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; color: #171717; }
       a { color: #047857; }
@@ -44,9 +49,10 @@ function htmlPage(title: string, body: string): string {
     </style>
   </head>
   <body>
-    <p><a href="/">← Back to ${PRODUCT_NAME}</a></p>
+    <p><a href="${escapeHtml(returnPath)}">← Back to ${PRODUCT_NAME}</a></p>
     <h1>${escapeHtml(title)}</h1>
     ${body}
+    ${returnPath === "/" ? "" : `<p>Sending you back to ${PRODUCT_NAME}.</p>`}
   </body>
 </html>`;
 }
@@ -59,9 +65,22 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+function headerText(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value.join(",");
+  return value ?? "";
+}
+
+/**
+ * JSON cart posts must answer with JSON. fetch() often omits
+ * application/json from Accept, then follows a 302 to api.kroger.com
+ * cross-origin and reports "Failed to fetch". Classic form posts, which
+ * are not application/json, still get that 302.
+ */
 function wantsJson(req: Request): boolean {
-  const accept = req.headers.accept ?? "";
-  return accept.includes("application/json");
+  const accept = headerText(req.headers.accept).toLowerCase();
+  if (accept.includes("application/json")) return true;
+  const contentType = headerText(req.headers["content-type"]).toLowerCase();
+  return req.method === "POST" && contentType.includes("application/json");
 }
 
 type StartItem = {
@@ -82,6 +101,22 @@ function asOptionalQuantity(value: unknown): number | undefined {
   return undefined;
 }
 
+/** A browser form can post `items` as one JSON field. fetch posts an array. */
+function readStartItems(value: unknown): StartItem[] | null {
+  let items = value;
+  if (typeof items === "string") {
+    const trimmed = items.trim();
+    if (!trimmed) return null;
+    try {
+      items = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return items as StartItem[];
+}
+
 function parseStartBody(body: unknown): {
   items: StartItem[];
   locationId?: string;
@@ -91,7 +126,8 @@ function parseStartBody(body: unknown): {
     return null;
   }
   const record = body as Record<string, unknown>;
-  if (!Array.isArray(record.items) || record.items.length === 0) {
+  const items = readStartItems(record.items);
+  if (!items) {
     return null;
   }
   const modality =
@@ -102,7 +138,20 @@ function parseStartBody(body: unknown): {
     typeof record.locationId === "string" && record.locationId.trim()
       ? record.locationId.trim()
       : undefined;
-  return { items: record.items as StartItem[], locationId, modality };
+  return { items, locationId, modality };
+}
+
+const RETURN_MESSAGE_MAX = 240;
+
+/** Same-origin path the shopper app reads to toast the cart result. */
+function shopperReturnPath(kind: "added" | "error", message: string): string {
+  const clean = message
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, RETURN_MESSAGE_MAX);
+  const params = new URLSearchParams({ kroger: kind, message: clean });
+  return `/?${params.toString()}`;
 }
 
 function searchUrlForLine(item: KrogerCartLine): string {
@@ -167,18 +216,18 @@ function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: Sh
 function pendingFromState(
   config: KrogerOAuthConfig,
   state: string | undefined
-): { items: KrogerCartLine[]; locationId?: string } | undefined {
+): { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect" } | undefined {
   if (!state) {
     return undefined;
   }
   const signed = verifyCartState(config, state);
   if (signed) {
     krogerCartSessions.takePending(state);
-    return { items: signed.items, locationId: signed.locationId };
+    return { items: signed.items, locationId: signed.locationId, purpose: signed.purpose };
   }
   const memory = krogerCartSessions.takePending(state);
   if (memory) {
-    return { items: memory.items, locationId: memory.locationId };
+    return { items: memory.items, locationId: memory.locationId, purpose: memory.purpose };
   }
   return undefined;
 }
@@ -200,10 +249,16 @@ router.get("/kroger/logout", async (req, res) => {
   );
 });
 
-router.get("/kroger/auth-status", (_req, res) => {
+router.get("/kroger/auth-status", async (req, res) => {
   const config = readKrogerOAuthConfig();
+  let connected = false;
+  if (config) {
+    const token = await shopperTokenForRequest(config, cookieValue(req, KROGER_SHOPPER_COOKIE));
+    connected = Boolean(token);
+  }
   res.json({
     oauthConfigured: Boolean(config),
+    connected,
     cartScope: config?.scope ?? null,
     redirectUri: config?.redirectUri ?? null,
     modality: readCartModality(),
@@ -212,6 +267,33 @@ router.get("/kroger/auth-status", (_req, res) => {
      * add to a shopper cart. A registered redirect URI is required.
      */
     requiresShopperLogin: true,
+  });
+});
+
+/** Optional sign-in with no cart items. Nothing is added until a later cart start. */
+router.post("/kroger/connect", async (req, res) => {
+  const config = readKrogerOAuthConfig();
+  if (!config) {
+    res.status(501).json({
+      error:
+        "Kroger sign-in is not configured. Set KROGER_REDIRECT_URI to the exact URL registered on the Kroger developer app.",
+      oauthConfigured: false,
+    });
+    return;
+  }
+
+  const existing = await shopperTokenForRequest(config, cookieValue(req, KROGER_SHOPPER_COOKIE));
+  if (existing) {
+    res.json({ status: "connected", oauthConfigured: true });
+    return;
+  }
+
+  const state = signCartState(config, { items: [], purpose: "connect" });
+  krogerCartSessions.savePending(state, { items: [], purpose: "connect" });
+  res.json({
+    authorizeUrl: buildKrogerAuthorizeUrl(config, state),
+    status: "needs_shopper_login",
+    oauthConfigured: true,
   });
 });
 
@@ -323,7 +405,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     res.status(501).send(
       htmlPage(
         "Kroger OAuth is not configured",
-        `<p class="status error">Set KROGER_REDIRECT_URI on Railway to the exact HTTPS callback URL registered on your Kroger developer app.</p>`
+        `<p class="status error">Set KROGER_REDIRECT_URI on Railway to the exact HTTPS callback URL registered on your Kroger developer app.</p>`,
+        shopperReturnPath("error", "Kroger cart sign-in is not set up. Nothing was added to your cart.")
       )
     );
     return;
@@ -340,7 +423,11 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
         "Kroger login was not completed",
         `<p class="status error">${escapeHtml(errorDescription || errorParam)}</p>
          <p>Cart write did not run. ${PRODUCT_NAME} never reports items as added unless Kroger acknowledges <code>PUT /v1/cart/add</code>.</p>
-         ${fallbackList}`
+         ${fallbackList}`,
+        shopperReturnPath(
+          "error",
+          "Kroger login was not completed. Nothing was added to your cart. Use Open at Kroger from your trip plan."
+        )
       )
     );
     return;
@@ -351,7 +438,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
       htmlPage(
         "Missing OAuth code",
         `<p class="status error">Kroger did not return an authorization code. Nothing was added to a cart.</p>
-         ${fallbackList}`
+         ${fallbackList}`,
+        shopperReturnPath("error", "Kroger did not return a login code. Nothing was added to your cart.")
       )
     );
     return;
@@ -361,7 +449,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     res.status(400).send(
       htmlPage(
         "Kroger cart session expired",
-        `<p class="status error">Start again from <strong>Send to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`
+        `<p class="status error">Start again from <strong>Send to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`,
+        shopperReturnPath("error", "That Kroger cart session expired. Start again from Send to Kroger cart.")
       )
     );
     return;
@@ -377,7 +466,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
         "Could not complete Kroger login",
         `<p class="status error">${escapeHtml(message)}</p>
          <p>The Cart API was not called. Confirm the redirect URI matches KROGER_REDIRECT_URI (including https and hostname) and that the Kroger app is allowed to request <code>cart.basic:write</code>.</p>
-         ${fallbackList}`
+         ${fallbackList}`,
+        shopperReturnPath("error", `Could not complete Kroger login. Nothing was added to your cart. ${message}`)
       )
     );
     return;
@@ -385,6 +475,16 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
 
   appendShopperCookie(res, config, token);
   await rememberAccountKroger(res, config, token);
+
+  if (pending.purpose === "connect" || pending.items.length === 0) {
+    res.send(
+      htmlPage(
+        "Kroger is connected",
+        `<p class="status">You’re signed in with Kroger. Nothing was added to a cart. Return to ${PRODUCT_NAME} and plan a trip when you want items sent.</p>`
+      )
+    );
+    return;
+  }
 
   const result = await addItemsToKrogerCart(token.accessToken, pending.items);
 
@@ -395,17 +495,26 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
         "Kroger did not add items to the cart",
         `<p class="status error">${escapeHtml(result.error)}</p>
          <p>${PRODUCT_NAME} will not claim a cart fill unless Kroger acknowledges <code>PUT /v1/cart/add</code> with HTTP 2xx. Common causes: the developer app lacks cart scopes, the shopper cancelled login, or the UPC is not orderable for pickup.</p>
-         ${fallbackList}`
+         ${fallbackList}`,
+        shopperReturnPath(
+          "error",
+          `Kroger did not add those items. ${result.error} Use Open at Kroger from your trip plan.`
+        )
       )
     );
     return;
   }
 
+  const addedLabel = `${result.added} item${result.added === 1 ? "" : "s"}`;
   res.send(
     htmlPage(
       "Added to your Kroger cart",
-      `<p class="status">Kroger accepted ${result.added} item${result.added === 1 ? "" : "s"} via the Cart API. Finish pickup/delivery on Kroger while logged into the <strong>same</strong> shopper account.</p>
-       <p><a href="${KROGER_CART_PAGE}" rel="noopener" target="_blank">Open Kroger cart</a></p>`
+      `<p class="status">Kroger accepted ${addedLabel} via the Cart API. Finish pickup/delivery on Kroger while logged into the <strong>same</strong> shopper account.</p>
+       <p><a href="${KROGER_CART_PAGE}" rel="noopener" target="_blank">Open Kroger cart</a></p>`,
+      shopperReturnPath(
+        "added",
+        `Kroger accepted ${addedLabel}. Finish pickup or delivery on kroger.com while logged into the same account.`
+      )
     )
   );
 });

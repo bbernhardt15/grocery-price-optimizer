@@ -12,11 +12,12 @@ import { MemoryBudgetStore, MongoBudgetStore, utcDay } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
-import { CatalogMaster, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
 import { matchProgress, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
-import { catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus } from "./status";
+import { catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "./status";
 import { nextRefreshPicks } from "./refresh";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import { recordsFromWalmartPage } from "./walmartWalk";
@@ -511,6 +512,21 @@ describe("catalog ingestion", () => {
     assert.equal(typeof queueBody.queue.walmart, "number");
     assert.equal(typeof queueBody.queue.kroger, "number");
     assert.equal(queueBody.hitRate.walmart === null || typeof queueBody.hitRate.walmart === "number", true);
+    const suspiciousDenied = await fetch(`${origin}/api/admin/catalog/suspicious`);
+    assert.equal(suspiciousDenied.status, 401);
+    const suspiciousOk = await fetch(`${origin}/api/admin/catalog/suspicious?limit=5`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    assert.equal(suspiciousOk.status, 200);
+    const suspiciousBody = (await suspiciousOk.json()) as {
+      suspicious: number;
+      departments: Array<{ id: string; name: string; suspicious: number }>;
+      items: unknown[];
+    };
+    assert.equal(typeof suspiciousBody.suspicious, "number");
+    assert.ok(suspiciousBody.departments.some((row) => row.id === "dairy-eggs" && row.name === "Dairy & Eggs"));
+    assert.equal(suspiciousBody.departments.some((row) => row.id === "other"), false);
+    assert.ok(Array.isArray(suspiciousBody.items));
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
@@ -1585,6 +1601,8 @@ describe("catalog ingestion", () => {
     config.walmartLookupBatch = 1;
     config.matchLookupShare = 0.5;
     config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
     const slice = await stepWalmart({
       client: {
         taxonomy: async () => ({ categories: [{ id: "pantry", name: "Pantry", path: "Food/Pantry", children: [] }] }),
@@ -1673,7 +1691,9 @@ describe("catalog ingestion", () => {
 
   it("refreshes a saved-list stale offer ahead of an older one", async () => {
     await CatalogOffer.updateMany({ status: "stale" }, { $set: { refreshExcluded: true } });
-    const now = new Date("2026-10-23T15:00:00.000Z");
+    // catalogStatus() counts refreshedToday on the real UTC day. The injected
+    // clock has to be that same day or the assertion is false after 2026-10-23.
+    const now = new Date();
     const listUpc = "049000042566";
     const oldUpc = "016000275287";
     const listKey = upcKey(listUpc);
@@ -1729,6 +1749,8 @@ describe("catalog ingestion", () => {
     config.walmartLookupBatch = 1;
     config.matchLookupShare = 0;
     config.refreshShare = 1;
+    config.refreshShareWalmart = 1;
+    config.refreshShareKroger = 1;
     const slice = await stepWalmart({
       client: {
         taxonomy: async () => ({ categories: [] }),
@@ -1764,6 +1786,209 @@ describe("catalog ingestion", () => {
     assert.equal(typeof status.counts.refreshedToday.walmart, "number");
     assert.equal(typeof status.counts.refreshQueue.walmart, "number");
     assert.equal(typeof status.refresh.share, "number");
+    assert.equal(status.refresh.shareKroger, ingestConfig().refreshShareKroger);
+    assert.equal(typeof status.refresh.effective.walmart.refreshShare, "number");
+    assert.equal(typeof status.refresh.effective.kroger.lookupShare, "number");
+    assert.equal(typeof status.match.effectiveLookupShare.walmart, "number");
+    assert.ok(["refresh", "balanced", "discover"].includes(status.refresh.mode));
+    const shelf = status.counts.offers - status.counts.discontinuedOffers;
+    const expectedRatio = shelf <= 0 ? 0 : Math.round((status.counts.staleOffers / shelf) * 1000) / 1000;
+    assert.equal(status.refresh.staleRatio, expectedRatio);
+  });
+
+  it("rewrites a Walmart api-proxy nextPage and advances past a category that still fails", async () => {
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const bad = "/api-proxy/service/affil/product/v2/paginated/items?category=milk&count=25&page=2";
+    const paths: string[] = [];
+    let milkPageFails = 0;
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.matchLookupShare = 0;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => ({
+          categories: [
+            { id: "milk", name: "Milk", path: "Food/Dairy/Milk", children: [] },
+            { id: "cereal", name: "Cereal", path: "Food/Breakfast Foods/Cereal", children: [] },
+          ],
+        }),
+        page: async (path: string) => {
+          paths.push(path);
+          assert.equal(path.includes("/api-proxy/"), false, path);
+          assert.match(path, /^\/paginated\/items\?/);
+          if (path.includes("category=milk") && path.includes("page=2")) {
+            milkPageFails += 1;
+            const error = new Error("No endpoint GET /api-proxy/service/affil/product/v2/paginated/items");
+            (error as Error & { status: number }).status = 404;
+            throw error;
+          }
+          if (path.includes("category=milk")) {
+            return {
+              items: [
+                {
+                  itemId: 111,
+                  name: "Whole Milk",
+                  brandName: "Dairy Pure",
+                  salePrice: 3.18,
+                  upc: "00055566677788",
+                },
+              ],
+              nextPage: bad,
+              nextPageExist: true,
+            };
+          }
+          return { items: [], nextPageExist: false };
+        },
+      },
+      maxCalls: 6,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0,
+      now: () => new Date("2026-10-26T12:00:00.000Z"),
+    });
+    assert.equal(slice.paused, null);
+    assert.equal(milkPageFails, 2);
+    assert.ok(paths.some((path) => path === "/paginated/items?category=milk&count=25&page=2"));
+    assert.ok(paths.some((path) => path.includes("category=cereal")));
+    const saved = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { index?: number; nextPage?: string | null; pageFallback?: boolean };
+    }>();
+    assert.equal(saved?.checkpoint?.nextPage ?? null, null);
+    assert.equal(saved?.checkpoint?.pageFallback ?? false, false);
+    assert.ok((saved?.checkpoint?.index ?? 0) >= 1);
+  });
+
+  it("refreshes shared and popular offers before older ones and skips refresh-excluded items", async () => {
+    await CatalogOffer.updateMany({ status: "stale" }, { $set: { refreshExcluded: true } });
+    const now = new Date();
+    const sharedUpc = "049000042566";
+    const popularUpc = "0003700031802";
+    const oldUpc = "070708200500";
+    const excludedUpc = "0001600027528";
+    const sharedKey = upcKey(sharedUpc);
+    const popularKey = upcKey(popularUpc);
+    const oldKey = upcKey(oldUpc);
+    const excludedKey = upcKey(excludedUpc);
+    assert.ok(sharedKey && popularKey && oldKey && excludedKey);
+    assert.ok(
+      walmartUpcForLookup(sharedUpc) &&
+        walmartUpcForLookup(popularUpc) &&
+        walmartUpcForLookup(oldUpc) &&
+        walmartUpcForLookup(excludedUpc)
+    );
+    const keys = [sharedKey, popularKey, oldKey, excludedKey];
+    await CatalogDemand.deleteMany({ $or: [{ upcKey: { $in: keys } }, { text: { $in: keys.map((key) => `upc:${key}`) } }] });
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await SharedList.deleteMany({ shareTokenHash: "catalog-health-share" });
+    const rows = [
+      { key: sharedKey, upc: sharedUpc, name: "Shared Soda", at: now, excluded: false },
+      { key: popularKey, upc: popularUpc, name: "Popular Beans", at: new Date("2026-02-01T00:00:00.000Z"), excluded: false },
+      { key: oldKey, upc: oldUpc, name: "Old Chips", at: new Date("2025-01-01T00:00:00.000Z"), excluded: false },
+      { key: excludedKey, upc: excludedUpc, name: "Excluded Cereal", at: new Date("2024-01-01T00:00:00.000Z"), excluded: true },
+    ];
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: "Store",
+        departmentId: "pantry",
+        upc: row.upc,
+        walmartItemId: row.key,
+        lastSeenAt: row.at,
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 1,
+        lastSeenAt: row.at,
+        status: "stale",
+        ...(row.excluded ? { refreshExcluded: true } : {}),
+      });
+    }
+    await SharedList.create({
+      shareTokenHash: "catalog-health-share",
+      ownerTokenHash: "catalog-health-owner",
+      title: "Week",
+      mode: "edit",
+      revokedAt: null,
+      items: [
+        {
+          itemId: "1",
+          catalogId: sharedKey,
+          name: "Shared Soda",
+          quantity: 1,
+          writtenAt: Date.now(),
+          updatedAt: now,
+          deleted: false,
+        },
+      ],
+    });
+    await noteCatalogDemand({ kind: "search", upcs: [popularUpc] });
+    const marked = await CatalogDemand.updateOne({ kind: "search", upcKey: popularKey }, { $set: { hits: 5 } });
+    assert.equal(marked.matchedCount, 1);
+    await noteCatalogDemand({ kind: "list", upcs: [excludedUpc] });
+    const picks = await nextRefreshPicks("Walmart", now, 3);
+    assert.deepEqual(
+      picks.map((pick) => pick.productKey),
+      [sharedKey, popularKey, oldKey]
+    );
+    assert.equal(picks[0]?.priority, "shared");
+    assert.equal(picks[1]?.priority, "popular");
+    assert.equal(picks[2]?.priority, "catalog");
+    assert.equal(
+      picks.some((pick) => pick.productKey === excludedKey),
+      false
+    );
+  });
+
+  it("keeps the Walmart daily budget at the configured value and clamps it to 1500", () => {
+    const previous = {
+      budget: process.env.WALMART_INGEST_DAILY_BUDGET,
+      refresh: process.env.CATALOG_REFRESH_SHARE,
+      walmart: process.env.CATALOG_REFRESH_SHARE_WALMART,
+      kroger: process.env.CATALOG_REFRESH_SHARE_KROGER,
+    };
+    const restore = (name: string, value: string | undefined) => {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    };
+    try {
+      delete process.env.WALMART_INGEST_DAILY_BUDGET;
+      delete process.env.CATALOG_REFRESH_SHARE;
+      delete process.env.CATALOG_REFRESH_SHARE_WALMART;
+      delete process.env.CATALOG_REFRESH_SHARE_KROGER;
+      assert.equal(ingestConfig().walmartDailyBudget, 500);
+      assert.equal(ingestConfig().refreshShare, 0.3);
+      assert.equal(ingestConfig().refreshShareWalmart, 0.3);
+      assert.equal(ingestConfig().refreshShareKroger, 0.6);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "1500";
+      assert.equal(ingestConfig().walmartDailyBudget, 1500);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "5000";
+      assert.equal(ingestConfig().walmartDailyBudget, 1500);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "400";
+      assert.equal(ingestConfig().walmartDailyBudget, 400);
+      process.env.CATALOG_REFRESH_SHARE_KROGER = "0.7";
+      process.env.CATALOG_REFRESH_SHARE_WALMART = "0.45";
+      assert.equal(ingestConfig().refreshShareKroger, 0.7);
+      assert.equal(ingestConfig().refreshShareWalmart, 0.45);
+      assert.equal(ingestConfig().walmartDailyBudget <= 1500, true);
+    } finally {
+      restore("WALMART_INGEST_DAILY_BUDGET", previous.budget);
+      restore("CATALOG_REFRESH_SHARE", previous.refresh);
+      restore("CATALOG_REFRESH_SHARE_WALMART", previous.walmart);
+      restore("CATALOG_REFRESH_SHARE_KROGER", previous.kroger);
+    }
   });
 
   it("sends a 13-digit Kroger id and treats a lookup 400 as a miss", async () => {
@@ -1814,6 +2039,8 @@ describe("catalog ingestion", () => {
     config.krogerMinIntervalMs = 0;
     config.matchLookupShare = 1;
     config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
     await stepKroger({
       client: {
         resolveLocation: async () => "01400431",
@@ -2029,5 +2256,178 @@ describe("catalog ingestion", () => {
       assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
     }
     assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+  });
+
+  it("moves Halloween dog apparel out of dairy and sets refresh exclusion both ways", async () => {
+    const dogs = [
+      {
+        key: "dairy-dog-dress",
+        name: "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween"],
+      },
+      {
+        key: "dairy-dog-scary",
+        name: "Way To Celebrate Dog Halloween Dress, Red So Cute It's Scary, (Small)",
+        brand: "Parent's Choice",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese"],
+      },
+      {
+        key: "dairy-dog-med",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween/Dog Sweaters"],
+      },
+      {
+        key: "dairy-dog-xs",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Seasonal/Halloween"],
+      },
+    ];
+    for (const row of dogs) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: row.brand,
+        departmentId: "dairy-eggs",
+        categoryPaths: row.categoryPaths,
+        walmartItemId: row.key,
+        lastSeenAt: new Date(),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 0.75,
+        lastSeenAt: new Date(),
+        status: "stale",
+        refreshExcluded: false,
+      });
+    }
+    await CatalogMaster.create({
+      key: "dairy-milk-flagged",
+      name: "Great Value Whole Milk",
+      brand: "Great Value",
+      departmentId: "dairy-eggs",
+      categoryPaths: ["Food/Dairy, Eggs & Cheese/Milk"],
+      walmartItemId: "dairy-milk-flagged",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "dairy-milk-flagged",
+      storeName: "Walmart",
+      locationId: "",
+      price: 3.18,
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: true,
+    });
+    await CatalogMaster.create({
+      key: "dairy-gerber-juice",
+      name: "Gerber Gerber Juice, 4 oz",
+      brand: "Gerber",
+      departmentId: "dairy-eggs",
+      categoryPaths: ["Food/Dairy, Eggs & Cheese"],
+      walmartItemId: "dairy-gerber-juice",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "dairy-gerber-juice",
+      storeName: "Walmart",
+      locationId: "",
+      price: 0.68,
+      size: "4 oz",
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: false,
+    });
+
+    const before = await catalogSuspicious(100);
+    const dairyBefore = before.departments.find((row) => row.id === "dairy-eggs");
+    assert.ok(dairyBefore);
+    assert.ok((dairyBefore?.suspicious ?? 0) >= dogs.length);
+    assert.equal(before.departments.some((row) => row.id === "other"), false);
+    assert.ok(before.items.some((row) => row.name.includes("Dog Sweater") && row.hint === "pet-apparel"));
+    assert.equal(before.items.some((row) => row.name.includes("Gerber")), false);
+
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.ok(finished.setExclusions >= dogs.length);
+    assert.ok(finished.clearedExclusions >= 1);
+    for (const row of dogs) {
+      assert.equal((await CatalogMaster.findOne({ key: row.key }))?.departmentId, "other", row.key);
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+    }
+    assert.equal((await CatalogMaster.findOne({ key: "dairy-milk-flagged" }))?.departmentId, "dairy-eggs");
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+    const juice = await CatalogMaster.findOne({ key: "dairy-gerber-juice" });
+    assert.notEqual(juice?.departmentId, "other");
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-gerber-juice" }))?.refreshExcluded, false);
+
+    const after = await catalogSuspicious(100);
+    const dairyAfter = after.departments.find((row) => row.id === "dairy-eggs");
+    assert.equal(dairyAfter?.suspicious ?? 0, (dairyBefore?.suspicious ?? 0) - dogs.length);
+    assert.equal(
+      after.items.some((row) => dogs.some((dog) => row.name === dog.name)),
+      false
+    );
+
+    const excluded = await excludeNongroceryFromRefresh();
+    assert.ok(excluded.masters >= 1);
+    for (const row of dogs) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+      assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-gerber-juice" }))?.refreshExcluded, false);
+
+    const again = await recategorizeCatalog();
+    assert.equal(again.status, "completed");
+    assert.equal(again.setExclusions, 0);
+    for (const row of dogs) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+  });
+
+  it("writes a new dog sweater as Other with refresh excluded when the leaf says dairy", async () => {
+    const name = "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)";
+    await upsertCatalogRecords([
+      {
+        name,
+        brand: "Way To Celebrate",
+        storeName: "Walmart",
+        price: 0.75,
+        retailerItemId: "dog-sweater-upsert",
+        categories: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween"],
+        departmentId: "dairy-eggs",
+        priceSource: "live",
+      },
+    ]);
+    const master = await CatalogMaster.findOne({ key: "local:walmart:dog-sweater-upsert" });
+    assert.ok(master);
+    assert.equal(master?.departmentId, "other");
+    assert.equal((await CatalogOffer.findOne({ productKey: "local:walmart:dog-sweater-upsert" }))?.refreshExcluded, true);
+
+    await upsertCatalogRecords([
+      {
+        name: "Gerber Gerber Juice, 4 oz",
+        brand: "Gerber",
+        storeName: "Walmart",
+        price: 0.72,
+        retailerItemId: "gerber-juice-upsert",
+        size: "4 fl oz",
+        categories: ["Food/Beverages/Juice"],
+        departmentId: "beverages",
+        priceSource: "live",
+      },
+    ]);
+    const juice = await CatalogMaster.findOne({ key: "local:walmart:gerber-juice-upsert" });
+    assert.equal(juice?.departmentId, "beverages");
+    assert.notEqual((await CatalogOffer.findOne({ productKey: "local:walmart:gerber-juice-upsert" }))?.refreshExcluded, true);
   });
 });

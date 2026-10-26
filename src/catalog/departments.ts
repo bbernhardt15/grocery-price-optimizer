@@ -165,6 +165,7 @@ const RULES: readonly Rule[] = [
   { test: /ground beef|\bbeef\b|steak/i, departmentId: "meat-seafood", subcategory: "Beef" },
   { test: /pork|bacon|sausage/i, departmentId: "meat-seafood", subcategory: "Pork" },
   { test: /\bmeat\b/i, departmentId: "meat-seafood" },
+  { test: /\beggnog\b/i, departmentId: "dairy-eggs" },
   { test: /\beggs?\b/i, departmentId: "dairy-eggs", subcategory: "Eggs" },
   { test: /cheese/i, departmentId: "dairy-eggs", subcategory: "Cheese" },
   { test: /yogurt/i, departmentId: "dairy-eggs", subcategory: "Yogurt" },
@@ -330,7 +331,22 @@ function babyGearLabel(categories: string[], name: string): string | null {
 
 /** Walmart roots that are not a grocery aisle. Matched on a whole segment. */
 const GM_SEGMENT =
-  /^(?:jewelry|fine jewelry|fashion jewelry|office supplies|office products|home improvement|personalized gifts|apparel|clothing|shoes|electronics|tvs?|video games?|toys|home decor|home décor|furniture|automotive|patio & garden|sports & outdoors|arts crafts & sewing|books|movies(?: & music)?|musical instruments|industrial & scientific|floral|tobacco)$/i;
+  /^(?:jewelry|fine jewelry|fashion jewelry|office supplies|office products|home improvement|personalized gifts|apparel|clothing|shoes|electronics|tvs?|video games?|toys|home decor|home décor|furniture|automotive|patio & garden|sports & outdoors|arts crafts & sewing|books|movies(?: & music)?|musical instruments|industrial & scientific|floral|tobacco|general merchandise)$/i;
+
+/**
+ * Seasonal, costume, pet-apparel, party, and decor leaves.
+ * A whole segment or a phrase inside one segment. "Salad Dressings" does not match "dress".
+ * These must not inherit Dairy & Eggs from an ancestor that says "Eggs".
+ */
+const MERCH_SEGMENT =
+  /^(?:costumes?(?:\s*(?:&|and)\s*dress[-\s]?up)?|dress[-\s]?up|general merchandise|sweaters?|dress(?:es)?|decorations?|d[eé]cor|party(?:\s*(?:&|and)\s*occasions)?)$|\b(?:costumes?|dress[-\s]?up|pet\s+(?:apparel|clothing)|home\s*decor|home\s*d[eé]cor|decorations?|d[eé]cor|(?:dog|cat|pet|puppy|kitten)\s+(?:sweaters?|dress(?:es)?|costumes?|apparel|clothing|outfits?)|party\s+(?:supplies|decorations?|d[eé]cor|favors|goods)|party(?:\s*(?:&|and)\s*occasions))\b|\b(?:sweaters?|dress(?:es)?)\b/i;
+
+/**
+ * Holiday branches. Food leaves under them (candy, eggnog, baking) keep that leaf's aisle.
+ * Ancestors above the branch, such as Dairy, Eggs & Cheese, do not.
+ */
+const SEASONAL_SEGMENT =
+  /^(?:seasonal(?:\s*(?:&|and)\s*holiday)?(?:\s+grocery)?|holidays?|halloween|christmas|hanukkah|kwanzaa|thanksgiving|easter|valentine'?s?(?:\s+day)?|fourth of july|4th of july|new year'?s?)$/i;
 
 /** Janitorial, food-service disposables, and named cleaning tools stay grocery under Industrial & Scientific. */
 const INDUSTRIAL_EXCEPTION =
@@ -373,8 +389,9 @@ function notGroceryLabel(categories: string[], name: string): string | null {
   const industrialGrocery = industrial && (segments.some((segment) => INDUSTRIAL_EXCEPTION.test(segment)) || INDUSTRIAL_EXCEPTION.test(name));
   if (!industrialGrocery) {
     for (const segment of segments) {
-      if (GM_SEGMENT.test(segment.trim())) {
-        return segment.toLowerCase();
+      const trimmed = segment.trim();
+      if (GM_SEGMENT.test(trimmed) || MERCH_SEGMENT.test(trimmed)) {
+        return trimmed.toLowerCase();
       }
     }
   }
@@ -616,6 +633,59 @@ function healthNameIntent(name: string): HealthNameIntent | null {
   return null;
 }
 
+const PET_NAME = "dogs?|cats?|pets?|puppies|kittens?";
+const APPAREL_NAME =
+  "sweaters?|sweatshirts?|hoodies?|dress(?:es)?|costumes?|outfits?|jackets?|coats?|shirts?|tees?|pajamas?|pyjamas?|vests?|booties|shoes?|hats?|bandanas?|apparel|clothing|clothes";
+
+const PET_APPAREL_NAME = new RegExp(
+  `\\b(?:${PET_NAME})\\b(?:\\s+\\w+){0,5}\\s+(?:${APPAREL_NAME})\\b|\\b(?:${APPAREL_NAME})\\b(?:\\s+\\w+){0,5}\\s+(?:${PET_NAME})\\b`,
+  "i"
+);
+const PET_TOY_NAME = new RegExp(
+  `\\b(?:${PET_NAME})\\b(?:\\s+\\w+){0,4}\\s+(?:toys?|plush)\\b|\\b(?:toys?|plush)\\b(?:\\s+\\w+){0,4}\\s+(?:${PET_NAME})\\b`,
+  "i"
+);
+const COSTUME_NAME = /\bcostumes?\b/i;
+const DECOR_NAME =
+  /\b(?:home\s*decor|home\s*d[eé]cor|halloween\s*decor|party\s*decor|table\s*decor|wall\s*decor|decorations?|d[eé]cor)\b/i;
+const PLAIN_APPAREL_NAME = /\b(?:sweaters?|sweatshirts?|hoodies?|dress(?:es)?)\b/i;
+
+export type SuspiciousHint = "pet-apparel" | "pet-toy" | "costume" | "decor" | "apparel";
+
+/**
+ * Obviously non-grocery titles: pet clothes, costumes, sweaters, dresses, toys, and decor.
+ * "Pumpkin" alone is not a hint. Pumpkin puree and pumpkin seeds stay food.
+ * Word boundaries keep "dressing" and "teething" out.
+ */
+export function suspiciousNonGroceryHint(name: string): SuspiciousHint | null {
+  const text = name.trim();
+  if (!text) {
+    return null;
+  }
+  if (PET_APPAREL_NAME.test(text)) {
+    return "pet-apparel";
+  }
+  if (PET_TOY_NAME.test(text)) {
+    return "pet-toy";
+  }
+  if (COSTUME_NAME.test(text)) {
+    return "costume";
+  }
+  if (DECOR_NAME.test(text)) {
+    return "decor";
+  }
+  if (PLAIN_APPAREL_NAME.test(text)) {
+    return "apparel";
+  }
+  return null;
+}
+
+/** Same hints, for the admin audit query. */
+export const SUSPICIOUS_NON_GROCERY_NAME = new RegExp(
+  [PET_APPAREL_NAME.source, PET_TOY_NAME.source, COSTUME_NAME.source, DECOR_NAME.source, PLAIN_APPAREL_NAME.source].join("|"),
+  "i"
+);
+
 /**
  * Name wins over the stored path for the misses that were still in Other.
  * Returns a department, or null when the usual path rules should run.
@@ -638,6 +708,10 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   const pet = petNameOverride(text);
   if (pet) {
     return { mapped: pet, blockHealth: true };
+  }
+  const hint = suspiciousNonGroceryHint(text);
+  if (hint) {
+    return { mapped: departmentFromName("other", hint), blockHealth: true };
   }
   if (/\b(?:training pants|pull-?ups)\b/i.test(text)) {
     return { mapped: departmentFromName("baby", "training-pants", "Diapers"), blockHealth: true };
@@ -722,8 +796,11 @@ export function mapToDepartment(
     };
   }
 
-  const categoryText = labels.join(" / ");
-  const segments = pathSegments(labels);
+  const allSegments = pathSegments(labels);
+  // A Halloween leaf under Dairy, Eggs & Cheese used to inherit "Eggs" and get crawled as dairy.
+  const seasonalAt = allSegments.findIndex((segment) => SEASONAL_SEGMENT.test(segment.trim()));
+  const segments = seasonalAt > 0 ? allSegments.slice(seasonalAt) : allSegments;
+  const categoryText = seasonalAt >= 0 ? segments.join(" / ") : labels.join(" / ");
   let specificRule: Rule | undefined;
   let specificSource = "";
   let weakRule: Rule | undefined;
@@ -814,6 +891,15 @@ export function mapToDepartment(
       reason: "baby:not diaper, wipe, formula, or baby food→other",
     };
   }
+  if (seasonalAt >= 0 && department.id === "other") {
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      generalMerchandise: true,
+      reason: "not-grocery:seasonal→other",
+    };
+  }
   return {
     departmentId: department.id,
     departmentName: department.name,
@@ -842,7 +928,8 @@ export type HealthConsumableMoveCount = {
  * Dry-run for masters stored in Other.
  * A row counts as a move only when the name rule (or the serum exception)
  * returns personal care. Recategorize writes that department and clears
- * refreshExcluded on the product's offers. `updated` is masters whose
+ * refreshExcluded on the product's offers. A row that stays in Other has the
+ * flag set. `updated` is masters whose
  * department or subcategory changes. `clearedExclusions` is offers that
  * had the flag, which is not the same number as masters.
  * Keyword search totals are an upper bound: they include books, pet
@@ -881,8 +968,9 @@ export type NameMoveCount = {
 /**
  * Count Other rows by the name rule that moves them.
  * `byRule` keys are the label in `name:<label>→department`.
- * Recategorize writes the new department and clears refreshExcluded
- * on that product's offers. `updated` counts masters whose department
+ * Recategorize writes the new department, clears refreshExcluded when the
+ * product leaves Other, and sets it when the product lands in Other.
+ * `updated` counts masters whose department
  * or subcategory changes. `clearedExclusions` counts offers that had
  * the flag. Keyword totals count false friends, so they are an upper bound.
  */

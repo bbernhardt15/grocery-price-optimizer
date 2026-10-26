@@ -1,9 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { PipelineStage } from "mongoose";
-import { DEPARTMENTS, departmentById, mapToDepartment } from "../catalog/departments";
+import { DEPARTMENTS, departmentById, mapToDepartment, SUSPICIOUS_NON_GROCERY_NAME, suspiciousNonGroceryHint } from "../catalog/departments";
 import { identifyFamily, summarizeFamilyRows } from "../catalog/family";
 import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
-import { estimateStorageBytes, ingestConfig, lookupCallsForTick } from "./config";
+import { effectiveShares, estimateStorageBytes, ingestConfig, lookupCallsForTick, staleBudgetMode, staleRatioOf } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
 import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
@@ -176,6 +176,18 @@ export async function catalogStatus() {
   const used = Object.fromEntries(budgets.map((row) => [row.provider, row.calls]));
   const bytes = estimateStorageBytes(products, offers);
   const krogerRun = checkpoints.find((row) => row.provider === "kroger");
+  const shelf = Math.max(0, offers - discontinued);
+  const staleRatio = staleRatioOf(stale, shelf);
+  const walmartShares = effectiveShares({
+    staleRatio,
+    lookupShare: config.matchLookupShare,
+    refreshShare: config.refreshShareWalmart,
+  });
+  const krogerShares = effectiveShares({
+    staleRatio,
+    lookupShare: config.matchLookupShare,
+    refreshShare: config.refreshShareKroger,
+  });
   return {
     enabled: config.enabled,
     dbFirst: config.dbFirst,
@@ -193,9 +205,27 @@ export async function catalogStatus() {
     },
     refresh: {
       share: config.refreshShare,
+      shareWalmart: config.refreshShareWalmart,
+      shareKroger: config.refreshShareKroger,
+      staleRatio,
+      staleOffers: stale,
+      shelfOffers: shelf,
+      mode: staleBudgetMode(staleRatio),
+      effective: {
+        walmart: {
+          mode: walmartShares.mode,
+          refreshShare: walmartShares.refreshShare,
+          lookupShare: walmartShares.lookupShare,
+        },
+        kroger: {
+          mode: krogerShares.mode,
+          refreshShare: krogerShares.refreshShare,
+          lookupShare: krogerShares.lookupShare,
+        },
+      },
       queue: refreshQueue,
       refreshedToday: refreshed,
-      note: "Refresh takes CATALOG_REFRESH_SHARE of each Walmart and Kroger tick, inside the same daily budgets and the Walmart 429 pause. Saved lists, shared lists, price watches, and recent searches go first, then merged products, then the oldest stale offer. A miss waits a day. Offers marked refreshExcluded are skipped. Nothing is deleted.",
+      note: "Refresh uses CATALOG_REFRESH_SHARE_WALMART (default CATALOG_REFRESH_SHARE, 0.3) and CATALOG_REFRESH_SHARE_KROGER (default 0.6), inside the same daily budgets and the Walmart 429 pause. staleRatio is stale offers divided by offers that are not discontinued. Above 30% the effective shares prioritize refresh and cut match lookup. Below 15% they shift calls back to crawling and matching. Saved lists and shared lists go first, then popular items (demand with at least 3 hits), price watches, recent searches, merged products, and the oldest stale offer. A miss waits a day. Offers marked refreshExcluded are skipped. Daily caps are not raised. Nothing is deleted.",
     },
     match: {
       merged: masters.merged,
@@ -205,6 +235,10 @@ export async function catalogStatus() {
       hitRate: progress.hitRate,
       mergedToday: progress.mergedToday,
       lookupShare: progress.lookupShare,
+      effectiveLookupShare: {
+        walmart: walmartShares.lookupShare,
+        kroger: krogerShares.lookupShare,
+      },
       retryDays: progress.retryDays,
       walmartBatch: progress.walmartBatch,
       note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1) and the body is zero-padded, so 070708200500 becomes 0007070820050. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. The old 3/1220 hit rate was those invalid ids. With valid ids, the hit rate should track how many of those UPCs Kroger stocks at the queried store, often tens of percent for national brands. A miss is tried again after the cooldown. Nothing is deleted.",
@@ -413,6 +447,56 @@ export async function catalogFamilySample(options: {
     ...summary,
     complete: scan >= catalogProducts,
     note: FAMILY_NOTE,
+  };
+}
+
+/**
+ * Read-only audit. Counts grocery-department products whose names look like
+ * pet apparel, costumes, sweaters, dresses, toys, or decor.
+ */
+export async function catalogSuspicious(rawLimit: number): Promise<{
+  suspicious: number;
+  departments: Array<{ id: string; name: string; suspicious: number }>;
+  items: Array<{ department: string; name: string; brand: string; paths: string; hint: string }>;
+  note: string;
+}> {
+  const limit = Math.min(100, Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 30));
+  const grocery = DEPARTMENTS.filter((department) => !department.generalMerchandise);
+  const pattern = SUSPICIOUS_NON_GROCERY_NAME.source;
+  const match = {
+    departmentId: { $in: grocery.map((department) => department.id) },
+    status: { $ne: "discontinued" },
+    name: { $regex: pattern, $options: "i" },
+  };
+  const [grouped, rows] = await Promise.all([
+    CatalogMaster.aggregate<{ _id: string; count: number }>([
+      { $match: match },
+      { $group: { _id: "$departmentId", count: { $sum: 1 } } },
+    ]),
+    CatalogMaster.find(match)
+      .sort({ departmentId: 1, name: 1 })
+      .limit(limit)
+      .select("name brand categoryPaths departmentId")
+      .lean<Array<{ name?: string; brand?: string; categoryPaths?: string[]; departmentId?: string }>>(),
+  ]);
+  const counts = new Map(grouped.map((row) => [row._id, row.count]));
+  const departments = grocery.map((department) => ({
+    id: department.id,
+    name: department.name,
+    suspicious: counts.get(department.id) ?? 0,
+  }));
+  const items = rows.map((row) => ({
+    department: row.departmentId ?? "",
+    name: clip(row.name ?? "", 80),
+    brand: clip(row.brand ?? "", 40),
+    paths: clip((row.categoryPaths ?? []).join(" | "), 120),
+    hint: suspiciousNonGroceryHint(row.name ?? "") ?? "",
+  }));
+  return {
+    suspicious: departments.reduce((sum, row) => sum + row.suspicious, 0),
+    departments,
+    items,
+    note: "Read-only. Counts are products still stored in a grocery department whose names look like pet apparel, costumes, sweaters, dresses, toys, or decor. Nothing is deleted.",
   };
 }
 
