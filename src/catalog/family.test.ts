@@ -310,6 +310,90 @@ describe("family identity", () => {
     assert.equal(shouted[0]?.familyName, "Oreo Cookies");
   });
 
+  it("puts Gerber juice flavors on one tile and clothing sizes on one sweater", () => {
+    const plain = identifyFamily({
+      name: "Gerber Gerber Juice, 4 oz",
+      brand: "Gerber",
+      size: "4 oz",
+      departmentId: "baby",
+    });
+    const pear = identifyFamily({
+      name: "GERBER Pear Juice, 4 fl oz",
+      brand: "GERBER",
+      size: "4 fl oz",
+      departmentId: "baby",
+    });
+    assert.equal(plain.familyKey, pear.familyKey);
+    assert.equal(plain.line, "juice");
+    assert.equal(plain.flavorLabel, "Original");
+    assert.equal(pear.flavorLabel, "Pear");
+    assert.equal(plain.variant.label, "4 oz");
+    assert.equal(pear.variant.label, "4 fl oz");
+    const juice = groupBrowseFamilies([
+      product({ id: "upc:juice", name: "Gerber Gerber Juice, 4 oz", brand: "Gerber", size: "4 oz", price: 0.68, departmentId: "baby" }),
+      product({ id: "upc:pear", name: "GERBER Pear Juice, 4 fl oz", brand: "GERBER", size: "4 fl oz", price: 0.72, departmentId: "baby" }),
+    ]);
+    assert.equal(juice.length, 1);
+    assert.equal(juice[0]?.familyName, "Gerber Juice");
+    assert.deepEqual(
+      juice[0]?.flavors.map((flavor) => flavor.label).sort(),
+      ["Original", "Pear"]
+    );
+
+    const xs = identifyFamily({
+      name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
+      brand: "Way To Celebrate",
+      size: "XS",
+      departmentId: "pets",
+    });
+    const medium = identifyFamily({
+      name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
+      brand: "Way To Celebrate",
+      size: "Medium",
+      departmentId: "pets",
+    });
+    const dress = identifyFamily({
+      name: "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
+      brand: "Way To Celebrate",
+      size: "XS",
+      departmentId: "pets",
+    });
+    assert.equal(xs.familyKey, medium.familyKey);
+    assert.notEqual(xs.familyKey, dress.familyKey);
+    assert.equal(xs.variant.label, "XS");
+    assert.equal(medium.variant.label, "Medium");
+    assert.equal(xs.flavor, medium.flavor);
+    const pets = groupBrowseFamilies([
+      product({
+        id: "upc:xs",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
+        brand: "Way To Celebrate",
+        size: "XS",
+        price: 0.75,
+        departmentId: "pets",
+      }),
+      product({
+        id: "upc:med",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
+        brand: "Way To Celebrate",
+        size: "Medium",
+        price: 0.75,
+        departmentId: "pets",
+      }),
+      product({
+        id: "upc:dress",
+        name: "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
+        brand: "Way To Celebrate",
+        size: "XS",
+        price: 0.75,
+        departmentId: "pets",
+      }),
+    ]);
+    assert.equal(pets.length, 2);
+    const sweater = pets.find((tile) => tile.variants.length === 2);
+    assert.deepEqual(sweater?.variants.map((variant) => variant.label).sort(), ["Medium", "XS"]);
+  });
+
   it("uses a front-of-pack photo and skips a nutrition panel for the same flavor", () => {
     const front = "https://www.kroger.com/product/images/xlarge/front/0004400003111";
     const nutrition = "https://www.kroger.com/product/images/xlarge/nutrition/0004400003111";

@@ -231,6 +231,29 @@ img { max-width: 100%; display: block; }
   color: var(--accent-ink);
   border-color: var(--accent);
 }
+.size-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.size-option {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px;
+  text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  border-radius: 12px; padding: 8px 10px;
+}
+.size-option[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.size-name { flex: 1; }
+.size-unit { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.85rem; white-space: nowrap; }
+.best-badge {
+  background: var(--accent); color: var(--accent-ink); border-radius: 999px;
+  padding: 2px 8px; font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+}
+.value-reason { margin: 8px 0 0; font-size: 0.85rem; }
+.value-flag { margin: 4px 0 0; color: var(--muted); font-size: 0.82rem; }
+.value-toggle { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.value-toggle button {
+  min-height: 36px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg); padding: 0 10px; font-size: 0.8rem;
+}
+.value-toggle button[aria-pressed="true"] {
+  background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+}
 .price-from, .price { margin: 8px 0 0; color: var(--muted); font-size: 0.92rem; }
 .show-more { width: 100%; margin: 12px 0; }
 .savings-card {

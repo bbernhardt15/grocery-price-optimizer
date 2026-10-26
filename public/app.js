@@ -43,6 +43,7 @@ import {
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
+import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -735,7 +736,9 @@ function applyFlavor(card, flavorKey) {
   const choices = flavorVariants(family, flavorKey);
   const current = productsById.get(card.dataset.productId);
   const sameSize = choices.find((variant) => variant.label && variant.label === current?.label);
-  const next = sameSize || choices[0];
+  const verdict = selectBestValue(choices.map(valueRow), card.dataset.valueSort || "unit");
+  const best = choices.find((variant) => variant.id === verdict.winnerId);
+  const next = sameSize || best || choices[0];
   if (next) applyVariant(card, next.id);
 }
 
@@ -772,7 +775,7 @@ function applyVariant(card, variantId) {
   const sizeHost = card.querySelector("[data-size-row]");
   if (sizeHost && family) {
     const sizes = flavorVariants(family, variant.flavorKey || "");
-    sizeHost.innerHTML = sizeChips(title, sizes, variant.id);
+    sizeHost.innerHTML = sizePanel(title, sizes, variant.id, card.dataset.valueSort || "unit");
   }
   paintChoice(card, "[data-flavor]", variant.flavorKey || "");
   paintChoice(card, "[data-size-id]", variant.id);
@@ -830,17 +833,43 @@ function choiceChips(title, kind, choices, selected) {
 }
 
 function sizeChips(title, sizes, selectedId) {
-  if (sizes.length <= 1) {
-    const only = sizes[0];
+  return sizePanel(title, sizes, selectedId, "unit");
+}
+
+function sizePanel(title, sizes, selectedId, sort) {
+  const list = sizes || [];
+  const rows = list.map(valueRow);
+  const hasUnits = rows.filter((row) => row.totalAmount != null && row.totalDimension).length >= 2;
+  const mode = hasUnits && sort !== "item" ? "unit" : "item";
+  const verdict = selectBestValue(rows, list.length > 1 ? mode : "unit");
+  const byId = new Map(list.map((variant) => [variant.id, variant]));
+  const ordered = (verdict.orderedIds.length ? verdict.orderedIds : list.map((variant) => variant.id))
+    .map((id) => byId.get(id))
+    .filter(Boolean);
+  if (ordered.length <= 1) {
+    const only = ordered[0];
     const label = only?.label || only?.sizeLabel || "";
-    return label ? `<p class="size">${escapeHtml(label)}</p>` : "";
+    const unit = only?.valueText ? ` · ${only.valueText}` : "";
+    return label ? `<p class="size">${escapeHtml(label)}${escapeHtml(unit)}</p>` : "";
   }
-  return `<div class="choice-row" role="radiogroup" aria-label="Size for ${escapeHtml(title)}">${choiceChips(
-    title,
-    "size-id",
-    sizes.map((variant) => ({ value: variant.id, label: variant.label || variant.sizeLabel || "Size" })),
-    selectedId
-  )}</div>`;
+  const basis = verdict.basis && verdict.basis !== "item" ? verdict.basis : ordered.find((variant) => variant.valueBasis)?.valueBasis || null;
+  const showUnitToggle = hasUnits;
+  const active = showUnitToggle && mode === "unit" ? "unit" : "item";
+  const options = ordered
+    .map((variant) => {
+      const on = variant.id === selectedId;
+      const badge = verdict.winnerId === variant.id ? `<span class="best-badge">Best value</span>` : "";
+      const unit = active === "item" ? "" : variant.valueText ? `<span class="size-unit">${escapeHtml(variant.valueText)}</span>` : "";
+      const pack = active === "item" ? `<span class="size-unit">${escapeHtml(money(variant.price))}</span>` : unit;
+      return `<li><button type="button" class="size-option" role="radio" aria-checked="${on}" data-size-id="${escapeHtml(variant.id)}"><span class="size-name">${escapeHtml(variant.label || variant.sizeLabel || "Size")}</span>${badge}${pack}</button></li>`;
+    })
+    .join("");
+  const toggle = showUnitToggle
+    ? `<div class="value-toggle" role="group" aria-label="Sort sizes for ${escapeHtml(title)}"><button type="button" data-value-sort="unit" aria-pressed="${active === "unit"}">${escapeHtml(unitSortLabel(basis))}</button><button type="button" data-value-sort="item" aria-pressed="${active === "item"}">Per item</button></div>`
+    : "";
+  const reason = verdict.reason ? `<p class="value-reason">${escapeHtml(verdict.reason)}</p>` : "";
+  const flag = verdict.largePackNote ? `<p class="value-flag">${escapeHtml(verdict.largePackNote)}</p>` : "";
+  return `${toggle}<ul class="size-list" role="radiogroup" aria-label="Size for ${escapeHtml(title)}">${options}</ul>${reason}${flag}`;
 }
 
 function cardHtml(tile) {
@@ -862,13 +891,10 @@ function cardHtml(tile) {
           flavorKey
         )}</div>`
       : "";
-  const sizeRow =
-    sizes.length > 1
-      ? `<p class="choice-label">Size</p><div data-size-row>${sizeChips(title, sizes, selected.id)}</div>`
-      : `<div data-size-row>${sizeChips(title, sizes, selected.id)}</div>`;
+  const sizeRow = `<p class="choice-label">Size</p><div data-size-row>${sizePanel(title, sizes, selected.id, "unit")}</div>`;
   const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
   const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
-  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-qty="1">
+  return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-value-sort="unit" data-qty="1">
     <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
       <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
     </button>
@@ -2330,6 +2356,15 @@ document.addEventListener("click", (event) => {
   const dept = target.closest("[data-dept]");
   if (dept) {
     selectDepartment(dept.getAttribute("data-dept"));
+    return;
+  }
+  const sortPick = target.closest("[data-value-sort]");
+  if (sortPick && sortPick.closest("#grid")) {
+    const card = sortPick.closest(".card");
+    if (card) {
+      card.dataset.valueSort = sortPick.getAttribute("data-value-sort") || "unit";
+      applyVariant(card, card.dataset.productId);
+    }
     return;
   }
   const flavorPick = target.closest("[data-flavor]");

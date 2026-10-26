@@ -19,6 +19,7 @@ import {
   type ParsedPackageSize,
   type SizeDimension,
 } from "../packageSize";
+import { normalizeUnitPrice, selectBestValue, type PricedSize } from "./bestValue";
 import type { BrowseProduct, CatalogGap, CatalogOffer, PackageSizeSummary } from "./types";
 
 const UNIT =
@@ -125,11 +126,15 @@ export type BrowseVariant = BrowseProduct & {
   totalSize: PackageSizeSummary | null;
   container: string | null;
   sizeCode: string | null;
-  /** Cheapest in-stock shelf price. */
+  /** Cheapest in-stock shelf price. The tile does not name that store. */
   price: number;
   storeName: string;
   unitPrice?: number;
   unitPriceText?: string;
+  /** Our normalized unit price from `price`. Null when the size has no measure. */
+  valuePer?: number | null;
+  valueText?: string | null;
+  valueBasis?: SizeDimension | null;
   gaps?: CatalogGap[];
 };
 
@@ -309,6 +314,8 @@ function describeVariant(name: string, size?: string | null): FamilyVariantShape
   }
   const tier = packTier(combined);
   if (tier) bits.push(tier);
+  const apparel = apparelSize(size, name);
+  if (apparel) bits.push(apparel);
   const label = bits.filter(Boolean).join(" · ") || "Standard";
   const signature = [
     count ?? "",
@@ -316,6 +323,7 @@ function describeVariant(name: string, size?: string | null): FamilyVariantShape
     unit ? round2(unit.amount) : "",
     container ?? "",
     sizeCode ?? "",
+    apparel ?? "",
   ].join("|");
   return {
     count,
@@ -336,6 +344,58 @@ function trimNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(round2(value));
 }
 
+const APPAREL_WORD =
+  "xxxs|xxs|xs|xxxl|xxl|xl|[2-5]xl|x-?small|extra\\s*small|small|medium|x-?large|xx-?large|extra\\s*large|large|one\\s*size";
+const APPAREL_PAREN = `${APPAREL_WORD}|s|m|l|\\d+\\s*(?:t|mos?|months?)`;
+
+function formatApparel(raw: string): string {
+  const key = raw.toLowerCase().replace(/[\s-]+/g, "");
+  const named: Record<string, string> = {
+    xxxs: "XXXS",
+    xxs: "XXS",
+    xs: "XS",
+    xsmall: "XS",
+    extrasmall: "XS",
+    s: "S",
+    small: "Small",
+    m: "M",
+    medium: "Medium",
+    l: "L",
+    large: "Large",
+    xl: "XL",
+    xlarge: "XL",
+    extralarge: "XL",
+    xxl: "XXL",
+    xxlarge: "XXL",
+    xxxl: "XXXL",
+    "2xl": "2XL",
+    "3xl": "3XL",
+    "4xl": "4XL",
+    "5xl": "5XL",
+    onesize: "One size",
+  };
+  if (named[key]) return named[key];
+  const youth = raw.match(/^(\d+)\s*(t|mos?|months?)$/i);
+  if (youth?.[1] && youth[2]) {
+    const unit = youth[2].toLowerCase().startsWith("t") ? "T" : "mo";
+    return `${youth[1]}${unit}`;
+  }
+  return raw.trim();
+}
+
+/** XS / Medium belong on the size chip, including "(Medium)" and a size field of "XS". */
+function apparelSize(size: string | null | undefined, name: string): string | null {
+  const paren = name.match(new RegExp(`\\(\\s*(${APPAREL_PAREN})\\s*\\)`, "i"));
+  if (paren?.[1]) return formatApparel(paren[1]);
+  const explicit = name.match(new RegExp(`\\bsize\\s+(${APPAREL_WORD})\\b`, "i"));
+  if (explicit?.[1]) return formatApparel(explicit[1]);
+  const trail = name.match(new RegExp(`,\\s*(${APPAREL_WORD})\\s*$`, "i"));
+  if (trail?.[1]) return formatApparel(trail[1]);
+  const sizeText = (size ?? "").trim();
+  if (sizeText && new RegExp(`^(?:${APPAREL_PAREN})$`, "i").test(sizeText)) return formatApparel(sizeText);
+  return null;
+}
+
 /** Shoppers pick these as a size, not as a flavor (King size, Family size, Snack pack). */
 function packTier(text: string): string | null {
   const named = text.match(/\b(king|family|party|share|mega|value|super)\s+size\b/i);
@@ -350,6 +410,9 @@ const PACKAGING_PATTERNS: RegExp[] = [
   /\b\d+(?:\.\d+)?\s*(?:packs?|pk)\b/gi,
   /\b\d+(?:\.\d+)?\s*(?:counts?|ct)\b/gi,
   /\b(?:party|family|snack|share|king|value|mega|super)\s+size\b/gi,
+  new RegExp(`\\(\\s*(?:${APPAREL_PAREN})\\s*\\)`, "gi"),
+  new RegExp(`\\bsize\\s+(?:${APPAREL_WORD})\\b`, "gi"),
+  new RegExp(`,\\s*(?:${APPAREL_WORD})\\s*$`, "gi"),
   /\bsnack\s+packs?\b/gi,
   /\bgrab\s+bags?\b/gi,
   /\bsingle[\s-]*serve\b/gi,
@@ -398,6 +461,7 @@ const PRODUCT_LINES: Array<{ pattern: RegExp; line: string; label: string }> = [
   { pattern: /\bmilks?\b/i, line: "milk", label: "Milk" },
   { pattern: /\beggs?\b/i, line: "eggs", label: "Eggs" },
   { pattern: /\byogurts?\b/i, line: "yogurt", label: "Yogurt" },
+  { pattern: /\bjuices?\b/i, line: "juice", label: "Juice" },
   { pattern: /\bclub\s+sodas?\b/i, line: "club soda", label: "Club Soda" },
   { pattern: /\bbaking\s+sodas?\b/i, line: "baking soda", label: "Baking Soda" },
   { pattern: /\bcream\s+sodas?\b/i, line: "cream soda", label: "Cream Soda" },
@@ -413,6 +477,7 @@ const LINE_WORDS: Record<string, Set<string>> = {
   milk: new Set(["milk"]),
   eggs: new Set(["egg", "eggs"]),
   yogurt: new Set(["yogurt", "yoghurt"]),
+  juice: new Set(["juice", "juices"]),
   "ice cream": new Set(["ice", "cream", "icecream"]),
   cereal: new Set(["cereal"]),
   soda: new Set(["soda", "soft", "drink"]),
@@ -581,9 +646,13 @@ function sizeSummary(amount: number | null, dimension: SizeDimension | null, lab
   return { dimension, amount, label };
 }
 
-function valuePerBase(price: number, totalAmount: number | null): number | null {
-  if (!(price >= 0) || totalAmount == null || !(totalAmount > 0)) return null;
-  return price / totalAmount;
+function toValueRow(variant: BrowseVariant): PricedSize {
+  return {
+    id: variant.id,
+    price: variant.price,
+    totalAmount: variant.totalSize?.amount ?? null,
+    totalDimension: variant.totalSize?.dimension ?? null,
+  };
 }
 
 function toVariant(product: BrowseProduct): BrowseVariant {
@@ -595,6 +664,7 @@ function toVariant(product: BrowseProduct): BrowseVariant {
   });
   const shape = identity.variant;
   const offer = product.bestOffer;
+  const quote = normalizeUnitPrice(offer.price, shape.totalAmount, shape.totalDimension);
   return {
     ...product,
     imageUrls: rankProductImages(product.imageUrls),
@@ -608,32 +678,28 @@ function toVariant(product: BrowseProduct): BrowseVariant {
     sizeCode: shape.sizeCode,
     price: offer.price,
     storeName: offer.storeName,
+    valuePer: quote?.per ?? null,
+    valueText: quote?.text ?? null,
+    valueBasis: quote?.basis ?? null,
     ...(offer.unitPrice != null ? { unitPrice: offer.unitPrice } : {}),
     ...(offer.unitPriceText ? { unitPriceText: offer.unitPriceText } : {}),
   };
 }
 
 /**
- * Best value is the lowest price per base unit (fl oz, oz, or each), so a
- * $/gal figure is not compared with a $/fl oz figure. When nothing has a
- * size, the variant closest to the median package wins, then the one sold
- * at the most stores.
+ * Best value is the lowest price per comparable base unit (fl oz, oz, or
+ * each). A volume is not ranked against a count. When nothing has a size,
+ * the variant closest to the median package wins, then the one sold at the
+ * most stores. A much larger pack may still win; the tile only flags it.
  */
 export function chooseDefaultVariant(variants: BrowseVariant[]): BrowseVariant {
-  const ranked = variants.map((variant) => ({
-    variant,
-    value: valuePerBase(variant.price, variant.totalSize?.amount ?? null),
-  }));
-  const valued = ranked.filter((row) => row.value != null);
-  if (valued.length > 0) {
-    valued.sort(
-      (a, b) =>
-        (a.value ?? 0) - (b.value ?? 0) ||
-        b.variant.offers.length - a.variant.offers.length ||
-        a.variant.price - b.variant.price ||
-        a.variant.label.localeCompare(b.variant.label)
-    );
-    return valued[0]!.variant;
+  const verdict = selectBestValue(variants.map(toValueRow), "unit");
+  if (verdict.winnerId) {
+    const found = variants.find((variant) => variant.id === verdict.winnerId);
+    if (found) return found;
+  }
+  if (!verdict.comparable) {
+    return variants.slice().sort((a, b) => a.price - b.price || a.label.localeCompare(b.label) || a.id.localeCompare(b.id))[0]!;
   }
   const amounts = variants
     .map((variant) => variant.totalSize?.amount)
