@@ -75,6 +75,7 @@ img { max-width: 100%; display: block; }
 .shell { min-height: 100dvh; }
 .topbar {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  min-width: 0; max-width: 100%;
   padding: calc(14px + var(--safe-top)) calc(16px + var(--safe-right)) 8px calc(16px + var(--safe-left));
   position: sticky; top: 0; z-index: 5;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -114,7 +115,7 @@ img { max-width: 100%; display: block; }
 .suggestions mark {
   background: var(--mark); color: inherit; padding: 0 0.12em; border-radius: 4px;
 }
-.top-actions { display: flex; gap: 8px; align-items: end; }
+.top-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; max-width: 100%; min-width: 0; }
 .zip { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--muted); gap: 2px; }
 .zip-hint { margin: 0 16px 8px; color: var(--muted); font-size: 0.8rem; }
 .zip input { width: 92px; }
@@ -195,9 +196,9 @@ a.text-btn:hover { background: var(--accent-soft); }
   background: var(--accent); color: var(--accent-ink); border-color: transparent;
 }
 .catalog { min-width: 0; }
-.toolbar { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+.toolbar { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .result-count { margin: 0; font-weight: 650; }
-.toolbar-actions { display: flex; gap: 8px; align-items: center; }
+.toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 100%; min-width: 0; }
 .sort select { width: auto; }
 .coverage-banner {
   margin: 8px 0 12px; color: var(--muted); font-size: 0.92rem;
