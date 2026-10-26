@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { krogerAdvance, krogerStartParam, nextKrogerStart, pickBrandSplits, sanitizeKrogerParam } from "./krogerTerms";
-import { groceryLeaves, recordsFromWalmartPage, walmartNextCursor, walmartPagePath } from "./walmartWalk";
+import { groceryLeaves, normalizeWalmartPage, recordsFromWalmartPage, walmartNextCursor, walmartPagePath } from "./walmartWalk";
 
 describe("walmart catalog walk", () => {
   it("keeps grocery leaves and skips other departments", () => {
@@ -274,6 +274,32 @@ describe("walmart catalog walk", () => {
     assert.equal(walmartPagePath("milk", "cursor 2"), "/paginated/items?category=milk&count=25&nextPage=cursor%202");
     assert.equal(walmartNextCursor({ items: [], nextPage: "abc", nextPageExist: true }), "abc");
     assert.equal(walmartNextCursor({ items: [], nextPage: "abc", nextPageExist: false }), null);
+  });
+
+  it("rewrites the api-proxy nextPage and rebuilds a link that is not paginated items", () => {
+    const badPath = "/api-proxy/service/affil/product/v2/paginated/items?category=976759&count=25&page=2";
+    const rewritten = normalizeWalmartPage("976759", badPath);
+    assert.equal(rewritten.fallback, false);
+    assert.equal(rewritten.path, "/paginated/items?category=976759&count=25&page=2");
+    assert.equal(rewritten.path.includes("/api-proxy/"), false);
+    assert.match(rewritten.note, /api-proxy\/service\/affil/);
+
+    const bare = "https://developer.api.walmart.com/api-proxy/service/affil/product/v2/paginated/items";
+    const rebuilt = normalizeWalmartPage("976759", bare);
+    assert.equal(rebuilt.fallback, true);
+    assert.equal(rebuilt.path, "/paginated/items?category=976759&count=25");
+    assert.equal(rebuilt.path.includes("api-proxy"), false);
+    assert.match(rebuilt.note, /rebuilt/);
+
+    const wrongHost = normalizeWalmartPage("976759", "https://example.invalid/nope?page=3&publisherId=secret");
+    assert.equal(wrongHost.fallback, true);
+    assert.equal(wrongHost.path, "/paginated/items?category=976759&count=25&page=3");
+    assert.equal(wrongHost.path.includes("publisherId"), false);
+
+    const forced = normalizeWalmartPage("976759", badPath, { forceFallback: true });
+    assert.equal(forced.fallback, true);
+    assert.equal(forced.path, "/paginated/items?category=976759&count=25&page=2");
+    assert.equal(forced.path.includes("/api-proxy/"), false);
   });
 
   it("maps a paginated item onto the shared record, including item id and sale", () => {

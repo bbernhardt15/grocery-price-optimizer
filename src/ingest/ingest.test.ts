@@ -12,7 +12,8 @@ import { MemoryBudgetStore, MongoBudgetStore } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
-import { CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { CatalogDemand, CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
 import { matchProgress, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
@@ -1544,6 +1545,8 @@ describe("catalog ingestion", () => {
     config.walmartLookupBatch = 1;
     config.matchLookupShare = 0.5;
     config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
     const slice = await stepWalmart({
       client: {
         taxonomy: async () => ({ categories: [{ id: "pantry", name: "Pantry", path: "Food/Pantry", children: [] }] }),
@@ -1690,6 +1693,8 @@ describe("catalog ingestion", () => {
     config.walmartLookupBatch = 1;
     config.matchLookupShare = 0;
     config.refreshShare = 1;
+    config.refreshShareWalmart = 1;
+    config.refreshShareKroger = 1;
     const slice = await stepWalmart({
       client: {
         taxonomy: async () => ({ categories: [] }),
@@ -1723,6 +1728,209 @@ describe("catalog ingestion", () => {
     assert.equal(status.counts.refreshedToday.walmart >= 1, true);
     assert.equal(typeof status.counts.refreshQueue.walmart, "number");
     assert.equal(typeof status.refresh.share, "number");
+    assert.equal(status.refresh.shareKroger, ingestConfig().refreshShareKroger);
+    assert.equal(typeof status.refresh.effective.walmart.refreshShare, "number");
+    assert.equal(typeof status.refresh.effective.kroger.lookupShare, "number");
+    assert.equal(typeof status.match.effectiveLookupShare.walmart, "number");
+    assert.ok(["refresh", "balanced", "discover"].includes(status.refresh.mode));
+    const shelf = status.counts.offers - status.counts.discontinuedOffers;
+    const expectedRatio = shelf <= 0 ? 0 : Math.round((status.counts.staleOffers / shelf) * 1000) / 1000;
+    assert.equal(status.refresh.staleRatio, expectedRatio);
+  });
+
+  it("rewrites a Walmart api-proxy nextPage and advances past a category that still fails", async () => {
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const bad = "/api-proxy/service/affil/product/v2/paginated/items?category=milk&count=25&page=2";
+    const paths: string[] = [];
+    let milkPageFails = 0;
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.matchLookupShare = 0;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => ({
+          categories: [
+            { id: "milk", name: "Milk", path: "Food/Dairy/Milk", children: [] },
+            { id: "cereal", name: "Cereal", path: "Food/Breakfast Foods/Cereal", children: [] },
+          ],
+        }),
+        page: async (path: string) => {
+          paths.push(path);
+          assert.equal(path.includes("/api-proxy/"), false, path);
+          assert.match(path, /^\/paginated\/items\?/);
+          if (path.includes("category=milk") && path.includes("page=2")) {
+            milkPageFails += 1;
+            const error = new Error("No endpoint GET /api-proxy/service/affil/product/v2/paginated/items");
+            (error as Error & { status: number }).status = 404;
+            throw error;
+          }
+          if (path.includes("category=milk")) {
+            return {
+              items: [
+                {
+                  itemId: 111,
+                  name: "Whole Milk",
+                  brandName: "Dairy Pure",
+                  salePrice: 3.18,
+                  upc: "00055566677788",
+                },
+              ],
+              nextPage: bad,
+              nextPageExist: true,
+            };
+          }
+          return { items: [], nextPageExist: false };
+        },
+      },
+      maxCalls: 6,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0,
+      now: () => new Date("2026-10-26T12:00:00.000Z"),
+    });
+    assert.equal(slice.paused, null);
+    assert.equal(milkPageFails, 2);
+    assert.ok(paths.some((path) => path === "/paginated/items?category=milk&count=25&page=2"));
+    assert.ok(paths.some((path) => path.includes("category=cereal")));
+    const saved = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { index?: number; nextPage?: string | null; pageFallback?: boolean };
+    }>();
+    assert.equal(saved?.checkpoint?.nextPage ?? null, null);
+    assert.equal(saved?.checkpoint?.pageFallback ?? false, false);
+    assert.ok((saved?.checkpoint?.index ?? 0) >= 1);
+  });
+
+  it("refreshes shared and popular offers before older ones and skips refresh-excluded items", async () => {
+    await CatalogOffer.updateMany({ status: "stale" }, { $set: { refreshExcluded: true } });
+    const now = new Date();
+    const sharedUpc = "049000042566";
+    const popularUpc = "0003700031802";
+    const oldUpc = "070708200500";
+    const excludedUpc = "0001600027528";
+    const sharedKey = upcKey(sharedUpc);
+    const popularKey = upcKey(popularUpc);
+    const oldKey = upcKey(oldUpc);
+    const excludedKey = upcKey(excludedUpc);
+    assert.ok(sharedKey && popularKey && oldKey && excludedKey);
+    assert.ok(
+      walmartUpcForLookup(sharedUpc) &&
+        walmartUpcForLookup(popularUpc) &&
+        walmartUpcForLookup(oldUpc) &&
+        walmartUpcForLookup(excludedUpc)
+    );
+    const keys = [sharedKey, popularKey, oldKey, excludedKey];
+    await CatalogDemand.deleteMany({ $or: [{ upcKey: { $in: keys } }, { text: { $in: keys.map((key) => `upc:${key}`) } }] });
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await SharedList.deleteMany({ shareTokenHash: "catalog-health-share" });
+    const rows = [
+      { key: sharedKey, upc: sharedUpc, name: "Shared Soda", at: now, excluded: false },
+      { key: popularKey, upc: popularUpc, name: "Popular Beans", at: new Date("2026-02-01T00:00:00.000Z"), excluded: false },
+      { key: oldKey, upc: oldUpc, name: "Old Chips", at: new Date("2025-01-01T00:00:00.000Z"), excluded: false },
+      { key: excludedKey, upc: excludedUpc, name: "Excluded Cereal", at: new Date("2024-01-01T00:00:00.000Z"), excluded: true },
+    ];
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: "Store",
+        departmentId: "pantry",
+        upc: row.upc,
+        walmartItemId: row.key,
+        lastSeenAt: row.at,
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 1,
+        lastSeenAt: row.at,
+        status: "stale",
+        ...(row.excluded ? { refreshExcluded: true } : {}),
+      });
+    }
+    await SharedList.create({
+      shareTokenHash: "catalog-health-share",
+      ownerTokenHash: "catalog-health-owner",
+      title: "Week",
+      mode: "edit",
+      revokedAt: null,
+      items: [
+        {
+          itemId: "1",
+          catalogId: sharedKey,
+          name: "Shared Soda",
+          quantity: 1,
+          writtenAt: Date.now(),
+          updatedAt: now,
+          deleted: false,
+        },
+      ],
+    });
+    await noteCatalogDemand({ kind: "search", upcs: [popularUpc] });
+    const marked = await CatalogDemand.updateOne({ kind: "search", upcKey: popularKey }, { $set: { hits: 5 } });
+    assert.equal(marked.matchedCount, 1);
+    await noteCatalogDemand({ kind: "list", upcs: [excludedUpc] });
+    const picks = await nextRefreshPicks("Walmart", now, 3);
+    assert.deepEqual(
+      picks.map((pick) => pick.productKey),
+      [sharedKey, popularKey, oldKey]
+    );
+    assert.equal(picks[0]?.priority, "shared");
+    assert.equal(picks[1]?.priority, "popular");
+    assert.equal(picks[2]?.priority, "catalog");
+    assert.equal(
+      picks.some((pick) => pick.productKey === excludedKey),
+      false
+    );
+  });
+
+  it("keeps the Walmart daily budget at the configured value and clamps it to 1500", () => {
+    const previous = {
+      budget: process.env.WALMART_INGEST_DAILY_BUDGET,
+      refresh: process.env.CATALOG_REFRESH_SHARE,
+      walmart: process.env.CATALOG_REFRESH_SHARE_WALMART,
+      kroger: process.env.CATALOG_REFRESH_SHARE_KROGER,
+    };
+    const restore = (name: string, value: string | undefined) => {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    };
+    try {
+      delete process.env.WALMART_INGEST_DAILY_BUDGET;
+      delete process.env.CATALOG_REFRESH_SHARE;
+      delete process.env.CATALOG_REFRESH_SHARE_WALMART;
+      delete process.env.CATALOG_REFRESH_SHARE_KROGER;
+      assert.equal(ingestConfig().walmartDailyBudget, 500);
+      assert.equal(ingestConfig().refreshShare, 0.3);
+      assert.equal(ingestConfig().refreshShareWalmart, 0.3);
+      assert.equal(ingestConfig().refreshShareKroger, 0.6);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "1500";
+      assert.equal(ingestConfig().walmartDailyBudget, 1500);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "5000";
+      assert.equal(ingestConfig().walmartDailyBudget, 1500);
+      process.env.WALMART_INGEST_DAILY_BUDGET = "400";
+      assert.equal(ingestConfig().walmartDailyBudget, 400);
+      process.env.CATALOG_REFRESH_SHARE_KROGER = "0.7";
+      process.env.CATALOG_REFRESH_SHARE_WALMART = "0.45";
+      assert.equal(ingestConfig().refreshShareKroger, 0.7);
+      assert.equal(ingestConfig().refreshShareWalmart, 0.45);
+      assert.equal(ingestConfig().walmartDailyBudget <= 1500, true);
+    } finally {
+      restore("WALMART_INGEST_DAILY_BUDGET", previous.budget);
+      restore("CATALOG_REFRESH_SHARE", previous.refresh);
+      restore("CATALOG_REFRESH_SHARE_WALMART", previous.walmart);
+      restore("CATALOG_REFRESH_SHARE_KROGER", previous.kroger);
+    }
   });
 
   it("sends a 13-digit Kroger id and treats a lookup 400 as a miss", async () => {
@@ -1773,6 +1981,8 @@ describe("catalog ingestion", () => {
     config.krogerMinIntervalMs = 0;
     config.matchLookupShare = 1;
     config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
     await stepKroger({
       client: {
         resolveLocation: async () => "01400431",

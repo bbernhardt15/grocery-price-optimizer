@@ -11,6 +11,11 @@ import type { RawCatalogRecord } from "../catalog/types";
  *   Response fields used by the official wrapper and the Catalog Product doc:
  *   `items`, `nextPage`, `nextPageExist`, `totalPages`.
  *   The next request passes `nextPage` (a URL or a cursor embedded in that URL).
+ *   Walmart often returns that link with the gateway prefix
+ *   `/api-proxy/service/affil/product/v2`. The signed client already uses that
+ *   base, so the crawler strips the prefix down to `/paginated/items` and
+ *   keeps the query string. A link that is not that endpoint is rebuilt from
+ *   the category id and the page cursor.
  *   https://walmart.io/docs/affiliate/paginated-items
  * - `count` is a documented request parameter. Search documents `numItems` max 25,
  *   and paginated examples use 10–25, so each page asks for 25.
@@ -149,22 +154,142 @@ export function groceryLeaves(taxonomy: unknown): WalmartCategory[] {
   return categories;
 }
 
-export function walmartPagePath(categoryId: string, nextPage: string | null | undefined): string {
-  const cursor = nextPage?.trim();
+const PAGINATED_ITEMS = "/paginated/items";
+const PAGE_CURSOR_KEYS = ["nextPage", "page", "offset", "cursor", "start"] as const;
+
+export type WalmartPagePlan = {
+  /** Path and query for the signed Affiliate GET. Always starts with `/paginated/items`. */
+  path: string;
+  /** True when the stored link was not usable and the path was rebuilt. */
+  fallback: boolean;
+  /** Empty when the stored cursor needed no rewrite. */
+  note: string;
+};
+
+function firstWalmartPage(categoryId: string): string {
+  return `${PAGINATED_ITEMS}?category=${encodeURIComponent(categoryId)}&count=${WALMART_PAGE_COUNT}`;
+}
+
+function parseWalmartLink(raw: string): URL | null {
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      return new URL(raw);
+    }
+    if (raw.startsWith("/")) {
+      return new URL(raw, "https://developer.api.walmart.com");
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Map a nextPage URL or path onto `/paginated/items`, dropping
+ * `/api-proxy/service/affil` and `/product/v2` so the signed client does not
+ * append that prefix to a base that already contains it.
+ * Returns null when the link is not the paginated-items endpoint or has no
+ * query (the shape behind "No endpoint GET /api-proxy/service/affil/product/v2/paginated/items").
+ */
+function rewriteWalmartNextPage(categoryId: string, cursor: string): WalmartPagePlan | null {
+  if (!cursor.includes("/") && !/^https?:\/\//i.test(cursor)) {
+    return {
+      path: `${PAGINATED_ITEMS}?category=${encodeURIComponent(categoryId)}&count=${WALMART_PAGE_COUNT}&nextPage=${encodeURIComponent(cursor)}`,
+      fallback: false,
+      note: "",
+    };
+  }
+  const url = parseWalmartLink(cursor);
+  if (!url) {
+    return null;
+  }
+  const index = url.pathname.lastIndexOf(PAGINATED_ITEMS);
+  if (index < 0 || url.pathname.slice(index) !== PAGINATED_ITEMS) {
+    return null;
+  }
+  if ([...url.searchParams.keys()].length === 0) {
+    return null;
+  }
+  let search = url.search;
+  if (!url.searchParams.get("category") && !url.searchParams.get("categoryId")) {
+    const params = new URLSearchParams(url.searchParams);
+    params.set("category", categoryId);
+    search = `?${params.toString()}`;
+  }
+  const path = `${PAGINATED_ITEMS}${search}`;
+  if (path.includes("/api-proxy/") || !path.startsWith(`${PAGINATED_ITEMS}?`)) {
+    return null;
+  }
+  const stripped = cursor.includes("api-proxy/service/affil");
+  return {
+    path,
+    fallback: false,
+    note: stripped
+      ? "rewrote nextPage onto /paginated/items, dropping the /api-proxy/service/affil prefix"
+      : "",
+  };
+}
+
+/** Category id plus whatever page cursor the bad link still carried. */
+function rebuildWalmartPage(categoryId: string, cursor: string): string {
+  const params = new URLSearchParams();
+  params.set("category", categoryId);
+  params.set("count", String(WALMART_PAGE_COUNT));
+  const url = parseWalmartLink(cursor);
+  if (url) {
+    for (const key of PAGE_CURSOR_KEYS) {
+      const value = url.searchParams.get(key)?.trim();
+      if (value) {
+        params.set(key, value);
+      }
+    }
+  } else if (!cursor.includes("/")) {
+    params.set("nextPage", cursor);
+  }
+  return `${PAGINATED_ITEMS}?${params.toString()}`;
+}
+
+/**
+ * Normalize Walmart's nextPage onto the Affiliate paginated-items path.
+ * `forceFallback` rebuilds from the category id after a rejected link, so a
+ * retry does not send the same bad URL.
+ */
+export function normalizeWalmartPage(
+  categoryId: string,
+  nextPage: string | null | undefined,
+  options?: { forceFallback?: boolean }
+): WalmartPagePlan {
+  const cursor = nextPage?.trim() ?? "";
   if (!cursor) {
-    return `/paginated/items?category=${encodeURIComponent(categoryId)}&count=${WALMART_PAGE_COUNT}`;
+    return { path: firstWalmartPage(categoryId), fallback: false, note: "" };
   }
-  if (cursor.startsWith("http://") || cursor.startsWith("https://")) {
-    const url = new URL(cursor);
-    const marker = "/paginated/items";
-    const index = url.pathname.indexOf(marker);
-    const path = index >= 0 ? url.pathname.slice(index) : marker;
-    return `${path}${url.search}`;
+  if (!options?.forceFallback) {
+    const rewritten = rewriteWalmartNextPage(categoryId, cursor);
+    if (rewritten) {
+      return rewritten;
+    }
   }
-  if (cursor.startsWith("/")) {
-    return cursor;
-  }
-  return `/paginated/items?category=${encodeURIComponent(categoryId)}&count=${WALMART_PAGE_COUNT}&nextPage=${encodeURIComponent(cursor)}`;
+  return {
+    path: rebuildWalmartPage(categoryId, cursor),
+    fallback: true,
+    note: options?.forceFallback
+      ? "retrying with /paginated/items rebuilt from the category id and page cursor"
+      : "nextPage link looked wrong; rebuilt /paginated/items from the category id and page cursor",
+  };
+}
+
+export function walmartPagePath(categoryId: string, nextPage: string | null | undefined): string {
+  return normalizeWalmartPage(categoryId, nextPage).path;
+}
+
+/** Walmart's gateway text when a nextPage path is called without rewriting it. */
+export function isWalmartEndpointMiss(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const body =
+    error && typeof error === "object" && "body" in error && typeof (error as { body?: unknown }).body === "string"
+      ? (error as { body: string }).body
+      : "";
+  return /no endpoint\s+GET\s+\/api-proxy\/service\/affil/i.test(`${message}\n${body}`);
 }
 
 export function walmartNextCursor(payload: unknown): string | null {
