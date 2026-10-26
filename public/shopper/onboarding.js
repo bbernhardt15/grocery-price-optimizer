@@ -27,8 +27,8 @@ const SPLIT_FREE = {
 
 const CARTS_OPEN = {
   id: "carts",
-  title: "Send to store carts",
-  body: "Send each store’s items to its cart or a search page. You finish checkout there.",
+  title: "Shop each store's list",
+  body: "Each store gets a list. A cart button appears only when that store can take one. Otherwise you open the list there.",
 };
 
 const CARTS_FREE = {

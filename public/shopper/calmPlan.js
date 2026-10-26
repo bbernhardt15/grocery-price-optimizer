@@ -52,6 +52,28 @@ export function calmPriceNote(source) {
   }
 }
 
+/** Operator setup (env vars, API docs, feed configuration) stays off the shopper screen. */
+const OPERATOR_COPY =
+  /FLIPP_|WALMART_|KROGER_|TARGET_|ACCESS_TOKEN|CONSUMER_ID|PRIVATE_KEY|api\.flipp\.com|walmart\.io|FlyerKit|partner feed|configured|Open Coverage/i;
+
+/** @param {string | null | undefined} text */
+export function shopperCopy(text) {
+  const value = clean(text);
+  if (!value || OPERATOR_COPY.test(value)) return "";
+  return value;
+}
+
+/**
+ * One quiet line for the shelf. No store-setup instructions.
+ * @param {{ demo?: boolean, zipOk?: boolean, weeklyAds?: boolean }} state
+ */
+export function shelfNote(state) {
+  if (!state?.zipOk && state?.weeklyAds) return "Add a ZIP to see this week's ads.";
+  if (state?.demo) return "Sample prices. Not a receipt.";
+  if (state?.weeklyAds) return "Some prices are from this week's ad.";
+  return "";
+}
+
 /**
  * One-store total versus the split plan.
  * @param {{ splitTotal?: number, savings?: number, singleStore?: { storeName: string, total: number } | null }} comparison

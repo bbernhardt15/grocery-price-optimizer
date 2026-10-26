@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { aboutMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard } from "../../public/shopper/calmPlan.js";
+import { aboutMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard, shelfNote, shopperCopy } from "../../public/shopper/calmPlan.js";
 import { singleStoreSavings } from "../../public/shopper/tripPlan.js";
 
 function line(partial: Record<string, unknown>) {
@@ -28,6 +28,12 @@ describe("calm trip plan", () => {
     assert.equal(calmPriceNote("cached_live"), "");
     assert.equal(aboutMoney(2.5), "about $2.50");
     assert.equal(aboutMoney(Number.NaN), "");
+    assert.equal(shopperCopy("Aldi has no public product API. Set FLIPP_ACCESS_TOKEN from https://api.flipp.com/flyerkit"), "");
+    assert.equal(shopperCopy("Set WALMART_CONSUMER_ID and WALMART_PRIVATE_KEY at walmart.io"), "");
+    assert.equal(shopperCopy("Weekly ad, not a shelf price"), "Weekly ad, not a shelf price");
+    assert.equal(shelfNote({ demo: true, zipOk: true, weeklyAds: false }), "Sample prices. Not a receipt.");
+    assert.equal(shelfNote({ demo: false, zipOk: false, weeklyAds: true }), "Add a ZIP to see this week's ads.");
+    assert.equal(shelfNote({ demo: false, zipOk: true, weeklyAds: false }), "");
   });
 
   it("compares one store with the split plan using the prices it was given", () => {

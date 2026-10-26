@@ -1,4 +1,4 @@
-const CACHE = "grocery-gitter-shell-v9";
+const CACHE = "grocery-gitter-shell-v10";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

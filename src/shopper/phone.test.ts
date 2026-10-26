@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PULL_THRESHOLD, keepAwake, lightTap, pullDistance, pullShouldRefresh } from "../../public/shopper/phone.js";
+import { PULL_THRESHOLD, keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "../../public/shopper/phone.js";
 
 describe("phone feel", () => {
   it("uses a haptic plugin when the shell already has one", async () => {
@@ -79,5 +79,14 @@ describe("phone feel", () => {
     assert.equal(pullShouldRefresh(PULL_THRESHOLD - 1), false);
     assert.equal(pullShouldRefresh(PULL_THRESHOLD), true);
     assert.equal(pullDistance(0, 500, true), 120);
+  });
+
+  it("measures a keyboard covering the layout viewport and a chip row that still scrolls", () => {
+    assert.equal(keyboardOverlap(844, 508, 0), 336);
+    assert.equal(keyboardOverlap(844, 844, 0), 0);
+    assert.equal(keyboardOverlap(844, 800, 20), 24);
+    assert.equal(keyboardOverlap(Number.NaN, 100), 0);
+    assert.equal(moreChips(0, 300, 640), true);
+    assert.equal(moreChips(340, 300, 640), false);
   });
 });

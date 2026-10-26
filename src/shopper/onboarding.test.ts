@@ -57,7 +57,9 @@ describe("onboarding steps", () => {
   it("fails open when RevenueCat is off and tells the free plan the truth", () => {
     const open = tripStepCopy(null);
     assert.match(open.split.body, /lowest price/);
-    assert.match(open.carts.body, /cart/);
+    assert.match(open.carts.body, /cart button appears only when/i);
+    assert.match(open.carts.body, /open the list/i);
+    assert.equal(/Send each store/.test(open.carts.body), false);
     const unenforced = tripStepCopy({ enforced: false, pro: false, limits: { multiStore: false, cartHandoffs: false } });
     assert.equal(unenforced.split.body, open.split.body);
     assert.equal(unenforced.carts.body, open.carts.body);

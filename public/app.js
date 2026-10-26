@@ -58,9 +58,9 @@ import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
 import { planBarCopy, readFlowStep, shouldAskToSignIn } from "./shopper/flow.js";
 import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
-import { aboutMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard } from "./shopper/calmPlan.js";
+import { aboutMoney as estimateMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
-import { keepAwake, lightTap, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
+import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -719,7 +719,8 @@ function renderListRows() {
           </label>
           <p class="muted">${escapeHtml(heading.detail)}</p>
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
-          <div class="alert-controls">
+          <button type="button" class="text-btn watch-toggle" data-watch-open="${escapeHtml(itemId)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
+          <div class="alert-controls"${watched || targetValue ? "" : " hidden"}>
             <label class="check-row item-watch">
               <input type="checkbox" data-watch="${escapeHtml(entry.product.id)}" ${watched ? "checked" : ""} />
               Watch price
@@ -870,20 +871,15 @@ function phoneShelf() {
   return window.matchMedia("(max-width: 1099px)").matches;
 }
 
-/** Bring a tall family card up under the sticky header so size and quantity sit above the list bar. */
+/** Nudge a tall card's add row above the plan bar. The row also sticks while the card scrolls. */
 function settleCard(card) {
   if (!card || !phoneShelf()) return;
+  const actions = card.querySelector(".card-actions");
   const bar = document.querySelector(".list-bar");
-  if (!bar || getComputedStyle(bar).display === "none") return;
-  const safeTop = (document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0) + 8;
-  const safeBottom = bar.getBoundingClientRect().top - 8;
-  const covered = [...card.querySelectorAll(".size-option, .choice-chip, .card-actions, .size")].some((node) => {
-    const rect = node.getBoundingClientRect();
-    return rect.height > 0 && (rect.bottom > safeBottom + 1 || rect.top < safeTop - 1);
-  });
-  if (!covered) return;
-  const delta = card.getBoundingClientRect().top - safeTop;
-  if (delta > 1) window.scrollBy({ top: delta, left: 0 });
+  if (!actions || !bar || getComputedStyle(bar).display === "none") return;
+  const limit = bar.getBoundingClientRect().top - 8;
+  const rect = actions.getBoundingClientRect();
+  if (rect.bottom > limit + 1) window.scrollBy({ top: rect.bottom - limit, left: 0 });
 }
 
 function applyFlavor(card, flavorKey) {
@@ -1106,6 +1102,25 @@ function renderDepartments() {
   }
   $("dept-chips").innerHTML = chips.join("");
   $("dept-nav").innerHTML = links.join("");
+  requestAnimationFrame(syncChipHint);
+}
+
+function syncChipHint() {
+  const row = $("dept-chips");
+  const hint = $("chip-hint");
+  if (!row || !hint) return;
+  hint.hidden = !moreChips(row.scrollLeft, row.clientWidth, row.scrollWidth);
+}
+
+function bindKeyboardInset() {
+  const apply = () => {
+    const viewport = window.visualViewport;
+    const overlap = viewport ? keyboardOverlap(window.innerHeight, viewport.height, viewport.offsetTop) : 0;
+    document.documentElement.style.setProperty("--keyboard", `${overlap}px`);
+  };
+  apply();
+  window.visualViewport?.addEventListener("resize", apply);
+  window.visualViewport?.addEventListener("scroll", apply);
 }
 
 function showCatalogError(message) {
@@ -1149,31 +1164,18 @@ async function loadPage(reset) {
     }
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
-    if (reset) settleCard(gridEl.querySelector(".card"));
-    const demo = catalogSource === "demo";
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
     const weeklyAds = (coverage || []).some((store) => store.mode === "weekly_ad_only");
-    const zipWarning = (body.warnings ?? []).find((warning) => /5-digit US ZIP/i.test(warning));
-    const foundNames = weeklyAdBanners.map((banner) => banner.storeName).filter(Boolean);
-    const foundLine = !zipOk
-      ? ""
-      : foundNames.length
-        ? ` Circulars Flipp returned for this ZIP: ${foundNames.join(", ")}. Each of those prices is the weekly ad, not a shelf price.`
-        : Array.isArray(body.weeklyAdBanners)
-          ? " Flipp returned no mapped grocery circular for this ZIP."
-          : "";
-    if (!zipOk && weeklyAds) {
-      coverageBannerEl.textContent = zipWarning || "Enter a 5-digit ZIP to load this week’s Target, Aldi, and other circular prices. Without a ZIP those stores stay on the demo catalog. A weekly ad is not a full shelf.";
-    } else if (demo) {
-      coverageBannerEl.textContent = `Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.${foundLine}`;
-    } else if (catalogSource === "database") {
-      coverageBannerEl.textContent = `Prices from Grocery Gitter’s saved catalog, plus weekly-ad items when this ZIP has a circular. Target and Aldi are not a full live shelf.${foundLine}`;
-    } else if (catalogSource === "mixed") {
-      coverageBannerEl.textContent = `Live samples are mixed with the demo catalog. Weekly-ad prices are labeled weekly ad, not a shelf price.${foundLine}`;
-    } else {
-      coverageBannerEl.textContent = `Live catalog sample. This is not a full store assortment.${foundLine}`;
+    if (coverageBannerEl) {
+      coverageBannerEl.textContent = shelfNote({
+        demo: catalogSource === "demo",
+        zipOk,
+        weeklyAds,
+      });
     }
-    const hardWarnings = (body.warnings ?? []).filter((warning) => !/5-digit US ZIP/i.test(warning));
+    const hardWarnings = (body.warnings ?? [])
+      .map((warning) => shopperCopy(warning))
+      .filter((warning) => warning && !/5-digit US ZIP/i.test(warning));
     if (hardWarnings.length) {
       showCatalogError(hardWarnings.join(" "));
     }
@@ -1366,16 +1368,17 @@ function openProduct(product) {
 
 function openCoverage() {
   const found = weeklyAdBanners.length
-    ? `<p class="muted">Circulars Flipp returned for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Weekly ad, not shelf price.</p>`
+    ? `<p class="muted">This week's ads for this ZIP: ${escapeHtml(weeklyAdBanners.map((banner) => banner.storeName).join(", "))}. Those prices are the ad, not the shelf.</p>`
     : "";
   coverageDialog.innerHTML = `<div class="sheet-body">
     <h2 id="coverage-title">Catalog coverage</h2>
     ${found}
     <ul class="offer-list">
       ${(coverage || [])
-        .map(
-          (store) => `<li><span><strong>${escapeHtml(store.storeName)}</strong> · ${escapeHtml(store.label)}<br /><span class="muted">${escapeHtml(store.detail)}</span></span></li>`
-        )
+        .map((store) => {
+          const detail = shopperCopy(store.detail);
+          return `<li><span><strong>${escapeHtml(store.storeName)}</strong> · ${escapeHtml(store.label)}${detail ? `<br /><span class="muted">${escapeHtml(detail)}</span>` : ""}</span></li>`;
+        })
         .join("")}
     </ul>
     <button type="button" class="primary" id="coverage-close">Close</button>
@@ -1567,10 +1570,11 @@ function renderTrip(payload) {
 
 function calmItemRow(item) {
   const swap = plainSwap(item);
-  const note = calmPriceNote(item.priceSource);
+  const rawNote = calmPriceNote(item.priceSource);
+  const note = rawNote === "sample price" ? "" : rawNote;
   const size = item.size ? `, ${item.size}` : "";
   const amount = Number(item.itemTotal ?? item.price);
-  const price = Number.isFinite(amount) ? aboutMoney(amount) : "Price unavailable";
+  const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
   const change =
     swap && item.lineId
       ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(item.lineId)}">${escapeHtml(swap.change)}</button>`
@@ -1633,7 +1637,7 @@ function paintTrip() {
     : "";
   const storeHtml = stores
     .map((store) => {
-      const total = Number.isFinite(Number(store.subtotal)) ? aboutMoney(store.subtotal) : "";
+      const total = Number.isFinite(Number(store.subtotal)) ? estimateMoney(store.subtotal) : "";
       return `<article class="calm-store">
         <header><h3>${escapeHtml(store.storeName)}</h3>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
         <ul class="item-list">${(store.items || []).map(calmItemRow).join("")}</ul>
@@ -1655,7 +1659,7 @@ function paintTrip() {
     ${fewerHtml}
     ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list.</p>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
-    ${lastOptimize?.pricingWarning ? `<p class="muted">${escapeHtml(lastOptimize.pricingWarning)}</p>` : ""}
+    ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
     ${customizeBlock(stores)}
   `;
   const fewerButton = $("use-fewer-stops");
@@ -1720,7 +1724,7 @@ function renderStore(store, checks) {
         <h3>${escapeHtml(store.storeName)}</h3>
         ${nearby}
         <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
-        ${store.pricing?.detail ? `<p class="muted">${escapeHtml(store.pricing.detail)}</p>` : ""}
+        ${shopperCopy(store.pricing?.detail) ? `<p class="muted">${escapeHtml(shopperCopy(store.pricing.detail))}</p>` : ""}
       </div>
       <p class="store-total"><span>Store total</span><strong>${money(store.subtotal)}</strong></p>
     </header>
@@ -1907,6 +1911,11 @@ async function planTrip() {
     );
     planErrorEl.hidden = false;
     planErrorEl.textContent = "Enter a 5-digit ZIP so the trip can use your nearest stores.";
+    const sheetCoversZip = window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");
+    if (sheetCoversZip) {
+      openList(false);
+      toast(planErrorEl.textContent, 4200);
+    }
     zipEl.focus();
     paintPlanBar();
     return;
@@ -2747,6 +2756,15 @@ document.addEventListener("click", (event) => {
   if (flowButton) {
     haptic();
     showStep(flowButton.getAttribute("data-flow"));
+    return;
+  }
+  const watchOpen = target.closest("[data-watch-open]");
+  if (watchOpen) {
+    const panel = watchOpen.closest(".list-row")?.querySelector(".alert-controls");
+    if (panel) {
+      panel.hidden = !panel.hidden;
+      watchOpen.textContent = panel.hidden ? "Price watch" : "Hide price watch";
+    }
     return;
   }
   const starter = target.closest("[data-starter]");
@@ -4005,13 +4023,13 @@ function renderShop() {
               const on = Boolean(item.lineId && checks[item.lineId]);
               const size = item.size ? `, ${escapeHtml(item.size)}` : "";
               const amount = Number(item.itemTotal ?? item.price);
-              const price = Number.isFinite(amount) ? aboutMoney(amount) : "Price unavailable";
+              const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
               const choices = swapChoices(item);
               const swap = choices.length
                 ? `<div class="swap-choices" hidden>${choices
                     .map((choice) => {
                       const label = Number.isFinite(choice.price)
-                        ? `${choice.name} at ${choice.storeName}, ${aboutMoney(choice.price)}`
+                        ? `${choice.name} at ${choice.storeName}, ${estimateMoney(choice.price)}`
                         : `${choice.name} at ${choice.storeName}`;
                       return `<button type="button" class="ghost" data-shop-swap="${escapeHtml(item.lineId || "")}" data-shop-store="${escapeHtml(choice.storeName)}">${escapeHtml(label)}</button>`;
                     })
@@ -4282,6 +4300,8 @@ async function boot() {
 
 async function bootApp() {
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
+  bindKeyboardInset();
+  $("dept-chips")?.addEventListener("scroll", syncChipHint, { passive: true });
   paintStarterLists();
   paintUsuals();
   paintPlanBar();
@@ -4301,6 +4321,7 @@ async function bootApp() {
   renderEstimate();
   if (typeof navigator !== "undefined" && navigator.onLine === false && restoreOfflineTrip()) {
     showCatalogError("You're offline. This trip is saved on this phone.");
+    if (resultCountEl) resultCountEl.textContent = "Saved on this device";
     listLoading = false;
     listReady = true;
     return;
@@ -4387,6 +4408,13 @@ pullHost?.addEventListener("touchend", () => {
   if (pullShouldRefresh(pullTravel)) void loadPage(true);
   pullStart = null;
   pullTravel = 0;
+});
+
+document.addEventListener("focusin", (event) => {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+  if (!field.closest(".filters.open, .list-panel.open, dialog.sheet")) return;
+  field.scrollIntoView({ block: "center" });
 });
 
 document.addEventListener("click", (event) => {

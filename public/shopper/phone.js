@@ -71,3 +71,30 @@ export function pullDistance(startY, currentY, atTop) {
 export function pullShouldRefresh(distance) {
   return Number(distance) >= PULL_THRESHOLD;
 }
+
+/**
+ * How far the keyboard covers the layout viewport.
+ * @param {number} innerHeight
+ * @param {number} visualHeight
+ * @param {number} [offsetTop]
+ */
+export function keyboardOverlap(innerHeight, visualHeight, offsetTop = 0) {
+  const inner = Number(innerHeight);
+  const visual = Number(visualHeight);
+  const offset = Number(offsetTop) || 0;
+  if (!Number.isFinite(inner) || !Number.isFinite(visual)) return 0;
+  return Math.max(0, Math.round(inner - visual - offset));
+}
+
+/**
+ * True while a horizontal scroller still has items off to the right.
+ * @param {number} scrollLeft
+ * @param {number} clientWidth
+ * @param {number} scrollWidth
+ */
+export function moreChips(scrollLeft, clientWidth, scrollWidth) {
+  const left = Number(scrollLeft) || 0;
+  const view = Number(clientWidth) || 0;
+  const full = Number(scrollWidth) || 0;
+  return full - view - left > 12;
+}
