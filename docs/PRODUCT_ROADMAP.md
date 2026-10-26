@@ -27,7 +27,7 @@ Customer-visible slice:
 2. Each store group in the API includes a **handoff** object: item identities (name, brand, quantity, price, `productId` / `upc` / `locationId` when known) plus an `action` of `kroger_cart` | `walmart_cart` | `search_deeplink` | `coming_soon`.
 3. **Kroger (always-available path):** “Open at Kroger” search/product deep links using `productId`/UPC when the Products API returned them, otherwise the item name. Shopper completes add-to-cart on kroger.com.
 4. **Walmart:** when at least one assigned line has a numeric item id, **Add N items to Walmart cart** opens one `www.walmart.com/sc/cart/addToCart` link (Impact-wrapped when `WALMART_PUBLISHER_ID` is set). Lines without an item id are left off that link. If none qualify, the card uses a public search deep link. **Target:** public search deep link. Authenticated cart-write APIs are not invented.
-5. **Aldi and other non-cart banners:** **Shop this list at {store}**. Link-tier stores (Aldi, Target, Publix, H-E-B, Meijer, and the other verified search URLs) include **Open in {store}**. Banners with no verified link are a checklist only. See [`STORE_HANDOFFS.md`](STORE_HANDOFFS.md). No fake checkout.
+5. **Aldi and other non-cart banners:** **Open {store} list**. Link-tier stores (Aldi, Target, Publix, H-E-B, Meijer, and the other verified links) include **Open in {store}**. Banners with no verified link are a checklist only. See [`STORE_HANDOFFS.md`](STORE_HANDOFFS.md). No fake checkout.
 
 ---
 
@@ -40,7 +40,7 @@ Price the same verified items at more than Kroger so the 15/5/10 split reflects 
 | **Kroger** | Official Locations + Products APIs (`product.compact`) | Working (unchanged) | `KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET` |
 | **Walmart** | Official [Affiliate Marketing API](https://walmart.io/apidocs/affiliates/affiliate-marketing-api) `GET /search` with RSA headers | Adapter shipped; live when keys are set. Prices are **walmart.com catalog**, not in-aisle local shelf (the search API has no store-price filter). [`GET /stores?zip=`](https://walmart.io/apidocs/affiliates/stores) labels the nearest store name and address (cached per ZIP) and does not change the price. When that response includes them, `fulfillmentStoreId` and `accessPointId` are sent on the add-to-cart link as `storeId` and `ap`. | `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`. `WALMART_PUBLISHER_ID` optional (Impact attribution). |
 | **Target** | **No public product/price API.** RedSky is an internal storefront endpoint and is **not** used. | Adapter shipped for a licensed partner feed (`GET {TARGET_PARTNER_BASE_URL}/products?query=&zip=`). Until those keys exist, Target can use Flipp weekly ads (if enabled) or the demo catalog. | `TARGET_PARTNER_BASE_URL`, `TARGET_PARTNER_API_KEY` |
-| **Aldi** | None (retailer). Flipp weekly-ad optional. | Demo catalog or weekly ad. Handoff is **Shop this list at Aldi** with `https://www.aldi.us/store/aldi/search?q=` | `FLIPP_ENABLED` / `FLIPP_ACCESS_TOKEN` |
+| **Aldi** | None (retailer). Flipp weekly-ad optional. | Demo catalog or weekly ad. Handoff is **Open Aldi list** with `https://www.aldi.us/store/aldi/s?k=` | `FLIPP_ENABLED` / `FLIPP_ACCESS_TOKEN` |
 
 Pipeline:
 
@@ -88,7 +88,7 @@ Code: `PartnerFeedProvider` in `src/pricing/partnerFeed.ts` implements `GET {bas
 
 Configured partner banners join the default competitor list. Unconfigured banners are omitted from that extra list (Flipp-mapped Publix-like banners can still appear when you pass `stores`). Dashboard label for licensed stub hits: **Partner feed**. Licensed shelf feeds beat Flipp weekly ads for the same banner.
 
-Handoff for those banners is the link tier (a store-site search link) or a checklist, per `src/storeHandoffConfig.ts`. Aldi is **Shop this list at Aldi** with a search link. Cart fill stays Kroger shopper OAuth and the Walmart add-to-cart URL.
+Handoff for those banners is the link tier (a store-site search link) or a checklist, per `src/storeHandoffConfig.ts`. Aldi is **Open Aldi list** with a search link. Cart fill stays **Send to Kroger cart** (shopper OAuth) and **Send to Walmart cart** (the add-to-cart URL).
 
 ---
 

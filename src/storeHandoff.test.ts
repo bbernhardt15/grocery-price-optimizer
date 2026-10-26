@@ -137,7 +137,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.items[0].locationId, "01400441");
     assert.equal(handoff.action.type, "shop_list");
     assert.equal(handoff.tier, "cart");
-    assert.equal(handoff.action.label, "Shop this list at Kroger");
+    assert.equal(handoff.action.label, "Open Kroger list");
     assert.equal(handoff.action.status, "ready");
     assert.equal(handoff.action.url, krogerSearchUrl(krogerMilk));
     assert.match(handoff.action.detail ?? "", /authorization-code/i);
@@ -183,7 +183,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 1.28,
     });
     assert.equal(walmart.action.type, "shop_list");
-    assert.equal(walmart.action.label, "Shop this list at Walmart");
+    assert.equal(walmart.action.label, "Open Walmart list");
     assert.equal(walmart.action.url, walmartSearchUrl(walmartBread));
     assert.match(walmart.action.detail ?? "", /not a cart fill/i);
     assert.match(walmart.action.detail ?? "", /partner/i);
@@ -195,7 +195,7 @@ describe("buildStoreHandoff", () => {
     });
     assert.equal(target.action.type, "shop_list");
     assert.equal(target.tier, "link");
-    assert.equal(target.action.label, "Shop this list at Target");
+    assert.equal(target.action.label, "Open Target list");
     assert.match(target.action.detail ?? "", /not a cart fill/i);
     assert.match(target.action.detail ?? "", /partner/i);
   });
@@ -231,7 +231,7 @@ describe("buildStoreHandoff", () => {
     }
 
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Open Walmart cart");
+    assert.equal(handoff.action.label, "Send to Walmart cart");
     assert.equal(handoff.action.status, "ready");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
@@ -264,7 +264,7 @@ describe("buildStoreHandoff", () => {
       process.env.WALMART_PUBLISHER_ID = previous;
     }
 
-    assert.equal(handoff.action.label, "Open Walmart cart");
+    assert.equal(handoff.action.label, "Send to Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin, "https://goto.walmart.com");
     assert.match(url.pathname, /^\/c\/impact-42\/568844\/9383$/);
@@ -346,7 +346,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 2,
     });
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Open Walmart cart");
+    assert.equal(handoff.action.label, "Send to Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
     assert.equal(url.searchParams.get("items"), "554433|2");
@@ -365,6 +365,59 @@ describe("buildStoreHandoff", () => {
     );
   });
 
+  it("builds each banner URL for the sample term milk, with Meijer using text=", () => {
+    const sample = {
+      query: "milk",
+      name: "milk",
+      brand: "Store",
+      price: 1,
+      quantity: 1,
+      itemTotal: 1,
+      unit: "ea",
+      normalizedUnit: "ea",
+    };
+    const expected: Record<string, string | undefined> = {
+      Kroger: "https://www.kroger.com/search?query=milk",
+      Walmart: "https://www.walmart.com/search?q=milk",
+      Target: "https://www.target.com/s?searchTerm=milk",
+      Aldi: "https://www.aldi.us/store/aldi/s?k=milk",
+      Publix: "https://www.publix.com/search?searchTerm=milk",
+      "H-E-B": "https://www.heb.com/search/?q=milk",
+      Meijer: "https://www.meijer.com/shopping/search.html?text=milk",
+      Safeway: "https://www.safeway.com/shop/search-results.html?q=milk",
+      Albertsons: "https://www.albertsons.com/shop/search-results.html?q=milk",
+      Vons: "https://www.vons.com/shop/search-results.html?q=milk",
+      "Jewel-Osco": "https://www.jewelosco.com/shop/search-results.html?q=milk",
+      Acme: "https://www.acmemarkets.com/shop/search-results.html?q=milk",
+      "Tom Thumb": "https://www.tomthumb.com/shop/search-results.html?q=milk",
+      Randalls: "https://www.randalls.com/shop/search-results.html?q=milk",
+      Pavilions: "https://www.pavilions.com/shop/search-results.html?q=milk",
+      "Food Lion": "https://shop.foodlion.com/search?search_term=milk",
+      Giant: "https://giantfood.com/",
+      "Stop & Shop": "https://stopandshop.com/",
+      Sprouts: "https://shop.sprouts.com/",
+      "Winn-Dixie": "https://www.winndixie.com/",
+      Costco: "https://www.costco.com/CatalogSearch?keyword=milk",
+      "Sam's Club": "https://www.samsclub.com/s/milk",
+      "Whole Foods": "https://www.wholefoodsmarket.com/search?text=milk",
+      "Amazon Fresh": "https://www.amazon.com/s?k=milk",
+      "Giant Eagle": undefined,
+    };
+
+    for (const row of STORE_HANDOFF_CONFIG) {
+      assert.ok(Object.hasOwn(expected, row.storeName), row.storeName);
+      const handoff = buildStoreHandoff({
+        storeName: row.storeName,
+        items: [{ ...sample, storeName: row.storeName }],
+        subtotal: 1,
+      });
+      assert.equal(handoff.items[0]?.url, expected[row.storeName], row.storeName);
+    }
+
+    assert.match(expected.Meijer ?? "", /[?&]text=milk$/);
+    assert.equal((expected.Meijer ?? "").includes("query="), false);
+  });
+
   it("does not treat a Flipp flyer id as a Walmart item id", () => {
     const handoff = buildStoreHandoff({
       storeName: "Walmart",
@@ -378,7 +431,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 1.28,
     });
     assert.equal(handoff.action.type, "shop_list");
-    assert.equal(handoff.action.label, "Shop this list at Walmart");
+    assert.equal(handoff.action.label, "Open Walmart list");
   });
 
   it("gives Aldi a checklist with a verified search link", () => {
@@ -390,9 +443,9 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.itemCount, 3);
     assert.equal(handoff.tier, "link");
     assert.equal(handoff.action.type, "shop_list");
-    assert.equal(handoff.action.label, "Shop this list at Aldi");
+    assert.equal(handoff.action.label, "Open Aldi list");
     assert.equal(handoff.action.status, "ready");
-    assert.equal(aldiSearchUrl(aldiBananas), "https://www.aldi.us/store/aldi/search?q=Bananas");
+    assert.equal(aldiSearchUrl(aldiBananas), "https://www.aldi.us/store/aldi/s?k=Bananas");
     assert.equal(handoff.items[0].url, aldiSearchUrl(aldiBananas));
     assert.equal(handoff.items[0].openLabel, "Open in Aldi");
     assert.match(handoff.action.detail ?? "", /not a cart fill/i);
@@ -418,7 +471,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 3.19,
     });
     assert.equal(publix.action.type, "shop_list");
-    assert.equal(publix.action.label, "Shop this list at Publix");
+    assert.equal(publix.action.label, "Open Publix list");
     assert.equal(publix.action.status, "ready");
     assert.equal(
       partnerSearchUrl("Publix", milk),
@@ -478,12 +531,25 @@ describe("buildStoreHandoff", () => {
       assert.equal(handoff.action.type, "shop_list", storeName);
       assert.equal(handoff.tier, "link", storeName);
       assert.equal(handoff.priceLabel, "Weekly ad, not shelf price", storeName);
-      assert.equal(handoff.action.label, `Shop this list at ${storeName}`, storeName);
+      assert.equal(handoff.action.label, `Open ${storeName} list`, storeName);
       assert.notEqual(handoff.action.type, "kroger_cart");
       assert.notEqual(handoff.action.type, "walmart_cart");
       assert.match(handoff.action.detail ?? "", /not a cart fill/i, storeName);
       assert.match(handoff.action.detail ?? "", /weekly ad, not a shelf price/i, storeName);
-      assert.match(handoff.action.url ?? "", /Whole%20Milk/, storeName);
+      const homepage: Record<string, string> = {
+        "Stop & Shop": "https://stopandshop.com/",
+        Sprouts: "https://shop.sprouts.com/",
+        "Winn-Dixie": "https://www.winndixie.com/",
+      };
+      if (homepage[storeName]) {
+        assert.equal(handoff.action.url, homepage[storeName], storeName);
+      } else {
+        assert.match(handoff.action.url ?? "", /Whole%20Milk/, storeName);
+      }
+      if (storeName === "Meijer") {
+        assert.match(handoff.action.url ?? "", /[?&]text=Whole%20Milk/);
+        assert.equal((handoff.action.url ?? "").includes("query="), false);
+      }
       assert.equal(handoff.items[0].openLabel, `Open in ${storeName}`, storeName);
       assert.equal((handoff.action.url ?? "").includes("999001"), false, storeName);
     }
@@ -509,8 +575,8 @@ describe("enrichOptimizeResult", () => {
     assert.equal(enriched.tripPlan.storeCount, 3);
     assert.equal(enriched.stores[0].items[0].name, "Gallon of Milk");
     assert.equal(enriched.stores[0].handoff.action.type, "shop_list");
-    assert.equal(enriched.stores[1].handoff.action.label, "Shop this list at Target");
-    assert.equal(enriched.stores[2].handoff.action.label, "Shop this list at Walmart");
+    assert.equal(enriched.stores[1].handoff.action.label, "Open Target list");
+    assert.equal(enriched.stores[2].handoff.action.label, "Open Walmart list");
     assert.equal(enriched.capabilities.krogerCart, false);
     assert.equal(enriched.stores[2].nearbyStore, undefined);
   });

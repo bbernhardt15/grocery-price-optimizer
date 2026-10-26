@@ -246,11 +246,11 @@ function searchQuery(
   return (item.upc || item.productId || item.name).trim();
 }
 
-/** Aldi's public online shop (delivery or pickup). Verified: HTTP 200 with the query in the page URL. */
+/** Aldi's public shop search. Indexed example: https://www.aldi.us/store/aldi/s?k=milk */
 export function aldiSearchUrl(
   item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
 ): string {
-  return `https://www.aldi.us/store/aldi/search?q=${encodeURIComponent(searchQuery(item))}`;
+  return `https://www.aldi.us/store/aldi/s?k=${encodeURIComponent(searchQuery(item))}`;
 }
 
 /** Public storefront search — not a cart fill. */
@@ -261,7 +261,7 @@ export function partnerSearchUrl(
   const q = encodeURIComponent(searchQuery(item));
   const configured = mappingForStore(storeName)?.searchUrl;
   if (configured) {
-    return configured.replaceAll("{q}", q);
+    return configured.includes("{q}") ? configured.replaceAll("{q}", q) : configured;
   }
   switch (retailerKey(storeName)) {
     case "publix":
@@ -269,17 +269,17 @@ export function partnerSearchUrl(
     case "heb":
       return `https://www.heb.com/search/?q=${q}`;
     case "meijer":
-      return `https://www.meijer.com/shopping/search.html?query=${q}`;
+      return `https://www.meijer.com/shopping/search.html?text=${q}`;
     case "safeway":
       return `https://www.safeway.com/shop/search-results.html?q=${q}`;
     case "albertsons":
       return `https://www.albertsons.com/shop/search-results.html?q=${q}`;
     case "food_lion":
-      return `https://www.foodlion.com/shop/search-results.html?q=${q}`;
+      return `https://shop.foodlion.com/search?search_term=${q}`;
     case "giant":
-      return `https://giantfood.com/shop/search-results.html?q=${q}`;
+      return "https://giantfood.com/";
     case "stop_and_shop":
-      return `https://stopandshop.com/shop/search-results.html?q=${q}`;
+      return "https://stopandshop.com/";
     case "costco":
       return `https://www.costco.com/CatalogSearch?keyword=${q}`;
     case "sams_club":
@@ -394,7 +394,7 @@ function shopListAction(
   const firstUrl = items.find((item) => item.url)?.url;
   return {
     type: "shop_list",
-    label: `Shop this list at ${storeName}`,
+    label: `Open ${storeName} list`,
     status: "ready",
     ...(firstUrl ? { url: firstUrl } : {}),
     detail,
@@ -424,7 +424,7 @@ function krogerAction(
       status: "needs_shopper_login",
       ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
       detail:
-        "Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. Grocery Gitter reports success only if Kroger returns HTTP 2xx. The client-credentials token used for pricing cannot write a cart.",
+        "Signs in to Kroger, then adds the items. Starts Kroger shopper login (authorization-code OAuth), then PUT /v1/cart/add. Grocery Gitter reports success only if Kroger returns HTTP 2xx. The client-credentials token used for pricing cannot write a cart.",
     };
   }
 
@@ -532,11 +532,11 @@ function walmartAction(
 
   return {
     type: "walmart_cart",
-    label: "Open Walmart cart",
+    label: "Send to Walmart cart",
     url,
     status: "ready",
     ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-    detail: `Opens walmart.com with ${count} item${count === 1 ? "" : "s"} in the cart. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
+    detail: `Opens walmart.com with the items in the cart link (${count} item${count === 1 ? "" : "s"}). ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
   };
 }
 
@@ -567,7 +567,7 @@ function partnerSearchAction(
   return shopListAction(
     storeName,
     items,
-    `Checklist with an Open in ${storeName} link for each item. Not a cart fill.${clubNote}${priceNote}`
+    `Checklist with item links. Each line has an Open in ${storeName} link. Not a cart fill.${clubNote}${priceNote}`
   );
 }
 

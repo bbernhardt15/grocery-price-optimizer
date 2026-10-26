@@ -716,17 +716,17 @@ describe("POST /api/optimize-list", () => {
     );
 
     assert.equal(byStore.Kroger.handoff.action.type, "shop_list");
-    assert.equal(byStore.Kroger.handoff.action.label, "Shop this list at Kroger");
+    assert.equal(byStore.Kroger.handoff.action.label, "Open Kroger list");
     assert.equal(byStore.Kroger.handoff.action.status, "ready");
     assert.match(byStore.Kroger.handoff.action.url ?? "", /kroger\.com\/search/);
     assert.match(byStore.Kroger.handoff.items[0].url ?? "", /kroger\.com\/search/);
 
     assert.equal(byStore.Walmart.handoff.action.type, "shop_list");
-    assert.equal(byStore.Walmart.handoff.action.label, "Shop this list at Walmart");
+    assert.equal(byStore.Walmart.handoff.action.label, "Open Walmart list");
     assert.match(byStore.Walmart.handoff.action.url ?? "", /walmart\.com\/search/);
 
     assert.equal(byStore.Target.handoff.action.type, "shop_list");
-    assert.equal(byStore.Target.handoff.action.label, "Shop this list at Target");
+    assert.equal(byStore.Target.handoff.action.label, "Open Target list");
     assert.match(byStore.Target.handoff.action.url ?? "", /target\.com\/s/);
 
     const bodyWithPricing = json as {
@@ -923,7 +923,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Walmart.nearbyStore?.name, "WM Supercenter");
       assert.equal(byStore.Walmart.nearbyStore?.storeId, "2066");
       assert.equal(byStore.Walmart.handoff.action.type, "walmart_cart");
-      assert.equal(byStore.Walmart.handoff.action.label, "Open Walmart cart");
+      assert.equal(byStore.Walmart.handoff.action.label, "Send to Walmart cart");
       const walmartCart = new URL(byStore.Walmart.handoff.action.url ?? "");
       assert.match(walmartCart.pathname, /\/c\/impact-1\/568844\/9383$/);
       const walmartDestination = new URL(walmartCart.searchParams.get("u") ?? "");
