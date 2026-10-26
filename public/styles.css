@@ -454,16 +454,17 @@ a.text-btn:hover { background: var(--accent-soft); }
   border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700;
 }
 
-.trip { display: flex; flex-direction: column; gap: 12px; }
+.trip { display: flex; flex-direction: column; gap: 12px; min-width: 0; max-width: 100%; }
 .trip-banner {
   display: flex; justify-content: space-between; gap: 12px; align-items: end;
   background: var(--accent); color: var(--accent-ink); border-radius: var(--radius); padding: 16px;
 }
 .trip-banner p { margin: 0; }
 .trip-total { font-family: var(--display); font-size: 2.2rem; }
-.store-grid { display: grid; gap: 12px; }
-.store-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
-.store-card header { display: flex; justify-content: space-between; gap: 8px; }
+.store-grid { display: grid; gap: 12px; min-width: 0; }
+.store-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; min-width: 0; max-width: 100%; }
+.store-card header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; min-width: 0; }
+.store-card header > div, .store-card p, .handoff-detail { min-width: 0; overflow-wrap: anywhere; }
 .store-card h3 { margin: 0 0 4px; }
 .badge-live, .badge-demo, .badge-ad {
   display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700;
