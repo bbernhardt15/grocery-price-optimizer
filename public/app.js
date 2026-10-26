@@ -40,12 +40,14 @@ import {
   applyTripEdits,
   formatTripText,
   groupForAisle,
+  moveOptionLabel,
   priceSourceLabel,
   readChecks,
   readTripSnapshot,
   saveTripSnapshot,
   shareItemId,
   singleStoreSavings,
+  swapSentence,
   tripFingerprint,
   writeCheck,
 } from "./shopper/tripPlan.js";
@@ -1295,19 +1297,54 @@ function exportRow(scope, storeName, actionType) {
   </div>`;
 }
 
+function sameStoreName(left, right) {
+  return String(left || "").trim().toLowerCase() === String(right || "").trim().toLowerCase();
+}
+
+function moveLine(lineId, storeName) {
+  if (!lineId || !storeName) return;
+  if (planLimited("multiStoreSplit")) {
+    openPaywall();
+    return;
+  }
+  const moves = { ...tripEdits.moves };
+  const original = (lastOptimize?.stores || [])
+    .flatMap((store) => store.items || [])
+    .find((item) => item.lineId === lineId);
+  const locked = tripEdits.lockedStore;
+  const backToOriginal = original && sameStoreName(storeName, original.storeName) && !locked;
+  const backToLock = locked && sameStoreName(storeName, locked);
+  if (backToOriginal || backToLock) delete moves[lineId];
+  else moves[lineId] = storeName;
+  tripEdits = { ...tripEdits, moves };
+  rememberTrip();
+  paintTrip();
+}
+
 function moveControl(item) {
   if (planLimited("multiStoreSplit")) return "";
   const offers = item.offers || [];
   if (offers.length < 2 || !item.lineId) return "";
   const options = offers
     .map((offer) => {
-      const selected = offer.storeName === item.storeName ? " selected" : "";
-      return `<option value="${escapeHtml(offer.storeName)}"${selected}>${escapeHtml(offer.storeName)} · ${money(offer.price)}</option>`;
+      const selected = sameStoreName(offer.storeName, item.storeName) ? " selected" : "";
+      return `<option value="${escapeHtml(offer.storeName)}"${selected}>${escapeHtml(moveOptionLabel(offer, item.price))}</option>`;
     })
     .join("");
   return `<label class="move">Move
     <select data-move-line="${escapeHtml(item.lineId)}" aria-label="Move ${escapeHtml(item.name)} to another store">${options}</select>
   </label>`;
+}
+
+function swapLine(item) {
+  const swapped = item.matchKind === "swap" || item.matchKind === "substitute";
+  const note = item.swapNote || (swapped ? swapSentence(item.substitutedFor || item.query || item.name, item.storeName, item.name) : "");
+  if (!note) return "";
+  const back =
+    item.exactStore && item.lineId && !sameStoreName(item.exactStore, item.storeName)
+      ? `<button type="button" class="text-btn" data-switch-back="${escapeHtml(item.lineId)}" data-switch-store="${escapeHtml(item.exactStore)}">Switch back</button>`
+      : "";
+  return `<span class="swap-note">${escapeHtml(note)}${back}</span>`;
 }
 
 function primaryAction(store) {
@@ -1391,7 +1428,6 @@ function paintTrip() {
 function renderStore(store, checks) {
   const rows = (store.items ?? [])
     .map((item) => {
-      const sub = item.matchKind === "substitute" ? ` <span class="sub-tag">Substitute</span>` : "";
       const checked = item.lineId && checks[item.lineId] ? " checked" : "";
       const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
       const priceLabel = itemPriceLabel(item, store);
@@ -1399,10 +1435,11 @@ function renderStore(store, checks) {
         <label class="check-line">
           <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
           <span>
-            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}${sub}</span>
+            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}</span>
             <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
           </span>
         </label>
+        ${swapLine(item)}
         <span class="item-price">
           <span class="${labelClass(priceLabel)}">${escapeHtml(priceLabel)}</span>
           <span>${money(item.price)} each</span>
@@ -1470,6 +1507,7 @@ function openChecklist(storeName) {
         .map((item) => {
           const checked = item.lineId && checks[item.lineId] ? " checked" : "";
           const size = item.size ? `, ${escapeHtml(item.size)}` : "";
+          const swap = item.swapNote ? `<span class="swap-note">${escapeHtml(item.swapNote)}</span>` : "";
           const where = instore ? `<span class="muted">${escapeHtml(item.storeName)}</span>` : "";
           const url = itemUrl(item);
           const link = url
@@ -1478,7 +1516,7 @@ function openChecklist(storeName) {
           return `<li class="check-row-line">
             <label class="check-line">
               <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
-              <span>${item.quantity}× ${escapeHtml(item.name)}${size}</span>
+              <span>${item.quantity}× ${escapeHtml(item.name)}${size}${swap}</span>
             </label>
             ${where}
             <strong>${money(item.itemTotal ?? item.price)}</strong>
@@ -2406,6 +2444,11 @@ document.addEventListener("click", (event) => {
     paintTrip();
     return;
   }
+  const switchBack = target.closest("[data-switch-back]");
+  if (switchBack) {
+    moveLine(switchBack.getAttribute("data-switch-back"), switchBack.getAttribute("data-switch-store"));
+    return;
+  }
   const exportButton = target.closest("[data-export]");
   if (exportButton) {
     void exportTrip(exportButton.getAttribute("data-export"), exportButton.getAttribute("data-export-store") || "").catch((error) => {
@@ -2431,20 +2474,7 @@ document.addEventListener("change", (event) => {
       openPaywall();
       return;
     }
-    const lineId = target.dataset.moveLine;
-    const storeName = target.value;
-    const moves = { ...tripEdits.moves };
-    const original = (lastOptimize?.stores || [])
-      .flatMap((store) => store.items || [])
-      .find((item) => item.lineId === lineId);
-    const locked = tripEdits.lockedStore;
-    const backToOriginal = original && storeName === original.storeName && !locked;
-    const backToLock = locked && storeName === locked;
-    if (backToOriginal || backToLock) delete moves[lineId];
-    else moves[lineId] = storeName;
-    tripEdits = { ...tripEdits, moves };
-    rememberTrip();
-    paintTrip();
+    moveLine(target.dataset.moveLine, target.value);
     return;
   }
   if (target instanceof HTMLInputElement && target.dataset.tripCheck) {

@@ -1,8 +1,11 @@
+import { upcKey } from "./catalog/normalize";
 import { mapToDepartment } from "./catalog/departments";
+import { parsePackageSize } from "./packageSize";
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
 import { compareProductOffers, unitPriceForProduct } from "./productMatch";
 import {
+  groceryWordTokens,
   matchTokenSets,
   nameContainsAllTokens,
 } from "./productSearchQuery";
@@ -63,9 +66,16 @@ export type PickedItem = {
   productId?: string;
   upc?: string;
   priceSource?: PriceSource;
-  /** Set when the winning offer is a labeled substitute, not the exact UPC. */
-  matchKind?: "exact" | "substitute";
+  /**
+   * `swap` only when the chosen item is not sold at any in-scope store and a
+   * different pack is filling in. An exact UPC or variant is never a swap.
+   */
+  matchKind?: "exact" | "swap" | "substitute";
+  /** "Swapped: X is not sold at Walmart, using Y" */
+  swapNote?: string;
   substitutedFor?: string;
+  /** Cheapest in-scope store that sells the chosen item, when one does. */
+  exactStore?: string;
   /** Stable id for this grocery line, used to remember checks and moves. */
   lineId?: string;
   /** Department name when the catalog or the product name maps to one. */
@@ -93,6 +103,10 @@ export type ItemOffer = {
   aisle?: string;
   /** Filled in when the trip is enriched with handoff links. */
   url?: string;
+  /** `swap` when this store does not carry the chosen item. */
+  matchKind?: "exact" | "swap" | "substitute";
+  swapNote?: string;
+  substitutedFor?: string;
 };
 
 export type StoreGroup = {
@@ -191,17 +205,147 @@ function productsMatchingQuery(
 
 function rankedMatches(line: GroceryLine, catalog: CatalogProduct[]): CatalogProduct[] {
   const matches = productsMatchingQuery(catalog, line.name);
-  matches.sort((a, b) =>
-    compareProductOffers(
-      line.name,
-      a.offerRole === "substitute" ? { ...a, name: line.name } : a,
-      b.offerRole === "substitute" ? { ...b, name: line.name } : b
-    )
-  );
+  // Keep each row's real name. Rewriting a substitute to the grocery line made
+  // a different pack look like an exact size match and let it beat a cheaper item.
+  matches.sort((a, b) => compareProductOffers(line.name, a, b));
   return matches;
 }
 
-function toItemOffer(product: CatalogProduct): ItemOffer {
+function storeKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Package used to decide "same variant". The title wins when the retailer
+ * size field is only the single bottle inside a pack the title already names
+ * ("16.9 fl oz" on a "6 Pack" of 16.9 fl oz bottles). Otherwise the retailer
+ * size field wins, then the title.
+ */
+function identitySize(product: CatalogProduct): { dimension: string; amount: number } | null {
+  const fromName = parsePackageSize(product.name);
+  const fromField = product.size?.trim() ? parsePackageSize(product.size) : null;
+  if (
+    fromName &&
+    fromField &&
+    fromName.dimension === fromField.dimension &&
+    fromField.amount > 0
+  ) {
+    const ratio = fromName.amount / fromField.amount;
+    const rounded = Math.round(ratio);
+    if (rounded >= 2 && Math.abs(ratio - rounded) < 0.08) {
+      return { dimension: fromName.dimension, amount: fromName.amount };
+    }
+    return { dimension: fromField.dimension, amount: fromField.amount };
+  }
+  const size = fromField ?? fromName;
+  return size ? { dimension: size.dimension, amount: size.amount } : null;
+}
+
+/** Same UPC, or the same brand + name + pack. Different packs stay apart. */
+function variantKey(product: CatalogProduct): string | null {
+  const name = groceryWordTokens(product.name).join(" ");
+  if (!name) {
+    return null;
+  }
+  const brand = product.brand.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const size = identitySize(product);
+  const sizeKey = size
+    ? `${size.dimension}:${Math.round(size.amount * 10) / 10}`
+    : "nosize";
+  return `${brand}|${name}|${sizeKey}`;
+}
+
+function sameIdentity(a: CatalogProduct, b: CatalogProduct): boolean {
+  const upcA = upcKey(a.upc);
+  const upcB = upcKey(b.upc);
+  if (upcA && upcB && upcA === upcB) {
+    return true;
+  }
+  const left = variantKey(a);
+  const right = variantKey(b);
+  return Boolean(left && right && left === right);
+}
+
+function preferShelf(current: CatalogProduct, candidate: CatalogProduct): CatalogProduct {
+  if (candidate.price !== current.price) {
+    return candidate.price < current.price ? candidate : current;
+  }
+  const candidateExact = candidate.offerRole !== "substitute";
+  const currentExact = current.offerRole !== "substitute";
+  if (candidateExact !== currentExact) {
+    return candidateExact ? candidate : current;
+  }
+  const byStore = candidate.storeName.localeCompare(current.storeName);
+  if (byStore !== 0) {
+    return byStore < 0 ? candidate : current;
+  }
+  return candidate.name.localeCompare(current.name) < 0 ? candidate : current;
+}
+
+function cheapestPerStore(products: CatalogProduct[]): CatalogProduct[] {
+  const byStore = new Map<string, CatalogProduct>();
+  for (const product of products) {
+    const key = storeKey(product.storeName);
+    const existing = byStore.get(key);
+    byStore.set(key, existing ? preferShelf(existing, product) : product);
+  }
+  return [...byStore.values()].sort((a, b) => {
+    if (a.price !== b.price) {
+      return a.price - b.price;
+    }
+    const byStore = a.storeName.localeCompare(b.storeName);
+    return byStore !== 0 ? byStore : a.name.localeCompare(b.name);
+  });
+}
+
+function bestRankedPerStore(products: CatalogProduct[], query: string): CatalogProduct[] {
+  const groups = new Map<string, CatalogProduct[]>();
+  for (const product of products) {
+    const key = storeKey(product.storeName);
+    const list = groups.get(key);
+    if (list) {
+      list.push(product);
+    } else {
+      groups.set(key, [product]);
+    }
+  }
+  const chosen: CatalogProduct[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => compareProductOffers(query, a, b));
+    if (group[0]) {
+      chosen.push(group[0]);
+    }
+  }
+  return chosen.sort(
+    (a, b) => a.price - b.price || a.storeName.localeCompare(b.storeName)
+  );
+}
+
+function replacementLabel(product: CatalogProduct, chosen: string): string {
+  const name = product.name.trim();
+  const size = product.size?.trim();
+  const brand = product.brand.trim();
+  if (name.toLowerCase() === chosen.trim().toLowerCase()) {
+    const detail = [brand, size].filter(Boolean).join(", ");
+    return detail ? `${name} (${detail})` : name;
+  }
+  if (size && !name.toLowerCase().includes(size.toLowerCase())) {
+    return `${name}, ${size}`;
+  }
+  if (brand && !name.toLowerCase().includes(brand.toLowerCase())) {
+    return `${brand} ${name}`;
+  }
+  return name;
+}
+
+function swapSentence(chosen: string, storeName: string, replacement: string): string {
+  return `Swapped: ${chosen} is not sold at ${storeName}, using ${replacement}`;
+}
+
+function toItemOffer(
+  product: CatalogProduct,
+  extra?: { matchKind?: "swap"; swapNote?: string; substitutedFor?: string }
+): ItemOffer {
   const mapped = mapToDepartment(product.categories, product.name);
   return {
     storeName: product.storeName,
@@ -217,7 +361,19 @@ function toItemOffer(product: CatalogProduct): ItemOffer {
     ...(product.priceSource ? { priceSource: product.priceSource } : {}),
     department: mapped.departmentName,
     ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    ...(extra?.matchKind ? { matchKind: extra.matchKind } : {}),
+    ...(extra?.swapNote ? { swapNote: extra.swapNote } : {}),
+    ...(extra?.substitutedFor ? { substitutedFor: extra.substitutedFor } : {}),
   };
+}
+
+function swapOffer(product: CatalogProduct, chosen: string): ItemOffer {
+  const replacement = replacementLabel(product, chosen);
+  return toItemOffer(product, {
+    matchKind: "swap",
+    swapNote: swapSentence(chosen, product.storeName, replacement),
+    substitutedFor: chosen,
+  });
 }
 
 /** First match per store wins because `matches` is already ranked best-first. */
@@ -225,7 +381,7 @@ function bestOfferPerStore(matches: CatalogProduct[]): ItemOffer[] {
   const seen = new Set<string>();
   const offers: ItemOffer[] = [];
   for (const product of matches) {
-    const key = product.storeName.trim().toLowerCase();
+    const key = storeKey(product.storeName);
     if (seen.has(key)) continue;
     seen.add(key);
     offers.push(toItemOffer(product));
@@ -233,20 +389,19 @@ function bestOfferPerStore(matches: CatalogProduct[]): ItemOffer[] {
   return offers;
 }
 
-function pickForLine(
+function toPicked(
   line: GroceryLine,
-  catalog: CatalogProduct[]
-): PickedItem | null {
-  const matches = rankedMatches(line, catalog);
-
-  if (matches.length === 0) {
-    return null;
-  }
-
-  const best = matches[0];
+  best: CatalogProduct,
+  offers: ItemOffer[],
+  extra: {
+    matchKind?: "swap";
+    swapNote?: string;
+    substitutedFor?: string;
+    exactStore?: string;
+  } = {}
+): PickedItem {
   const unitPrice = unitPriceForProduct(best.price, best.name, best.size);
   const mapped = mapToDepartment(best.categories, best.name);
-
   return {
     query: line.name,
     name: best.name,
@@ -265,25 +420,126 @@ function pickForLine(
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
     department: mapped.departmentName,
     ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
-    offers: bestOfferPerStore(matches),
-    ...(best.offerRole === "substitute"
+    offers,
+    ...(extra.exactStore ? { exactStore: extra.exactStore } : {}),
+    ...(extra.matchKind
       ? {
-          matchKind: "substitute" as const,
-          substitutedFor: best.substitutedFor || line.name,
+          matchKind: extra.matchKind,
+          ...(extra.swapNote ? { swapNote: extra.swapNote } : {}),
+          ...(extra.substitutedFor ? { substitutedFor: extra.substitutedFor } : {}),
         }
       : {}),
   };
+}
+
+function lineAnchors(line: GroceryLine, catalog: CatalogProduct[]): CatalogProduct[] {
+  return catalog.filter(
+    (product) =>
+      product.pinned && product.sourceQuery === line.name && product.offerRole !== "substitute"
+  );
+}
+
+function lineSubstitutes(line: GroceryLine, catalog: CatalogProduct[]): CatalogProduct[] {
+  return catalog.filter(
+    (product) => product.offerRole === "substitute" && product.sourceQuery === line.name
+  );
+}
+
+function chosenName(
+  line: GroceryLine,
+  anchors: CatalogProduct[],
+  subs: CatalogProduct[]
+): string {
+  return (
+    anchors[0]?.name ||
+    subs.find((product) => product.substitutedFor)?.substitutedFor ||
+    line.name
+  );
+}
+
+/**
+ * The shopper picked one product. Compare that UPC / variant on shelf price.
+ * A different pack is only the assignment when no in-scope store sells it.
+ */
+function pickSelected(
+  line: GroceryLine,
+  catalog: CatalogProduct[],
+  anchors: CatalogProduct[],
+  subs: CatalogProduct[]
+): PickedItem | null {
+  const chosen = chosenName(line, anchors, subs);
+  const pool =
+    anchors.length > 0
+      ? catalog.filter((product) => anchors.some((anchor) => sameIdentity(anchor, product)))
+      : [];
+  if (pool.length > 0) {
+    const exacts = cheapestPerStore(pool);
+    const best = exacts[0];
+    if (!best) {
+      return null;
+    }
+    const covered = new Set(exacts.map((product) => storeKey(product.storeName)));
+    const swaps = bestRankedPerStore(
+      subs.filter(
+        (product) =>
+          !covered.has(storeKey(product.storeName)) &&
+          !exacts.some((exact) => sameIdentity(exact, product))
+      ),
+      line.name
+    );
+    return toPicked(
+      line,
+      best,
+      [...exacts.map((product) => toItemOffer(product)), ...swaps.map((product) => swapOffer(product, chosen))],
+      { exactStore: best.storeName }
+    );
+  }
+  if (subs.length === 0) {
+    return null;
+  }
+  const ranked = bestRankedPerStore(subs, line.name);
+  const best = ranked[0];
+  if (!best) {
+    return null;
+  }
+  const offers = ranked.map((product) => swapOffer(product, chosen));
+  const winner = offers.find((offer) => storeKey(offer.storeName) === storeKey(best.storeName));
+  return toPicked(line, best, offers, {
+    matchKind: "swap",
+    ...(winner?.swapNote ? { swapNote: winner.swapNote } : {}),
+    substitutedFor: chosen,
+  });
+}
+
+function pickGeneric(line: GroceryLine, catalog: CatalogProduct[]): PickedItem | null {
+  const matches = rankedMatches(line, catalog);
+  if (matches.length === 0) {
+    return null;
+  }
+  return toPicked(line, matches[0], bestOfferPerStore(matches));
+}
+
+function pickForLine(line: GroceryLine, catalog: CatalogProduct[]): PickedItem | null {
+  const anchors = lineAnchors(line, catalog);
+  const subs = lineSubstitutes(line, catalog);
+  if (anchors.length > 0 || subs.length > 0) {
+    return pickSelected(line, catalog, anchors, subs);
+  }
+  return pickGeneric(line, catalog);
 }
 
 /**
  * Maps each grocery item to one in-scope product, multiplies that shelf price
  * by the requested quantity, then groups by storeName.
  *
- * Candidates are the strongest keyword set that hits (full name, then without
- * a generic trailing word, then the first two words). Inside that set the
- * product itself beats a flavor/ingredient use of the same words, then either
- * the closest requested package size or the lower unit price. See
- * `productMatch.ts` for the full rule.
+ * A pinned selection is one product. Every store that sells that UPC or the
+ * same brand, name, and pack is compared on shelf price, and the cheapest
+ * store gets the line. A different pack is used only when that item is not
+ * sold at any in-scope store, and then it is labeled as a swap.
+ *
+ * A typed line (no pinned product) still uses the strongest keyword set, then
+ * the product itself over a flavor, then the closest requested size or the
+ * lower unit price. See `productMatch.ts`.
  */
 function catalogFor(stores: string[], products: CatalogProduct[]): CatalogProduct[] {
   const storeFilter = allowedStores(stores);

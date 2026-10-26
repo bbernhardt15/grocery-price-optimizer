@@ -191,12 +191,44 @@ function cleanText(value) {
   return text || undefined;
 }
 
+export function swapSentence(chosen, storeName, replacement) {
+  const item = String(chosen || "This item").replace(/\s+/g, " ").trim();
+  const store = String(storeName || "this store").trim() || "this store";
+  const using = String(replacement || "a different pack").replace(/\s+/g, " ").trim();
+  return `Swapped: ${item} is not sold at ${store}, using ${using}`;
+}
+
+function offerIsSwap(offer) {
+  return offer?.matchKind === "swap" || offer?.matchKind === "substitute";
+}
+
+export function moveOptionLabel(offer, currentPrice) {
+  const price = Number(offer?.price);
+  const current = Number(currentPrice);
+  const base = `${offer?.storeName || "Store"} · ${money(price)}`;
+  const swap = offerIsSwap(offer);
+  let text = swap ? `${base} swap` : base;
+  if (Number.isFinite(price) && Number.isFinite(current)) {
+    const delta = roundMoney(current - price);
+    if (delta > 0) text += ` (save ${money(delta)})`;
+    else if (delta < 0) text += ` (${money(Math.abs(delta))} more)`;
+  }
+  return text;
+}
+
 function lineFromOffer(item, offer) {
   const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
   const price = Number(offer.price);
   const same = sameStore(offer.storeName, item.storeName);
   const size = cleanText(offer.size) || (same ? cleanText(item.size) : undefined);
   const aisle = cleanText(offer.aisle) || (same ? cleanText(item.aisle) : undefined);
+  const swap =
+    offerIsSwap(offer) || (same && offer?.matchKind !== "exact" && (item?.matchKind === "swap" || item?.matchKind === "substitute"));
+  const chosen = offer.substitutedFor || item.substitutedFor || item.query || item.name;
+  const note = swap
+    ? offer.swapNote || (same ? item.swapNote : "") || swapSentence(chosen, offer.storeName, offer.name || item.name)
+    : "";
+  const exactStore = cleanText(item.exactStore);
   return {
     query: item.query,
     lineId: item.lineId,
@@ -216,7 +248,10 @@ function lineFromOffer(item, offer) {
     department: offer.department || item.department,
     ...(aisle ? { aisle } : {}),
     ...(offer.url ? { url: offer.url } : {}),
-    ...(same && item.matchKind ? { matchKind: item.matchKind } : {}),
+    ...(swap ? { matchKind: "swap" } : {}),
+    ...(note ? { swapNote: note } : {}),
+    ...(swap && chosen ? { substitutedFor: chosen } : {}),
+    ...(exactStore ? { exactStore } : {}),
     offers: item.offers,
   };
 }
@@ -395,7 +430,10 @@ export function singleStoreSavings(lines) {
     let total = 0;
     let complete = true;
     for (const line of priced) {
-      const offer = (line.offers || []).find((row) => sameStore(row.storeName, storeName));
+      const rows = (line.offers || []).filter((row) => sameStore(row.storeName, storeName));
+      const exact = rows.find((row) => !offerIsSwap(row));
+      const hasExactSomewhere = (line.offers || []).some((row) => row && !offerIsSwap(row));
+      const offer = exact || (hasExactSomewhere ? undefined : rows[0]);
       if (!offer || !Number.isFinite(Number(offer.price))) {
         complete = false;
         break;
