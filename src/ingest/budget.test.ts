@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
-import { lookupCallsForTick, tickCallSplit } from "./config";
+import { effectiveShares, lookupCallsForTick, tickCallSplit } from "./config";
 
 describe("lookup share", () => {
   it("gives lookups a fraction of the tick and at least one call when the share is above zero", () => {
@@ -17,6 +17,49 @@ describe("lookup share", () => {
     assert.deepEqual(tickCallSplit(4, 0.5, 0), { lookup: 2, refresh: 0, discovery: 2 });
     assert.deepEqual(tickCallSplit(1, 0.5, 0.3), { lookup: 1, refresh: 0, discovery: 0 });
     assert.deepEqual(tickCallSplit(4, 1, 0.3), { lookup: 4, refresh: 0, discovery: 0 });
+  });
+
+  it("reserves refresh first when the shelf is stale", () => {
+    assert.deepEqual(tickCallSplit(4, 0.2, 0.8, true), { lookup: 1, refresh: 3, discovery: 0 });
+    assert.deepEqual(tickCallSplit(4, 0.2, 0.6, true), { lookup: 1, refresh: 2, discovery: 1 });
+    assert.deepEqual(tickCallSplit(1, 0.2, 0.6, true), { lookup: 0, refresh: 1, discovery: 0 });
+  });
+
+  it("prioritizes refresh above 30% stale and gives it back below 15%", () => {
+    const highKroger = effectiveShares({ staleRatio: 0.34, lookupShare: 0.5, refreshShare: 0.6 });
+    assert.equal(highKroger.mode, "refresh");
+    assert.equal(highKroger.refreshFirst, true);
+    assert.equal(highKroger.lookupShare, 0.2);
+    assert.equal(highKroger.refreshShare, 0.8);
+    assert.ok(highKroger.refreshShare + highKroger.lookupShare <= 1);
+
+    const highWalmart = effectiveShares({ staleRatio: 0.34, lookupShare: 0.5, refreshShare: 0.3 });
+    assert.equal(highWalmart.mode, "refresh");
+    assert.equal(highWalmart.lookupShare, 0.2);
+    assert.equal(highWalmart.refreshShare, 0.6);
+
+    const low = effectiveShares({ staleRatio: 0.1, lookupShare: 0.5, refreshShare: 0.6 });
+    assert.equal(low.mode, "discover");
+    assert.equal(low.refreshFirst, false);
+    assert.equal(low.refreshShare, 0.3);
+    assert.equal(low.lookupShare, 0.5);
+
+    const mid = effectiveShares({ staleRatio: 0.22, lookupShare: 0.5, refreshShare: 0.6 });
+    assert.equal(mid.mode, "balanced");
+    assert.equal(mid.refreshShare, 0.6);
+    assert.equal(mid.lookupShare, 0.5);
+    assert.equal(mid.refreshFirst, false);
+  });
+
+  it("does not invent refresh budget or cut a tick that is entirely lookups", () => {
+    const off = effectiveShares({ staleRatio: 0.5, lookupShare: 0.5, refreshShare: 0 });
+    assert.equal(off.refreshShare, 0);
+    assert.equal(off.lookupShare, 0.5);
+    assert.equal(off.refreshFirst, false);
+
+    const allLookup = effectiveShares({ staleRatio: 0.5, lookupShare: 1, refreshShare: 0.6 });
+    assert.equal(allLookup.lookupShare, 1);
+    assert.equal(allLookup.refreshShare, 0);
   });
 });
 

@@ -58,7 +58,7 @@ app.get("/api", (_req, res) => {
       "GET /api/catalog/products/:id":
         "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, the stale ratio, the effective refresh and match shares, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
       "GET /api/admin/catalog/suspicious":
         "Read-only audit of grocery departments for names that look like pet apparel, costumes, sweaters, dresses, toys, or decor. Returns a count per department plus examples. Same admin token as status. Nothing is deleted.",
       "POST /api/admin/catalog/recategorize":

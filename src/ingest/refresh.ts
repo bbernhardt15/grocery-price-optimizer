@@ -3,13 +3,17 @@ import { PriceWatch } from "../alerts/models";
 import { krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { utcDay } from "./budget";
+import { staleRatioOf } from "./config";
 import { CATALOG_DEMAND_DAYS } from "./demand";
 import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay } from "./models";
 
 /** A miss waits a day so the same dead offer does not spend the budget again. */
 export const REFRESH_RETRY_MS = 24 * 60 * 60 * 1000;
 
-export type RefreshPriority = "list" | "shared" | "watch" | "search" | "merged" | "catalog";
+export type RefreshPriority = "list" | "shared" | "popular" | "watch" | "search" | "merged" | "catalog";
+
+/** Demand rows at or above this many hits are refreshed before watches and one-off searches. */
+export const POPULAR_DEMAND_HITS = 3;
 
 export type RefreshPick = {
   offerId: string;
@@ -39,6 +43,7 @@ type MasterRow = {
 type PriorityKeys = {
   list: string[];
   shared: string[];
+  popular: string[];
   watch: string[];
   search: string[];
   merged: string[];
@@ -74,8 +79,8 @@ async function loadPriority(now: Date): Promise<PriorityKeys> {
     CatalogDemand.find({ lastSeenAt: { $gte: since } })
       .sort({ hits: -1, lastSeenAt: -1 })
       .limit(120)
-      .select("kind upcKey text")
-      .lean<Array<{ kind?: string; upcKey?: string; text?: string }>>(),
+      .select("kind upcKey text hits")
+      .lean<Array<{ kind?: string; upcKey?: string; text?: string; hits?: number }>>(),
     SharedList.find({ revokedAt: null })
       .sort({ updatedAt: -1 })
       .limit(80)
@@ -95,12 +100,16 @@ async function loadPriority(now: Date): Promise<PriorityKeys> {
   ]);
   const list = new Set<string>();
   const shared = new Set<string>();
+  const popular = new Set<string>();
   const watch = new Set<string>();
   const search = new Set<string>();
   const phrases: string[] = [];
   for (const row of demand) {
     const bucket = row.kind === "list" ? list : search;
     addKey(bucket, row.upcKey);
+    if ((row.hits ?? 0) >= POPULAR_DEMAND_HITS) {
+      addKey(popular, row.upcKey);
+    }
     if (row.kind === "search" && row.text && !row.text.startsWith("upc:") && phrases.length < 5) {
       phrases.push(row.text);
     }
@@ -136,6 +145,7 @@ async function loadPriority(now: Date): Promise<PriorityKeys> {
   return {
     list: [...list],
     shared: [...shared],
+    popular: [...popular],
     watch: [...watch],
     search: [...search],
     merged: merged.map((row) => row.key),
@@ -165,9 +175,10 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
 }
 
 /**
- * Oldest stale offers for one store, skipping general merchandise that was
- * marked refreshExcluded. Saved lists, shared lists, price watches, and
- * recent searches come before merged products, then the rest of the shelf.
+ * Stale offers for one store, skipping general merchandise marked
+ * refreshExcluded. Saved lists and shared lists come first, then popular
+ * items, price watches, recent searches, merged products, and the oldest
+ * stale offer.
  */
 export async function nextRefreshPicks(
   storeName: "Walmart" | "Kroger",
@@ -182,6 +193,7 @@ export async function nextRefreshPicks(
   const tiers: Array<{ priority: RefreshPriority; keys?: string[] }> = [
     { priority: "list", keys: priority.list },
     { priority: "shared", keys: priority.shared },
+    { priority: "popular", keys: priority.popular },
     { priority: "watch", keys: priority.watch },
     { priority: "search", keys: priority.search },
     { priority: "merged", keys: priority.merged },
@@ -249,6 +261,15 @@ export async function finishRefresh(picks: RefreshPick[], now: Date, refreshedOf
     { $inc: { [field]: refreshedOffers }, $setOnInsert: { day } },
     { upsert: true }
   );
+}
+
+/** Stale offers divided by offers that are still on the shelf (not discontinued). */
+export async function loadStaleRatio(): Promise<number> {
+  const [stale, shelf] = await Promise.all([
+    CatalogOffer.countDocuments({ status: "stale" }),
+    CatalogOffer.countDocuments({ status: { $ne: "discontinued" } }),
+  ]);
+  return staleRatioOf(stale, shelf);
 }
 
 export async function refreshQueueSize(now = new Date()): Promise<{ walmart: number; kroger: number }> {
