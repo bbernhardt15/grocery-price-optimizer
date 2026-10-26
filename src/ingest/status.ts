@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { PipelineStage } from "mongoose";
-import { DEPARTMENTS, departmentById, mapToDepartment } from "../catalog/departments";
+import { DEPARTMENTS, departmentById, mapToDepartment, SUSPICIOUS_NON_GROCERY_NAME, suspiciousNonGroceryHint } from "../catalog/departments";
 import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
 import { estimateStorageBytes, ingestConfig, lookupCallsForTick } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
@@ -319,6 +319,56 @@ export async function catalogSample(department: string, rawLimit: number): Promi
     };
   });
   return { department: known.id, n: items.length, items };
+}
+
+/**
+ * Read-only audit. Counts grocery-department products whose names look like
+ * pet apparel, costumes, sweaters, dresses, toys, or decor.
+ */
+export async function catalogSuspicious(rawLimit: number): Promise<{
+  suspicious: number;
+  departments: Array<{ id: string; name: string; suspicious: number }>;
+  items: Array<{ department: string; name: string; brand: string; paths: string; hint: string }>;
+  note: string;
+}> {
+  const limit = Math.min(100, Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 30));
+  const grocery = DEPARTMENTS.filter((department) => !department.generalMerchandise);
+  const pattern = SUSPICIOUS_NON_GROCERY_NAME.source;
+  const match = {
+    departmentId: { $in: grocery.map((department) => department.id) },
+    status: { $ne: "discontinued" },
+    name: { $regex: pattern, $options: "i" },
+  };
+  const [grouped, rows] = await Promise.all([
+    CatalogMaster.aggregate<{ _id: string; count: number }>([
+      { $match: match },
+      { $group: { _id: "$departmentId", count: { $sum: 1 } } },
+    ]),
+    CatalogMaster.find(match)
+      .sort({ departmentId: 1, name: 1 })
+      .limit(limit)
+      .select("name brand categoryPaths departmentId")
+      .lean<Array<{ name?: string; brand?: string; categoryPaths?: string[]; departmentId?: string }>>(),
+  ]);
+  const counts = new Map(grouped.map((row) => [row._id, row.count]));
+  const departments = grocery.map((department) => ({
+    id: department.id,
+    name: department.name,
+    suspicious: counts.get(department.id) ?? 0,
+  }));
+  const items = rows.map((row) => ({
+    department: row.departmentId ?? "",
+    name: clip(row.name ?? "", 80),
+    brand: clip(row.brand ?? "", 40),
+    paths: clip((row.categoryPaths ?? []).join(" | "), 120),
+    hint: suspiciousNonGroceryHint(row.name ?? "") ?? "",
+  }));
+  return {
+    suspicious: departments.reduce((sum, row) => sum + row.suspicious, 0),
+    departments,
+    items,
+    note: "Read-only. Counts are products still stored in a grocery department whose names look like pet apparel, costumes, sweaters, dresses, toys, or decor. Nothing is deleted.",
+  };
 }
 
 /**

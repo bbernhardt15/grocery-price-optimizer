@@ -98,13 +98,16 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
 }
 
 /** Bump when grocery leaves change so a resume re-reads the Walmart tree. */
-export const WALMART_TAXONOMY_VERSION = 6;
+export const WALMART_TAXONOMY_VERSION = 7;
 
 /**
  * Crawl a leaf only when it maps to a grocery department.
  * General merchandise (jewelry, office, home improvement, electronics,
  * apparel, toys, pet accessories, health devices, and the rest of
  * Industrial & Scientific) stays out so the daily budget is not spent there.
+ * Seasonal, costume, pet-apparel, party, and decor leaves do too, even when
+ * they sit under a grocery ancestor such as Dairy, Eggs & Cheese.
+ * A food leaf under Seasonal (Halloween candy, eggnog) still maps to its aisle.
  */
 function isGrocery(node: Taxon): boolean {
   const mapped = mapToDepartment([node.path, node.name], node.name);

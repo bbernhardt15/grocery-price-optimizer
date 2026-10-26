@@ -16,7 +16,7 @@ import { CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock
 import { noteCatalogDemand } from "./demand";
 import { matchProgress, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
-import { catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus } from "./status";
+import { catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "./status";
 import { nextRefreshPicks } from "./refresh";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
 import { recordsFromWalmartPage } from "./walmartWalk";
@@ -511,6 +511,21 @@ describe("catalog ingestion", () => {
     assert.equal(typeof queueBody.queue.walmart, "number");
     assert.equal(typeof queueBody.queue.kroger, "number");
     assert.equal(queueBody.hitRate.walmart === null || typeof queueBody.hitRate.walmart === "number", true);
+    const suspiciousDenied = await fetch(`${origin}/api/admin/catalog/suspicious`);
+    assert.equal(suspiciousDenied.status, 401);
+    const suspiciousOk = await fetch(`${origin}/api/admin/catalog/suspicious?limit=5`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    assert.equal(suspiciousOk.status, 200);
+    const suspiciousBody = (await suspiciousOk.json()) as {
+      suspicious: number;
+      departments: Array<{ id: string; name: string; suspicious: number }>;
+      items: unknown[];
+    };
+    assert.equal(typeof suspiciousBody.suspicious, "number");
+    assert.ok(suspiciousBody.departments.some((row) => row.id === "dairy-eggs" && row.name === "Dairy & Eggs"));
+    assert.equal(suspiciousBody.departments.some((row) => row.id === "other"), false);
+    assert.ok(Array.isArray(suspiciousBody.items));
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
@@ -1973,5 +1988,178 @@ describe("catalog ingestion", () => {
       assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
     }
     assert.equal((await CatalogOffer.findOne({ productKey: "other-jewelry" }))?.refreshExcluded, true);
+  });
+
+  it("moves Halloween dog apparel out of dairy and sets refresh exclusion both ways", async () => {
+    const dogs = [
+      {
+        key: "dairy-dog-dress",
+        name: "Way To Celebrate Dog Dress, Orange & Black Polka Dot Pumpkin Face, (XS)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween"],
+      },
+      {
+        key: "dairy-dog-scary",
+        name: "Way To Celebrate Dog Halloween Dress, Red So Cute It's Scary, (Small)",
+        brand: "Parent's Choice",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese"],
+      },
+      {
+        key: "dairy-dog-med",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween/Dog Sweaters"],
+      },
+      {
+        key: "dairy-dog-xs",
+        name: "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (XS)",
+        brand: "Way To Celebrate",
+        categoryPaths: ["Food/Seasonal/Halloween"],
+      },
+    ];
+    for (const row of dogs) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: row.brand,
+        departmentId: "dairy-eggs",
+        categoryPaths: row.categoryPaths,
+        walmartItemId: row.key,
+        lastSeenAt: new Date(),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 0.75,
+        lastSeenAt: new Date(),
+        status: "stale",
+        refreshExcluded: false,
+      });
+    }
+    await CatalogMaster.create({
+      key: "dairy-milk-flagged",
+      name: "Great Value Whole Milk",
+      brand: "Great Value",
+      departmentId: "dairy-eggs",
+      categoryPaths: ["Food/Dairy, Eggs & Cheese/Milk"],
+      walmartItemId: "dairy-milk-flagged",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "dairy-milk-flagged",
+      storeName: "Walmart",
+      locationId: "",
+      price: 3.18,
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: true,
+    });
+    await CatalogMaster.create({
+      key: "dairy-gerber-juice",
+      name: "Gerber Gerber Juice, 4 oz",
+      brand: "Gerber",
+      departmentId: "dairy-eggs",
+      categoryPaths: ["Food/Dairy, Eggs & Cheese"],
+      walmartItemId: "dairy-gerber-juice",
+      lastSeenAt: new Date(),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "dairy-gerber-juice",
+      storeName: "Walmart",
+      locationId: "",
+      price: 0.68,
+      size: "4 oz",
+      lastSeenAt: new Date(),
+      status: "stale",
+      refreshExcluded: false,
+    });
+
+    const before = await catalogSuspicious(100);
+    const dairyBefore = before.departments.find((row) => row.id === "dairy-eggs");
+    assert.ok(dairyBefore);
+    assert.ok((dairyBefore?.suspicious ?? 0) >= dogs.length);
+    assert.equal(before.departments.some((row) => row.id === "other"), false);
+    assert.ok(before.items.some((row) => row.name.includes("Dog Sweater") && row.hint === "pet-apparel"));
+    assert.equal(before.items.some((row) => row.name.includes("Gerber")), false);
+
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.ok(finished.setExclusions >= dogs.length);
+    assert.ok(finished.clearedExclusions >= 1);
+    for (const row of dogs) {
+      assert.equal((await CatalogMaster.findOne({ key: row.key }))?.departmentId, "other", row.key);
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+    }
+    assert.equal((await CatalogMaster.findOne({ key: "dairy-milk-flagged" }))?.departmentId, "dairy-eggs");
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+    const juice = await CatalogMaster.findOne({ key: "dairy-gerber-juice" });
+    assert.notEqual(juice?.departmentId, "other");
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-gerber-juice" }))?.refreshExcluded, false);
+
+    const after = await catalogSuspicious(100);
+    const dairyAfter = after.departments.find((row) => row.id === "dairy-eggs");
+    assert.equal(dairyAfter?.suspicious ?? 0, (dairyBefore?.suspicious ?? 0) - dogs.length);
+    assert.equal(
+      after.items.some((row) => dogs.some((dog) => row.name === dog.name)),
+      false
+    );
+
+    const excluded = await excludeNongroceryFromRefresh();
+    assert.ok(excluded.masters >= 1);
+    for (const row of dogs) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+      assert.equal(await CatalogMaster.countDocuments({ key: row.key }), 1);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-gerber-juice" }))?.refreshExcluded, false);
+
+    const again = await recategorizeCatalog();
+    assert.equal(again.status, "completed");
+    assert.equal(again.setExclusions, 0);
+    for (const row of dogs) {
+      assert.equal((await CatalogOffer.findOne({ productKey: row.key }))?.refreshExcluded, true, row.key);
+    }
+    assert.equal((await CatalogOffer.findOne({ productKey: "dairy-milk-flagged" }))?.refreshExcluded, false);
+  });
+
+  it("writes a new dog sweater as Other with refresh excluded when the leaf says dairy", async () => {
+    const name = "Way To Celebrate Dog Sweater, Orange Leafy Pumpkin, (Medium)";
+    await upsertCatalogRecords([
+      {
+        name,
+        brand: "Way To Celebrate",
+        storeName: "Walmart",
+        price: 0.75,
+        retailerItemId: "dog-sweater-upsert",
+        categories: ["Food/Dairy, Eggs & Cheese/Seasonal/Halloween"],
+        departmentId: "dairy-eggs",
+        priceSource: "live",
+      },
+    ]);
+    const master = await CatalogMaster.findOne({ key: "local:walmart:dog-sweater-upsert" });
+    assert.ok(master);
+    assert.equal(master?.departmentId, "other");
+    assert.equal((await CatalogOffer.findOne({ productKey: "local:walmart:dog-sweater-upsert" }))?.refreshExcluded, true);
+
+    await upsertCatalogRecords([
+      {
+        name: "Gerber Gerber Juice, 4 oz",
+        brand: "Gerber",
+        storeName: "Walmart",
+        price: 0.72,
+        retailerItemId: "gerber-juice-upsert",
+        size: "4 fl oz",
+        categories: ["Food/Beverages/Juice"],
+        departmentId: "beverages",
+        priceSource: "live",
+      },
+    ]);
+    const juice = await CatalogMaster.findOne({ key: "local:walmart:gerber-juice-upsert" });
+    assert.equal(juice?.departmentId, "beverages");
+    assert.notEqual((await CatalogOffer.findOne({ productKey: "local:walmart:gerber-juice-upsert" }))?.refreshExcluded, true);
   });
 });
