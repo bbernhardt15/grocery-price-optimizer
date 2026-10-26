@@ -128,6 +128,16 @@ img { max-width: 100%; display: block; }
 }
 .ghost, .text-btn { border: 1px solid var(--line); background: var(--surface); padding: 0 12px; }
 .text-btn { background: transparent; }
+a.text-btn,
+a.text-btn:visited,
+a.text-btn:hover,
+a.text-btn:active {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: transparent; color: var(--ink); font: inherit; font-weight: 700;
+  line-height: 1.2; text-decoration: none; cursor: pointer; text-align: center;
+}
+a.text-btn:hover { background: var(--accent-soft); }
 .count-pill {
   display: inline-grid; place-items: center; min-width: 1.4rem; height: 1.4rem; margin-left: 6px;
   border-radius: 999px; background: var(--accent-ink); color: var(--accent); font-size: 0.8rem;
@@ -403,7 +413,14 @@ img { max-width: 100%; display: block; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 46px; padding: 0 16px; border-radius: 999px; text-decoration: none; font-weight: 700;
 }
-.handoff-btn { background: var(--ink); color: var(--bg); border: 0; }
+.handoff-btn {
+  background: var(--ink); color: var(--bg); border: 0; font: inherit; font-weight: 700;
+  line-height: 1.2; cursor: pointer; text-align: center;
+}
+a.handoff-btn,
+a.handoff-btn:visited,
+a.handoff-btn:hover,
+a.handoff-btn:active { color: var(--bg); text-decoration: none; }
 .handoff-btn:disabled { opacity: 0.55; }
 .instacart-cta { background: #003d29; color: #faf1e5; border: 0; }
 .instacart-cta img { width: 22px; height: 22px; }
@@ -429,6 +446,10 @@ img { max-width: 100%; display: block; }
 .check-row-line {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
   border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
+}
+.check-row-line > a.text-btn { margin-left: auto; flex: 0 1 auto; max-width: 100%; }
+@media (max-width: 520px) {
+  .check-row-line > a.text-btn { flex: 1 1 100%; margin-left: 0; }
 }
 .print-root { display: none; }
 @media print {

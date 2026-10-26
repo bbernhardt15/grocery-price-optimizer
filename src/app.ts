@@ -78,7 +78,7 @@ app.get("/api", (_req, res) => {
       "POST /api/kroger/cart/start":
         "Starts shopper OAuth for PUT /v1/cart/add, or reuses a shopper cookie. Does nothing without KROGER_REDIRECT_URI and a UPC. Success is only claimed after Kroger HTTP 2xx.",
       "GET /api/kroger/oauth/callback":
-        "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add. Falls back to Open at Kroger search links on cancel or API rejection.",
+        "Kroger redirect: exchanges the authorization code, then PUT /v1/cart/add, then sends the shopper back to the app with a success or error message. Cancel and API rejection pages also include Open at Kroger search links.",
       "GET /api/instacart/status":
         "Whether INSTACART_API_KEY and INSTACART_API_BASE_URL are set. Does not return the key. Separate from INSTACART_PARTNER_* price-feed stubs.",
       "POST /api/instacart/shopping-list":

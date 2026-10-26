@@ -311,10 +311,32 @@ function applyZip(zip, { reload = true } = {}) {
   if (reload) void loadPage(true);
 }
 
-function toast(message) {
+let toastTimer = 0;
+
+function toast(message, durationMs = 1600) {
   toastEl.textContent = message;
   toastEl.classList.add("show");
-  window.setTimeout(() => toastEl.classList.remove("show"), 1600);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+}
+
+/** OAuth callback lands on /?kroger=added|error&message=… after the cart write. */
+function consumeKrogerReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const kind = params.get("kroger");
+  if (kind !== "added" && kind !== "error") return;
+  const message = String(params.get("message") || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+  params.delete("kroger");
+  params.delete("message");
+  const query = params.toString();
+  const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+  history.replaceState({}, "", next);
+  const fallback = kind === "added" ? "Kroger accepted the cart." : "Kroger did not add those items.";
+  toast(message || fallback, 6500);
 }
 
 function readSessionToken() {
@@ -1301,9 +1323,9 @@ function primaryAction(store) {
     return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(action.label || "Send to Kroger cart")}</button>`;
   }
   if (action.type === "walmart_cart" && action.url) {
-    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || "Open Walmart cart")}</a>`;
+    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label || `Send to ${store.storeName} cart`)}</a>`;
   }
-  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Shop this list at ${store.storeName}`)}</button>`;
+  return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(action.label || `Open ${store.storeName} list`)}</button>`;
 }
 
 function renderTrip(payload) {
@@ -1440,7 +1462,7 @@ function openChecklist(storeName) {
   const items = checklistItems(storeName);
   const groups = groupForAisle(items);
   const checks = readChecks(localStorage, tripId());
-  const title = instore ? "In the store" : `Shop this list at ${storeName}`;
+  const title = instore ? "In the store" : `${storeName} list`;
   const groupsHtml = groups
     .map((group) => {
       const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
@@ -1659,7 +1681,7 @@ async function startKroger(storeName, button) {
   try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
     const body = await response.json().catch(() => ({}));
@@ -3391,6 +3413,7 @@ function adoptSessionFromUrl() {
 async function boot() {
   try {
     adoptSessionFromUrl();
+    consumeKrogerReturn();
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
     await bootApp();
   } finally {

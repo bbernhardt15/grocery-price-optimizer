@@ -37,7 +37,11 @@ export type FlippMerchantMapping = {
    * fallback, and no cart handoff.
    */
   dealsOnly?: boolean;
-  /** Public storefront search. `{q}` is the encoded query. Not a cart fill. */
+  /**
+   * Public storefront link. `{q}` is the encoded search term. A URL with no
+   * `{q}` is the store homepage, used when a search URL could not be verified.
+   * Not a cart fill.
+   */
   searchUrl?: string;
   /** Club pricing. Membership may be required. No third-party cart write. */
   club?: boolean;
@@ -99,8 +103,17 @@ function loadMerchantConfig(): FlippMerchantMapping[] {
     if (!Array.isArray(row.nameAliases) || row.nameAliases.length === 0) {
       throw new Error(`Flipp merchant config row ${storeName} needs nameAliases`);
     }
-    if (row.searchUrl !== undefined && !row.searchUrl.includes("{q}")) {
-      throw new Error(`Flipp merchant config row ${storeName} searchUrl must include {q}`);
+    if (row.searchUrl !== undefined) {
+      const probe = row.searchUrl.replaceAll("{q}", "milk");
+      let parsed: URL;
+      try {
+        parsed = new URL(probe);
+      } catch {
+        throw new Error(`Flipp merchant config row ${storeName} searchUrl must be an https URL`);
+      }
+      if (parsed.protocol !== "https:") {
+        throw new Error(`Flipp merchant config row ${storeName} searchUrl must be https`);
+      }
     }
     return {
       storeName,

@@ -70,7 +70,7 @@
     "flyerKitSlug": "meijer",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://www.meijer.com/shopping/search.html?query={q}"
+    "searchUrl": "https://www.meijer.com/shopping/search.html?text={q}"
   },
   {
     "storeName": "H-E-B",
@@ -160,7 +160,7 @@
     "flyerKitSlug": "stopandshop",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://stopandshop.com/shop/search-results.html?q={q}"
+    "searchUrl": "https://stopandshop.com/"
   },
   {
     "storeName": "Sprouts",
@@ -170,7 +170,7 @@
     "flyerKitSlug": "sprouts",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://shop.sprouts.com/search?search_term={q}"
+    "searchUrl": "https://shop.sprouts.com/"
   },
   {
     "storeName": "Winn-Dixie",
@@ -180,7 +180,7 @@
     "flyerKitSlug": "winndixie",
     "exactName": true,
     "dealsOnly": true,
-    "searchUrl": "https://shop.winndixie.com/shop/search?search_term={q}"
+    "searchUrl": "https://www.winndixie.com/"
   },
   {
     "storeName": "Costco",
