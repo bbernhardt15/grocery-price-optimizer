@@ -25,9 +25,12 @@ describe("phone audit leftovers", () => {
     assert.ok(flavor > actions && size > flavor, "flavor and size follow Add");
     assert.ok(card.indexOf("data-size-row") > 0);
     assert.match(card, /class="card-lead"/);
-    assert.match(css, /\.choice-row\s*\{[^}]*overflow-x:\s*auto/s);
-    assert.match(css, /\.choice-row\s*\{[^}]*flex-wrap:\s*nowrap/s);
-    assert.match(css, /\.size-list\s*\{[^}]*max-height:\s*148px/s);
+    assert.match(card, /class="check card-add"/);
+    assert.match(css, /\.choice-row\s*\{[^}]*flex-wrap:\s*wrap/s);
+    assert.doesNotMatch(css, /\.choice-row\s*\{[^}]*flex-wrap:\s*nowrap/s);
+    assert.doesNotMatch(css, /\.size-list\s*\{[^}]*max-height:\s*148px/s);
+    assert.match(css, /\.card-open img\s*\{[^}]*background:\s*transparent/s);
+    assert.doesNotMatch(card, /best store|Not at Kroger/i);
     assert.match(css, /\.best-badge/);
     assert.match(app, /Per item/);
     assert.match(app, /unitSortLabel/);

@@ -172,7 +172,25 @@ export function mountImport(deps) {
     }
   }
 
+  function bindAsk() {
+    const mic = document.getElementById("ask-mic");
+    const more = document.getElementById("ask-import");
+    if (mic && mic.dataset.bound !== "1") {
+      mic.dataset.bound = "1";
+      mic.addEventListener("click", () => {
+        open("home");
+        void startRecording();
+      });
+    }
+    if (more && more.dataset.bound !== "1") {
+      more.dataset.bound = "1";
+      more.addEventListener("click", () => open("home"));
+    }
+    return Boolean(mic || more);
+  }
+
   function paintEntry() {
+    if (bindAsk()) return;
     const host = document.getElementById("start-here");
     if (!host || host.querySelector(".import-entry")) return;
     const section = document.createElement("section");
@@ -190,6 +208,23 @@ export function mountImport(deps) {
       open("home");
       void startRecording();
     });
+  }
+
+  function find(text) {
+    const value = String(text || "").trim();
+    open("home");
+    const paste = $("import-paste");
+    if (paste) paste.value = value;
+    if (!value) {
+      setStatus("Type or paste a list.", "error");
+      return Promise.resolve();
+    }
+    return runText(value);
+  }
+
+  function speak() {
+    open("home");
+    return startRecording();
   }
 
   function paintEmpty() {
@@ -785,5 +820,5 @@ export function mountImport(deps) {
   if (progress) new MutationObserver(syncOnboarding).observe(progress, { childList: true, characterData: true, subtree: true });
   void loadStatus();
   void consumeShare();
-  return { open };
+  return { open, find, speak };
 }

@@ -88,6 +88,7 @@ import {
 } from "./shopper/krogerReturn.js";
 import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
 import { mountImport } from "./shopper/import.js";
+import { askIntent } from "./shopper/askIntent.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
@@ -204,6 +205,8 @@ const familiesByKey = new Map();
 let departments = [];
 let activeDepartment = "all";
 let query = "";
+let browseOpen = false;
+let importer = null;
 let nextCursor = null;
 let loading = false;
 let total = 0;
@@ -215,6 +218,7 @@ let instacartEnabled = false;
 let lastOptimize = null;
 let tripEdits = { lockedStore: null, moves: {} };
 let searchTimer = 0;
+let shelfTimer = 0;
 let suggestLoadingTimer = 0;
 let suggestAbort = null;
 let activeSuggest = -1;
@@ -281,6 +285,59 @@ function fillEmpty(el, state, role) {
 
 function hasActiveFilters() {
   return Boolean($("filter-brand").value || $("filter-sale").checked || $("filter-budget").checked);
+}
+
+function refineCount() {
+  let count = 0;
+  if ($("filter-brand")?.value) count += 1;
+  if ($("filter-sale")?.checked) count += 1;
+  if ($("filter-budget")?.checked) count += 1;
+  if (sortEl?.value && sortEl.value !== "relevance") count += 1;
+  return count;
+}
+
+function paintRefine() {
+  const count = refineCount();
+  const badge = $("refine-count");
+  const button = $("filters-open");
+  if (badge) {
+    badge.hidden = count === 0;
+    badge.textContent = String(count);
+  }
+  if (button) button.setAttribute("aria-label", count ? `Refine, ${count} active` : "Refine");
+}
+
+function shelfRequested() {
+  return browseOpen || Boolean(String(query || "").trim());
+}
+
+function syncBrowse() {
+  const add = flowStep === "add";
+  const showShelf = add && shelfRequested();
+  const panel = $("browse-panel");
+  const toggle = $("browse-toggle");
+  const label = $("browse-label");
+  const hint = $("ask-hint");
+  const browse = $("browse");
+  if (panel) panel.hidden = !showShelf;
+  if (browse) browse.hidden = !add;
+  if (hint) hint.hidden = !add || Boolean(query);
+  const start = $("start-here");
+  if (start) start.hidden = !add || Boolean(query);
+  if (label) label.textContent = browseOpen ? "Hide the aisle" : "Browse all items";
+  if (toggle) {
+    toggle.hidden = !add || Boolean(query);
+    toggle.setAttribute("aria-expanded", browseOpen ? "true" : "false");
+  }
+  document.body.dataset.browse = browseOpen ? "open" : "closed";
+  document.body.dataset.results = query ? "search" : "";
+  paintRefine();
+}
+
+function openBrowse() {
+  browseOpen = true;
+  syncBrowse();
+  if (gridEl && !gridEl.querySelector(".card, .empty-state, .skeleton")) void loadPage(true);
 }
 
 function paintListEmpty() {
@@ -900,7 +957,7 @@ function renderListRows() {
       const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
         <img src="${escapeHtml(image)}" alt="" />
-        <div>
+        <div class="list-copy">
           <label class="got-it">
             <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />
             <strong>${escapeHtml(heading.title)}</strong>
@@ -1234,7 +1291,7 @@ function cardHtml(tile) {
         <h3>${escapeHtml(title)}</h3>
         <p class="price" data-price>${escapeHtml(priceText(selected))}</p>
         <div class="card-actions">
-          <label class="check">
+          <label class="check card-add">
             <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
             Add
           </label>
@@ -1309,7 +1366,7 @@ async function loadPage(reset) {
   if (!reset && !nextCursor) return;
   loading = true;
   if (reset) {
-    if (flowStep === "add") skeletons();
+    if (flowStep === "add" && !gridEl.querySelector(".card")) skeletons();
     nextCursor = null;
   }
   showCatalogError("");
@@ -1376,11 +1433,13 @@ async function loadPage(reset) {
 }
 
 function selectDepartment(id) {
+  browseOpen = true;
   activeDepartment = id;
   query = "";
   searchEl.value = "";
   closeSuggestions();
   renderDepartments();
+  syncBrowse();
   const chip = document.querySelector(`[data-dept="${CSS.escape(id)}"]`);
   chip?.scrollIntoView({ inline: "center", block: "nearest" });
   void loadPage(true);
@@ -1456,6 +1515,7 @@ function chooseSuggestion(index) {
   activeDepartment = "all";
   renderDepartments();
   closeSuggestions();
+  syncBrowse();
   void loadPage(true);
 }
 
@@ -1465,7 +1525,15 @@ async function loadSuggestions(text) {
     suggestions = [];
     suggestionQuery = "";
     activeSuggest = -1;
-    showSuggestStatus("Type a product, brand, or aisle.");
+    showSuggestStatus("Type a product, or a list like taco night for 6.");
+    return;
+  }
+  if (askIntent(q) === "list") {
+    suggestAbort?.abort();
+    suggestions = [];
+    suggestionQuery = q;
+    activeSuggest = -1;
+    showSuggestStatus("Press Enter to match these items.");
     return;
   }
   window.clearTimeout(suggestLoadingTimer);
@@ -1520,6 +1588,8 @@ function openList(open) {
 function openFilters(open) {
   $("filters").classList.toggle("open", open);
   $("filters-open").setAttribute("aria-expanded", String(open));
+  paintRefine();
+  if (open) $("sort")?.focus();
 }
 
 function openProduct(product) {
@@ -2154,12 +2224,8 @@ async function planTrip() {
     planErrorEl.textContent = "Enter a 5-digit ZIP so the trip can use your nearest stores.";
     const sheetCoversZip = window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");
     if (sheetCoversZip) openList(false);
-    if (phoneShelf()) {
-      openDrawer({ focus: "zip" });
-      toast(planErrorEl.textContent, 4200);
-    } else {
-      zipEl.focus();
-    }
+    openDrawer({ focus: "zip" });
+    toast(planErrorEl.textContent, 4200);
     paintPlanBar();
     return;
   }
@@ -3237,12 +3303,24 @@ gridEl.addEventListener(
 
 $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  query = searchEl.value.trim();
-  if (query) {
-    activeDepartment = "all";
-    renderDepartments();
-  }
+  const text = searchEl.value.trim();
   closeSuggestions();
+  if (!text) {
+    searchEl.focus();
+    return;
+  }
+  if (askIntent(text) === "list") {
+    window.clearTimeout(shelfTimer);
+    query = "";
+    syncBrowse();
+    if (importer?.find) importer.find(text);
+    else toast("Paste the list from Import.");
+    return;
+  }
+  query = text;
+  activeDepartment = "all";
+  renderDepartments();
+  syncBrowse();
   void loadPage(true);
 });
 
@@ -3255,15 +3333,40 @@ searchEl.addEventListener("input", () => {
     suggestions = [];
     suggestionQuery = "";
     activeSuggest = -1;
-    if (document.activeElement === searchEl) showSuggestStatus("Type a product, brand, or aisle.");
+    window.clearTimeout(shelfTimer);
+    query = "";
+    syncBrowse();
+    if (browseOpen) void loadPage(true);
+    else if (gridEl) gridEl.innerHTML = "";
+    if (document.activeElement === searchEl) showSuggestStatus("Type a product, or a list like taco night for 6.");
     else closeSuggestions();
     return;
   }
+  if (askIntent(value) === "list") {
+    window.clearTimeout(shelfTimer);
+    suggestAbort?.abort();
+    suggestions = [];
+    showSuggestStatus("Press Enter to match these items.");
+    return;
+  }
   searchTimer = window.setTimeout(() => void loadSuggestions(value), SUGGEST_DEBOUNCE_MS);
+  window.clearTimeout(shelfTimer);
+  const shelfQuery = value.trim();
+  if (shelfQuery.length >= 2) {
+    shelfTimer = window.setTimeout(() => {
+      if (searchEl.value.trim() !== shelfQuery || askIntent(shelfQuery) !== "search") return;
+      query = shelfQuery;
+      activeDepartment = "all";
+      renderDepartments();
+      syncBrowse();
+      void loadPage(true);
+    }, 280);
+  }
 });
 
 searchEl.addEventListener("focus", () => {
-  if (!searchEl.value.trim()) showSuggestStatus("Type a product, brand, or aisle.");
+  if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a list like taco night for 6.");
+  else if (askIntent(searchEl.value) === "list") showSuggestStatus("Press Enter to match these items.");
   else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
 });
 
@@ -3291,7 +3394,11 @@ suggestPanel.addEventListener("mousedown", (event) => {
   event.preventDefault();
 });
 
-sortEl.addEventListener("change", () => void loadPage(true));
+sortEl.addEventListener("change", () => {
+  paintRefine();
+  if (shelfRequested()) void loadPage(true);
+});
+$("filters")?.addEventListener("change", paintRefine);
 $("filters").addEventListener("submit", (event) => {
   event.preventDefault();
   openFilters(false);
@@ -3307,7 +3414,25 @@ $("filters-clear").addEventListener("click", () => {
 });
 $("filters-open").addEventListener("click", () => openFilters(!$("filters").classList.contains("open")));
 $("filters-close").addEventListener("click", () => openFilters(false));
-$("list-toggle").addEventListener("click", () => openList(!listPanel.classList.contains("open")));
+$("list-toggle").addEventListener("click", () => {
+  if (window.matchMedia("(min-width: 1100px)").matches) {
+    $("list-panel")?.querySelector("h2")?.focus();
+    return;
+  }
+  openList(!listPanel.classList.contains("open"));
+});
+$("browse-toggle")?.addEventListener("click", () => {
+  browseOpen = !browseOpen;
+  if (!browseOpen && $("filters")?.classList.contains("open")) openFilters(false);
+  syncBrowse();
+  if (browseOpen) openBrowse();
+});
+$("usuals-list")?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-usual]") : null;
+  if (!button) return;
+  const row = readUsuals(localStorage)[Number(button.getAttribute("data-usual"))];
+  if (row) void addOneUsual(row);
+});
 $("list-bar-btn").addEventListener("click", () => openList(true));
 $("list-close").addEventListener("click", () => openList(false));
 $("coverage-open").addEventListener("click", openCoverage);
@@ -3383,7 +3508,7 @@ listItemsEl.addEventListener("change", (event) => {
   }
 });
 alertsToggle?.addEventListener("click", () => {
-  if (phoneShelf()) closeDrawer({ restoreFocus: false });
+  closeDrawer({ restoreFocus: false });
   void openAlerts(!alertsDialog?.open);
 });
 $("alerts-close")?.addEventListener("click", () => openAlerts(false));
@@ -3391,7 +3516,7 @@ alertsDialog?.addEventListener("close", () => alertsToggle?.setAttribute("aria-e
 $("push-btn")?.addEventListener("click", () => void enablePush());
 for (const button of document.querySelectorAll(".settings-open")) {
   button.addEventListener("click", () => {
-    if (phoneShelf()) closeDrawer({ restoreFocus: false });
+    closeDrawer({ restoreFocus: false });
     openSettings();
   });
 }
@@ -3418,7 +3543,7 @@ zipEl.addEventListener("change", () => {
   paintZipPlace();
   if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
   scheduleWatchSync();
-  void loadPage(true);
+  if (shelfRequested()) void loadPage(true);
 });
 zipEl.addEventListener("input", paintZipPlace);
 $("theme-btn").addEventListener("click", () => {
@@ -3435,8 +3560,14 @@ document.addEventListener("keydown", (event) => {
     searchEl.focus();
     return;
   }
+  if (event.key === "Escape" && $("filters")?.classList.contains("open") && !document.querySelector("dialog[open]")) {
+    event.preventDefault();
+    openFilters(false);
+    $("filters-open")?.focus();
+    return;
+  }
   const drawer = $("app-drawer");
-  const open = phoneShelf() && drawer?.classList.contains("is-open");
+  const open = drawer?.classList.contains("is-open");
   if (!open) return;
   if (event.key === "Escape") {
     if (document.querySelector("dialog[open]")) return;
@@ -3513,13 +3644,18 @@ function syncDrawerMode() {
   const scrim = $("drawer-scrim");
   const menu = $("menu-open");
   if (!drawer) return;
-  if (!phoneShelf()) {
-    drawer.classList.remove("is-open");
-    drawer.setAttribute("aria-hidden", "false");
-    drawer.removeAttribute("inert");
-    if (scrim) scrim.hidden = true;
-    menu?.setAttribute("aria-expanded", "false");
-    return;
+  const wide = window.matchMedia("(min-width: 1100px)").matches;
+  const toggle = $("list-toggle");
+  if (listPanel) {
+    if (wide) {
+      listPanel.classList.add("open");
+      listPanel.dataset.wide = "1";
+      toggle?.setAttribute("aria-expanded", "true");
+    } else if (listPanel.dataset.wide === "1") {
+      listPanel.classList.remove("open");
+      delete listPanel.dataset.wide;
+      toggle?.setAttribute("aria-expanded", "false");
+    }
   }
   const open = drawer.classList.contains("is-open");
   drawer.setAttribute("aria-hidden", open ? "false" : "true");
@@ -3532,10 +3668,6 @@ function syncDrawerMode() {
 function openDrawer(options = {}) {
   const drawer = $("app-drawer");
   if (!drawer) return;
-  if (!phoneShelf()) {
-    if (options.focus === "zip") zipEl?.focus();
-    return;
-  }
   drawer.classList.add("is-open");
   syncDrawerMode();
   const target = options.focus === "zip" ? zipEl : $("drawer-title");
@@ -3547,15 +3679,14 @@ function openDrawer(options = {}) {
 function closeDrawer(options = {}) {
   const drawer = $("app-drawer");
   if (!drawer) return;
-  const wasOpen = drawer.classList.contains("is-open") && phoneShelf();
+  const wasOpen = drawer.classList.contains("is-open");
   drawer.classList.remove("is-open");
   syncDrawerMode();
   if (wasOpen && options.restoreFocus !== false) $("menu-open")?.focus();
 }
 
 function focusZipField() {
-  if (phoneShelf()) openDrawer({ focus: "zip" });
-  else zipEl?.focus();
+  openDrawer({ focus: "zip" });
 }
 
 function paintAlertList() {
@@ -4340,16 +4471,13 @@ function syncStepVisibility() {
   const add = flowStep === "add";
   if (gridEl) gridEl.hidden = !add;
   if (sentinelEl) sentinelEl.hidden = !add;
-  if (start) start.hidden = !add || Boolean(query);
+  if (start) start.hidden = !add;
   const showMore = $("show-more");
   if (showMore && !add) showMore.hidden = true;
   if (tripEl) tripEl.hidden = flowStep !== "plan";
   if (shop) shop.hidden = flowStep !== "shop";
-  const chips = $("dept-chips");
-  const toolbar = document.querySelector(".toolbar");
-  if (chips) chips.hidden = !add;
-  if (toolbar) toolbar.hidden = !add;
   document.body.dataset.step = flowStep;
+  syncBrowse();
 }
 
 function showStep(step) {
@@ -4531,7 +4659,7 @@ function paintStarterLists() {
   host.dataset.ready = "1";
   host.innerHTML = STARTER_LISTS.map(
     (list) =>
-      `<button type="button" class="starter" data-starter="${escapeHtml(list.id)}"><span>${escapeHtml(list.title)}</span><span class="muted">${escapeHtml(list.blurb)}</span></button>`
+      `<button type="button" class="quick-chip" data-starter="${escapeHtml(list.id)}" title="${escapeHtml(list.blurb)}" aria-label="${escapeHtml(list.title)}. ${escapeHtml(list.blurb)}">${escapeHtml(list.title)}</button>`
   ).join("");
 }
 
@@ -4543,8 +4671,34 @@ function paintUsuals() {
   block.hidden = rows.length === 0;
   listEl.innerHTML = rows
     .slice(0, 8)
-    .map((row) => `<li>${escapeHtml(row.name)}</li>`)
+    .map(
+      (row, index) =>
+        `<li><button type="button" class="quick-chip" data-usual="${index}">${escapeHtml(row.name)}</button></li>`
+    )
     .join("");
+}
+
+async function addOneUsual(row) {
+  if (!row) return;
+  if (listIsLocked()) {
+    toast("This list is view-only.");
+    return;
+  }
+  try {
+    const product = await resolveUsual(row);
+    if (!product?.id) {
+      toast("That usual isn't on the shelf right now.");
+      return;
+    }
+    if (findListEntry(product.id)) {
+      toast("Already on your list.");
+      return;
+    }
+    addProduct(productsById.get(product.id) || product, row.quantity || 1);
+    haptic();
+  } catch {
+    toast("That usual isn't on the shelf right now.");
+  }
 }
 
 function flattenTiles(tiles) {
@@ -4679,7 +4833,7 @@ function maybeAskAccount(intent, next) {
 }
 
 async function findNearbyStores() {
-  if (phoneShelf()) openDrawer({ focus: "zip" });
+  openDrawer({ focus: "zip" });
   const button = $("find-stores");
   if (button) button.disabled = true;
   try {
@@ -4846,7 +5000,7 @@ async function bootApp() {
   await loadBilling();
   await refreshAlerts();
   await loadPushStatus();
-  await loadPage(true);
+  syncBrowse();
   paintKrogerConnected(krogerConnectedNow());
   void refreshKrogerFromServer();
   if (!isNative() && "serviceWorker" in navigator) {
@@ -4917,6 +5071,7 @@ document.addEventListener("click", (event) => {
     openList(false);
     void openAlerts(false);
     showStep("add");
+    openBrowse();
     searchEl.focus();
   } else if (action === "find-stores") {
     $("find-stores")?.click();
@@ -4924,7 +5079,9 @@ document.addEventListener("click", (event) => {
     query = "";
     searchEl.value = "";
     closeSuggestions();
-    void loadPage(true);
+    syncBrowse();
+    if (browseOpen) void loadPage(true);
+    else if (gridEl) gridEl.innerHTML = "";
     searchEl.focus();
   } else if (action === "clear-filters") {
     activeDepartment = "all";
@@ -4975,7 +5132,7 @@ const welcome = mountWelcome({
   getBilling: () => billingStatus,
 });
 
-mountImport({
+importer = mountImport({
   addProduct,
   showStep,
   remember(items) {

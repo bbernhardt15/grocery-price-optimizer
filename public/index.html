@@ -36,8 +36,8 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=phone-calm-2" />
-    <link rel="stylesheet" href="/shopper/import.css?v=import-1" />
+    <link rel="stylesheet" href="/styles.css?v=add-calm-1" />
+    <link rel="stylesheet" href="/shopper/import.css?v=add-calm-1" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -57,25 +57,40 @@
         </div>
 
         <form id="search-form" class="search" role="search" autocomplete="off">
-          <label class="sr-only" for="search">Search products</label>
-          <input
-            id="search"
-            type="search"
-            name="q"
-            placeholder="Search milk, bread, a brand…"
-            maxlength="80"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded="false"
-            aria-controls="suggest-panel"
-            aria-haspopup="listbox"
-            enterkeyhint="search"
-          />
+          <label class="sr-only" for="search">What do you need?</label>
+          <div class="ask-field">
+            <input
+              id="search"
+              type="search"
+              name="q"
+              placeholder="What do you need?"
+              maxlength="400"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="suggest-panel"
+              aria-haspopup="listbox"
+              aria-describedby="ask-hint"
+              enterkeyhint="search"
+            />
+            <div class="ask-actions">
+              <button type="button" class="ask-mic" id="ask-mic" aria-label="Speak your list">
+                <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+              </button>
+              <button type="button" class="ask-import" id="ask-import" aria-label="Paste, photo, or file">
+                <span class="ask-import-label">Import</span>
+              </button>
+            </div>
+          </div>
           <div id="suggest-panel" class="suggestions" hidden>
             <p id="suggest-status" class="suggest-status" role="status" hidden></p>
             <ul id="suggestions" role="listbox" hidden></ul>
           </div>
         </form>
+        <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
+          My list
+          <span id="list-count" class="count-pill">0</span>
+        </button>
       </header>
 
         <aside id="app-drawer" class="app-drawer" aria-labelledby="drawer-title" aria-hidden="true" inert>
@@ -105,10 +120,6 @@
             <span id="theme-label">Match device</span>
           </button>
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
-          <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
-            My list
-            <span id="list-count" class="count-pill">0</span>
-          </button>
           <section class="drawer-help" aria-labelledby="help-title">
             <h2 id="help-title">Help</h2>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
@@ -122,65 +133,78 @@
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
 
       <div class="body">
-        <aside class="rail" aria-label="Departments and filters">
+        <aside class="rail" aria-label="Departments">
           <nav id="dept-nav" class="dept-nav" aria-label="Departments"></nav>
-          <form id="filters" class="filters" aria-labelledby="refine-title">
-            <div class="filters-head">
-              <h2 id="refine-title">Refine</h2>
-              <button type="button" class="text-btn" id="filters-close">Close</button>
-            </div>
-            <label>Sort
-              <select id="sort" aria-label="Sort products">
-                <option value="relevance" selected>Suggested</option>
-                <option value="price">Lowest price</option>
-                <option value="unitPrice">Best unit price</option>
-                <option value="name">Name</option>
-                <option value="onSale">On sale</option>
-              </select>
-            </label>
-            <label>Brand
-              <select id="filter-brand" name="brand">
-                <option value="">All brands</option>
-              </select>
-            </label>
-            <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
-            <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
-            <div class="filter-actions">
-              <button type="submit" class="primary">Show items</button>
-              <button type="button" class="ghost" id="filters-clear">Clear</button>
-            </div>
-          </form>
         </aside>
 
         <main id="catalog" class="catalog" tabindex="-1">
-          <div class="dept-scroller">
-            <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
-            <span id="chip-hint" class="chip-hint" hidden>More</span>
-          </div>
-          <div class="toolbar">
-            <p id="result-count" class="result-count" aria-live="polite">Loading shelves…</p>
-            <div class="toolbar-actions">
-              <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">Refine</button>
-              <button id="coverage-open" type="button" class="text-btn" hidden>Coverage</button>
-            </div>
-          </div>
-          <p id="coverage-banner" class="coverage-banner"></p>
           <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
+          <p id="ask-hint" class="ask-hint">A product like milk, or a list like taco night for 6.</p>
           <section id="start-here" class="start-here" aria-label="Start from a list">
             <div id="usuals-block" hidden>
               <div class="start-head">
-                <h2>Buy again</h2>
-                <button type="button" id="add-usuals" class="primary">Add my usuals</button>
+                <h2>Your usuals</h2>
+                <button type="button" id="add-usuals" class="text-btn">Add all</button>
               </div>
-              <ul id="usuals-list" class="usuals-list"></ul>
+              <ul id="usuals-list" class="usuals-list quick-row"></ul>
             </div>
             <h2>Starter lists</h2>
-            <div id="starter-lists" class="starter-row"></div>
+            <div id="starter-lists" class="starter-row quick-row"></div>
           </section>
-          <p id="catalog-error" class="status" role="alert" hidden></p>
-          <div id="grid" class="grid" aria-live="polite"></div>
-          <button type="button" id="show-more" class="show-more" hidden>Show more</button>
-          <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+          <section id="browse" class="browse">
+            <button type="button" id="browse-toggle" class="browse-toggle" aria-expanded="false" aria-controls="browse-panel">
+              <span id="browse-label">Browse all items</span>
+            </button>
+            <div id="browse-panel" hidden>
+              <div class="dept-scroller">
+                <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
+                <span id="chip-hint" class="chip-hint" hidden>More</span>
+              </div>
+              <div class="browse-tools">
+                <div class="toolbar">
+                  <p id="result-count" class="result-count" aria-live="polite"></p>
+                  <div class="toolbar-actions">
+                    <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">
+                      Refine
+                      <span id="refine-count" class="count-pill" hidden>0</span>
+                    </button>
+                    <button id="coverage-open" type="button" class="text-btn" hidden>Coverage</button>
+                  </div>
+                </div>
+                <form id="filters" class="filters" aria-labelledby="refine-title">
+                  <div class="filters-head">
+                    <h2 id="refine-title">Refine</h2>
+                    <button type="button" class="text-btn" id="filters-close">Close</button>
+                  </div>
+                  <label>Sort
+                    <select id="sort" aria-label="Sort products">
+                      <option value="relevance" selected>Suggested</option>
+                      <option value="price">Lowest price</option>
+                      <option value="unitPrice">Best unit price</option>
+                      <option value="name">Name</option>
+                      <option value="onSale">On sale</option>
+                    </select>
+                  </label>
+                  <label>Brand
+                    <select id="filter-brand" name="brand">
+                      <option value="">All brands</option>
+                    </select>
+                  </label>
+                  <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
+                  <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
+                  <div class="filter-actions">
+                    <button type="submit" class="primary">Show items</button>
+                    <button type="button" class="ghost" id="filters-clear">Clear</button>
+                  </div>
+                </form>
+              </div>
+              <p id="coverage-banner" class="coverage-banner"></p>
+              <p id="catalog-error" class="status" role="alert" hidden></p>
+              <div id="grid" class="grid" aria-live="polite"></div>
+              <button type="button" id="show-more" class="show-more" hidden>Show more</button>
+              <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+            </div>
+          </section>
           <section id="trip" class="trip" hidden aria-label="Trip plan"></section>
           <section id="shop" class="shop" hidden aria-label="In the store"></section>
           <footer class="site-footer">
@@ -438,6 +462,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=import-1"></script>
+    <script type="module" src="/app.js?v=add-calm-1"></script>
   </body>
 </html>
