@@ -36,6 +36,14 @@ export function themeGlyph(choice) {
   return "◐";
 }
 
+/** Short row label in the menu. The aria-label stays more specific. */
+export function themeShortLabel(choice) {
+  const parsed = parseThemeChoice(choice);
+  if (parsed === "dark") return "Dark mode";
+  if (parsed === "light") return "Light mode";
+  return "Match device";
+}
+
 export function themeButtonLabel(choice, systemDark) {
   const parsed = parseThemeChoice(choice);
   if (parsed === "dark") return "Dark theme on. Switch to light.";

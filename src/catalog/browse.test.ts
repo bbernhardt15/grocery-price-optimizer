@@ -146,6 +146,26 @@ describe("filter and sort", () => {
     assert.equal(sortProducts(catalog, "onSale")[0]?.id, "milk");
   });
 
+  it("suggests a shelf by how widely it is stocked, not by the lowest price", () => {
+    const cheap = product({
+      id: "cheap",
+      name: "Odd Tiny Candy",
+      brand: "Odd",
+      offers: [offer({ storeName: "Aldi", price: 0.39 })],
+    });
+    const common = product({
+      id: "common",
+      name: "Whole Milk",
+      brand: "Dairy Pure",
+      offers: [
+        offer({ storeName: "Kroger", price: 3.49 }),
+        offer({ storeName: "Walmart", price: 3.29 }),
+      ],
+    });
+    assert.equal(sortProducts([cheap, common], "relevance")[0]?.id, "common");
+    assert.notEqual(sortProducts([cheap, common], "price")[0]?.id, "common");
+  });
+
   it("ranks a query match ahead of a cheaper unrelated product", () => {
     const ranked = sortProducts(filterProducts(catalog, { query: "potato" }), "relevance", {
       query: "potato",

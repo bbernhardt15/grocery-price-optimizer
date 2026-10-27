@@ -1,0 +1,179 @@
+/* Import sits in the Add step and in a sheet above the bottom dock. */
+
+.import-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  position: static;
+}
+.import-entry-row,
+.import-actions,
+.import-review-actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.import-entry-row .import-open,
+.import-actions button,
+.import-review-actions .primary { flex: 1 1 12rem; min-width: 0; min-height: 64px; }
+.empty-state [data-import-open] { width: 100%; min-height: 44px; }
+.import-mic {
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg-accent);
+  color: var(--ink);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-weight: 700;
+  padding: 6px 8px;
+}
+.import-mic svg { width: 22px; height: 22px; display: block; }
+.import-mic[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+.import-lead { margin: 0; color: var(--muted); }
+.import-sheet {
+  width: min(560px, calc(100% - 16px));
+  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 16px);
+  margin-bottom: var(--bar-h);
+}
+.import-sheet .sheet-body {
+  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 16px);
+  padding-bottom: 16px;
+}
+.import-paste,
+.import-transcript,
+.import-goal {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 12px;
+  font: inherit;
+  line-height: 1.4;
+}
+.import-goal { min-height: 72px; }
+.import-tools, .import-choice-row, .import-size-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.import-tools button, .import-choice, .import-size, .import-search-hit {
+  min-height: 44px;
+}
+.import-link-row, .import-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.import-link-row input {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0 12px;
+  font: inherit;
+}
+.import-status { margin: 0; }
+.import-status[data-kind="error"] { color: var(--sale); }
+.import-listening {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+}
+.import-listening p { margin: 0; }
+.import-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  display: inline-block;
+  margin-right: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .import-mic[aria-pressed="true"] .import-pulse,
+  .import-listening .import-pulse {
+    animation: import-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes import-pulse {
+  50% { transform: scale(0.7); opacity: 0.55; }
+}
+.import-count { margin: 0; font-weight: 700; }
+.import-review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.import-tile {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.import-tile h3 { margin: 0; font-size: 1.05rem; }
+.import-tile .brand, .import-note { margin: 0; color: var(--muted); }
+.import-tile-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.import-tile-head img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--bg-accent);
+  flex: 0 0 auto;
+}
+.import-check { display: flex; gap: 8px; align-items: center; font-weight: 700; min-height: 44px; }
+.import-stepper { display: flex; align-items: center; gap: 8px; }
+.import-stepper button { min-width: 44px; min-height: 44px; }
+.import-save { display: flex; gap: 8px; align-items: flex-start; }
+#onboard-import { width: 100%; }
+
+@media (max-width: 1099px) {
+  dialog.import-sheet {
+    position: fixed;
+    inset: calc(8px + var(--safe-top)) max(8px, var(--safe-right)) calc(var(--bar-h) + 8px) max(8px, var(--safe-left));
+    width: auto;
+    max-width: none;
+    max-height: none;
+    height: auto;
+    margin: 0;
+  }
+  dialog.import-sheet .sheet-body {
+    max-height: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 12px 14px;
+  }
+}

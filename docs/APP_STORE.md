@@ -76,7 +76,7 @@ Sign-in is optional and stays off until the account variables in `docs/ACCOUNTS.
 
 Crash reporting is Sentry, and only when `SENTRY_DSN` is set. With that variable unset, the app does not initialize Sentry and does not send crash reports. The store answers below assume the build you ship has the DSN set. If you leave it unset, answer “No” for crash data and crash logs.
 
-The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Find nearby stores**. That button is not on the launch screen and not in the two-screen welcome. It is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET` and `ACCESS_COARSE_LOCATION` only. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required.
+The website does not ask for location. The iOS and Android shells ask only after the shopper taps **Find nearby stores**. That button is not on the launch screen and not in the two-screen welcome. It is approximate location, used once to look up a ZIP. The coordinates are not stored and are not linked to the user, including when the shopper is signed in. iOS declares `NSLocationWhenInUseUsageDescription` with that explanation. It also declares `NSLocationAlwaysAndWhenInUseUsageDescription` with the same text, because `@capacitor/geolocation` depends on a library that can report location in the background and Apple requires the key. The app does not request Always authorization, does not request background location, and does not track the shopper after the lookup. Android declares `INTERNET`, `ACCESS_COARSE_LOCATION`, and `RECORD_AUDIO`. It does not declare `ACCESS_FINE_LOCATION`. Location hardware is not required. The microphone is not required either: `RECORD_AUDIO` is used only after the shopper taps **Speak**, and the recording is not kept. iOS declares `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` for that same tap.
 
 ### Location questions
 
@@ -90,7 +90,7 @@ Answer these the same way on App Store Connect and in the Play Console.
 | Is it stored? | No. Coordinates are sent to `GET /api/geo/zip`, which asks the Census geocoder and then drops them |
 | Linked to the user? | No. Not linked to the account, the email, or the random alert id |
 | iOS purpose string | `NSLocationWhenInUseUsageDescription`: approximate location, once, to look up a ZIP, not stored, not linked. The Always-and-When-In-Use key uses the same sentence and is not a background request |
-| Android permissions | `INTERNET` and `ACCESS_COARSE_LOCATION`. `android.hardware.location.network` is `required=false` |
+| Android permissions | `INTERNET`, `ACCESS_COARSE_LOCATION`, and `RECORD_AUDIO` (microphone only after Speak). `android.hardware.location.network` and `android.hardware.microphone` are `required=false` |
 
 What the app actually handles:
 

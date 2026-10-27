@@ -72,5 +72,9 @@
 	<string>Grocery Gitter uses your approximate location once, only after you tap Use my location, to look up a ZIP. It is not stored and not linked to you. You can type a ZIP instead.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Grocery Gitter uses your approximate location once, only after you tap Use my location, to look up a ZIP. It is not stored and not linked to you. You can type a ZIP instead. The app does not track you in the background.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Grocery Gitter uses the microphone only while you tap Speak, to hear your grocery list. The recording is not kept. You can paste the list instead.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Grocery Gitter uses speech recognition only while you tap Speak, to turn your words into a grocery list. You can paste the list instead.</string>
 </dict>
 </plist>

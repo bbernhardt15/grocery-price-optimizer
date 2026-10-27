@@ -1,4 +1,5 @@
-const CACHE = "grocery-gitter-shell-v12";
+const CACHE = "grocery-gitter-shell-v13";
+const SHARE_CACHE = "gg-import-share";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -8,17 +9,57 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== SHARE_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
 
+async function receiveSharedList(request) {
+  const home = new URL("/", self.location.origin).href;
+  try {
+    const form = await request.formData();
+    const cache = await caches.open(SHARE_CACHE);
+    const keys = await cache.keys();
+    await Promise.all(keys.map((key) => cache.delete(key)));
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const files = [];
+    let index = 0;
+    for (const entry of form.getAll("media")) {
+      if (!entry || typeof entry === "string" || !entry.size || entry.size > 8_000_000) continue;
+      const id = `${stamp}-${index}`;
+      index += 1;
+      const headers = new Headers();
+      if (entry.type) headers.set("content-type", entry.type);
+      headers.set("x-filename", encodeURIComponent(entry.name || "list"));
+      await cache.put(new Request(`/import-share-cache/${id}`), new Response(entry, { headers }));
+      files.push({ id, name: entry.name || "list", type: entry.type || "" });
+    }
+    const manifest = {
+      title: String(form.get("title") || ""),
+      text: String(form.get("text") || ""),
+      url: String(form.get("url") || ""),
+      files,
+    };
+    await cache.put(
+      new Request("/import-share-cache/manifest"),
+      new Response(JSON.stringify(manifest), { headers: { "content-type": "application/json" } })
+    );
+    return Response.redirect(new URL("/?import=shared", self.location.origin).href, 303);
+  } catch {
+    return Response.redirect(home, 303);
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+  const url = new URL(request.url);
+  if (request.method === "POST" && url.origin === self.location.origin && url.pathname === "/import-share") {
+    event.respondWith(receiveSharedList(request));
+    return;
+  }
   if (request.method !== "GET") {
     return;
   }
-  const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
     return;
   }

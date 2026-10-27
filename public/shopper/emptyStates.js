@@ -14,8 +14,8 @@ export const EMPTY_STATES = {
   },
   filters: {
     title: "Nothing in this aisle",
-    body: "Those filters didn’t match. Clear them to see the shelf again.",
-    action: "Clear filters",
+    body: "Those choices didn’t match. Clear them to see the shelf again.",
+    action: "Clear",
     actionId: "clear-filters",
   },
   shelf: {
