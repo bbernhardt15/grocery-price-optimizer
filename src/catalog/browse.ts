@@ -154,6 +154,13 @@ export function sortProducts<T extends BrowseProduct>(
       if (delta !== 0) {
         return delta;
       }
+      if (tokens.length === 0) {
+        const stocked = (b.offers?.length ?? 0) - (a.offers?.length ?? 0);
+        if (stocked !== 0) {
+          return stocked;
+        }
+        return a.name.localeCompare(b.name) || a.brand.localeCompare(b.brand) || a.id.localeCompare(b.id);
+      }
     }
     return shelfPrice(a, store) - shelfPrice(b, store) || a.name.localeCompare(b.name);
   });

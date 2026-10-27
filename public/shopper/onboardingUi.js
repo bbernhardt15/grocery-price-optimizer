@@ -272,6 +272,10 @@ export function mountWelcome(deps) {
     }
   }
 
+  function krogerIsConnected() {
+    return Boolean(kroger?.connected) || Boolean(deps.krogerKnownConnected?.());
+  }
+
   function syncSettings() {
     const themeBtn = $("settings-theme");
     if (themeBtn) themeBtn.textContent = deps.themeLabel();
@@ -280,18 +284,22 @@ export function mountWelcome(deps) {
     if (zipLine) zipLine.textContent = zip ? `ZIP ${zip}` : "No ZIP saved yet.";
     const krogerLine = $("settings-kroger");
     const connectBtn = $("settings-kroger-connect");
-    if (!kroger?.oauthConfigured) {
+    const ready = $("settings-kroger-ready");
+    if (krogerIsConnected()) {
+      if (krogerLine) krogerLine.textContent = "Kroger connected";
+      if (connectBtn) connectBtn.hidden = true;
+      if (ready) ready.hidden = false;
+    } else if (!kroger?.oauthConfigured) {
       if (krogerLine) krogerLine.textContent = "Kroger sign-in isn’t set up on this server.";
       if (connectBtn) connectBtn.hidden = true;
-    } else if (kroger.connected) {
-      if (krogerLine) krogerLine.textContent = "Kroger is connected.";
-      if (connectBtn) connectBtn.hidden = true;
+      if (ready) ready.hidden = true;
     } else {
       if (krogerLine) krogerLine.textContent = "Optional. Connect Kroger to add items to your cart.";
       if (connectBtn) {
         connectBtn.hidden = false;
         connectBtn.textContent = "Connect Kroger";
       }
+      if (ready) ready.hidden = true;
     }
   }
 

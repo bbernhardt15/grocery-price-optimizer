@@ -494,7 +494,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
   });
   const filtered = filterProducts(scope.products, filters);
   const families = groupBrowseFamilies(filtered);
-  const sort = request.sort ?? (query ? "relevance" : "price");
+  const sort = request.sort ?? "relevance";
   const sorted = query ? diversifyFamilies(sortProducts(families, sort, filters)) : sortProducts(families, sort, filters);
   const offset = Number(request.cursor ?? "0");
   const limit = Math.min(Math.max(request.limit ?? 24, 1), 48);

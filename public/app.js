@@ -15,6 +15,7 @@ import {
   themeColor,
   themeGlyph,
   themeIsDark,
+  themeShortLabel,
 } from "./shopper/theme.js";
 import {
   attributionLine,
@@ -36,6 +37,7 @@ import {
   tripStoreEmpty,
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
+import { ONBOARDING_KEY } from "./shopper/onboarding.js";
 import {
   applyTripEdits,
   formatTripText,
@@ -73,7 +75,17 @@ import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/ac
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
-import { planBarCopy, readFlowStep, shouldAskToSignIn } from "./shopper/flow.js";
+import { bottomChrome, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "./shopper/flow.js";
+import { nextTrapTarget, swipeClosesDrawer } from "./shopper/drawer.js";
+import { zipPlaceLabel } from "./shopper/zipPlace.js";
+import {
+  KROGER_CART_URL,
+  KROGER_CONNECTED_KEY,
+  krogerBrowserShouldClose,
+  krogerCallbackSucceeded,
+  krogerReturnMarksConnected,
+  parseKrogerReturn,
+} from "./shopper/krogerReturn.js";
 import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
@@ -267,17 +279,7 @@ function fillEmpty(el, state, role) {
 }
 
 function hasActiveFilters() {
-  return Boolean(
-    activeDepartment !== "all" ||
-      $("filter-store").value ||
-      $("filter-brand").value ||
-      $("filter-sub").value ||
-      ($("filter-size").value && $("filter-size").value !== "any") ||
-      $("filter-sale").checked ||
-      $("filter-store-brand").checked ||
-      $("filter-min").value.trim() ||
-      $("filter-max").value.trim()
-  );
+  return Boolean($("filter-brand").value || $("filter-sale").checked || $("filter-budget").checked);
 }
 
 function paintListEmpty() {
@@ -325,15 +327,24 @@ async function readDeviceCoords() {
 
 async function openAuthorize(url) {
   if (isNative()) {
+    await armKrogerBrowserWatch();
     await openExternal(url);
     return;
   }
   window.location.assign(url);
 }
 
+function paintZipPlace() {
+  const el = $("zip-place");
+  if (!el) return;
+  const zip = normalizeZip(zipEl.value);
+  el.textContent = ZIP_PATTERN.test(zip) ? zipPlaceLabel(zip) : "Add a ZIP for nearby stores";
+}
+
 function applyZip(zip, { reload = true } = {}) {
   const normalized = normalizeZip(zip);
   zipEl.value = normalized;
+  paintZipPlace();
   if (!ZIP_PATTERN.test(normalized)) return;
   localStorage.setItem(ZIP_KEY, normalized);
   scheduleWatchSync();
@@ -357,23 +368,182 @@ function toast(message, durationMs = 1600) {
   toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
 }
 
-/** OAuth callback lands on /?kroger=added|error&message=… after the cart write. */
+let landedFromKroger = false;
+/** @type {Promise<void> | null} */
+let krogerWatch = null;
+
+function krogerConnectedNow() {
+  try {
+    return localStorage.getItem(KROGER_CONNECTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Drop sign-in sheets, the drawer scrim, and scroll locks so the dock can take taps. */
+function releasePageForTaps() {
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    try {
+      dialog.close();
+    } catch {
+      /* already closing */
+    }
+  });
+  document.querySelector(".filters")?.classList.remove("open");
+  document.querySelector(".list-panel")?.classList.remove("open");
+  $("filters-open")?.setAttribute("aria-expanded", "false");
+  $("list-toggle")?.setAttribute("aria-expanded", "false");
+  closeDrawer({ restoreFocus: false });
+  const scrim = $("drawer-scrim");
+  if (scrim) scrim.hidden = true;
+  document.body.inert = false;
+  document.querySelector(".shell")?.removeAttribute("inert");
+  document.body.style.overflow = "";
+  document.documentElement.style.overflow = "";
+  document.body.style.position = "";
+  document.body.style.pointerEvents = "";
+  document.documentElement.style.pointerEvents = "";
+  document.body.classList.remove("modal-open");
+}
+
+function paintKrogerConnected(connected) {
+  const on = Boolean(connected);
+  const card = $("kroger-card");
+  if (card) card.hidden = !on;
+  const line = $("settings-kroger");
+  const connect = $("settings-kroger-connect");
+  const ready = $("settings-kroger-ready");
+  if (on) {
+    if (line) line.textContent = "Kroger connected";
+    if (connect) connect.hidden = true;
+    if (ready) ready.hidden = false;
+  }
+}
+
+function rememberKrogerConnected() {
+  try {
+    localStorage.setItem(KROGER_CONNECTED_KEY, "1");
+  } catch {
+    /* private browsing */
+  }
+  paintKrogerConnected(true);
+  if (flowStep === "plan" && lastOptimize) paintTrip();
+  if (flowStep === "shop") renderShop();
+}
+
+function krogerBannerHtml() {
+  if (!krogerConnectedNow()) return "";
+  return `<section class="kroger-card" data-kroger-banner>
+    <h2>Kroger connected</h2>
+    <button type="button" class="primary" data-kroger-send>Send to Kroger cart</button>
+    <a href="${KROGER_CART_URL}" data-kroger-cart rel="noopener">Open Kroger cart</a>
+  </section>`;
+}
+
+function applyKrogerReturn(parsed) {
+  if (!parsed) return;
+  landedFromKroger = true;
+  try {
+    localStorage.setItem(ONBOARDING_KEY, "1");
+  } catch {
+    /* private browsing */
+  }
+  releasePageForTaps();
+  if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
+  if (parsed.step) showStep(parsed.step);
+  toast(parsed.message, 6500);
+}
+
+/** OAuth callback lands on /?kroger=connected|added|error&step=…&message=… */
 function consumeKrogerReturn() {
+  const parsed = parseKrogerReturn(window.location.search);
+  if (!parsed) return;
   const params = new URLSearchParams(window.location.search);
-  const kind = params.get("kroger");
-  if (kind !== "added" && kind !== "error") return;
-  const message = String(params.get("message") || "")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 240);
   params.delete("kroger");
   params.delete("message");
+  params.delete("step");
   const query = params.toString();
   const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
   history.replaceState({}, "", next);
-  const fallback = kind === "added" ? "Kroger accepted the cart." : "Kroger did not add those items.";
-  toast(message || fallback, 6500);
+  applyKrogerReturn(parsed);
+}
+
+async function refreshKrogerFromServer() {
+  try {
+    const response = await apiFetch("/api/kroger/auth-status", {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (body.connected) {
+      rememberKrogerConnected();
+      return;
+    }
+    if (response.ok && body.oauthConfigured && body.connected === false && !apiOrigin()) {
+      try {
+        localStorage.removeItem(KROGER_CONNECTED_KEY);
+      } catch {
+        /* private browsing */
+      }
+    }
+  } catch {
+    /* the phone can still show the connected state from this device */
+  }
+  paintKrogerConnected(krogerConnectedNow());
+}
+
+async function armKrogerBrowserWatch() {
+  const browser = window.Capacitor?.Plugins?.Browser;
+  if (!isNative() || !browser?.addListener || krogerWatch) return;
+  let sawCode = false;
+  let applied = false;
+  /** @type {Array<{ remove?: () => Promise<void> | void }>} */
+  const handles = [];
+  const stop = async () => {
+    krogerWatch = null;
+    for (const handle of handles.splice(0)) {
+      try {
+        await handle.remove?.();
+      } catch {
+        /* listener already removed */
+      }
+    }
+  };
+  const applyOnce = (parsed) => {
+    if (!parsed || applied) return;
+    applied = true;
+    applyKrogerReturn(parsed);
+  };
+  krogerWatch = Promise.resolve();
+  try {
+    handles.push(
+      await browser.addListener("browserPageLoaded", (event) => {
+        const url = String(event?.url || "");
+        if (krogerCallbackSucceeded(url)) sawCode = true;
+        if (!krogerBrowserShouldClose(url)) return;
+        applyOnce(parseKrogerReturn(url));
+        void browser.close?.();
+        void stop();
+      })
+    );
+    handles.push(
+      await browser.addListener("browserFinished", () => {
+        if (!applied && sawCode) {
+          applyOnce({
+            kind: "connected",
+            message: "Kroger connected.",
+            step: "plan",
+          });
+        } else {
+          releasePageForTaps();
+        }
+        void refreshKrogerFromServer();
+        void stop();
+      })
+    );
+  } catch {
+    krogerWatch = null;
+  }
 }
 
 function readSessionToken() {
@@ -860,10 +1030,8 @@ function selectedVariant(tile) {
 
 function brandLine(tile, title) {
   const brand = String(tile.brand || "").trim();
-  const parts = [];
-  if (brand && !String(title).toLowerCase().startsWith(brand.toLowerCase())) parts.push(brand);
-  if (tile.storeBrand) parts.push("store brand");
-  return parts.join(" · ");
+  if (!brand || String(title).toLowerCase().startsWith(brand.toLowerCase())) return "";
+  return brand;
 }
 
 function priceText(variant) {
@@ -973,21 +1141,11 @@ function filterQuery() {
   const params = new URLSearchParams();
   if (activeDepartment !== "all") params.set("department", activeDepartment);
   if (query) params.set("q", query);
-  const store = $("filter-store").value;
   const brand = $("filter-brand").value;
-  const sub = $("filter-sub").value;
-  const size = $("filter-size").value;
-  if (store) params.set("store", store);
   if (brand) params.set("brand", brand);
-  if (sub) params.set("subcategory", sub);
-  if (size && size !== "any") params.set("size", size);
   if ($("filter-sale").checked) params.set("onSale", "1");
-  if ($("filter-store-brand").checked) params.set("storeBrand", "1");
-  const min = $("filter-min").value.trim();
-  const max = $("filter-max").value.trim();
-  if (min) params.set("minPrice", min);
-  if (max) params.set("maxPrice", max);
-  params.set("sort", sortEl.value);
+  if ($("filter-budget").checked) params.set("storeBrand", "1");
+  params.set("sort", sortEl.value || "relevance");
   const zip = normalizeZip(zipEl.value);
   if (ZIP_PATTERN.test(zip)) params.set("zip", zip.slice(0, 5));
   params.set("limit", "12");
@@ -1100,16 +1258,12 @@ function skeletons() {
 
 function fillFacets(facets) {
   const brand = $("filter-brand");
-  const store = $("filter-store");
-  const sub = $("filter-sub");
-  const keep = { brand: brand.value, store: store.value, sub: sub.value };
-  const options = (values, current, label) =>
-    [`<option value="">${label}</option>`]
-      .concat(values.map((value) => `<option ${value === current ? "selected" : ""}>${escapeHtml(value)}</option>`))
-      .join("");
-  brand.innerHTML = options(facets.brands ?? [], keep.brand, "All brands");
-  store.innerHTML = options(facets.stores ?? [], keep.store, "All stores");
-  sub.innerHTML = options(facets.subcategories ?? [], keep.sub, "All");
+  if (!brand) return;
+  const current = brand.value;
+  const values = facets.brands ?? [];
+  brand.innerHTML = [`<option value="">All brands</option>`]
+    .concat(values.map((value) => `<option ${value === current ? "selected" : ""}>${escapeHtml(value)}</option>`))
+    .join("");
 }
 
 function renderDepartments() {
@@ -1373,7 +1527,7 @@ function openProduct(product) {
   productDialog.innerHTML = `<div class="sheet-body">
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <h2 id="dialog-title">${escapeHtml(title)}</h2>
-    ${note ? `<p class="muted">${escapeHtml(note)}${product.storeBrand ? " · store brand" : ""}</p>` : ""}
+    ${note ? `<p class="muted">${escapeHtml(note)}</p>` : ""}
     <p class="price">${escapeHtml(priceText(product))}</p>
     <p class="muted estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     <p class="muted">Pick the flavor and size on the shelf. Grocery Gitter chooses the store when you plan the trip.</p>
@@ -1704,6 +1858,7 @@ function paintTrip() {
         <header><h3>${escapeHtml(store.storeName)}</h3>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
         <ul class="item-list">${(store.items || []).map(calmItemRow).join("")}</ul>
         ${couponsHtml}
+        <div class="shop-actions">${primaryAction(store)}</div>
       </article>`;
     })
     .join("");
@@ -1711,6 +1866,7 @@ function paintTrip() {
     ? `<p class="muted">We couldn't price ${escapeHtml(lastOptimize.unavailable.join(", "))}.</p>`
     : "";
   tripEl.innerHTML = `
+    ${krogerBannerHtml()}
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     <div class="store-grid">${storeHtml}</div>
     ${missing}
@@ -1996,11 +2152,13 @@ async function planTrip() {
     planErrorEl.hidden = false;
     planErrorEl.textContent = "Enter a 5-digit ZIP so the trip can use your nearest stores.";
     const sheetCoversZip = window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");
-    if (sheetCoversZip) {
-      openList(false);
+    if (sheetCoversZip) openList(false);
+    if (phoneShelf()) {
+      openDrawer({ focus: "zip" });
       toast(planErrorEl.textContent, 4200);
+    } else {
+      zipEl.focus();
     }
-    zipEl.focus();
     paintPlanBar();
     return;
   }
@@ -2110,12 +2268,14 @@ async function startKroger(storeName, button) {
     if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
     if (body.authorizeUrl) {
       if (isNative()) {
+        await armKrogerBrowserWatch();
         await openExternal(body.authorizeUrl);
         return;
       }
       window.location.assign(body.authorizeUrl);
       return;
     }
+    if (body.status === "added" || body.krogerCartUrl) rememberKrogerConnected();
     toast(body.status === "added" ? "Kroger accepted the cart." : "Kroger cart updated.");
   } catch (error) {
     toast(error instanceof Error ? error.message : "Kroger cart failed.");
@@ -2135,6 +2295,8 @@ function applyTheme(theme) {
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColor(choice, systemDark));
   const glyph = $("theme-glyph");
   if (glyph) glyph.textContent = themeGlyph(choice);
+  const themeLabel = $("theme-label");
+  if (themeLabel) themeLabel.textContent = themeShortLabel(choice);
   $("theme-btn")?.setAttribute("aria-label", themeButtonLabel(choice, systemDark));
   void syncSystemBars(dark);
 }
@@ -2908,6 +3070,17 @@ document.addEventListener("click", (event) => {
     haptic();
     return;
   }
+  const krogerCartLink = target.closest("[data-kroger-cart], #kroger-cart-link, #settings-kroger-cart");
+  if (krogerCartLink instanceof HTMLAnchorElement) {
+    event.preventDefault();
+    void openExternal(krogerCartLink.href || KROGER_CART_URL);
+    return;
+  }
+  const krogerSend = target.closest("[data-kroger-send], #kroger-send, #settings-kroger-send");
+  if (krogerSend instanceof HTMLButtonElement) {
+    void sendToKrogerCart(krogerSend);
+    return;
+  }
   const walmartCart = target.closest('a.handoff-btn[href*="walmart.com"]');
   if (walmartCart instanceof HTMLAnchorElement) {
     event.preventDefault();
@@ -3124,14 +3297,10 @@ $("filters").addEventListener("submit", (event) => {
   void loadPage(true);
 });
 $("filters-clear").addEventListener("click", () => {
-  $("filter-store").value = "";
   $("filter-brand").value = "";
-  $("filter-sub").value = "";
-  $("filter-size").value = "any";
-  $("filter-min").value = "";
-  $("filter-max").value = "";
   $("filter-sale").checked = false;
-  $("filter-store-brand").checked = false;
+  $("filter-budget").checked = false;
+  if (sortEl) sortEl.value = "relevance";
   openFilters(false);
   void loadPage(true);
 });
@@ -3146,7 +3315,14 @@ planBtn.addEventListener("click", () => {
   void planTrip();
 });
 $("bar-primary")?.addEventListener("click", onPrimary);
+$("shop-done")?.addEventListener("click", onPrimary);
+$("shop-status")?.addEventListener("click", onPrimary);
+$("refresh-prices")?.addEventListener("click", () => void refreshPrices());
 $("find-stores")?.addEventListener("click", () => void findNearbyStores());
+$("settings-find-stores")?.addEventListener("click", () => {
+  $("settings-dialog")?.close();
+  void findNearbyStores();
+});
 $("add-usuals")?.addEventListener("click", () => void addUsualList());
 $("account-ask-skip")?.addEventListener("click", () => {
   accountAskDeclined = true;
@@ -3205,12 +3381,18 @@ listItemsEl.addEventListener("change", (event) => {
     saveList();
   }
 });
-alertsToggle?.addEventListener("click", () => void openAlerts(!alertsDialog?.open));
+alertsToggle?.addEventListener("click", () => {
+  if (phoneShelf()) closeDrawer({ restoreFocus: false });
+  void openAlerts(!alertsDialog?.open);
+});
 $("alerts-close")?.addEventListener("click", () => openAlerts(false));
 alertsDialog?.addEventListener("close", () => alertsToggle?.setAttribute("aria-expanded", "false"));
 $("push-btn")?.addEventListener("click", () => void enablePush());
 for (const button of document.querySelectorAll(".settings-open")) {
-  button.addEventListener("click", openSettings);
+  button.addEventListener("click", () => {
+    if (phoneShelf()) closeDrawer({ restoreFocus: false });
+    openSettings();
+  });
 }
 $("settings-close")?.addEventListener("click", () => $("settings-dialog")?.close());
 $("open-paywall")?.addEventListener("click", () => openPaywall());
@@ -3232,10 +3414,12 @@ $("magic-link-form")?.addEventListener("submit", (event) => {
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
+  paintZipPlace();
   if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
   scheduleWatchSync();
   void loadPage(true);
 });
+zipEl.addEventListener("input", paintZipPlace);
 $("theme-btn").addEventListener("click", () => {
   applyTheme(nextTheme(document.documentElement.dataset.theme || "system"));
 });
@@ -3248,8 +3432,45 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "/" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
     event.preventDefault();
     searchEl.focus();
+    return;
   }
+  const drawer = $("app-drawer");
+  const open = phoneShelf() && drawer?.classList.contains("is-open");
+  if (!open) return;
+  if (event.key === "Escape") {
+    if (document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    closeDrawer();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const next = nextTrapTarget(drawerFocusIds(), document.activeElement?.id, event.shiftKey);
+  if (!next) return;
+  event.preventDefault();
+  document.getElementById(next)?.focus();
 });
+
+$("menu-open")?.addEventListener("click", () => {
+  if ($("app-drawer")?.classList.contains("is-open")) closeDrawer();
+  else openDrawer();
+});
+$("drawer-close")?.addEventListener("click", () => closeDrawer());
+$("drawer-scrim")?.addEventListener("click", () => closeDrawer());
+
+let drawerSwipeStart = null;
+$("app-drawer")?.addEventListener(
+  "touchstart",
+  (event) => {
+    drawerSwipeStart = event.touches[0]?.clientX ?? null;
+  },
+  { passive: true }
+);
+$("app-drawer")?.addEventListener("touchend", (event) => {
+  const end = event.changedTouches[0]?.clientX;
+  if (drawerSwipeStart != null && swipeClosesDrawer(drawerSwipeStart, end)) closeDrawer();
+  drawerSwipeStart = null;
+});
+window.addEventListener("resize", syncDrawerMode);
 
 const observer = new IntersectionObserver((entries) => {
   if (entries.some((entry) => entry.isIntersecting)) void loadPage(false);
@@ -3258,16 +3479,82 @@ observer.observe(sentinelEl);
 
 function paintAlertBadge() {
   const badge = $("alerts-badge");
-  if (!badge || !alertsToggle) return;
-  if (unreadAlerts > 0) {
-    badge.hidden = false;
-    badge.textContent = unreadAlerts > 9 ? "9+" : String(unreadAlerts);
-    alertsToggle.setAttribute("aria-label", `Price alerts, ${unreadAlerts} new`);
-  } else {
-    badge.hidden = true;
-    badge.textContent = "0";
-    alertsToggle.setAttribute("aria-label", "Price alerts");
+  const dot = $("menu-badge");
+  const menu = $("menu-open");
+  if (badge && alertsToggle) {
+    if (unreadAlerts > 0) {
+      badge.hidden = false;
+      badge.textContent = unreadAlerts > 9 ? "9+" : String(unreadAlerts);
+      alertsToggle.setAttribute("aria-label", `Price alerts, ${unreadAlerts} new`);
+    } else {
+      badge.hidden = true;
+      badge.textContent = "0";
+      alertsToggle.setAttribute("aria-label", "Price alerts");
+    }
   }
+  if (dot) dot.hidden = unreadAlerts <= 0;
+  if (menu) menu.setAttribute("aria-label", unreadAlerts > 0 ? "Menu, new price alerts" : "Menu");
+}
+
+function drawerFocusIds() {
+  const drawer = $("app-drawer");
+  if (!drawer) return [];
+  return [...drawer.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]
+    .filter((el) => el.getClientRects().length > 0)
+    .map((el) => {
+      if (!el.id) el.id = `drawer-focus-${Math.random().toString(36).slice(2, 8)}`;
+      return el.id;
+    });
+}
+
+function syncDrawerMode() {
+  const drawer = $("app-drawer");
+  const scrim = $("drawer-scrim");
+  const menu = $("menu-open");
+  if (!drawer) return;
+  if (!phoneShelf()) {
+    drawer.classList.remove("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    drawer.removeAttribute("inert");
+    if (scrim) scrim.hidden = true;
+    menu?.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const open = drawer.classList.contains("is-open");
+  drawer.setAttribute("aria-hidden", open ? "false" : "true");
+  if (open) drawer.removeAttribute("inert");
+  else drawer.setAttribute("inert", "");
+  if (scrim) scrim.hidden = !open;
+  menu?.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function openDrawer(options = {}) {
+  const drawer = $("app-drawer");
+  if (!drawer) return;
+  if (!phoneShelf()) {
+    if (options.focus === "zip") zipEl?.focus();
+    return;
+  }
+  drawer.classList.add("is-open");
+  syncDrawerMode();
+  const target = options.focus === "zip" ? zipEl : $("drawer-title");
+  if (target) {
+    target.focus();
+  }
+}
+
+function closeDrawer(options = {}) {
+  const drawer = $("app-drawer");
+  if (!drawer) return;
+  const wasOpen = drawer.classList.contains("is-open") && phoneShelf();
+  drawer.classList.remove("is-open");
+  syncDrawerMode();
+  if (wasOpen && options.restoreFocus !== false) $("menu-open")?.focus();
+}
+
+function focusZipField() {
+  if (phoneShelf()) openDrawer({ focus: "zip" });
+  else zipEl?.focus();
 }
 
 function paintAlertList() {
@@ -4072,12 +4359,17 @@ function showStep(step) {
     /* private browsing */
   }
   syncStepVisibility();
+  if (flowStep !== "add") {
+    document.querySelector(".filters")?.classList.remove("open");
+    $("filters-open")?.setAttribute("aria-expanded", "false");
+    document.querySelector(".list-panel")?.classList.remove("open");
+  }
   if (flowStep === "plan") {
     if (lastOptimize) paintTrip();
     else if (planning) {
       /* the skeleton stays up while the plan is on its way */
     } else if (list.size) void planTrip();
-    else if (tripEl) tripEl.innerHTML = emptyStateMarkup(emptyState("list"), escapeHtml);
+    else if (tripEl) tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
   }
   if (flowStep === "shop") {
     if (!lastOptimize) loadCachedTrip();
@@ -4105,21 +4397,29 @@ function paintPlanBar() {
     left: progress.left,
     complete: progress.complete,
   });
+  const about = copy.totalLabel ? `about ${copy.totalLabel}` : "";
   const countEl = $("bar-count");
   const totalEl = $("bar-total");
   const primary = $("bar-primary");
   if (countEl) countEl.textContent = copy.countLabel;
-  if (totalEl) totalEl.textContent = copy.totalLabel;
+  if (totalEl) totalEl.textContent = about;
   if (primary) {
     primary.textContent = copy.button;
     primary.disabled = !copy.enabled;
   }
+  const shopCount = $("shop-count");
+  const shopTotal = $("shop-total");
+  const shopDone = $("shop-done");
+  if (shopCount) shopCount.textContent = copy.countLabel;
+  if (shopTotal) shopTotal.textContent = about;
+  if (shopDone) shopDone.disabled = !copy.enabled;
+  document.body.dataset.chrome = bottomChrome(flowStep);
   document.querySelectorAll("[data-flow]").forEach((button) => {
     if (button.getAttribute("data-flow") === flowStep) button.setAttribute("aria-current", "step");
     else button.removeAttribute("aria-current");
   });
   const title = $("brand-title");
-  if (title) title.textContent = flowStep === "plan" ? "Your plan" : flowStep === "shop" ? "In the store" : "Add items";
+  if (title) title.textContent = stepTitle(flowStep);
 }
 
 function renderShop() {
@@ -4127,7 +4427,7 @@ function renderShop() {
   if (!shop) return;
   const view = currentTrip();
   if (!view?.stores?.length) {
-    shop.innerHTML = emptyStateMarkup(emptyState("shop"), escapeHtml);
+    shop.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("shop"), escapeHtml)}`;
     paintPlanBar();
     return;
   }
@@ -4189,6 +4489,8 @@ function renderShop() {
     })
     .join("");
   shop.innerHTML = `
+    ${krogerBannerHtml()}
+    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Your plan</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
@@ -4376,6 +4678,7 @@ function maybeAskAccount(intent, next) {
 }
 
 async function findNearbyStores() {
+  if (phoneShelf()) openDrawer({ focus: "zip" });
   const button = $("find-stores");
   if (button) button.disabled = true;
   try {
@@ -4411,17 +4714,63 @@ function onPrimary() {
   }
   const view = currentTrip();
   const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : null;
-  if (progress?.complete) toast("Nice. That trip is done.");
+  if (progress?.complete) {
+    toast("Nice. That trip is done.");
+    return;
+  }
+  const left = Math.max(0, Number(progress?.left) || 0);
+  if (left > 0) toast(left === 1 ? "1 left." : `${left} left.`);
+  else toast("Nothing to shop yet.");
+}
+
+async function refreshPrices() {
+  const button = $("refresh-prices");
+  if (button) button.disabled = true;
+  const step = flowStep;
+  try {
+    await loadPage(true);
+    if (list.size && (step === "plan" || step === "shop")) {
+      await planTrip();
+      if (step === "shop") showStep("shop");
+    }
+    toast("Prices refreshed.");
+    haptic();
+  } catch {
+    toast("Couldn't refresh prices.");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function sendToKrogerCart(button) {
+  const stores = currentTrip()?.stores || [];
+  const krogerStore = stores.find(
+    (store) => store?.handoff?.action?.type === "kroger_cart" || /kroger/i.test(String(store?.storeName || ""))
+  );
+  if (!krogerStore) {
+    toast("Add items and open your plan. Send to Kroger cart is there when the list includes Kroger.");
+    if (list.size) showStep("plan");
+    return;
+  }
+  if (planLimited("cartHandoffs")) {
+    openPaywall();
+    return;
+  }
+  maybeAskAccount("cart", () => {
+    void startKroger(krogerStore.storeName, button);
+  });
 }
 
 async function boot() {
   try {
     adoptSessionFromUrl();
     consumeKrogerReturn();
+    paintKrogerConnected(krogerConnectedNow());
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
     await bootApp();
   } finally {
-    welcome.maybeAutoOpen();
+    if (!landedFromKroger) welcome.maybeAutoOpen();
+    else releasePageForTaps();
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
     if (wantsAlerts && onboard?.open) {
@@ -4440,6 +4789,8 @@ async function bootApp() {
   paintUsuals();
   paintPlanBar();
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
+  paintZipPlace();
+  syncDrawerMode();
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
   if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
   const nameEl = $("display-name");
@@ -4495,6 +4846,8 @@ async function bootApp() {
   await refreshAlerts();
   await loadPushStatus();
   await loadPage(true);
+  paintKrogerConnected(krogerConnectedNow());
+  void refreshKrogerFromServer();
   if (!isNative() && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (event) => {
@@ -4515,7 +4868,11 @@ const pullHost = document.querySelector(".catalog");
 pullHost?.addEventListener(
   "touchstart",
   (event) => {
-    if (flowStep !== "add" || window.scrollY > 8) {
+    const blocked =
+      window.scrollY > 8 ||
+      $("app-drawer")?.classList.contains("is-open") ||
+      document.querySelector("dialog[open]");
+    if (blocked) {
       pullStart = null;
       return;
     }
@@ -4539,7 +4896,7 @@ pullHost?.addEventListener(
 pullHost?.addEventListener("touchend", () => {
   const status = $("pull-status");
   if (status) status.hidden = true;
-  if (pullShouldRefresh(pullTravel)) void loadPage(true);
+  if (pullShouldRefresh(pullTravel)) void refreshPrices();
   pullStart = null;
   pullTravel = 0;
 });
@@ -4597,16 +4954,19 @@ document.addEventListener("click", (event) => {
   }
 });
 
+window.addEventListener("popstate", () => consumeKrogerReturn());
+
 const welcome = mountWelcome({
   isNative,
   apiUrl,
   fetch: (...args) => globalThis.fetch(...args),
   getZip: () => normalizeZip(zipEl.value),
   setZip: (zip) => applyZip(zip),
-  focusZip: () => zipEl.focus(),
+  focusZip: () => focusZipField(),
   readCoords: readDeviceCoords,
   openAuthorize,
   toast,
+  krogerKnownConnected: () => krogerConnectedNow(),
   themeLabel: () => themeButtonLabel(document.documentElement.dataset.theme || "system", window.matchMedia("(prefers-color-scheme: dark)").matches),
   cycleTheme: () => applyTheme(nextTheme(document.documentElement.dataset.theme || "system")),
   accountsEnabled: () => Boolean(authStatus?.enabled),
