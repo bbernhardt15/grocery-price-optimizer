@@ -67,7 +67,7 @@ function rawRequest(
   });
 }
 
-function appReturn(html: string): { kind: string; message: string } {
+function appReturn(html: string): { kind: string; message: string; step: string } {
   const match = html.match(/location\.replace\(("(?:\\.|[^"\\])*")\)/);
   assert.ok(match, "callback should send the shopper back to the app");
   const path = JSON.parse(match[1]) as string;
@@ -77,6 +77,7 @@ function appReturn(html: string): { kind: string; message: string } {
   return {
     kind: url.searchParams.get("kroger") ?? "",
     message: url.searchParams.get("message") ?? "",
+    step: url.searchParams.get("step") ?? "",
   };
 }
 
@@ -343,6 +344,7 @@ describe("Kroger cart handoff routes", () => {
     assert.match(html, /kroger\.com\/cart/);
     const back = appReturn(html);
     assert.equal(back.kind, "added");
+    assert.equal(back.step, "shop");
     assert.match(back.message, /accepted 2 items/i);
     assert.match(back.message, /kroger\.com/i);
     assert.equal(calls.length, 2);
@@ -506,7 +508,12 @@ describe("Kroger cart handoff routes", () => {
     );
     assert.equal(callback.status, 200);
     const html = await callback.text();
-    assert.match(html, /Kroger is connected/);
+    assert.match(html, /Kroger connected/);
+    assert.match(html, /https:\/\/www\.kroger\.com\/cart/);
+    assert.match(html, /location\.replace/);
+    const back = appReturn(html);
+    assert.equal(back.kind, "connected");
+    assert.equal(back.step, "plan");
     assert.doesNotMatch(html, /Added to your Kroger cart/);
     assert.equal(calls.length, 1);
     assert.match(callback.headers.get("set-cookie") ?? "", new RegExp(`${KROGER_SHOPPER_COOKIE}=`));

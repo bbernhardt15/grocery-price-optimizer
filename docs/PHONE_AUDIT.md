@@ -118,6 +118,14 @@ Contrast of the palette on `main` matches the colors sampled in the audit (`--mu
 
 In-store mode (“In the store”, department groups, on-device checkoffs) was understandable. The safe-area gap on that dialog is in the fixed list.
 
+## Phone chrome follow-up
+
+The calm shop flow left two fixed bars (the step labels and the plan summary) and a header row of ZIP, theme, Settings, and Alerts. On a phone those stacked over the last starter cards, the long “See your plan” label could wrap, and a saved Shop step kept the title “In the store” while the shelf was still on screen because `display` rules overrode the `hidden` attribute.
+
+The shopper page now has one bottom dock. Add and Plan show Add / Plan / Shop (equal width, one line, at least 44px) and, in the same dock, the item count, an about-total, and one primary button. Shop replaces that dock with the “N left / Done” bar. Done stays tappable while items are left, and the tap says how many are left. The header on a phone is the menu, the step title, and search. ZIP, alerts, theme, Settings, Help, and Refresh prices are in a drawer. Refine replaces the old Filters sheet: brand, on sale, budget-friendly brands, and sort. The default shelf is Suggested, not lowest price.
+
+Coming back from Kroger sign-in lands on Your plan (or In the store after a cart write), closes any sign-in sheet, and leaves the page scrollable. The drawer and the plan then show Kroger connected, Send to Kroger cart, and Open Kroger cart (`kroger.com/cart`). The menu drawer is a full-height layer above its dimmed backdrop, so Refresh prices and the cart actions take taps. Phone frames for that pass are in `docs/phone-chrome/`.
+
 ## Screenshot index (390×844)
 
 The same step names exist under `360x740/`, `430x932/`, and `844x390/` unless noted. These frames are the pre-redesign audit.

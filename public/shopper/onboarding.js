@@ -171,8 +171,8 @@ export function krogerStepCopy(status) {
   }
   if (status.connected) {
     return {
-      title: "Kroger is connected",
-      body: "You’re signed in. A trip can add Kroger items to your cart.",
+      title: "Kroger connected",
+      body: "You’re signed in. Send items to your Kroger cart from the plan, or open the cart on Kroger.",
       action: "Done",
       connect: false,
     };
