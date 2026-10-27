@@ -112,7 +112,9 @@ On the website the link returns to this site and sets the session cookie. In the
 | `AuthIdentity` | `apple`, `google`, or `email`, plus the provider subject. Unique per provider and subject. |
 | `AuthSession` | SHA-256 of the session token and an expiry. The raw token is not stored. |
 | `MagicLink` | SHA-256 of the one-time token, the email, and an expiry. The raw token is not stored. |
-| `SavedList` | One list per account: items, ZIP, alert checkbox, revision. |
+| `SavedList` | One list per account: items, ZIP, alert checkbox, revision, and an optional `starterBook`. |
+
+`starterBook` (version 1) holds slot favorites, per-list overrides, and My lists. A save that omits it leaves the stored book alone. A save that includes it merges by `updatedAt`: the later favorite, override, or list wins, and a newer delete stays deleted. Choices store a product family and size, not a price or a store. Guests keep the same book in `gg-starter-book` on the device. Delete my data removes it with the saved list.
 
 `PriceWatch`, `PriceAlert`, `PushSubscription`, and `SharedList` gain an optional `accountId`. Guest rows leave it empty. A shared list also stores `ownerDeviceId` when the client sends `deviceId`, so a later limit can count guest lists. The raw share secret is still only a hash on the list. The account keeps a sealed copy so deleting the account can also drop a collaborator's watch of that link.
 

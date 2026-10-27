@@ -104,6 +104,11 @@ const savedListSchema = new Schema(
       default: [],
     },
     revision: { type: Number, required: true, default: 0 },
+    /**
+     * Slot favorites and My lists. Absent until a device sends them.
+     * A missing field on a later write leaves this alone.
+     */
+    starterBook: { type: Schema.Types.Mixed },
     coupons: {
       type: [
         new Schema(

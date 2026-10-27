@@ -86,7 +86,8 @@ import {
   krogerReturnMarksConnected,
   parseKrogerReturn,
 } from "./shopper/krogerReturn.js";
-import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
+import { matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
+import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
@@ -1770,6 +1771,7 @@ function renderTrip(payload) {
 }
 
 function calmItemRow(item) {
+  item = lists().annotate(item);
   const swap = plainSwap(item);
   const rawNote = calmPriceNote(item.priceSource);
   const note = rawNote === "sample price" ? "" : rawNote;
@@ -2910,6 +2912,7 @@ async function addSample() {
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+  if (lists().onClick(target)) return;
   const anchor = target.closest("a[href]");
   if (anchor && isNative()) {
     const legal = window.GroceryGitterNative.bundledLegalPath(new URL(anchor.href).pathname);
@@ -3829,6 +3832,7 @@ function personalListPayload() {
     removed: shareState?.shareToken ? [] : readRemoved(),
     baseRevision: listRevision || null,
     coupons: readCoupons(localStorage),
+    starterBook: lists().payload(),
   };
 }
 
@@ -3900,6 +3904,7 @@ async function pushAccountList() {
     }
     if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
     if (Array.isArray(body.list?.coupons)) writeCoupons(localStorage, body.list.coupons);
+    if (body.list?.starterBook) lists().applyServer(body.list.starterBook);
     localStorage.removeItem(REMOVED_KEY);
   } catch {
     /* the list stays on this device and tries again on the next edit */
@@ -3912,6 +3917,7 @@ function rememberServerList(server) {
   listRevision = server.revision || listRevision;
   if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
   if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
+  if (server.starterBook) lists().applyServer(server.starterBook);
   if (server.alertsEnabled && listAlertsEl) {
     listAlertsEl.checked = true;
     localStorage.setItem(ALERTS_KEY, "1");
@@ -4442,6 +4448,8 @@ function renderShop() {
           const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
           const rows = group.items
             .map((item) => {
+              const noted = lists().annotate(item);
+              const favoriteSwap = noted !== item ? plainSwap(noted) : null;
               const on = Boolean(item.lineId && checks[item.lineId]);
               const size = item.size ? `, ${escapeHtml(item.size)}` : "";
               const amount = Number(item.itemTotal ?? item.price);
@@ -4465,6 +4473,7 @@ function renderShop() {
                   <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${on ? " checked" : ""} />
                   <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
                 </label>
+                ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
                 ${notHere}
                 ${swap}
               </div>`;
@@ -4524,14 +4533,34 @@ function rememberListAsUsuals() {
   paintUsuals();
 }
 
+let listHome = null;
+function lists() {
+  if (!listHome) {
+    listHome = createListHome({
+      escapeHtml,
+      toast,
+      haptic,
+      addProduct,
+      loadShelf: loadStarterShelf,
+      searchTiles: async (query) => {
+        const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`));
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
+        for (const tile of body.items || []) rememberTile(tile);
+        return body.items || [];
+      },
+      productById: (id) => productsById.get(id),
+      hasProduct: (id) => Boolean(findListEntry(id)),
+      locked: () => listIsLocked(),
+      onChange: () => scheduleAccountSync(),
+      mediaUrl,
+    });
+  }
+  return listHome;
+}
+
 function paintStarterLists() {
-  const host = $("starter-lists");
-  if (!host || host.dataset.ready === "1") return;
-  host.dataset.ready = "1";
-  host.innerHTML = STARTER_LISTS.map(
-    (list) =>
-      `<button type="button" class="starter" data-starter="${escapeHtml(list.id)}"><span>${escapeHtml(list.title)}</span><span class="muted">${escapeHtml(list.blurb)}</span></button>`
-  ).join("");
+  lists().paint();
 }
 
 function paintUsuals() {
@@ -4899,6 +4928,11 @@ pullHost?.addEventListener("touchend", () => {
   if (pullShouldRefresh(pullTravel)) void refreshPrices();
   pullStart = null;
   pullTravel = 0;
+});
+
+document.addEventListener("input", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target) lists().onInput(target);
 });
 
 document.addEventListener("focusin", (event) => {

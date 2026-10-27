@@ -1,4 +1,5 @@
 import { SavedList, type RemovedItem, type SavedListItem } from "./models";
+import { mergeStarterBooks, parseStarterBook, type StarterBook } from "./starterBook";
 
 export type { RemovedItem, SavedListItem };
 
@@ -28,6 +29,8 @@ export type SavedListWrite = {
   baseRevision: number | null;
   /** Absent means "leave the stored coupons alone." An array replaces them. */
   coupons?: SavedCoupon[];
+  /** Absent means "leave stored favorites and My lists alone." Present merges by time. */
+  starterBook?: StarterBook;
 };
 
 export type PublicSavedList = {
@@ -37,6 +40,7 @@ export type PublicSavedList = {
   alertsEnabled: boolean;
   items: SavedListItem[];
   coupons: SavedCoupon[];
+  starterBook?: StarterBook;
   revision: number;
   updatedAt: string | null;
 };
@@ -160,6 +164,8 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
   const zip = cleanText(row.zip, 10);
   const coupons = parseSavedCoupons(row.coupons);
   if (coupons && "error" in coupons) return coupons;
+  const starterBook = parseStarterBook(row.starterBook);
+  if (starterBook && "error" in starterBook) return starterBook;
   return {
     listId,
     listName: cleanText(row.listName, 80) || "My list",
@@ -169,6 +175,7 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
     removed,
     baseRevision,
     ...(coupons ? { coupons } : {}),
+    ...(starterBook ? { starterBook } : {}),
   };
 }
 
@@ -207,9 +214,11 @@ export function toPublicSavedList(doc: {
   alertsEnabled?: boolean;
   items?: SavedListItem[];
   coupons?: SavedCoupon[];
+  starterBook?: unknown;
   revision: number;
   updatedAt?: Date;
 }): PublicSavedList {
+  const starterBook = parseStarterBook(doc.starterBook);
   return {
     listId: doc.listId,
     listName: doc.listName || "My list",
@@ -217,6 +226,7 @@ export function toPublicSavedList(doc: {
     alertsEnabled: doc.alertsEnabled === true,
     items: Array.isArray(doc.items) ? doc.items : [],
     coupons: Array.isArray(doc.coupons) ? doc.coupons.map(parseSavedCoupon).filter((coupon): coupon is SavedCoupon => Boolean(coupon)) : [],
+    ...(starterBook && !("error" in starterBook) ? { starterBook } : {}),
     revision: doc.revision,
     updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
   };
@@ -240,6 +250,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
       alertsEnabled: write.alertsEnabled,
       items,
       coupons: write.coupons ?? [],
+      ...(write.starterBook ? { starterBook: write.starterBook } : {}),
       removed: write.removed.slice(-MAX_ITEMS),
       revision: 1,
     });
@@ -263,6 +274,9 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
         alertsEnabled: write.alertsEnabled,
         items,
         ...(write.coupons ? { coupons: write.coupons } : {}),
+        ...(write.starterBook
+          ? { starterBook: mergeStarterBooks((existing as { starterBook?: unknown }).starterBook, write.starterBook) }
+          : {}),
         removed: [...priorRemoved, ...write.removed].slice(-MAX_ITEMS),
         revision: current.revision + 1,
       },
