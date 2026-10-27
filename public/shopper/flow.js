@@ -3,7 +3,7 @@
  * The sticky bar keeps one primary action for the step you're on.
  */
 
-import { formatMoney } from "./savingsMeter.js";
+import { priceFigure } from "./calmPlan.js";
 
 export const FLOW_STEPS = [
   { id: "add", label: "Add items" },
@@ -39,7 +39,7 @@ export function planBarCopy(input = {}) {
     else countLabel = left === 1 ? "1 left" : `${left} left`;
   }
   const amount = Number(input.total);
-  const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? `about ${formatMoney(amount)}` : "";
+  const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
   let button = "See your plan";
   let enabled = count > 0 && !input.planning;
   if (step === "plan") {

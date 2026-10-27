@@ -28,7 +28,7 @@ describe("three-step flow", () => {
 
     const add = planBarCopy({ step: "add", itemCount: 3, total: 12.5 });
     assert.equal(add.countLabel, "3 items");
-    assert.equal(add.totalLabel, "about $12.50");
+    assert.equal(add.totalLabel, "$12.50");
     assert.equal(add.button, "See your plan");
     assert.equal(add.enabled, true);
 

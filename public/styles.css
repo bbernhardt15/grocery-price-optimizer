@@ -228,6 +228,9 @@ a.text-btn:hover { background: var(--accent-soft); }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 0; overflow: hidden;
 }
+.card-lead { display: flex; flex-direction: column; min-width: 0; }
+.card-summary { min-width: 0; padding: 10px 12px 0; display: flex; flex-direction: column; gap: 2px; }
+.card-summary .card-actions { padding: 6px 0 8px; }
 .card.just-added { animation: pop 420ms ease; }
 .card-open {
   border: 0; background: var(--bg-accent); padding: 0; text-align: left; position: relative;
@@ -245,11 +248,14 @@ a.text-btn:hover { background: var(--accent-soft); }
   position: absolute; top: 8px; right: 8px; background: var(--surface); color: var(--muted);
   border-radius: 999px; padding: 3px 7px; font-size: 0.7rem; border: 1px solid var(--line);
 }
-.card-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 2px; flex: 1; }
-.card-body h3 { margin: 0; font-size: 1rem; line-height: 1.25; }
+.card-body { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.card-summary h3, .card-body h3 { margin: 0; font-size: 1rem; line-height: 1.25; }
 .brand, .size, .unit, .gap, .muted { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .choice-label { margin: 8px 0 0; color: var(--muted); font-size: 0.75rem; font-weight: 650; }
-.choice-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; overflow-x: auto; max-width: 100%; }
+.choice-row {
+  display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; overflow-x: auto; max-width: 100%;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+}
 .choice-chip {
   flex: none;
   min-height: 44px;
@@ -265,7 +271,10 @@ a.text-btn:hover { background: var(--accent-soft); }
   color: var(--accent-ink);
   border-color: var(--accent);
 }
-.size-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.size-list {
+  list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px;
+  max-height: 148px; overflow-y: auto; overscroll-behavior: contain;
+}
 .size-option {
   width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px;
   text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
@@ -377,7 +386,13 @@ a.text-btn:hover { background: var(--accent-soft); }
 .list-alert-toggle { align-items: flex-start; }
 .list-alert-toggle span { flex: 1; line-height: 1.35; }
 .alert-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
-.watch-toggle { min-height: 44px; }
+.alert-controls[hidden] { display: none !important; }
+.watch-opt {
+  align-self: flex-start; width: auto; margin: 0; padding: 2px 0; border: 0; background: transparent;
+  color: var(--muted); font-size: 0.78rem; font-weight: 650; line-height: 1.2;
+  text-decoration: underline; text-underline-offset: 2px; min-height: 28px;
+}
+.estimate-note { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .item-watch { min-height: 44px; font-size: 0.92rem; }
 .target-price { display: flex; align-items: center; gap: 4px; font-size: 0.92rem; color: var(--muted); min-height: 44px; }
 .target-price input {
@@ -666,16 +681,18 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
   .zip input { width: 76px; }
-  .card-actions {
-    position: sticky;
-    bottom: calc(var(--bar-h) + 4px);
-    z-index: 2;
-    background: var(--surface);
+  .card-lead {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: start;
   }
+  .card-lead .card-open { width: 92px; min-height: 92px; }
+  .card-lead .card-open img { width: 92px; height: 92px; min-height: 92px; padding: 6px; }
+  .card-summary { padding: 8px 10px 0 0; }
+  .card-summary .card-actions { padding: 4px 0 6px; }
 }
 @media (max-width: 799px) {
-  .card-open { min-height: 96px; }
-  .card-open img { height: 96px; }
   .size-option, .choice-chip, .value-toggle button, .card-actions, .stepper button {
     scroll-margin-bottom: calc(var(--bar-h) + 12px);
   }
@@ -685,6 +702,8 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   .topbar { padding-top: calc(4px + var(--safe-top)); padding-bottom: 4px; }
   .brand-kicker, .coverage-banner { display: none; }
   .card-open, .card-open img { min-height: 64px; height: 64px; }
+  .card-lead { grid-template-columns: 64px minmax(0, 1fr); }
+  .card-lead .card-open, .card-lead .card-open img { width: 64px; min-height: 64px; height: 64px; }
   .step-bar { padding-top: 2px; padding-bottom: 2px; }
   .list-bar { padding-top: 4px; padding-bottom: calc(4px + var(--safe-bottom)); }
 }

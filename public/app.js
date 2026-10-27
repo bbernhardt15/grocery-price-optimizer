@@ -75,7 +75,7 @@ import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
 import { planBarCopy, readFlowStep, shouldAskToSignIn } from "./shopper/flow.js";
 import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
-import { aboutMoney as estimateMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
+import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
 
@@ -736,8 +736,8 @@ function renderListRows() {
           </label>
           <p class="muted">${escapeHtml(heading.detail)}</p>
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
-          <button type="button" class="text-btn watch-toggle" data-watch-open="${escapeHtml(itemId)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
-          <div class="alert-controls"${watched || targetValue ? "" : " hidden"}>
+          <button type="button" class="watch-opt" data-watch-open="${escapeHtml(itemId)}" aria-expanded="${watched || targetValue ? "true" : "false"}" aria-controls="watch-${escapeHtml(itemId)}" aria-label="Price watch for ${escapeHtml(heading.title)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
+          <div class="alert-controls" id="watch-${escapeHtml(itemId)}"${watched || targetValue ? "" : " hidden"}>
             <label class="check-row item-watch">
               <input type="checkbox" data-watch="${escapeHtml(entry.product.id)}" ${watched ? "checked" : ""} />
               Watch price
@@ -866,9 +866,9 @@ function brandLine(tile, title) {
   return parts.join(" · ");
 }
 
-function aboutMoney(variant) {
+function priceText(variant) {
   const amount = variant?.typicalPrice ?? variant?.bestOffer?.price ?? variant?.price;
-  return Number.isFinite(Number(amount)) ? `about ${money(amount)}` : "";
+  return Number.isFinite(Number(amount)) ? money(amount) : "";
 }
 
 function flavorVariants(family, flavorKey) {
@@ -942,7 +942,7 @@ function applyVariant(card, variantId) {
     open.setAttribute("aria-label", `Details for ${title}`);
   }
   const priceEl = card.querySelector("[data-price]");
-  if (priceEl) priceEl.textContent = aboutMoney(variant);
+  if (priceEl) priceEl.textContent = priceText(variant);
   const sizeHost = card.querySelector("[data-size-row]");
   if (sizeHost && family) {
     const sizes = flavorVariants(family, variant.flavorKey || "");
@@ -1066,26 +1066,30 @@ function cardHtml(tile) {
   const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
   const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
   return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
-    <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
-      <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
-    </button>
+    <div class="card-lead">
+      <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
+        <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
+      </button>
+      <div class="card-summary">
+        ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
+        <h3>${escapeHtml(title)}</h3>
+        <p class="price" data-price>${escapeHtml(priceText(selected))}</p>
+        <div class="card-actions">
+          <label class="check">
+            <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
+            Add
+          </label>
+          <div class="stepper">
+            <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
+            <output>${qty}</output>
+            <button type="button" data-inc="${escapeHtml(selected.id)}" aria-label="Increase quantity of ${escapeHtml(title)}">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="card-body">
-      ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
-      <h3>${escapeHtml(title)}</h3>
       ${flavorRow}
       ${sizeRow}
-      <p class="price" data-price>${escapeHtml(aboutMoney(selected))}</p>
-    </div>
-    <div class="card-actions">
-      <label class="check">
-        <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
-        Add
-      </label>
-      <div class="stepper">
-        <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
-        <output>${qty}</output>
-        <button type="button" data-inc="${escapeHtml(selected.id)}" aria-label="Increase quantity of ${escapeHtml(title)}">+</button>
-      </div>
     </div>
   </article>`;
 }
@@ -1268,7 +1272,7 @@ function renderSuggestionRows(q) {
   suggestionsEl.innerHTML = suggestions
     .map((item, index) => {
       const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
-      const price = suggestionPriceLabel(item.bestPrice, "", (value) => `about ${money(value)}`);
+      const price = suggestionPriceLabel(item.bestPrice, "", (value) => money(value));
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
       const thumb = item.imageUrl
         ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
@@ -1370,7 +1374,8 @@ function openProduct(product) {
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <h2 id="dialog-title">${escapeHtml(title)}</h2>
     ${note ? `<p class="muted">${escapeHtml(note)}${product.storeBrand ? " · store brand" : ""}</p>` : ""}
-    <p class="price">${escapeHtml(aboutMoney(product))}</p>
+    <p class="price">${escapeHtml(priceText(product))}</p>
+    <p class="muted estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     <p class="muted">Pick the flavor and size on the shelf. Grocery Gitter chooses the store when you plan the trip.</p>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
     <button type="button" class="ghost" id="dialog-close">Close</button>
@@ -1616,7 +1621,7 @@ function calmItemRow(item) {
   const note = rawNote === "sample price" ? "" : rawNote;
   const size = item.size ? `, ${item.size}` : "";
   const amount = Number(item.itemTotal ?? item.price);
-  const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
+  const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
   const change =
     swap && item.lineId
       ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(item.lineId)}">${escapeHtml(swap.change)}</button>`
@@ -1684,7 +1689,7 @@ function paintTrip() {
     : "";
   const storeHtml = stores
     .map((store) => {
-      const total = Number.isFinite(Number(store.subtotal)) ? estimateMoney(store.subtotal) : "";
+      const total = Number.isFinite(Number(store.subtotal)) ? priceFigure(store.subtotal) : "";
       const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
       const couponsHtml = storeCouponMarkup(store, {
         page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
@@ -1706,13 +1711,14 @@ function paintTrip() {
     ? `<p class="muted">We couldn't price ${escapeHtml(lastOptimize.unavailable.join(", "))}.</p>`
     : "";
   tripEl.innerHTML = `
+    <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     <div class="store-grid">${storeHtml}</div>
     ${missing}
     <section class="savings-card">
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
       ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
-      <p class="muted">${escapeHtml(card.note)}</p>
+      ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
     ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
     ${fewerHtml}
@@ -2872,6 +2878,7 @@ document.addEventListener("click", (event) => {
     if (panel) {
       panel.hidden = !panel.hidden;
       watchOpen.textContent = panel.hidden ? "Price watch" : "Hide price watch";
+      watchOpen.setAttribute("aria-expanded", panel.hidden ? "false" : "true");
     }
     return;
   }
@@ -4138,13 +4145,13 @@ function renderShop() {
               const on = Boolean(item.lineId && checks[item.lineId]);
               const size = item.size ? `, ${escapeHtml(item.size)}` : "";
               const amount = Number(item.itemTotal ?? item.price);
-              const price = Number.isFinite(amount) ? estimateMoney(amount) : "Price unavailable";
+              const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
               const choices = swapChoices(item);
               const swap = choices.length
                 ? `<div class="swap-choices" hidden>${choices
                     .map((choice) => {
                       const label = Number.isFinite(choice.price)
-                        ? `${choice.name} at ${choice.storeName}, ${estimateMoney(choice.price)}`
+                        ? `${choice.name} at ${choice.storeName}, ${priceFigure(choice.price)}`
                         : `${choice.name} at ${choice.storeName}`;
                       return `<button type="button" class="ghost" data-shop-swap="${escapeHtml(item.lineId || "")}" data-shop-store="${escapeHtml(choice.storeName)}">${escapeHtml(label)}</button>`;
                     })
@@ -4182,6 +4189,7 @@ function renderShop() {
     })
     .join("");
   shop.innerHTML = `
+    <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
     ${html}
