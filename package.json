@@ -9,7 +9,7 @@
     "build": "tsc && node scripts/copy-flipp-merchants.mjs && tsx scripts/upload-sourcemaps.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/coupons/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/alerts/**/*.test.ts src/lists/**/*.test.ts src/geo/**/*.test.ts src/auth/**/*.test.ts src/billing/**/*.test.ts src/observability/**/*.test.ts",
+    "test": "tsx --test src/*.test.ts src/models/*.test.ts src/services/*.test.ts src/scraper/*.test.ts src/routes/*.test.ts src/pricing/**/*.test.ts src/coupons/**/*.test.ts src/catalog/**/*.test.ts src/ingest/**/*.test.ts src/shopper/**/*.test.ts src/alerts/**/*.test.ts src/lists/**/*.test.ts src/geo/**/*.test.ts src/auth/**/*.test.ts src/billing/**/*.test.ts src/observability/**/*.test.ts src/import/**/*.test.ts",
     "ingest": "tsx src/ingest/cli.ts",
     "ingest:demo": "tsx src/ingest/cli.ts --demo",
     "scrape": "tsx src/scrape-grocery.ts",

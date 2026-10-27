@@ -17,6 +17,7 @@ import authRouter from "./routes/auth";
 import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
+import importListRouter from "./routes/importList";
 
 initSentry();
 
@@ -24,7 +25,12 @@ const app = express();
 const publicDir = path.join(__dirname, "..", "public");
 
 app.use(cors());
-app.use(express.json());
+const jsonSmall = express.json({ limit: "100kb" });
+const jsonMedia = express.json({ limit: "8mb" });
+app.use((req, res, next) => {
+  const media = req.method === "POST" && (req.path === "/api/import/photo" || req.path === "/api/import/audio");
+  return (media ? jsonMedia : jsonSmall)(req, res, next);
+});
 app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
   if (!req.path.startsWith("/api")) {
@@ -131,6 +137,8 @@ app.get("/api", (_req, res) => {
         "Deletes this device's price watches, alert records, and push subscriptions, and any shared list whose owner token is included. When a session is sent, also deletes that account and the other devices on it. Revokes and clears the Kroger shopper cookie when it is sent. Idempotent. ZIP totals, catalog-demand phrases, and Sentry crash reports are not tied to a device or account and are left in place.",
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
+      "POST /api/import/text":
+        "Parses a pasted list into catalog matches. Photo, voice, and suggestions stay off until IMPORT_VISION_PROVIDER / IMPORT_SPEECH_PROVIDER / IMPORT_AI_PROVIDER and a key are set. See docs/IMPORT.md.",
       "GET /api/observability":
         "Crash-reporting config for the website and the native shells. enabled is false when SENTRY_DSN is unset, and the body then has no DSN. The auth token is never returned.",
     },
@@ -154,6 +162,7 @@ app.use("/api", instacartShoppingListRouter);
 app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
 app.use("/api", deleteMyDataRouter);
+app.use("/api", importListRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));
