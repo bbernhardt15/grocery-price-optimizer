@@ -139,6 +139,10 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       await page.evaluateOnNewDocument(new Function(SEED_PAGE) as () => void);
       await page.goto(origin, { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#bottom-dock");
+      await inPage(page, `
+        document.documentElement.style.setProperty("--safe-area-inset-top", "47px");
+        document.documentElement.style.setProperty("--safe-area-inset-bottom", "34px");
+      `);
       await page.waitForFunction(
         new Function('return document.getElementById("zip-place") && document.getElementById("zip-place").textContent.includes("45103")') as () => boolean
       );
@@ -188,6 +192,12 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
 
       await page.click("#menu-open");
       await page.waitForSelector("#app-drawer.is-open");
+      await page.waitForFunction(
+        new Function(`
+          const zip = document.getElementById("zip");
+          return zip && zip.getBoundingClientRect().left >= 0;
+        `) as () => boolean
+      );
       const drawer = await inPage<any>(page, `
         const zip = document.getElementById("zip").getBoundingClientRect();
         const scrim = document.getElementById("drawer-scrim");
@@ -265,6 +275,10 @@ describe("phone taps after Kroger", { timeout: 60_000 }, () => {
         await page.setViewport({ ...size, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
         await page.goto(origin, { waitUntil: "domcontentloaded" });
         await page.waitForSelector("#shop-done");
+        await inPage(page, `
+          document.documentElement.style.setProperty("--safe-area-inset-top", "47px");
+          document.documentElement.style.setProperty("--safe-area-inset-bottom", "34px");
+        `);
         const hits = await inPage<any>(page, `
           document.documentElement.style.setProperty("--safe-area-inset-top", "47px");
           document.documentElement.style.setProperty("--safe-area-inset-bottom", "34px");
@@ -311,6 +325,13 @@ describe("phone taps after Kroger", { timeout: 60_000 }, () => {
 
         await page.click("#menu-open");
         await page.waitForSelector("#app-drawer.is-open");
+        await page.waitForFunction(
+          new Function(`
+            const el = document.getElementById("refresh-prices");
+            const box = el.getBoundingClientRect();
+            return box.left >= 0 && box.height >= 44 && box.bottom <= window.innerHeight;
+          `) as () => boolean
+        );
         const refresh = await inPage<any>(page, `
           const el = document.getElementById("refresh-prices");
           el.scrollIntoView({ block: "center" });
@@ -347,7 +368,7 @@ describe("phone taps after Kroger", { timeout: 60_000 }, () => {
           title: document.getElementById("brand-title").textContent,
           dialog: dialog.open,
           cardHidden: card.hidden,
-          cardText: card.innerText,
+          cardText: card.textContent || "",
           scrimHidden: document.getElementById("drawer-scrim").hidden,
           drawerOpen: document.getElementById("app-drawer").classList.contains("is-open"),
           overflow: document.body.style.overflow,
