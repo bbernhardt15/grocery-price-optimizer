@@ -7,7 +7,9 @@ describe("delete my data screen", () => {
   const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
 
   it("offers Settings and a typed DELETE confirm on the shopper page", () => {
-    assert.match(html, /class="settings-btn settings-open"/);
+    assert.match(html, /id="settings-open"[^>]*class="ghost settings-open"/);
+    assert.equal((html.match(/settings-open/g) || []).length >= 2, true);
+    assert.equal(html.includes("settings-btn"), false);
     assert.match(html, /class="linkish settings-open"/);
     assert.match(html, /id="settings-dialog"/);
     assert.match(html, /Delete my data/);

@@ -690,6 +690,7 @@ export function saveTripSnapshot(storage, payload, edits) {
       edits: {
         lockedStore: edits?.lockedStore || null,
         moves: { ...(edits?.moves || {}) },
+        fewerStops: Boolean(edits?.fewerStops),
       },
       savedAt: Date.now(),
     })

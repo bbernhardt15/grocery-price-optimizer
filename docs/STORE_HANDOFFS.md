@@ -14,7 +14,7 @@ The trip is segmented by store. Each segment shows the items, quantity, price, a
 
 Per-store **Copy list** is one item per line, with quantity and size (`2 Whole Milk, 1 gal`), so it pastes into notes or a store app's list. A whole-trip print or share puts **{store} list** above each group. The per-store print/PDF title and the shareable-link title are **{store} list**. Share uses the Capacitor Share plugin when the native shell has it, then the Web Share API, then copy. **Shareable link** creates a list with the existing shared-list API. **Add to Instacart** appears only when `INSTACART_API_KEY` and `INSTACART_API_BASE_URL` are set. In-store mode, which puts every store on one checklist, is titled **In the store**.
 
-Checked items are stored on the device (`gg-trip-checks`). The last trip is stored too (`gg-last-trip`), so in-store mode still opens when the phone is offline.
+Checked items are stored on the device (`gg-trip-checks`). The last trip is stored too (`gg-last-trip`), so the Shop step still opens when the phone is offline. In the store, rows are grouped by store and then by aisle. The screen stays awake when the browser allows a wake lock, and it keeps working when that lock is refused. A missing item can be swapped for another pack that is already priced. The plan itself stays in plain language: about-prices, a one-store comparison labeled as an estimate, and a swap line only there.
 
 ## Supported stores
 

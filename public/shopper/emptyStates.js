@@ -2,7 +2,7 @@
 export const EMPTY_STATES = {
   list: {
     title: "Your list is empty",
-    body: "Check items while you browse. They stay on this device until you share.",
+    body: "Tap a starter list, buy again, or browse the aisle. Items stay on this device.",
     action: "Browse the aisle",
     actionId: "browse",
   },
@@ -59,6 +59,12 @@ export const EMPTY_STATES = {
     body: "The request didn’t go through. Check your connection and try again.",
     action: "Try again",
     actionId: "retry",
+  },
+  shop: {
+    title: "Nothing to shop yet",
+    body: "Add a few items and we'll make the plan.",
+    action: "Add items",
+    actionId: "add-items",
   },
 };
 

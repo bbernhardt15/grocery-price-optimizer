@@ -27,20 +27,20 @@ describe("onboarding steps", () => {
     assert.equal(shouldShowOnboarding("0"), true);
     assert.equal(onboardingDone("1"), true);
     assert.equal(shouldShowOnboarding("1"), false);
-    assert.equal(ONBOARDING_STEPS.length, 5);
+    assert.equal(ONBOARDING_STEPS.length, 2);
     assert.deepEqual(
       ONBOARDING_STEPS.map((step) => step.id),
-      ["pick", "split", "carts", "zip", "kroger"]
+      ["add", "plan"]
     );
-    assert.equal(progressLabel(0), "1 of 5");
-    assert.equal(progressLabel(4), "5 of 5");
+    assert.equal(progressLabel(0), "1 of 2");
+    assert.equal(progressLabel(1), "2 of 2");
     assert.equal(clampStep(-3), 0);
-    assert.equal(clampStep(99), 4);
+    assert.equal(clampStep(99), 1);
     assert.equal(primaryLabel(ONBOARDING_STEPS[0]), "Next");
-    assert.equal(primaryLabel(ONBOARDING_STEPS[3]), "Continue");
+    assert.equal(primaryLabel(ONBOARDING_STEPS[1]), "Done");
     assert.match(ONBOARDING_STEPS[0].body, /list stays on this device/i);
+    assert.match(ONBOARDING_STEPS[0].body, /starter list/i);
     assert.match(ONBOARDING_STEPS[1].body, /lowest price/i);
-    assert.match(ONBOARDING_STEPS[2].body, /cart/i);
   });
 
   it("accepts a blank ZIP and rejects a partial one", () => {
@@ -57,7 +57,9 @@ describe("onboarding steps", () => {
   it("fails open when RevenueCat is off and tells the free plan the truth", () => {
     const open = tripStepCopy(null);
     assert.match(open.split.body, /lowest price/);
-    assert.match(open.carts.body, /cart/);
+    assert.match(open.carts.body, /cart button appears only when/i);
+    assert.match(open.carts.body, /open the list/i);
+    assert.equal(/Send each store/.test(open.carts.body), false);
     const unenforced = tripStepCopy({ enforced: false, pro: false, limits: { multiStore: false, cartHandoffs: false } });
     assert.equal(unenforced.split.body, open.split.body);
     assert.equal(unenforced.carts.body, open.carts.body);
@@ -79,22 +81,20 @@ describe("onboarding steps", () => {
     assert.match(pro.carts.body, /cart/);
   });
 
-  it("adds an optional sign-in step only when accounts are configured", () => {
+  it("keeps sign-in out of the two-screen welcome", () => {
     const off = welcomeSteps({ accountsEnabled: false, billing: null });
-    assert.equal(off.some((step) => step.id === "account"), false);
-    assert.equal(off.length, 5);
     const on = welcomeSteps({ accountsEnabled: true, signedIn: false, billing: { enforced: false } });
-    assert.equal(on.length, 6);
-    assert.equal(progressLabel(0, on), "1 of 6");
-    const account = on.find((step) => step.id === "account");
-    assert.equal(account?.kind, "account");
+    const signed = welcomeSteps({ accountsEnabled: true, signedIn: true });
+    assert.equal(off.length, 2);
+    assert.equal(on.length, 2);
+    assert.equal(signed.length, 2);
+    assert.equal(on.some((step) => step.id === "account" || step.id === "zip" || step.id === "kroger"), false);
+    assert.equal(progressLabel(0, on), "1 of 2");
     assert.equal(accountStepCopy(false).signIn, true);
     assert.match(accountStepCopy(false).body, /optional/i);
     assert.match(accountStepCopy(false).body, /without an account/i);
     assert.equal(accountStepCopy(true).signIn, false);
     assert.match(accountStepCopy(true).title, /signed in/i);
-    const signed = welcomeSteps({ accountsEnabled: true, signedIn: true });
-    assert.equal(signed.filter((step) => step.id === "account").length, 1);
   });
 
   it("keeps Kroger connect optional", () => {
