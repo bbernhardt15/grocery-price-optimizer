@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
-import { adminAuthorized, adminTokenConfigured, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
+import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
 const router = Router();
 
@@ -42,6 +42,32 @@ router.get("/admin/catalog/sample", async (req: Request, res: Response) => {
   const limit = Number(req.query.limit ?? 20);
   try {
     const body = await catalogSample(department, limit);
+    if ("error" in body) {
+      res.status(400).json(body);
+      return;
+    }
+    res.json(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/family-sample", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  const department = typeof req.query.department === "string" ? req.query.department : "";
+  const query = typeof req.query.q === "string" ? req.query.q : typeof req.query.query === "string" ? req.query.query : "";
+  const limit = Number(req.query.limit ?? 20);
+  const scan = req.query.scan == null || req.query.scan === "" ? undefined : Number(req.query.scan);
+  try {
+    const body = await catalogFamilySample({
+      department,
+      query,
+      limit,
+      ...(scan != null && Number.isFinite(scan) ? { scan } : {}),
+    });
     if ("error" in body) {
       res.status(400).json(body);
       return;

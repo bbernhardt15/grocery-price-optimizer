@@ -129,11 +129,11 @@ function shelfPrice(product: BrowseProduct, store?: string): number {
   );
 }
 
-export function sortProducts(
-  products: BrowseProduct[],
+export function sortProducts<T extends BrowseProduct>(
+  products: T[],
   sort: BrowseSort,
   filters: BrowseFilters = {}
-): BrowseProduct[] {
+): T[] {
   const tokens = queryTokens(filters.query ?? "");
   const store = filters.store?.trim();
   const copy = [...products];

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { PipelineStage } from "mongoose";
 import { DEPARTMENTS, departmentById, mapToDepartment, SUSPICIOUS_NON_GROCERY_NAME, suspiciousNonGroceryHint } from "../catalog/departments";
+import { identifyFamily, summarizeFamilyRows } from "../catalog/family";
 import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
 import { effectiveShares, estimateStorageBytes, ingestConfig, lookupCallsForTick, staleBudgetMode, staleRatioOf } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
@@ -324,7 +325,18 @@ export async function catalogSample(department: string, rawLimit: number): Promi
   | {
       department: string;
       n: number;
-      items: Array<{ name: string; brand: string; stores: string; paths: string; stored: string; now: string; rule: string }>;
+      items: Array<{
+        name: string;
+        brand: string;
+        stores: string;
+        paths: string;
+        stored: string;
+        now: string;
+        rule: string;
+        familyKey: string;
+        familyName: string;
+        variantLabel: string;
+      }>;
     }
 > {
   const known = departmentById(department);
@@ -333,15 +345,29 @@ export async function catalogSample(department: string, rawLimit: number): Promi
   }
   const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 20));
   const rows = await CatalogMaster.aggregate<
-    { name?: string; brand?: string; walmartItemId?: string; krogerProductId?: string; categoryPaths?: string[]; departmentId?: string }
+    {
+      name?: string;
+      brand?: string;
+      size?: string;
+      walmartItemId?: string;
+      krogerProductId?: string;
+      categoryPaths?: string[];
+      departmentId?: string;
+    }
   >([
     { $match: { departmentId: known.id, status: { $ne: "discontinued" } } },
     { $sample: { size: limit } },
-    { $project: { name: 1, brand: 1, walmartItemId: 1, krogerProductId: 1, categoryPaths: 1, departmentId: 1 } },
+    { $project: { name: 1, brand: 1, size: 1, walmartItemId: 1, krogerProductId: 1, categoryPaths: 1, departmentId: 1 } },
   ]);
   const items = rows.map((row) => {
     const paths = row.categoryPaths ?? [];
     const mapped = mapToDepartment(paths, row.name ?? "");
+    const family = identifyFamily({
+      brand: row.brand,
+      name: row.name,
+      size: row.size,
+      departmentId: row.departmentId,
+    });
     return {
       name: clip(row.name ?? "", 80),
       brand: clip(row.brand ?? "", 40),
@@ -350,9 +376,78 @@ export async function catalogSample(department: string, rawLimit: number): Promi
       stored: row.departmentId ?? "",
       now: mapped.departmentId,
       rule: mapped.reason ?? "none",
+      familyKey: family.familyKey,
+      familyName: clip(family.familyName, 80),
+      variantLabel: clip(family.variant.label, 80),
     };
   });
   return { department: known.id, n: items.length, items };
+}
+
+const FAMILY_NOTE =
+  "A family is the department, the normalized brand, and the product line (cookies, ice cream, cereal, chips). Flavor and variety are chips inside that tile. Pack count and size are the next step. Names with no shared product line stay separate, so Diet Coke does not join Coca-Cola. groupedShare is the fraction of scanned masters that sit in a family with more than one size, pack, or flavor.";
+
+/**
+ * Inspect family grouping. Computes keys from stored names so it is accurate
+ * before a backfill, and stays a single indexed scan of the master collection.
+ */
+export async function catalogFamilySample(options: {
+  department?: string;
+  query?: string;
+  limit?: number;
+  scan?: number;
+}): Promise<
+  | { error: string }
+  | {
+      department: string | null;
+      query: string;
+      catalogProducts: number;
+      scanned: number;
+      families: number;
+      groupedFamilies: number;
+      groupedProducts: number;
+      groupedShare: number;
+      complete: boolean;
+      note: string;
+      groups: ReturnType<typeof summarizeFamilyRows>["groups"];
+    }
+> {
+  const department = options.department?.trim() ?? "";
+  if (department && department !== "all" && !departmentById(department)) {
+    return { error: `Unknown department "${department}".` };
+  }
+  const match: Record<string, unknown> = { status: { $ne: "discontinued" } };
+  if (department && department !== "all") {
+    match.departmentId = departmentById(department)?.id ?? department;
+  }
+  const tokens = (options.query ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1);
+  if (tokens.length > 0) {
+    match.$and = tokens.map((token) => {
+      const pattern = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      return { $or: [{ name: pattern }, { brand: pattern }] };
+    });
+  }
+  const catalogProducts = await CatalogMaster.countDocuments(match);
+  const requested = options.scan;
+  const scanCap = requested == null ? 20_000 : Math.min(80_000, Math.max(1, Math.floor(requested)));
+  const scan = Math.min(scanCap, catalogProducts);
+  const rows = await CatalogMaster.find(match)
+    .select("key name brand size departmentId")
+    .limit(scan)
+    .lean<Array<{ key?: string; name?: string; brand?: string; size?: string; departmentId?: string }>>();
+  const summary = summarizeFamilyRows(rows, options.limit ?? 20);
+  return {
+    department: department && department !== "all" ? departmentById(department)?.id ?? department : null,
+    query: tokens.join(" "),
+    catalogProducts,
+    ...summary,
+    complete: scan >= catalogProducts,
+    note: FAMILY_NOTE,
+  };
 }
 
 /**
