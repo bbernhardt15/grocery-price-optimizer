@@ -1,6 +1,10 @@
 # Phone audit — Grocery Gitter first run
 
-Audited as a brand-new shopper on this branch (product-family tiles, PR #42). Local demo server, no retailer keys, ZIP `45202`. Playwright drove headless Chrome with `isMobile`, `hasTouch`, and the screen size set to the viewport (`deviceScaleFactor: 1`, CSS pixels).
+Audited as a brand-new shopper on the product-family tiles branch (PR #42), before the calm shop flow landed on `main`. Local demo server, no retailer keys, ZIP `45202`. Playwright drove headless Chrome with `isMobile`, `hasTouch`, and the screen size set to the viewport (`deviceScaleFactor: 1`, CSS pixels).
+
+`main` has since merged that tiles work (PR #42) and the mobile redesign (PR #47, calm shop flow, merge `bcae665`, plus the coupon follow-up in PR #46). The four defects this audit fixed are already on `main` in that redesign. This branch keeps the write-up and the screenshots. It does not change shopper code.
+
+Screenshots under `docs/phone-audit/` show the UI at audit time. Treat them as evidence of what was on screen then. The file and selector notes below are checked against `main` after the merge.
 
 Viewports:
 
@@ -13,198 +17,116 @@ Viewports:
 | `docs/phone-audit/390x844-safe/` | 390×844 | same, with 47px top / 34px bottom safe-area variables |
 | `docs/phone-audit/844x390-safe/` | 844×390 | landscape, with 47px side insets and 21px bottom |
 | `docs/phone-audit/390x844-dark/` | 390×844 | dark color scheme |
-| `docs/phone-audit/before/` | 390×844 | welcome dialog **before** the overflow fix |
+| `docs/phone-audit/before/` | 390×844 | welcome dialog before the overflow fix |
 
-The safe-area folders were captured before the follow-up check that actually applied the insets (the init script ran too early). The safe-area results in the findings below come from a second pass that set `--safe-area-inset-*` on `<html>` after load.
+The safe-area folders were captured before a follow-up that applied the insets (the init script ran too early). The safe-area notes in the original findings came from a second pass that set `--safe-area-inset-*` on `<html>` after load.
 
 Journey, in order: welcome (including a bad ZIP), empty list, empty alerts, settings, filters, search for Oreo, Coca-Cola, milk, eggs, and dog food, size and quantity inside the tile, product detail, list and savings, plan-without-ZIP, trip plan, store handoff, per-store list, in-store mode, empty search, offline reload, failed browse, search with a shortened viewport (keyboard stand-in), filters with that same shortened viewport.
 
 Shelves settled in about 550ms. Typeahead was about 40ms. Planning the trip was about 100–150ms. Nothing in that path felt slow on the demo catalog.
 
-## Fixed in this branch
+## Fixed on main
 
-These were clear defects. Each is its own commit. The redesign can replace the layout; please do not put the overflow back.
+The redesign (PR #47, calm shop flow) and the phone chrome that shipped with it already cover these. Selectors below are the ones on `main`.
 
-1. **Welcome “Next” was off the screen.** `.top-actions` and `.toolbar-actions` are nowrap flex rows. On a 360–430px phone their min-content width is about 484–500px. Mobile Chrome then grows the layout viewport to that width while the visual viewport stays at the device width, so `position: fixed` dialogs size against the wider viewport. `#onboarding` became 440px wide and `#onboard-next` started at x≈388, with only a couple of pixels on screen. Playwright could not tap it; a person would have had to pan sideways to leave the welcome. Evidence: `docs/phone-audit/before/390-welcome-next-clipped.png`. Fix: `flex-wrap: wrap; max-width: 100%; min-width: 0` on `.top-actions` and `.toolbar-actions`, and the same min/max width on `.topbar` and `.toolbar` (`public/styles.css`).
+### Overflow and first-run blockers
 
-2. **The trip plan scrolled sideways.** `.store-card p.muted` prints the operator setup hint, including `https://api.flipp.com/flyerkit/v4.0/documentation` with no break. That word plus the store total made the card about 413px wide inside a 358px column (page `scrollWidth` 429 on a 390px phone, 440 on a 360px phone). Fix: `min-width: 0` on `.trip`, `.store-grid`, `.store-card`, and the header’s text column; `flex-wrap: wrap` on `.store-card header`; `overflow-wrap: anywhere` on `.store-card p` and `.handoff-detail`. After the fix, `scrollWidth` matches the viewport at 360, 390, and 430. Shots: `390x844/24b-trip-plan-after-wrap.png`, `390x844/25b-store-handoff-after-wrap.png`.
+1. **Welcome “Next” left the screen.** `.top-actions` and `.toolbar-actions` were nowrap flex rows. On a 360–430px phone their min-content width was about 484–500px, so the layout viewport grew and `#onboard-next` sat at x≈388. Evidence: `docs/phone-audit/before/390-welcome-next-clipped.png`. On `main`, `.top-actions`, `.toolbar-actions`, `.topbar`, and `.toolbar` wrap and use `min-width: 0; max-width: 100%` (`public/styles.css`). Phones also hide `.brand-kicker` and `#list-toggle` under 1099px, so the header has one Settings button.
 
-3. **“Plan the trip” with no ZIP hid both the error and the field.** `#plan-error` rendered at y≈923 (below an 844px screen) inside `#list-panel`, and `planTrip` focused `#zip`. The ZIP’s box is y≈143–187 while the open sheet starts at y≈124, so the field is underneath the sheet. Fix in `planTrip` (`public/app.js`): on a viewport under 1100px, close the sheet, toast the same sentence, then focus `#zip`. Shot: `390x844/23b-plan-zip-error-after.png`.
+2. **The trip plan scrolled sideways.** `.store-card p.muted` printed an unbroken Flipp setup URL. Page `scrollWidth` was 429 on a 390px phone. On `main`, `.trip`, `.store-grid`, and `.store-card` use `min-width: 0`, `.store-card header` wraps, and `.store-card p` / `.handoff-detail` use `overflow-wrap: anywhere`. `shopperCopy` in `public/shopper/calmPlan.js` also drops operator text (env vars, `api.flipp.com`, FlyerKit, “Open Coverage”), so that URL is no longer rendered.
 
-4. **Offline restore left the shelf status on “Loading shelves…”.** The saved trip and `#catalog-error` were correct, but `#result-count` kept the initial HTML. It now reads “Saved on this device”. Shot: `390x844/30c-offline-after.png`.
+3. **“Plan the trip” with no ZIP hid the error and the field.** `#plan-error` sat below the screen inside the open list sheet, which covered `#zip`. On `main`, `planTrip` in `public/app.js` uses main’s line: `const sheetCoversZip = window.matchMedia("(max-width: 1099px)").matches && listPanel.classList.contains("open");` then closes the sheet, toasts, and focuses `#zip`.
 
-## P0
+4. **Offline restore left “Loading shelves…”.** On `main`, the offline path sets `#result-count` to “Saved on this device” (`public/app.js`).
 
-None still open. The two overflow bugs above were P0 because the first screen’s primary button and the trip’s store cards were not fully on the phone.
+### Layout, copy, and touch (redesign)
 
-## P1
+5. **The chrome ate the phone.** The audit header was about 247px and `.list-bar` about 104px (button, meter, caption). On `main`, phones hide the brand kicker and the duplicate list toggle, visually hide the ZIP label and `#zip-hint`, and hide `.list-bar .meter`, `.bar-caption`, and `.bar-save`. Landscape (`max-height: 520px`) shortens `--step-h` / `--plan-h` and the header. The redesign’s remaining bottom chrome is `#step-bar` (Add items / See your plan / Shop) above `#list-bar`. `--bar-h` is the sum of those two bars plus the safe area.
 
-### 1. The chrome eats the phone
+6. **Two Settings buttons in the header.** The audit header had `.settings-btn.settings-open` and `#settings-open`. On `main` the header button is only `#settings-open`. A text Settings control remains in `.site-footer` and `.panel-legal` (`button.linkish.settings-open`), which is the legal-nav link.
 
-`public/styles.css` — `.topbar`, `.top-actions`, `.list-bar`, `:root` (`--bar-h`)
+7. **The first screen talked like an operator console.** The shelf banner described demo shelves, partner feeds, and Coverage. `#zip-hint` explained circulars. On `main`, `#coverage-banner` is `shelfNote` from `public/shopper/calmPlan.js` (“Sample prices. Not a receipt.”, or a one-line ZIP / weekly-ad note). `#coverage-open` is `hidden`. `#zip-hint` reads “Saved on this phone.” and is clipped off screen.
 
-After the wrap fix the header is **247px** tall at 360, 390, and 430 (brand, search, then two rows of ZIP / Settings / theme / Settings / Alerts / My list). `.list-bar` is **104px** (button, meter, caption). Together that is about 350px before any shelf. On 360×740 the products start halfway down the screen. See `390x844/07-home-shelves.png` and `360x740/07-home-shelves.png`.
+8. **Store cards showed env-var setup.** Aldi and Walmart paragraphs named `FLIPP_ACCESS_TOKEN`, `WALMART_CONSUMER_ID`, and API docs (`renderStore`, `.store-card p.muted`). On `main`, that slot is `shopperCopy(store.pricing?.detail)`, which returns an empty string for operator setup text.
 
-With a 47px status-bar inset the header becomes **294px** and the bar **138px** (`padding-top` 61px, `padding-bottom` 42px). The variables work. The cost is more chrome.
+9. **Welcome said “send to carts”; the button opened a checklist.** `CARTS_OPEN` in `public/shopper/onboarding.js` now says “Shop each store's list” and “A cart button appears only when that store can take one. Otherwise you open the list there.” Handoff buttons stay `.handoff-btn` / `[data-shop-list]` when no cart can be sent.
 
-Landscape 844×390: header **141px**, bar **104px**. The first `article.card .card-open` starts around y=150 and the bar starts at y=286, so the photo is covered and the size/add controls are below the fold. See `844x390/07-home-shelves.png`.
+10. **Add sat below a tile taller than the phone.** Oreo’s flavor chips, size list, and unit toggle pushed `.card-actions` off the first screen (`390x844/14-oreo-size-qty.png`). On `main`, under 1099px, `.card-actions` is `position: sticky` above `--bar-h`, so Add stays reachable. The tile can still be long; that remaining density is listed under still open.
 
-`--bar-h` is `118px + safe-area`, while the real bar is ~104px, so `.body` padding is a little taller than the bar. Not the main problem. The main problem is two stacked toolbars plus a three-line summary bar.
+11. **Several controls were under 44px.** On `main` these are at least 44px tall in `public/styles.css`: `.chip`, `.dept-link`, `.choice-chip`, `.stepper button` (44×44), `.value-toggle button`, `.item-watch`, `.target-price` and its input, `label.got-it`, `.watch-toggle`, `.export-row .ghost`, `.move select`.
 
-### 2. Two Settings buttons
+12. **Bottom sheets stayed under the keyboard.** `#filters.open` and `#list-panel.open` used `bottom: 0`. On `main` both use `bottom: var(--keyboard, 0px)`, and `keyboardOverlap` in `public/shopper/phone.js` (called from `public/app.js`) sets `--keyboard` from `visualViewport`. Inputs inside those sheets and `dialog.sheet` get a scroll margin that includes `--keyboard`.
 
-`public/index.html` — `.settings-btn.settings-open` and `#settings-open`
+13. **Dialogs ignored the safe area.** On `main`, `dialog.sheet` and `.sheet-body` cap height and pad with `--safe-top`, `--safe-bottom`, and `--keyboard`.
 
-Both are visible, both say “Settings”, both carry `.settings-open`. Only `#settings-open` has `aria-haspopup`, `aria-controls`, and `aria-expanded`. The extra control is part of why `.top-actions` wraps to two rows (each Settings button is ~90px).
+14. **Every list row opened a price watch immediately.** `renderListRows` showed “Watch price” and “Target $” as soon as an item was added, at 32px / 36px. On `main` those controls sit in `.alert-controls` and stay `hidden` until the row has a watch or a target. The disclosure is `button.watch-toggle` (“Price watch”), at 44px. The button itself is still on every row; see still open.
 
-### 3. First screen talks like an operator console
+15. **Department chips scrolled with no hint.** `#chip-hint` (“More”) sits on the right of `.dept-scroller` with a fade. Chips are 44px.
 
-`public/app.js` — `#coverage-banner` (copy set in `loadPage`)
+16. **“Fewer stops” stated a $2 rule as a setting.** The checkbox `#fewer-stops` is gone. `fewerStopsOffer` in `public/shopper/calmPlan.js` offers a plain sentence and `#use-fewer-stops` (“Use fewer stops”) only when the gap is within $2.
 
-`public/index.html` — `#zip-hint`
+17. **“Demo catalog” on every price.** The shelf line is now “Sample prices. Not a receipt.” Seed prices can add `calmPriceNote` (“sample price”). The estimate prefix “about $X” is still there; see still open.
 
-On every shelf, before a search:
+18. **“Delete my data” led the bottom of a long settings dialog.** It is now `<details class="delete-box">` with summary “Delete my data” (`public/index.html`). The dialog is still long; see still open.
 
-> Demo shelves — store prices here are samples until Walmart, Kroger, or a partner feed is configured. Open Coverage for what each store can actually browse.
+19. **In-store mode was understandable, and its dialog missed the status bar.** The safe-area padding in item 13 covers `dialog.sheet`, including in-store and the per-store list.
 
-`#zip-hint` is always under the header: “5-digit US ZIP… Target, Aldi, and other weekly ads use this ZIP’s circular, not a national shelf.”
+## Still open
 
-A new shopper has not asked what a circular, a partner feed, or Coverage is. The banner is `0.92rem` muted text and it sits above the products.
+These are the audit items `main` has not closed. None of them are the overflow blockers.
 
-### 4. Store cards show env-var setup, not a price explanation
+### P2 — A family tile is still a long read
 
-`public/app.js` — `renderStore`, selector `.store-card p.muted` (fed by `store.pricing.detail`)
+`public/app.js` — `cardHtml`, selectors `article.card`, `.choice-row .choice-chip`, `[data-size-row] .size-list`
 
-`src/pricing/flipp/flippProvider.ts` — `FLIPP_SETUP_HINT` / `setupHint()`
+Oreo is still one card with flavor chips and a size list (unit price, “Best value”, `.value-toggle`). Sticky `.card-actions` keeps Add on screen. The amount of reading before the first add is unchanged. Shot from the audit: `390x844/14-oreo-size-qty.png`.
 
-`src/pricing` Walmart provider setup hint (same slot)
+### P2 — Prices still say “about $X”
 
-On the demo trip the Aldi card includes:
+`public/shopper/calmPlan.js` — `aboutMoney`
 
-> Aldi has no public product API. Weekly-ad prices (not a full shelf catalog) use Flipp. Official FlyerKit: set FLIPP_ACCESS_TOKEN from a Flipp technical contact (https://api.flipp.com/…)
+`public/app.js` — `.price` via `aboutMoney`
 
-Walmart’s paragraph names `WALMART_CONSUMER_ID`, `WALMART_PRIVATE_KEY`, and `walmart.io`. Wrapping the URL fixed the overflow. The sentence is still the wrong audience. Shopper-facing copy already exists for the case when Flipp is on (`FLIPP_ENABLED_HINT` does not mention the token). The unconfigured path still uses the operator hint, and the tile prints it in full.
+Estimates render as `about ${formatMoney(value)}` on the tile, the list, and the trip. The redesign kept that label on purpose. It is still the dominant money wording on a first run.
 
-### 5. Welcome says “send to carts”; the button opens an in-app checklist
+### P2 — Every new list row still offers “Price watch”
 
-`public/shopper/onboarding.js` — `CARTS_OPEN` (“Send each store’s items to its cart or a search page.”)
+`public/app.js` — `renderListRows`, selector `button.watch-toggle`
 
-`public/app.js` — `.handoff-btn`, `[data-shop-list]`, `[data-kroger]`, `a.handoff-btn`
+The checkbox and target field are hidden until that tap, and both are 44px when open. The button is on the row as soon as the item is added, before the person has a reason to watch a price. Shot from the audit (controls expanded, pre-redesign): `390x844/21-list-with-items.png`.
 
-`src/storeHandoff.ts` — `krogerAction`, `walmartAction`, `shopListAction`
-
-With no Kroger OAuth and no numeric Walmart item ids (demo / seed rows), every store button was **“Open Aldi list”** or **“Open Walmart list”**. There was no “Send to Kroger cart” and no “Send to Walmart cart”. The button opens `#trip-dialog` (`openChecklist`), not the retailer. The checklist’s per-item link is `a.text-btn` (“Open in {Store}”) when `item.url` exists. That is a reasonable fallback, and the label does not match the welcome step. Shots: `390x844/03-welcome-carts.png`, `390x844/25b-store-handoff-after-wrap.png`, `390x844/27b-store-list-after.png`.
-
-### 6. One family tile is taller than the phone
-
-`public/app.js` — `cardHtml`, selectors `article.card`, `.choice-row .choice-chip`, `[data-size-row] .size-list`, `.card-actions`
-
-`public/shopper/familyTile.js` — labels only; the height is the rendered tile
-
-Oreo is one card with eight flavor chips (Original, Double Stuf, Double Stuf Gluten Free, Double Stuf Golden, Mini, Mint, Thins, Zero Sugar) and a size list with a “Best value” badge, unit price, and a `.value-toggle` (“Per ounce” / “Per item”). Add and the quantity stepper sit under all of that. Coca-Cola is the same shape. Choosing a size and tapping `+` before Add does work (quantity is staged on `article.card` via `data-qty`). The cost is a long, dense card and a lot of reading before the first add. Shot: `390x844/14-oreo-size-qty.png`.
-
-### 7. Several controls are under 44px
-
-`public/styles.css`
-
-| Selector | Measured / declared | Where it hurts |
-| --- | --- | --- |
-| `.chip`, `.dept-link` | `min-height: 40px` | `#dept-chips button.chip` (All, Produce, …) |
-| `.choice-chip` | `min-height: 40px` | flavor radios inside `article.card` |
-| `.stepper button` | `40×40` | `article.card .stepper button`, `#list-items .stepper button` |
-| `.value-toggle button` | `min-height: 36px` | “Per ounce” / “Per item” on the tile |
-| `.item-watch` | `min-height: 32px` | “Watch price” on each `#list-items .list-row` |
-| `.target-price input` | `min-height: 36px` | “Target $” on each list row |
-| `label.got-it` | about **24px** tall | the check-off control; `.got-it input` is `1.15rem` |
-| `.export-row .ghost` | `min-height: 40px` | Copy list, Share, Print or PDF, Shareable link |
-| `.move select` | `min-height: 40px` | “Change store” select |
-
-`.size-option` and `.handoff-btn` are 44px or taller. The checkbox inside `label.check` is small, but that label is 44px tall, so Add is fine.
-
-### 8. Bottom sheets stay under the keyboard
-
-`public/styles.css` — `#filters.open` (`position: fixed; bottom: 0; z-index: 8`), `#list-panel.open` (same pattern)
-
-`public/index.html` — `#filter-min`, `#filter-max`, `#display-name`, `#delete-confirm`
-
-Shrinking the viewport by 336px (a stand-in for the iOS keyboard) left `#search` usable, because it is in the header. The filter sheet did not move. `#filter-min` and `#filter-max` sat below the list bar (field top 464, bar top 404 in the short viewport). `#onboard-zip` is in a centered dialog and stayed usable. Shots: `390x844/33-keyboard-filters.png`, `390x844/32-keyboard-search.png`.
-
-### 9. Dialogs ignore the safe area
-
-`public/styles.css` — `dialog.sheet`, `#trip-dialog.checklist-sheet`, `#onboarding`
-
-`--safe-top` / `--safe-bottom` are applied on `.topbar`, `.list-bar`, `#filters.open`, and `#list-panel.open`. A centered or top-aligned `dialog` does not use them. After the trip overflow fix, `#trip-dialog` in in-store mode was top **19px**, height 806, on an 844px screen. A 47px status-bar inset covers the title. Landscape welcome ZIP (`#onboarding` on the zip step) is `max-height` constrained and scrolls (`scrollHeight` 406 vs client 359 at 844×390); the dialog still sits 16px from the top. Shot: `390x844/28b-instore-after.png`.
-
-### 10. List rows ask for a price watch before the person has a list habit
-
-`public/app.js` — `renderListRows`
-
-`public/styles.css` — `.alert-controls`, `.item-watch`, `.target-price`
-
-Every row shows “Watch price” and “Target $” as soon as the item is added, under a paragraph about comparing “the best price across stores with the price when you saved each item.” That is accurate and early. Combined with the 32px / 36px targets above, the sheet is busy on a first add. Shot: `390x844/21-list-with-items.png`.
-
-## P2
-
-### 11. Department chips scroll with no hint
-
-`public/styles.css` — `.dept-chips` (`overflow-x: auto`)
-
-`public/app.js` — `renderDepartments`, selector `#dept-chips button.chip`
-
-The row is the right pattern (it does not widen the page). Nothing marks that Bakery through Pet are off to the right. Chips are also 40px tall (P1 table).
-
-### 12. “Fewer stops” states a dollar rule with no context
-
-`public/app.js` — `paintTrip`, selector `#fewer-stops` / `.fewer-stops`
-
-> Fewer stops. Only add a store when it saves at least $2.
-
-The $2 / $8 switch is real behavior and reads like a setting the shopper did not ask for. The headline above it is clear: “No single store carries this whole list”, with a per-store total and “This trip”. Keep that block; the threshold sentence is the confusing line.
-
-### 13. “about $X” and “Demo catalog” on every price
-
-`public/app.js` — `.price` via `aboutMoney`, `.badge-demo` via `labelClass`
-
-Useful honesty, repeated on the tile, the list, and each trip line. On a demo server it is the dominant badge. Fine as a temporary state; loud if this build is what a first-run review sees.
-
-### 14. Settings is a long first dialog
+### P2 — Settings is still a long first dialog
 
 `public/index.html` — `#settings-dialog`
 
-Account, Pro, theme, ZIP, Kroger, “Show welcome”, and “Delete my data” (type DELETE) are one scrolling dialog. On 390×844 it is about 716px and fits. On 360×740 it scrolls (`scrollHeight` 716, client 702). Nothing is trapped. It is a lot to meet before the first shop. Shot: `390x844/10-settings-top.png`, `390x844/11-settings-bottom.png`.
+Account, plan, theme, ZIP, Kroger, and “Show welcome” are one scrolling dialog. Delete is collapsed, so the destructive action is out of the first glance. On 390×844 the audit dialog was about 716px and fit; on 360×740 it scrolled. Shots: `390x844/10-settings-top.png`, `390x844/11-settings-bottom.png` (pre-redesign, delete expanded).
 
-### 15. Empty, error, and offline states are in good shape
+## Kept on purpose
 
-Worth keeping while the layout changes:
+Empty, error, and offline states were in good shape at audit time, and the redesign’s shopper modules still own those sentences (`public/shopper/emptyStates.js` and the offline line above).
 
-| State | Selector | Result |
+| State | Selector | Audit result |
 | --- | --- | --- |
 | Empty list | `#list-empty` | “Your list is empty” + “Browse the aisle”. `390x844/08-empty-list.png` |
-| No alerts | `#alerts-empty` | “No price drops yet” path + “Turn on list alerts”. `390x844/09-alerts-empty.png` |
+| No alerts | `#alerts-empty` | “No price drops yet” + “Turn on list alerts”. `390x844/09-alerts-empty.png` |
 | No search hits | `#grid .empty-state` | “No matches” for `zzzznotagrocery`, with Clear search. `390x844/29-empty-search.png` |
 | Browse failed | `#grid .empty-state` | “Couldn’t reach Grocery Gitter” + Try again. `390x844/31-network-error.png` |
-| Offline with a saved trip | `#catalog-error`, `#trip .offline-note` | Trip comes back. Status line fixed in this branch. `390x844/30c-offline-after.png` |
+| Offline with a saved trip | `#catalog-error`, `#trip .offline-note` | Trip comes back. Status line is “Saved on this device”. `390x844/30c-offline-after.png` |
 | Bad welcome ZIP | `#onboard-zip-error` | “Enter a 5-digit ZIP, or leave it blank.” `390x844/05-welcome-zip-error.png` |
 
-### 16. Contrast of the current palette passes WCAG AA
+Contrast of the palette on `main` matches the colors sampled in the audit (`--muted` `#5c5348` on `#fffdfb` about 7.4:1, muted on `#f4efe6` about 6.6:1, dark muted `#c3baac` on `#24302a` about 7.1:1, white on `#0e7a45` about 5.4:1). This pass did not re-sample pixels. Do not lighten `--muted` further if the type stays under 18px.
 
-Sampled text on the home shelf in light and dark. Muted `#5c5348` on `#fffdfb` is about **7.4:1**. Muted on the page background `#f4efe6` is about **6.6:1**. Dark muted `#c3baac` on `#24302a` is about **7.1:1**. White on accent `#0e7a45` is about **5.4:1**. No contrast failure turned up on visible text. Do not lighten `--muted` further if the type stays under 18px.
-
-### 17. In-store mode itself is understandable
-
-`public/app.js` — `[data-instore="trip"]`, `#trip-dialog`
-
-Title “In the store”, grouped by department, checkboxes, “Checked items stay on this device, including offline.” The per-store list uses the same dialog (`[data-shop-list]`). After the overflow fix the portrait dialog fits the width. The safe-area gap is P1.9.
+In-store mode (“In the store”, department groups, on-device checkoffs) was understandable. The safe-area gap on that dialog is in the fixed list.
 
 ## Screenshot index (390×844)
 
-The same step names exist under `360x740/`, `430x932/`, and `844x390/` unless noted.
+The same step names exist under `360x740/`, `430x932/`, and `844x390/` unless noted. These frames are the pre-redesign audit.
 
 | File | Step |
 | --- | --- |
 | `01-welcome-pick.png` | Welcome, “Pick items” |
 | `02-welcome-split.png` | “Split by the cheapest store” |
-| `03-welcome-carts.png` | “Send to store carts” |
+| `03-welcome-carts.png` | Carts step (wording has since changed on main) |
 | `04-welcome-zip.png` | ZIP step |
 | `05-welcome-zip-error.png` | Invalid ZIP (390 only) |
 | `06-welcome-kroger.png` | Kroger step, connect unavailable |
@@ -220,10 +142,10 @@ The same step names exist under `360x740/`, `430x932/`, and `844x390/` unless no
 | `18-eggs-*` | eggs |
 | `19-dogfood-*` | dog food |
 | `20-product-detail.png` | Product sheet |
-| `21-list-with-items.png` / `22-list-savings.png` | List and savings meter |
-| `23-plan-zip-error.png` | Missing ZIP **before** the focus fix |
+| `21-list-with-items.png` / `22-list-savings.png` | List and savings |
+| `23-plan-zip-error.png` | Missing ZIP before the focus fix |
 | `23b-plan-zip-error-after.png` | Same moment after the fix |
-| `24-trip-plan.png` | Trip **before** the card wrap (sideways overflow) |
+| `24-trip-plan.png` | Trip before the card wrap (sideways overflow) |
 | `24b-trip-plan-after-wrap.png` | Trip after the wrap |
 | `25-store-handoff.png` / `25b-store-handoff-after-wrap.png` | Open {Store} list |
 | `27-store-list-modal.png` / `27b-store-list-after.png` | Per-store checklist |
@@ -234,4 +156,4 @@ The same step names exist under `360x740/`, `430x932/`, and `844x390/` unless no
 | `32-keyboard-search.png` | Search with a short viewport |
 | `33-keyboard-filters.png` | Filters with a short viewport |
 
-`390x844-dark/` repeats the core path in dark mode. `*-safe/` repeats it with the safe-area variables attempted at load; trust the P1.9 note over those shots.
+`390x844-dark/` repeats the core path in dark mode. `*-safe/` repeats it with the safe-area variables attempted at load.
