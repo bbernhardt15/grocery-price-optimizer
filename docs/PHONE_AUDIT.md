@@ -124,7 +124,7 @@ The calm shop flow left two fixed bars (the step labels and the plan summary) an
 
 The shopper page now has one bottom dock. Add and Plan show Add / Plan / Shop (equal width, one line, at least 44px) and, in the same dock, the item count, an about-total, and one primary button. Shop replaces that dock with the “N left / Done” bar. Done stays tappable while items are left, and the tap says how many are left. The header on a phone is the menu, the step title, and search. ZIP, alerts, theme, Settings, Help, and Refresh prices are in a drawer. Refine replaces the old Filters sheet: brand, on sale, budget-friendly brands, and sort. The default shelf is Suggested, not lowest price.
 
-Coming back from Kroger sign-in lands on Your plan (or In the store after a cart write), closes any sign-in sheet, and leaves the page scrollable. The drawer and the plan then show Kroger connected, Send to Kroger cart, and Open Kroger cart (`kroger.com/cart`).
+Coming back from Kroger sign-in lands on Your plan (or In the store after a cart write), closes any sign-in sheet, and leaves the page scrollable. The drawer and the plan then show Kroger connected, Send to Kroger cart, and Open Kroger cart (`kroger.com/cart`). The menu drawer is a full-height layer above its dimmed backdrop, so Refresh prices and the cart actions take taps. Phone frames for that pass are in `docs/phone-chrome/`.
 
 ## Screenshot index (390×844)
 
