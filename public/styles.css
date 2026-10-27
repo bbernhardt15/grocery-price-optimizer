@@ -953,11 +953,91 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
 .usuals-list li { display: inline-flex; background: none; border: 0; padding: 0; min-height: 0; }
 .starter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .starter-row.quick-row { display: flex; flex-wrap: wrap; }
+.list-home { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.list-home h3,
+#seasonal-block,
+.start-head,
+#my-lists,
+#more-lists {
+  scroll-margin-top: calc(16px + var(--safe-top) + 64px);
+}
+.list-home h3 { margin: 4px 0 0; font-family: var(--display); font-size: 1.05rem; }
+.starter-card { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.starter-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .starter {
-  min-height: 72px; text-align: left; border: 1px solid var(--line); background: var(--surface);
+  min-height: 72px; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--surface);
   border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
 }
 .starter span:first-child { font-weight: 700; }
+.starter span { min-width: 0; overflow-wrap: anywhere; }
+.party {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+}
+.party button, .slot-controls .text-btn, .pick-actions button {
+  min-height: 44px; min-width: 44px;
+}
+.party output { min-width: 1.5rem; font-weight: 700; text-align: center; }
+.nudge {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  margin: 0; padding: 10px 12px; border-radius: 14px; background: var(--accent-soft); color: var(--ink);
+}
+.nudge p { margin: 0; }
+.slot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.slot-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; background: var(--bg);
+}
+.slot-need { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.slot-product { margin: 0; font-weight: 700; }
+.slot-copy p { overflow-wrap: anywhere; }
+.slot-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.slot-move { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.sheet-actions {
+  position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px;
+  padding-top: 8px; background: var(--surface);
+}
+.sheet-actions .primary, .sheet-actions .ghost { width: 100%; min-height: 44px; }
+.list-rename, .slot-finder, .pick-results { display: flex; flex-direction: column; gap: 8px; }
+.list-rename input, .slot-finder input, #pick-query {
+  width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); padding: 0 12px; font: inherit;
+}
+.pick-results { display: flex; flex-direction: column; gap: 10px; }
+.pick-tile {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: start;
+  border: 1px solid var(--line); border-radius: 16px; padding: 10px; background: var(--bg);
+}
+.pick-tile img { width: 72px; height: 72px; object-fit: contain; background: var(--bg-accent); border-radius: 12px; }
+.pick-tile h3 { margin: 0; font-size: 1rem; }
+.pick-copy { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pick-sizes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick-actions { display: flex; flex-direction: column; gap: 6px; }
+.pick-actions .primary, .pick-actions .ghost { width: 100%; }
+.danger { color: var(--sale); }
+dialog.list-sheet {
+  width: min(520px, calc(100% - 16px));
+  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 12px);
+  margin: auto auto var(--bar-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+dialog.list-sheet .sheet-body {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 12px;
+}
+dialog.list-sheet .slot-list,
+dialog.list-sheet .pick-results {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+dialog.list-sheet .sheet-actions { position: static; flex: none; }
 @media (max-height: 520px) {
   .start-here { margin: 0 0 6px; gap: 4px; }
   .start-here h2 { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
