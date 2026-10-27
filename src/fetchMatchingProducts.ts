@@ -2,6 +2,7 @@ import { Product } from "./models/Product";
 import { escapeRegex } from "./escapeRegex";
 import { parseGroceryList } from "./parseGroceryLine";
 import type { CatalogProduct, PriceSource } from "./optimizeGroceryList";
+import { publishSale } from "./pricing/saleFacts";
 import {
   keywordNameFilter,
   matchTokenSets,
@@ -22,6 +23,9 @@ type LeanProduct = {
   lastUpdated?: Date;
   updatedAt?: Date;
   priceSource?: "live" | "weekly_ad" | "seed" | null;
+  onSale?: boolean | null;
+  regularPrice?: number | null;
+  saleEndsOn?: string | null;
 };
 
 export type FetchMatchingOptions = {
@@ -87,6 +91,12 @@ function toCatalogProduct(doc: LeanProduct): CatalogProduct {
     lastUpdated: doc.lastUpdated,
     updatedAt: doc.updatedAt,
     priceSource: storedPriceSource(doc),
+    ...(publishSale({
+      price: doc.price,
+      onSale: doc.onSale === true,
+      regularPrice: doc.regularPrice ?? undefined,
+      saleEndsOn: doc.saleEndsOn ?? undefined,
+    }) ?? {}),
   };
 }
 

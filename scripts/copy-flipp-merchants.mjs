@@ -12,3 +12,8 @@ const destDir = path.join(root, "dist/pricing/flipp");
 
 mkdirSync(destDir, { recursive: true });
 cpSync(src, path.join(destDir, "merchants.json"));
+
+const couponSrc = path.join(root, "src/coupons/pages.json");
+const couponDest = path.join(root, "dist/coupons");
+mkdirSync(couponDest, { recursive: true });
+cpSync(couponSrc, path.join(couponDest, "pages.json"));

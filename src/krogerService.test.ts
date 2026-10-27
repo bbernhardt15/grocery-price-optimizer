@@ -133,6 +133,8 @@ describe("KrogerService.searchProducts", () => {
     assert.equal(products[0].name, "Kroger 2% Reduced Fat Milk");
     assert.equal(products[0].brand, "Kroger");
     assert.equal(products[0].price, 2.99);
+    assert.equal(products[0].onSale, true);
+    assert.equal(products[0].regularPrice, 3.49);
     assert.equal(products[0].unit, "gal");
     assert.equal(products[0].locationId, "01400441");
     assert.equal(products[0].productId, "0001111041700");
@@ -171,6 +173,8 @@ describe("KrogerService.searchProducts", () => {
     assert.equal(products.length, 1);
     assert.equal(products[0].name, "Honey Nut Cheerios Cereal");
     assert.equal(products[0].price, 4.29);
+    assert.equal(products[0].onSale, undefined);
+    assert.equal(products[0].regularPrice, undefined);
   });
 
   it("falls back to nationalPrice when location prices are missing", async () => {

@@ -6,6 +6,7 @@ type HandoffCarrier = {
     handoff?: {
       items?: Array<object>;
       action?: object;
+      coupon?: object;
     };
   }>;
 };
@@ -50,5 +51,6 @@ export function entitlementPayload(access: Access): { plan: "free" | "pro"; limi
   const limited: string[] = [];
   if (!access.limits.multiStore) limited.push("multiStoreSplit");
   if (!access.limits.cartHandoffs) limited.push("cartHandoffs");
+  if (!access.limits.ownCoupons) limited.push("ownCoupons");
   return { plan: access.plan, limited };
 }

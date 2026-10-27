@@ -3,7 +3,13 @@
  * copy a list, and remember in-store checks. The server still builds the
  * first handoff. This module rebuilds totals and actions after an edit so
  * the checklist works offline.
+ *
+ * Coupon dollars are not part of these totals. `singleStoreSavings` compares
+ * shelf prices only. Estimated coupon savings live in `public/shopper/coupons.js`
+ * (`couponSavingsSummary`) and are shown on their own line.
  */
+
+import { couponPageFor } from "./coupons.js";
 
 const KROGER_CART_START = "/api/kroger/cart/start";
 
@@ -245,6 +251,9 @@ function lineFromOffer(item, offer) {
     ...(cleanText(offer.upc) ? { upc: cleanText(offer.upc) } : {}),
     ...(cleanText(offer.locationId) ? { locationId: cleanText(offer.locationId) } : {}),
     ...(offer.priceSource ? { priceSource: offer.priceSource } : {}),
+    ...(offer.onSale ? { onSale: true } : {}),
+    ...(offer.onSale && Number(offer.regularPrice) > price ? { regularPrice: Number(offer.regularPrice) } : {}),
+    ...(offer.onSale && offer.saleEndsOn ? { saleEndsOn: offer.saleEndsOn } : {}),
     department: offer.department || item.department,
     ...(aisle ? { aisle } : {}),
     ...(offer.url ? { url: offer.url } : {}),
@@ -367,6 +376,7 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
   }
 
   const priceLabel = segmentPriceLabel(storeName, items, prior);
+  const coupon = prior?.handoff?.coupon?.url ? prior.handoff.coupon : couponPageFor(storeName);
 
   return {
     storeName,
@@ -376,6 +386,7 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     subtotal,
     items: handoffItems,
     action,
+    ...(coupon ? { coupon } : {}),
   };
 }
 

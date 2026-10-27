@@ -31,6 +31,8 @@ export type RawCatalogRecord = {
   /** Retailer taxonomy labels (Walmart categoryPath, Kroger categories). */
   categories?: string[];
   onSale?: boolean;
+  regularPrice?: number;
+  saleEndsOn?: string;
   availability?: OfferAvailability;
   priceSource: OfferPriceSource;
   storeBrand?: boolean;
@@ -42,6 +44,8 @@ export type CatalogOffer = {
   unitPrice?: number;
   unitPriceText?: string;
   onSale: boolean;
+  regularPrice?: number;
+  saleEndsOn?: string;
   availability: OfferAvailability;
   retailerItemId?: string;
   productId?: string;

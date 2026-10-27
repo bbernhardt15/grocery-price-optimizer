@@ -60,6 +60,8 @@ function dealToRecord(storeName: string, deal: NormalizedFlippDeal, zip: string)
     normalizedUnit: "count",
     priceSource: "weekly_ad",
     onSale: true,
+    ...(deal.regularPrice != null ? { regularPrice: deal.regularPrice } : {}),
+    ...(deal.saleEndsOn ? { saleEndsOn: deal.saleEndsOn } : {}),
     ...(deal.flyerItemId ? { productId: deal.flyerItemId } : {}),
     ...(deal.postPriceText ? { size: deal.postPriceText } : {}),
     ...(deal.imageUrl ? { imageUrls: [deal.imageUrl] } : {}),
@@ -101,6 +103,8 @@ async function dealsForStore(
         ...(row.postPriceText ? { postPriceText: row.postPriceText } : {}),
         ...(row.saleStory ? { saleStory: row.saleStory } : {}),
         ...(row.imageUrl ? { imageUrl: row.imageUrl } : {}),
+        ...(row.regularPrice != null ? { regularPrice: row.regularPrice } : {}),
+        ...(row.saleEndsOn ? { saleEndsOn: row.saleEndsOn } : {}),
       }))
     );
   }

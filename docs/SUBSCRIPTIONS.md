@@ -15,10 +15,12 @@ Purchases require a Grocery Gitter account. The app sends the account id as the 
 | Shared lists | 1 | Unlimited (`0`) |
 | Price alerts | Off | On |
 | Cart handoffs (Kroger, Walmart, Target, Instacart) | Off | On |
+| Store coupon links and the “look for coupons” list | On | On |
+| Coupons you type in | Off | On |
 
 A shared-list cap of `0` means unlimited. The one saved list per account is already how sync works. Updating that list is allowed. Creating another shared list, or creating one with no `deviceId` and no session, returns 402 once billing is enforced. Opening the same list again (the saved owner token) is not a new list. Turning price alerts off is always allowed. Turning them on is refused on the free plan.
 
-These numbers are env vars. Pro always keeps price alerts, the multi-store split, and cart handoffs, even if a free flag is widened.
+These numbers are env vars. Pro always keeps price alerts, the multi-store split, cart handoffs, and coupons you type in, even if a free flag is widened. Store coupon links stay available on the free plan. See [Coupons](COUPONS.md).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -27,12 +29,13 @@ These numbers are env vars. Pro always keeps price alerts, the multi-store split
 | `PLAN_FREE_PRICE_ALERTS` | `false` | `true`, `1`, `yes`, or `on` to allow alerts without Pro |
 | `PLAN_FREE_MULTI_STORE` | `false` | Allow the multi-store split without Pro |
 | `PLAN_FREE_CART_HANDOFFS` | `false` | Allow Kroger, Instacart, and the other cart links without Pro |
+| `PLAN_FREE_OWN_COUPONS` | `false` | Allow typing in a coupon you already have without Pro |
 | `PLAN_PRO_SAVED_LISTS` | `0` | `0` is unlimited |
 | `PLAN_PRO_SHARED_LISTS` | `0` | `0` is unlimited |
 
 Set them on the Railway web service. The ingest worker does not read them.
 
-When billing is enforced, `POST /api/optimize-list` for a free shopper uses one store and returns `entitlement: { plan: "free", limited: ["multiStoreSplit", "cartHandoffs"] }`. Checkout links on that response are removed. A Pro account gets the split and the store buttons.
+When billing is enforced, `POST /api/optimize-list` for a free shopper uses one store and returns `entitlement: { plan: "free", limited: ["multiStoreSplit", "cartHandoffs", "ownCoupons"] }`. Checkout links on that response are removed. The coupon page link and the item checklist stay. The form for a coupon you type in is hidden. A Pro account gets the split, the store buttons, and that form.
 
 `requirePro` is the Express middleware for a route that should be Pro-only. It calls `next()` when the webhook secret is unset, and when the signed-in account has an active `pro` entitlement. Otherwise it responds 402 `{ code: "pro_required" }`. List, alert, and cart routes check the plan flags above so one free flag can open a single feature. Invalid request bodies stay 400. Kroger still returns 501 when it is not configured and the shopper is allowed to use cart handoffs.
 

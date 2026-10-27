@@ -1,4 +1,5 @@
 import type { CatalogProduct } from "../../optimizeGroceryList";
+import { walmartSale } from "../../pricing/saleFacts";
 import { walmartPricingProvider } from "../../pricing/walmartProvider";
 import { StorePricingError } from "../../pricing/types";
 import { mapToDepartment } from "../departments";
@@ -145,7 +146,7 @@ function rawItemToProduct(item: {
     ...(item.size?.trim() ? { size: item.size.trim() } : {}),
     ...(images.length > 0 ? { imageUrls: images } : {}),
     ...(item.categoryPath?.trim() ? { categories: [item.categoryPath.trim()] } : {}),
-    ...(typeof item.msrp === "number" && item.msrp > price ? { onSale: true } : {}),
+    ...(walmartSale(price, item.salePrice, item.msrp) ?? {}),
     availability: !stock ? "unknown" : stock.includes("not") || stock.includes("out") ? "out_of_stock" : "in_stock",
   };
 }

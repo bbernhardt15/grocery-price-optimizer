@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { lockCartHandoffs } from "./billing/applyPlan";
 import { STORE_HANDOFF_CONFIG } from "./storeHandoffConfig";
 import { FLIPP_MERCHANT_MAPPINGS } from "./pricing/flipp/merchants";
 import type { StoreGroup } from "./optimizeGroceryList";
@@ -141,6 +142,31 @@ describe("buildStoreHandoff", () => {
     assert.equal(handoff.action.status, "ready");
     assert.equal(handoff.action.url, krogerSearchUrl(krogerMilk));
     assert.match(handoff.action.detail ?? "", /authorization-code/i);
+    assert.equal(handoff.coupon?.url, "https://www.kroger.com/savings/cl/coupons/");
+    assert.equal(handoff.coupon?.label, "Kroger digital coupons");
+  });
+
+  it("falls back to a store homepage when a coupon page is not confirmed", () => {
+    const handoff = buildStoreHandoff({
+      storeName: "Food Lion",
+      items: [{ query: "milk", name: "Milk", brand: "Food Lion", storeName: "Food Lion", price: 2.5, quantity: 1, itemTotal: 2.5, unit: "gal", normalizedUnit: "gal" }],
+      subtotal: 2.5,
+    });
+    assert.equal(handoff.coupon?.url, "https://shop.foodlion.com/");
+    assert.equal(handoff.coupon?.kind, "home");
+  });
+
+  it("keeps the coupon link when cart links are locked", () => {
+    const handoff = buildStoreHandoff({
+      storeName: "Kroger",
+      items: [krogerMilk],
+      subtotal: 5.78,
+    });
+    const locked = lockCartHandoffs({
+      stores: [{ storeName: "Kroger", items: [{ name: "Milk", url: "https://www.kroger.com/search?query=milk" }], handoff }],
+    });
+    assert.equal(locked.stores[0].handoff?.action.type, "coming_soon");
+    assert.equal(locked.stores[0].handoff?.coupon?.url, "https://www.kroger.com/savings/cl/coupons/");
   });
 
   it("offers kroger_cart only when OAuth is configured and a UPC exists", () => {

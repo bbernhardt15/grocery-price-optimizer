@@ -35,6 +35,41 @@ describe("saved list merge", () => {
     assert.equal(byId.has("eggs"), true);
   });
 
+  it("keeps typed coupons when the save includes them", () => {
+    const coupon = {
+      id: "c-oreo",
+      storeName: "Kroger",
+      lineId: "0:large eggs",
+      itemName: "Oreo",
+      kind: "dollars",
+      amount: 1,
+      expiresOn: "2026-12-01",
+    };
+    const withCoupons = parseSavedListWrite({
+      listId: "list-123456",
+      items: [item("milk", 1)],
+      coupons: [coupon],
+    });
+    assert.equal("error" in withCoupons, false);
+    if ("error" in withCoupons) return;
+    assert.equal(withCoupons.coupons?.[0].amount, 1);
+
+    const omitted = parseSavedListWrite({
+      listId: "list-123456",
+      items: [item("milk", 1)],
+    });
+    assert.equal("error" in omitted, false);
+    if ("error" in omitted) return;
+    assert.equal(omitted.coupons, undefined);
+
+    const invalid = parseSavedListWrite({
+      listId: "list-123456",
+      items: [item("milk", 1)],
+      coupons: [{ id: "nope" }],
+    });
+    assert.equal("error" in invalid, true);
+  });
+
   it("rejects a list without ids", () => {
     const parsed = parseSavedListWrite({ listId: "short", items: [] });
     assert.equal("error" in parsed, true);

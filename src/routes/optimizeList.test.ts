@@ -1443,6 +1443,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(body.entitlement?.plan, "free");
       assert.ok(body.entitlement?.limited.includes("multiStoreSplit"));
       assert.ok(body.entitlement?.limited.includes("cartHandoffs"));
+      assert.ok(body.entitlement?.limited.includes("ownCoupons"));
       assert.equal(body.stores[0].items[0].lineId?.startsWith("0:"), true);
       assert.equal(body.stores[0].items[0].url, undefined);
       assert.equal(body.stores[0].items[0].offers?.some((offer) => offer.url), false);
