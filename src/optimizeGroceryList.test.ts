@@ -53,6 +53,48 @@ describe("optimizeGroceryList", () => {
     assert.equal(typeof milk?.department, "string");
   });
 
+  it("copies sale facts onto the winning line and each offer", () => {
+    const eggs: CatalogProduct[] = [
+      {
+        name: "Large Eggs",
+        brand: "Great Value",
+        storeName: "Walmart",
+        price: 2.14,
+        unit: "dozen",
+        normalizedUnit: "dozen",
+        onSale: true,
+        regularPrice: 2.64,
+        saleEndsOn: "2026-11-08T23:59:00-05:00",
+      },
+      {
+        name: "Large Eggs",
+        brand: "Aldi",
+        storeName: "Aldi",
+        price: 1.89,
+        unit: "dozen",
+        normalizedUnit: "dozen",
+        regularPrice: 3,
+      },
+    ];
+    const split = optimizeGroceryList(["eggs"], ["Aldi", "Walmart"], eggs);
+    const line = split.stores[0].items[0];
+    assert.equal(line.storeName, "Aldi");
+    assert.equal(line.onSale, undefined);
+    assert.equal(line.regularPrice, undefined);
+    const walmart = line.offers?.find((offer) => offer.storeName === "Walmart");
+    assert.equal(walmart?.onSale, true);
+    assert.equal(walmart?.regularPrice, 2.64);
+    assert.equal(walmart?.saleEndsOn, "2026-11-08");
+    const aldi = line.offers?.find((offer) => offer.storeName === "Aldi");
+    assert.equal(aldi?.onSale, undefined);
+
+    const onlyWalmart = optimizeGroceryList(["eggs"], ["Walmart"], eggs);
+    const sale = onlyWalmart.stores[0].items[0];
+    assert.equal(sale.onSale, true);
+    assert.equal(sale.regularPrice, 2.64);
+    assert.equal(sale.saleEndsOn, "2026-11-08");
+  });
+
   it("only considers stores in the provided list", () => {
     const result = optimizeGroceryList(["milk"], ["Walmart"], catalog);
 
@@ -390,6 +432,30 @@ describe("optimizeGroceryList", () => {
     const result = optimizeGroceryList(["chicken"], ["Kroger"], chicken);
     assert.equal(result.stores[0]?.items[0]?.name, "Boneless Skinless Chicken Breast");
     assert.equal(result.stores[0]?.items[0]?.unitPriceText, "$6.49/lb");
+  });
+
+  it("keeps a pinned sale's was-price and end date on the trip line", () => {
+    const products = demoBrowseProducts();
+    const eggs = products.find((product) => product.brand === "Great Value" && product.name === "Large Eggs");
+    assert.ok(eggs);
+    assert.equal(eggs.offers[0]?.onSale, true);
+    assert.equal(eggs.offers[0]?.regularPrice, 2.64);
+    assert.equal(eggs.offers[0]?.saleEndsOn, "2026-11-08");
+    const result = optimizeGroceryList(
+      ["Large Eggs"],
+      [],
+      pinnedRowsForSelections(
+        [{ name: eggs.name, quantity: 1, catalogId: eggs.id, brand: eggs.brand }],
+        products,
+        { allowSubstitutes: false }
+      )
+    );
+    const line = result.stores[0]?.items[0];
+    assert.equal(line?.storeName, "Walmart");
+    assert.equal(line?.price, 2.14);
+    assert.equal(line?.onSale, true);
+    assert.equal(line?.regularPrice, 2.64);
+    assert.equal(line?.saleEndsOn, "2026-11-08");
   });
 
   it("prices the pinned browse product and can fill a missing store with a labeled substitute", () => {

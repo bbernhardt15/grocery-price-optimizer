@@ -334,6 +334,23 @@ const GM_SEGMENT =
   /^(?:jewelry|fine jewelry|fashion jewelry|office supplies|office products|home improvement|personalized gifts|apparel|clothing|shoes|electronics|tvs?|video games?|toys|home decor|home décor|furniture|automotive|patio & garden|sports & outdoors|arts crafts & sewing|books|movies(?: & music)?|musical instruments|industrial & scientific|floral|tobacco|general merchandise)$/i;
 
 /**
+ * Walmart top-level departments that are not grocery and were leaking into
+ * Household because a leaf said Cleaners, Degreasers, or Water.
+ * Auto & Tires is the live taxonomy name. Tires, RV, outdoor/patio, and
+ * automotive chemicals are the same class. A whole segment only, so
+ * "Household Essentials" is untouched.
+ */
+const NON_GROCERY_BRANCH =
+  /^(?:auto(?:\s*&\s*tires)?|tires?(?:\s*&\s*wheels)?|wheels?\s*&\s*tires|automotive(?:\s+(?:chemicals?|cleaners?|care|accessories|degreasers?))?|rv|rvs|outdoor(?:\s+(?:living|patio))?|outdoors|patio(?:\s*&\s*garden)?|lawn\s*&\s*garden|camping(?:\s+gear)?)$/i;
+
+/**
+ * Automotive, tire, and RV products. A kitchen degreaser does not match.
+ * Checked against the path and the name so a misfiled cleaner still leaves Household.
+ */
+const AUTO_RV_TEXT =
+  /\b(?:auto\s*&\s*tires|automotive|automobiles?|engine\s+degreasers?|brake\s+cleaners?|carburetor\s+cleaners?|rv\s+waste\s*water|waste\s*water\s+treatments?|holding\s+tanks?|black\s+water|grey\s+water|gray\s+water)\b|\b(?:tires|rv)\b/i;
+
+/**
  * Seasonal, costume, pet-apparel, party, and decor leaves.
  * A whole segment or a phrase inside one segment. "Salad Dressings" does not match "dress".
  * These must not inherit Dairy & Eggs from an ancestor that says "Eggs".
@@ -370,6 +387,10 @@ function notGroceryLabel(categories: string[], name: string): string | null {
   const leaf = segments.at(-1) ?? "";
   const focus = `${leaf} ${name}`;
   const text = `${segments.join(" ")} ${name}`;
+  const auto = text.match(AUTO_RV_TEXT);
+  if (auto) {
+    return auto[0].toLowerCase().replace(/\s+/g, " ");
+  }
   if (/\btestosterone\b/i.test(name)) {
     return "testosterone";
   }
@@ -390,7 +411,7 @@ function notGroceryLabel(categories: string[], name: string): string | null {
   if (!industrialGrocery) {
     for (const segment of segments) {
       const trimmed = segment.trim();
-      if (GM_SEGMENT.test(trimmed) || MERCH_SEGMENT.test(trimmed)) {
+      if (GM_SEGMENT.test(trimmed) || MERCH_SEGMENT.test(trimmed) || NON_GROCERY_BRANCH.test(trimmed)) {
         return trimmed.toLowerCase();
       }
     }

@@ -1,0 +1,202 @@
+[
+  {
+    "storeName": "Kroger",
+    "url": "https://www.kroger.com/savings/cl/coupons/",
+    "label": "Kroger digital coupons",
+    "note": "Opens Kroger’s coupon page. You clip them there, on your shopper card. Grocery Gitter cannot clip them for you.",
+    "kind": "coupons",
+    "aliases": ["kroger"]
+  },
+  {
+    "storeName": "Walmart",
+    "url": "https://www.walmart.com/walmartcash",
+    "label": "Walmart Cash",
+    "note": "Opens Walmart Cash. Those offers come from Ibotta and are clipped on Walmart, not here.",
+    "kind": "coupons",
+    "aliases": ["walmart"]
+  },
+  {
+    "storeName": "Target",
+    "url": "https://www.target.com/circle",
+    "label": "Target Circle",
+    "note": "Opens Target Circle. You save the deals in Target’s app or on Target’s site.",
+    "kind": "coupons",
+    "aliases": ["target"]
+  },
+  {
+    "storeName": "Aldi",
+    "url": "https://www.aldi.us/store/aldi/pages/weekly-specials",
+    "label": "This week’s ALDI Finds",
+    "note": "Aldi does not offer digital coupons to clip. This opens this week’s ad.",
+    "kind": "weekly",
+    "aliases": ["aldi"]
+  },
+  {
+    "storeName": "Publix",
+    "url": "https://www.publix.com/savings/digital-coupons",
+    "label": "Publix digital coupons",
+    "note": "Opens Publix digital coupons. Clip them on your Publix account, then use your phone number at checkout.",
+    "kind": "coupons",
+    "aliases": ["publix"]
+  },
+  {
+    "storeName": "Meijer",
+    "url": "https://www.meijer.com/shopping/coupons.html",
+    "label": "Meijer mPerks coupons",
+    "note": "Opens Meijer coupons. Clip them to your mPerks account. Grocery Gitter cannot clip them for you.",
+    "kind": "coupons",
+    "aliases": ["meijer"]
+  },
+  {
+    "storeName": "H-E-B",
+    "url": "https://www.heb.com/digital-coupon/coupon-selection/all-coupons",
+    "label": "H-E-B digital coupons",
+    "note": "Opens H-E-B digital coupons. Clip them in the H-E-B app or on heb.com.",
+    "kind": "coupons",
+    "aliases": ["h e b", "heb"]
+  },
+  {
+    "storeName": "Albertsons",
+    "url": "https://www.albertsons.com/rewards/all-coupons",
+    "label": "Albertsons for U coupons",
+    "note": "Opens Albertsons for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["albertsons"]
+  },
+  {
+    "storeName": "Safeway",
+    "url": "https://www.safeway.com/rewards/all-coupons",
+    "label": "Safeway for U coupons",
+    "note": "Opens Safeway for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["safeway"]
+  },
+  {
+    "storeName": "Vons",
+    "url": "https://www.vons.com/rewards/all-coupons",
+    "label": "Vons for U coupons",
+    "note": "Opens Vons for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["vons"]
+  },
+  {
+    "storeName": "Jewel-Osco",
+    "url": "https://www.jewelosco.com/rewards/all-coupons",
+    "label": "Jewel-Osco for U coupons",
+    "note": "Opens Jewel-Osco for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["jewel osco"]
+  },
+  {
+    "storeName": "Acme",
+    "url": "https://www.acmemarkets.com/rewards/all-coupons",
+    "label": "Acme for U coupons",
+    "note": "Opens Acme for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["acme", "acme markets"]
+  },
+  {
+    "storeName": "Tom Thumb",
+    "url": "https://www.tomthumb.com/rewards/all-coupons",
+    "label": "Tom Thumb for U coupons",
+    "note": "Opens Tom Thumb for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["tom thumb"]
+  },
+  {
+    "storeName": "Randalls",
+    "url": "https://www.randalls.com/rewards/all-coupons",
+    "label": "Randalls for U coupons",
+    "note": "Opens Randalls for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["randalls"]
+  },
+  {
+    "storeName": "Pavilions",
+    "url": "https://www.pavilions.com/rewards/all-coupons",
+    "label": "Pavilions for U coupons",
+    "note": "Opens Pavilions for U coupons. Clip them on your for U account.",
+    "kind": "coupons",
+    "aliases": ["pavilions"]
+  },
+  {
+    "storeName": "Food Lion",
+    "url": "https://shop.foodlion.com/",
+    "label": "Food Lion",
+    "note": "We could not confirm a public Food Lion coupon page, so this opens Food Lion’s home page. Clip coupons in the Food Lion app.",
+    "kind": "home",
+    "aliases": ["food lion"]
+  },
+  {
+    "storeName": "Giant",
+    "url": "https://giantfood.com/savings/coupons/browse",
+    "label": "Giant Food coupons",
+    "note": "Opens Giant Food coupons. This is Giant Food, not Giant Eagle. Clip them on your Giant account.",
+    "kind": "coupons",
+    "aliases": ["giant", "giant food"]
+  },
+  {
+    "storeName": "Stop & Shop",
+    "url": "https://stopandshop.com/savings/coupons/browse",
+    "label": "Stop & Shop coupons",
+    "note": "Opens Stop & Shop coupons. Clip them on your Stop & Shop account.",
+    "kind": "coupons",
+    "aliases": ["stop and shop"]
+  },
+  {
+    "storeName": "Sprouts",
+    "url": "https://shop.sprouts.com/store/sprouts/pages/in-store-deals",
+    "label": "Sprouts digital coupons",
+    "note": "Opens Sprouts deals. Clip coupons in the Sprouts app or on this page, then scan your barcode at checkout.",
+    "kind": "coupons",
+    "aliases": ["sprouts", "sprouts farmers market"]
+  },
+  {
+    "storeName": "Winn-Dixie",
+    "url": "https://www.winndixie.com/coupons",
+    "label": "Winn-Dixie digital coupons",
+    "note": "Opens Winn-Dixie digital coupons. Clip them on your Winn-Dixie account.",
+    "kind": "coupons",
+    "aliases": ["winn dixie"]
+  },
+  {
+    "storeName": "Costco",
+    "url": "https://www.costco.com/whse-savings.html",
+    "label": "Costco Warehouse Savings",
+    "note": "Costco does not offer a public coupon clip page. This opens warehouse savings. A membership may be required.",
+    "kind": "deals",
+    "aliases": ["costco"]
+  },
+  {
+    "storeName": "Sam's Club",
+    "url": "https://www.samsclub.com/shop/savings",
+    "label": "Sam's Club savings",
+    "note": "Sam’s Club does not share a coupon clip page we can link. This opens Sam’s Club savings. A membership may be required.",
+    "kind": "deals",
+    "aliases": ["sams club"]
+  },
+  {
+    "storeName": "Whole Foods",
+    "url": "https://www.wholefoodsmarket.com/sales-flyer",
+    "label": "Whole Foods weekly sales",
+    "note": "Whole Foods does not share a coupon clip page we can link. This opens the weekly sales flyer.",
+    "kind": "weekly",
+    "aliases": ["whole foods", "whole foods market"]
+  },
+  {
+    "storeName": "Amazon Fresh",
+    "url": "https://www.amazon.com/",
+    "label": "Amazon",
+    "note": "Amazon Fresh does not share a coupon page we can link, so this opens Amazon’s home page.",
+    "kind": "home",
+    "aliases": ["amazon fresh"]
+  },
+  {
+    "storeName": "Giant Eagle",
+    "url": "https://www.gianteagle.com/coupons",
+    "label": "Giant Eagle coupons",
+    "note": "Opens Giant Eagle coupons. Clip them in the Giant Eagle app or on this page. This is not Giant Food.",
+    "kind": "coupons",
+    "aliases": ["giant eagle"]
+  }
+]

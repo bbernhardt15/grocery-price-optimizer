@@ -9,7 +9,7 @@ type Shelf = {
   subcategory?: string;
   size: string;
   storeBrand?: boolean;
-  offers: Array<{ store: string; price: number; onSale?: boolean }>;
+  offers: Array<{ store: string; price: number; onSale?: boolean; regularPrice?: number; saleEndsOn?: string }>;
 };
 
 function placeholder(departmentId: string, title: string): string {
@@ -166,7 +166,7 @@ const SHELVES: Shelf[] = [
     subcategory: "Eggs",
     size: "12 ct",
     storeBrand: true,
-    offers: [{ store: "Walmart", price: 2.14, onSale: true }],
+    offers: [{ store: "Walmart", price: 2.14, onSale: true, regularPrice: 2.64, saleEndsOn: "2026-11-08" }],
   },
   {
     name: "Large Eggs",
@@ -895,6 +895,8 @@ function toRecords(): RawCatalogRecord[] {
         subcategory: shelf.subcategory,
         imageUrls: [placeholder(shelf.departmentId, shelf.name)],
         onSale: Boolean(offer.onSale),
+        ...(offer.regularPrice != null ? { regularPrice: offer.regularPrice } : {}),
+        ...(offer.saleEndsOn ? { saleEndsOn: offer.saleEndsOn } : {}),
         availability: "unknown",
         priceSource: "seed",
         storeBrand: shelf.storeBrand,

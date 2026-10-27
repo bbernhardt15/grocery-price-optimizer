@@ -1,3 +1,4 @@
+import { mapToDepartment } from "../catalog/departments";
 import { krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
 import { Product } from "../models/Product";
 import { utcDay } from "./budget";
@@ -49,11 +50,48 @@ export type LookupPick = {
 type CandidateRow = {
   key: string;
   name: string;
+  brand?: string;
   upc?: string;
   departmentId?: string;
+  categoryPaths?: string[];
   matchWalmartVariant?: number;
   matchKrogerVariant?: number;
 };
+
+/**
+ * Brands Walmart sells that Kroger does not carry under that name.
+ * Looking them up spends a product call and a name search on a sure miss.
+ */
+const WALMART_ONLY_BRAND =
+  /^(?:great value|equate|marketside|parents choice|parent's choice|mainstays|ozark trail|hyper tough|super tech|onn|sams choice|sam's choice|freshness guaranteed|clear american|members mark|member's mark|ol roy|ol' roy|special kitty|george|athletic works|time and tru|wonder nation|no boundaries|terra & sky|pen\+gear|expert grill|blackweb|hart|world table)$/i;
+
+export function isWalmartOnlyBrand(brand: string | undefined): boolean {
+  const key = (brand ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, " ");
+  if (!key) {
+    return false;
+  }
+  return WALMART_ONLY_BRAND.test(key);
+}
+
+/**
+ * Why a Walmart master should not be sent to Kroger.
+ * Private label, general merchandise, and auto/RV/outdoor rows miss.
+ * Null means the row is still worth a lookup.
+ */
+export function krogerLookupBlock(row: { name: string; brand?: string; categoryPaths?: string[] }): string | null {
+  if (isWalmartOnlyBrand(row.brand)) {
+    return "walmart-only-brand";
+  }
+  const mapped = mapToDepartment(row.categoryPaths, row.name);
+  if (mapped.signal === "excluded") {
+    return mapped.reason ?? "non-grocery";
+  }
+  return null;
+}
 
 type DemandSets = {
   listKeys: string[];
@@ -77,22 +115,17 @@ function retryMs(): number {
 
 function dueClauses(side: Side, now: Date): Record<string, unknown>[] {
   const tried = side === "walmart" ? "matchWalmartAt" : "matchKrogerAt";
-  const variant = side === "walmart" ? "matchWalmartVariant" : "matchKrogerVariant";
   const has = side === "walmart" ? "krogerProductId" : "walmartItemId";
   const missing = side === "walmart" ? "walmartItemId" : "krogerProductId";
   const cutoff = new Date(now.getTime() - retryMs());
+  // Negative cache: a finished miss stores match*At and is not due again until
+  // the retry window, even if a variant index was left above zero. An in-progress
+  // variant (no timestamp yet) is still due, so the next GTIN can run immediately.
   return [
     { key: { $not: /^local:/ } },
     { [has]: { $type: "string", $ne: "" } },
     { $or: [{ [missing]: { $exists: false } }, { [missing]: null }, { [missing]: "" }] },
-    {
-      $or: [
-        { [variant]: { $gt: 0 } },
-        { [tried]: { $exists: false } },
-        { [tried]: null },
-        { [tried]: { $lte: cutoff } },
-      ],
-    },
+    { $or: [{ [tried]: { $exists: false } }, { [tried]: null }, { [tried]: { $lte: cutoff } }] },
   ];
 }
 
@@ -193,7 +226,7 @@ async function fetchRows(side: Side, now: Date, extra: Record<string, unknown>, 
     clauses.push({ key: { $nin: exclude } });
   }
   return CatalogMaster.find({ $and: clauses })
-    .select("key name upc departmentId matchWalmartVariant matchKrogerVariant")
+    .select("key name brand upc departmentId categoryPaths matchWalmartVariant matchKrogerVariant")
     .limit(BATCH)
     .lean<CandidateRow[]>();
 }
@@ -246,6 +279,10 @@ async function nextLookups(side: Side, now: Date, limit: number, dryRun: boolean
         continue;
       }
       seen.add(row.key);
+      if (side === "kroger" && krogerLookupBlock(row)) {
+        retire.push(row.key);
+        continue;
+      }
       const pick = toPick(side, row, pass.priority);
       if (!pick) {
         retire.push(row.key);

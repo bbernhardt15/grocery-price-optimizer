@@ -4,6 +4,19 @@ export type { RemovedItem, SavedListItem };
 
 const MAX_ITEMS = 100;
 const MAX_NAME = 120;
+const MAX_COUPONS = 40;
+const COUPON_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const COUPON_ID = /^[A-Za-z0-9:_-]{1,80}$/;
+
+export type SavedCoupon = {
+  id: string;
+  storeName: string;
+  lineId: string;
+  itemName: string;
+  kind: "dollars" | "percent";
+  amount: number;
+  expiresOn?: string;
+};
 
 export type SavedListWrite = {
   listId: string;
@@ -13,6 +26,8 @@ export type SavedListWrite = {
   items: SavedListItem[];
   removed: RemovedItem[];
   baseRevision: number | null;
+  /** Absent means "leave the stored coupons alone." An array replaces them. */
+  coupons?: SavedCoupon[];
 };
 
 export type PublicSavedList = {
@@ -21,6 +36,7 @@ export type PublicSavedList = {
   zip: string;
   alertsEnabled: boolean;
   items: SavedListItem[];
+  coupons: SavedCoupon[];
   revision: number;
   updatedAt: string | null;
 };
@@ -66,6 +82,44 @@ export function parseSavedItem(value: unknown): SavedListItem | null {
   return item;
 }
 
+export function parseSavedCoupon(value: unknown): SavedCoupon | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = cleanText(row.id, 80);
+  const storeName = cleanText(row.storeName, 80);
+  const lineId = cleanText(row.lineId, 80).replace(/\s+/g, " ");
+  const itemName = cleanText(row.itemName, MAX_NAME);
+  const kind = row.kind === "percent" ? "percent" : row.kind === "dollars" ? "dollars" : "";
+  const amount = typeof row.amount === "number" && Number.isFinite(row.amount) ? Math.round(row.amount * 100) / 100 : 0;
+  if (!COUPON_ID.test(id) || !storeName || !lineId || /[\u0000-\u001f<>]/.test(lineId) || !itemName || !kind || !(amount > 0)) return null;
+  if (kind === "percent" && amount > 100) return null;
+  if (kind === "dollars" && amount > 500) return null;
+  const expiresOn = typeof row.expiresOn === "string" && COUPON_DAY.test(row.expiresOn) ? row.expiresOn : "";
+  return {
+    id,
+    storeName,
+    lineId,
+    itemName,
+    kind,
+    amount,
+    ...(expiresOn ? { expiresOn } : {}),
+  };
+}
+
+export function parseSavedCoupons(value: unknown): SavedCoupon[] | { error: string } | undefined {
+  if (value == null) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_COUPONS) {
+    return { error: "coupons must be a list of at most 40 coupons." };
+  }
+  const coupons: SavedCoupon[] = [];
+  for (const entry of value) {
+    const coupon = parseSavedCoupon(entry);
+    if (!coupon) return { error: "Each coupon needs an item, a store, and an amount off." };
+    coupons.push(coupon);
+  }
+  return coupons;
+}
+
 export function parseSavedListWrite(body: unknown): SavedListWrite | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { error: "Send the saved list as a JSON object." };
@@ -104,6 +158,8 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
     return { error: "baseRevision must be the revision you last saved." };
   }
   const zip = cleanText(row.zip, 10);
+  const coupons = parseSavedCoupons(row.coupons);
+  if (coupons && "error" in coupons) return coupons;
   return {
     listId,
     listName: cleanText(row.listName, 80) || "My list",
@@ -112,6 +168,7 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
     items,
     removed,
     baseRevision,
+    ...(coupons ? { coupons } : {}),
   };
 }
 
@@ -149,6 +206,7 @@ export function toPublicSavedList(doc: {
   zip?: string;
   alertsEnabled?: boolean;
   items?: SavedListItem[];
+  coupons?: SavedCoupon[];
   revision: number;
   updatedAt?: Date;
 }): PublicSavedList {
@@ -158,6 +216,7 @@ export function toPublicSavedList(doc: {
     zip: doc.zip || "",
     alertsEnabled: doc.alertsEnabled === true,
     items: Array.isArray(doc.items) ? doc.items : [],
+    coupons: Array.isArray(doc.coupons) ? doc.coupons.map(parseSavedCoupon).filter((coupon): coupon is SavedCoupon => Boolean(coupon)) : [],
     revision: doc.revision,
     updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
   };
@@ -180,6 +239,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
       zip: write.zip,
       alertsEnabled: write.alertsEnabled,
       items,
+      coupons: write.coupons ?? [],
       removed: write.removed.slice(-MAX_ITEMS),
       revision: 1,
     });
@@ -202,6 +262,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
         zip: write.zip,
         alertsEnabled: write.alertsEnabled,
         items,
+        ...(write.coupons ? { coupons: write.coupons } : {}),
         removed: [...priorRemoved, ...write.removed].slice(-MAX_ITEMS),
         revision: current.revision + 1,
       },

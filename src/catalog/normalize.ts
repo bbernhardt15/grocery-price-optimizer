@@ -1,4 +1,5 @@
 import { formatUnitPrice, parsePackageSize } from "../packageSize";
+import { publishSale } from "../pricing/saleFacts";
 import { departmentById, mapToDepartment } from "./departments";
 import type {
   BrowseProduct,
@@ -320,6 +321,12 @@ export function offerFromRecord(record: RawCatalogRecord): {
     storeName,
     price: Math.round(record.price * 100) / 100,
     onSale: Boolean(record.onSale),
+    ...(publishSale({
+      price: record.price,
+      onSale: Boolean(record.onSale),
+      regularPrice: record.regularPrice,
+      saleEndsOn: record.saleEndsOn,
+    }) ?? {}),
     availability: availabilityOf(record.availability),
     priceSource: record.priceSource,
     ...(unit ?? {}),

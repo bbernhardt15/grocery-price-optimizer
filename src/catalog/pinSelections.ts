@@ -1,4 +1,5 @@
 import type { CatalogProduct, PriceSource } from "../optimizeGroceryList";
+import { publishSale } from "../pricing/saleFacts";
 import { parseGroceryUnit } from "../pricing/parseGroceryUnit";
 import { upcKey } from "./normalize";
 import { gapsForProduct } from "./substitutes";
@@ -48,6 +49,12 @@ function toOptimizerProduct(
     ...(offer.productId ? { productId: offer.productId } : {}),
     ...(offer.upc || product.upc ? { upc: offer.upc || product.upc } : {}),
     priceSource: optimizerSource(offer.priceSource),
+    ...(publishSale({
+      price: offer.price,
+      onSale: offer.onSale,
+      regularPrice: offer.regularPrice,
+      saleEndsOn: offer.saleEndsOn,
+    }) ?? {}),
     sourceQuery: meta.sourceQuery,
     ...(meta.pinned ? { pinned: true } : {}),
     ...(meta.offerRole ? { offerRole: meta.offerRole } : {}),

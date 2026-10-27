@@ -262,6 +262,57 @@ describe("walmart catalog walk", () => {
     assert.equal(leaves.find((leaf) => leaf.id === "candy")?.path, "Food/Seasonal/Halloween Candy");
   });
 
+  it("does not walk Auto & Tires, RV, outdoor, or automotive chemical leaves", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "auto",
+          name: "Auto & Tires",
+          path: "Auto & Tires",
+          children: [
+            { id: "auto-clean", name: "Automotive Cleaners", path: "Auto & Tires", children: [] },
+            { id: "degrease", name: "Degreasers", path: "Auto & Tires", children: [] },
+            {
+              id: "rv",
+              name: "RV",
+              path: "Auto & Tires",
+              children: [{ id: "rv-water", name: "Waste Water Treatment", path: "Auto & Tires", children: [] }],
+            },
+            { id: "tires", name: "Tires", path: "Auto & Tires", children: [] },
+          ],
+        },
+        {
+          id: "outdoor",
+          name: "Patio & Garden",
+          path: "Patio & Garden",
+          children: [{ id: "patio-clean", name: "Outdoor Cleaners", path: "Patio & Garden", children: [] }],
+        },
+        {
+          id: "chem",
+          name: "Automotive Chemicals",
+          path: "Automotive Chemicals",
+          children: [{ id: "chem-clean", name: "Cleaners", path: "Automotive Chemicals", children: [] }],
+        },
+        {
+          id: "home",
+          name: "Household Essentials",
+          path: "Household Essentials",
+          children: [
+            { id: "paper", name: "Paper Towels", path: "Household Essentials", children: [] },
+            { id: "laundry", name: "Laundry Detergent", path: "Household Essentials", children: [] },
+            { id: "trash", name: "Trash Bags", path: "Household Essentials", children: [] },
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(
+      leaves.map((leaf) => leaf.id).sort(),
+      ["laundry", "paper", "trash"]
+    );
+    assert.ok(leaves.every((leaf) => leaf.departmentId === "household"));
+    assert.equal(leaves.find((leaf) => leaf.id === "paper")?.path, "Household Essentials/Paper Towels");
+  });
+
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {
     assert.equal(walmartPagePath("milk", null), "/paginated/items?category=milk&count=25");
     assert.equal(

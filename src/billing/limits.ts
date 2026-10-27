@@ -8,6 +8,8 @@ export type PlanLimits = {
   priceAlerts: boolean;
   multiStore: boolean;
   cartHandoffs: boolean;
+  /** Coupons the shopper types in. Store coupon links stay free. */
+  ownCoupons: boolean;
 };
 
 function intEnv(name: string, fallback: number): number {
@@ -35,6 +37,7 @@ export function freeLimits(): PlanLimits {
     priceAlerts: boolEnv("PLAN_FREE_PRICE_ALERTS", false),
     multiStore: boolEnv("PLAN_FREE_MULTI_STORE", false),
     cartHandoffs: boolEnv("PLAN_FREE_CART_HANDOFFS", false),
+    ownCoupons: boolEnv("PLAN_FREE_OWN_COUPONS", false),
   };
 }
 
@@ -46,6 +49,7 @@ export function proLimits(): PlanLimits {
     priceAlerts: true,
     multiStore: true,
     cartHandoffs: true,
+    ownCoupons: true,
   };
 }
 
@@ -64,4 +68,5 @@ export const OPEN_LIMITS: PlanLimits = {
   priceAlerts: true,
   multiStore: true,
   cartHandoffs: true,
+  ownCoupons: true,
 };

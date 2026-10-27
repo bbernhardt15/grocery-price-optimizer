@@ -17,7 +17,18 @@ export const seedCatalog: CatalogProduct[] = [
 
   // Walmart
   { name: "Whole Milk", brand: "Great Value", storeName: "Walmart", price: 2.48, unit: "gal", normalizedUnit: "gal", size: "1 gal" },
-  { name: "Large Eggs", brand: "Great Value", storeName: "Walmart", price: 2.14, unit: "count", normalizedUnit: "count", size: "12 ct" },
+  {
+    name: "Large Eggs",
+    brand: "Great Value",
+    storeName: "Walmart",
+    price: 2.14,
+    unit: "count",
+    normalizedUnit: "count",
+    size: "12 ct",
+    onSale: true,
+    regularPrice: 2.64,
+    saleEndsOn: "2026-11-08",
+  },
   { name: "White Bread", brand: "Great Value", storeName: "Walmart", price: 1.28, unit: "oz", normalizedUnit: "oz" },
   { name: "Bananas", brand: "Fresh", storeName: "Walmart", price: 0.58, unit: "lbs", normalizedUnit: "lbs" },
   { name: "Boneless Chicken Breast", brand: "Marketside", storeName: "Walmart", price: 4.47, unit: "lbs", normalizedUnit: "lbs" },

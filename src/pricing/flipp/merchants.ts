@@ -43,6 +43,11 @@ export type FlippMerchantMapping = {
    * Not a cart fill.
    */
   searchUrl?: string;
+  /**
+   * The store's own coupon, rewards, or weekly-ad page. Not a scrape and not
+   * a cart fill. Shoppers clip coupons on that page.
+   */
+  couponUrl?: string;
   /** Club pricing. Membership may be required. No third-party cart write. */
   club?: boolean;
 };
@@ -56,6 +61,7 @@ type MerchantConfigRow = {
   exactName?: boolean;
   dealsOnly?: boolean;
   searchUrl?: string;
+  couponUrl?: string;
   club?: boolean;
 };
 
@@ -115,6 +121,18 @@ function loadMerchantConfig(): FlippMerchantMapping[] {
         throw new Error(`Flipp merchant config row ${storeName} searchUrl must be https`);
       }
     }
+    if (!row.couponUrl?.trim()) {
+      throw new Error(`Flipp merchant config row ${storeName} needs a couponUrl`);
+    }
+    let couponUrl: URL;
+    try {
+      couponUrl = new URL(row.couponUrl);
+    } catch {
+      throw new Error(`Flipp merchant config row ${storeName} couponUrl must be an https URL`);
+    }
+    if (couponUrl.protocol !== "https:" || couponUrl.href.includes("{q}")) {
+      throw new Error(`Flipp merchant config row ${storeName} couponUrl must be an https page, not a search template`);
+    }
     return {
       storeName,
       merchantIds: row.merchantIds,
@@ -124,6 +142,7 @@ function loadMerchantConfig(): FlippMerchantMapping[] {
       ...(row.exactName ? { exactName: true } : {}),
       ...(row.dealsOnly ? { dealsOnly: true } : {}),
       ...(row.searchUrl ? { searchUrl: row.searchUrl } : {}),
+      couponUrl: couponUrl.href,
       ...(row.club ? { club: true } : {}),
     };
   });

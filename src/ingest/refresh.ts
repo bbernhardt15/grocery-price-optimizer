@@ -1,5 +1,6 @@
 import { itemIsWatched } from "../alerts/compare";
 import { PriceWatch } from "../alerts/models";
+import { mapToDepartment } from "../catalog/departments";
 import { krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { utcDay } from "./budget";
@@ -38,6 +39,8 @@ type MasterRow = {
   name: string;
   upc?: string;
   krogerProductId?: string;
+  departmentId?: string;
+  categoryPaths?: string[];
 };
 
 type PriorityKeys = {
@@ -176,7 +179,9 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
 
 /**
  * Stale offers for one store, skipping general merchandise marked
- * refreshExcluded. Saved lists and shared lists come first, then popular
+ * refreshExcluded. A stale offer the rules mark excluded (auto, RV,
+ * outdoor, and the rest of non-grocery) is flagged refreshExcluded here so
+ * the next pass does not spend a call on it. Saved lists and shared lists come first, then popular
  * items, price watches, recent searches, merged products, and the oldest
  * stale offer.
  */
@@ -202,43 +207,67 @@ export async function nextRefreshPicks(
   const chosen: RefreshPick[] = [];
   const seen = new Set<string>();
   const skipIds: unknown[] = [];
-  for (const tier of tiers) {
-    if (chosen.length >= want) {
-      break;
+  const excludeIds: unknown[] = [];
+  const flushSkips = async () => {
+    if (skipIds.length > 0) {
+      await CatalogOffer.updateMany({ _id: { $in: skipIds } }, { $set: { refreshAttemptAt: now } });
+      skipIds.length = 0;
     }
-    const keys = tier.keys?.filter((key) => !seen.has(key));
-    const offers = await staleOffers(storeName, now, Math.max(want - chosen.length, 1) + 6, keys);
-    const masters = await CatalogMaster.find({ key: { $in: offers.map((offer) => offer.productKey) } })
-      .select("key name upc krogerProductId")
-      .lean<MasterRow[]>();
-    const byKey = new Map(masters.map((master) => [master.key, master]));
-    for (const offer of offers) {
-      if (chosen.length >= want) {
+    if (excludeIds.length > 0) {
+      await CatalogOffer.updateMany(
+        { _id: { $in: excludeIds } },
+        { $set: { refreshAttemptAt: now, refreshExcluded: true } }
+      );
+      excludeIds.length = 0;
+    }
+  };
+  for (const tier of tiers) {
+    let guard = 0;
+    while (chosen.length < want && guard < 40) {
+      guard += 1;
+      const keys = tier.keys?.filter((key) => !seen.has(key));
+      if (tier.keys && (!keys || keys.length === 0)) {
         break;
       }
-      if (seen.has(offer.productKey)) {
-        continue;
+      const offers = await staleOffers(storeName, now, Math.max(want - chosen.length, 1) + 6, keys);
+      if (offers.length === 0 || offers.every((offer) => seen.has(offer.productKey))) {
+        break;
       }
-      seen.add(offer.productKey);
-      const master = byKey.get(offer.productKey);
-      const code = master ? lookupCode(storeName, master) : null;
-      if (!master || !code) {
-        skipIds.push(offer._id);
-        continue;
+      const masters = await CatalogMaster.find({ key: { $in: offers.map((offer) => offer.productKey) } })
+        .select("key name upc krogerProductId categoryPaths")
+        .lean<MasterRow[]>();
+      const byKey = new Map(masters.map((master) => [master.key, master]));
+      for (const offer of offers) {
+        if (chosen.length >= want) {
+          break;
+        }
+        if (seen.has(offer.productKey)) {
+          continue;
+        }
+        seen.add(offer.productKey);
+        const master = byKey.get(offer.productKey);
+        const code = master ? lookupCode(storeName, master) : null;
+        const nongrocery = master ? mapToDepartment(master.categoryPaths, master.name).signal === "excluded" : false;
+        if (!master || !code || nongrocery) {
+          if (nongrocery) {
+            excludeIds.push(offer._id);
+          } else {
+            skipIds.push(offer._id);
+          }
+          continue;
+        }
+        chosen.push({
+          offerId: String(offer._id),
+          productKey: offer.productKey,
+          storeName,
+          name: master.name,
+          code,
+          locationId: offer.locationId ?? "",
+          priority: tier.priority,
+        });
       }
-      chosen.push({
-        offerId: String(offer._id),
-        productKey: offer.productKey,
-        storeName,
-        name: master.name,
-        code,
-        locationId: offer.locationId ?? "",
-        priority: tier.priority,
-      });
+      await flushSkips();
     }
-  }
-  if (skipIds.length > 0) {
-    await CatalogOffer.updateMany({ _id: { $in: skipIds } }, { $set: { refreshAttemptAt: now } });
   }
   return chosen;
 }

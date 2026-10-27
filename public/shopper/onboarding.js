@@ -1,10 +1,16 @@
 /** First-run welcome. The stored flag is "1" after Skip, Done, or Escape. */
 export const ONBOARDING_KEY = "gg-onboarding-done";
 
-const PICK_STEP = {
-  id: "pick",
-  title: "Pick items",
-  body: "Check groceries as you browse. Your list stays on this device.",
+const WELCOME_ADD = {
+  id: "add",
+  title: "Start with what you already buy",
+  body: "Buy again, tap a starter list, or browse the aisle. Your list stays on this device.",
+};
+
+const WELCOME_PLAN = {
+  id: "plan",
+  title: "We'll plan the trip",
+  body: "Grocery Gitter picks the lowest prices. You shop the list in the store.",
 };
 
 const SPLIT_OPEN = {
@@ -21,28 +27,14 @@ const SPLIT_FREE = {
 
 const CARTS_OPEN = {
   id: "carts",
-  title: "Send to store carts",
-  body: "Send each store’s items to its cart or a search page. You finish checkout there.",
+  title: "Shop each store's list",
+  body: "Each store gets a list. A cart button appears only when that store can take one. Otherwise you open the list there.",
 };
 
 const CARTS_FREE = {
   id: "carts",
   title: "Cart handoffs are in Pro",
   body: "The free plan shows the trip. Pro sends each store’s items to its cart or a search page. You finish checkout there.",
-};
-
-const ZIP_STEP = {
-  id: "zip",
-  kind: "zip",
-  title: "Your ZIP",
-  body: "A 5-digit ZIP finds nearby stores and this week’s ads. You can skip it.",
-};
-
-const KROGER_STEP = {
-  id: "kroger",
-  kind: "kroger",
-  title: "Connect Kroger",
-  body: "Optional. Sign in on Kroger so we can add items to your cart. We never see your password.",
 };
 
 /**
@@ -85,15 +77,12 @@ export function accountStepCopy(signedIn) {
 }
 
 /**
- * Welcome screens. The sign-in step is included only when accounts are configured.
- * @param {{ accountsEnabled?: boolean, signedIn?: boolean, billing?: { enforced?: boolean, pro?: boolean, limits?: { multiStore?: boolean, cartHandoffs?: boolean } } | null }} [options]
+ * Two welcome screens. Sign-in, ZIP, and Kroger stay out of this intro.
+ * Sign-in waits until a save or a cart send. Location waits for Find nearby stores.
+ * @param {{ accountsEnabled?: boolean, signedIn?: boolean, billing?: { enforced?: boolean, pro?: boolean, limits?: { multiStore?: boolean, cartHandoffs?: boolean } } | null }} [_options]
  */
-export function welcomeSteps(options = {}) {
-  const trip = tripStepCopy(options.billing);
-  const steps = [PICK_STEP, trip.split, trip.carts];
-  if (options.accountsEnabled) steps.push(accountStepCopy(Boolean(options.signedIn)));
-  steps.push(ZIP_STEP, KROGER_STEP);
-  return steps;
+export function welcomeSteps(_options = {}) {
+  return [WELCOME_ADD, WELCOME_PLAN];
 }
 
 /** Default tour: billing not enforced, accounts off. */
@@ -135,7 +124,7 @@ export function progressLabel(index, steps = ONBOARDING_STEPS) {
 /** @param {{ kind?: string } | null | undefined} step */
 export function primaryLabel(step) {
   if (step?.kind === "zip") return "Continue";
-  if (step?.kind === "kroger" || step?.kind === "account") return "Done";
+  if (step?.kind === "kroger" || step?.kind === "account" || step?.id === "plan") return "Done";
   return "Next";
 }
 

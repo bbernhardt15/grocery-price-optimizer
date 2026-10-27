@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { freeLimits, proLimits, withinCap } from "./limits";
 import { isProAccount } from "./entitlement";
-import { lockCartHandoffs } from "./applyPlan";
+import { entitlementPayload, lockCartHandoffs } from "./applyPlan";
 import { eventAction, presentedSecret, secretsEqual, targetsFor } from "./webhook";
 
 describe("plan limits", () => {
@@ -28,6 +28,8 @@ describe("plan limits", () => {
       assert.equal(free.priceAlerts, false);
       assert.equal(free.multiStore, false);
       assert.equal(free.cartHandoffs, false);
+      assert.equal(free.ownCoupons, false);
+      assert.equal(proLimits().ownCoupons, true);
       assert.equal(proLimits().sharedLists, 0);
       assert.equal(proLimits().multiStore, true);
       assert.equal(withinCap(1, 1), false);
@@ -75,6 +77,38 @@ describe("cart handoff lock", () => {
     assert.equal("url" in (line.offers?.[0] ?? {}), false);
     assert.equal(locked.stores[0].handoff?.action.type, "coming_soon");
     assert.equal("url" in (locked.stores[0].handoff?.action ?? {}), false);
+    const withCoupon = lockCartHandoffs({
+      stores: [
+        {
+          storeName: "Kroger",
+          items: [],
+          handoff: {
+            action: { type: "kroger_cart", label: "Add to Kroger", url: "https://www.kroger.com/cart" },
+            coupon: { url: "https://www.kroger.com/savings/cl/coupons/", label: "Kroger digital coupons" },
+          },
+        },
+      ],
+    });
+    const kept = withCoupon.stores[0].handoff?.coupon as { url?: string } | undefined;
+    assert.equal(kept?.url, "https://www.kroger.com/savings/cl/coupons/");
+  });
+
+  it("names own coupons as a free-plan limit only when billing is on", () => {
+    const open = entitlementPayload({
+      enforced: false,
+      plan: "free",
+      pro: false,
+      limits: { savedLists: 0, sharedLists: 0, priceAlerts: true, multiStore: true, cartHandoffs: true, ownCoupons: true },
+    });
+    assert.equal(open, null);
+    const free = entitlementPayload({
+      enforced: true,
+      plan: "free",
+      pro: false,
+      limits: freeLimits(),
+    });
+    assert.ok(free?.limited.includes("ownCoupons"));
+    assert.ok(free?.limited.includes("cartHandoffs"));
   });
 });
 

@@ -22,7 +22,11 @@ import type { RawCatalogRecord } from "../catalog/types";
  *
  * The public Affiliate introduction does not publish a numeric daily quota
  * (the Marketplace rate-limit tables are a different API). HTTP 429 is the
- * throttle signal. Budgets live in config.ts.
+ * throttle signal. Production returned 429 near 660 calls with a 5 second
+ * gap (2026-09-29) and near 1,137 calls with a 2 second gap (2026-09-25),
+ * so the crawler default stays 500 and the env value is clamped at 1,500.
+ * GET /items accepts up to 20 UPCs in one call (`upc` comma-separated, same
+ * cap as `ids`). Budgets live in config.ts.
  */
 
 export const WALMART_PAGE_COUNT = 25;
@@ -103,13 +107,15 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
 }
 
 /** Bump when grocery leaves change so a resume re-reads the Walmart tree. */
-export const WALMART_TAXONOMY_VERSION = 7;
+export const WALMART_TAXONOMY_VERSION = 8;
 
 /**
  * Crawl a leaf only when it maps to a grocery department.
  * General merchandise (jewelry, office, home improvement, electronics,
  * apparel, toys, pet accessories, health devices, and the rest of
  * Industrial & Scientific) stays out so the daily budget is not spent there.
+ * Auto & Tires, tires, RV, outdoor/patio, and automotive chemicals stay out
+ * too, including leaves named Cleaners or Degreasers. Those pages are not fetched.
  * Seasonal, costume, pet-apparel, party, and decor leaves do too, even when
  * they sit under a grocery ancestor such as Dairy, Eggs & Cheese.
  * A food leaf under Seasonal (Halloween candy, eggnog) still maps to its aisle.

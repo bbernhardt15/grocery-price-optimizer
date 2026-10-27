@@ -13,6 +13,7 @@ import {
   priceSourceLabel,
   type HandoffTier,
 } from "./storeHandoffConfig";
+import { publicCouponLink, type StoreCouponLink } from "./coupons/pages";
 
 export type { HandoffTier } from "./storeHandoffConfig";
 
@@ -68,6 +69,11 @@ export type StoreHandoff = {
   subtotal: number;
   items: HandoffItem[];
   action: StoreHandoffAction;
+  /**
+   * The store's own coupon or deals page. Stays on the card even when cart
+   * links are held for Pro. Grocery Gitter does not clip these coupons.
+   */
+  coupon?: StoreCouponLink;
 };
 
 /** What the shopper's device needs to rebuild cart links after a move. */
@@ -602,6 +608,7 @@ export function buildStoreHandoff(
     action = partnerSearchAction(group.storeName, items);
   }
 
+  const coupon = publicCouponLink(group.storeName);
   return {
     storeName: group.storeName,
     tier,
@@ -610,6 +617,7 @@ export function buildStoreHandoff(
     subtotal: group.subtotal,
     items,
     action,
+    ...(coupon ? { coupon } : {}),
   };
 }
 

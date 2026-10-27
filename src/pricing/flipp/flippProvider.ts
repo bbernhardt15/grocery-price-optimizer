@@ -74,6 +74,8 @@ export class FlippDealsProvider implements StorePricingProvider {
           normalizedUnit: unit,
           priceSource: "weekly_ad" as const,
           onSale: true,
+          ...(deal.regularPrice != null ? { regularPrice: deal.regularPrice } : {}),
+          ...(deal.saleEndsOn ? { saleEndsOn: deal.saleEndsOn } : {}),
         };
       });
     } catch (error) {

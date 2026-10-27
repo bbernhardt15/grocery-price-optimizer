@@ -1,6 +1,7 @@
 import { upcKey } from "./catalog/normalize";
 import { mapToDepartment } from "./catalog/departments";
 import { parsePackageSize } from "./packageSize";
+import { publishSale } from "./pricing/saleFacts";
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
 import { compareProductOffers, unitPriceForProduct } from "./productMatch";
@@ -43,6 +44,10 @@ export type CatalogProduct = {
   imageUrls?: string[];
   categories?: string[];
   onSale?: boolean;
+  /** Higher price from the same source (Kroger regular, Walmart msrp, flyer original). */
+  regularPrice?: number;
+  /** YYYY-MM-DD when the source sent a sale end date. */
+  saleEndsOn?: string;
   availability?: "in_stock" | "out_of_stock" | "unknown";
 };
 
@@ -82,6 +87,12 @@ export type PickedItem = {
   department?: string;
   /** Aisle or subcategory when one is known. */
   aisle?: string;
+  /** True only when this line's price source says the selling price is a sale. */
+  onSale?: boolean;
+  /** Old price when the same source sent one higher than `price`. */
+  regularPrice?: number;
+  /** YYYY-MM-DD when the source sent a sale end date. */
+  saleEndsOn?: string;
   /** Cheapest offer at each store that carries this line, including the winner. */
   offers?: ItemOffer[];
 };
@@ -103,6 +114,9 @@ export type ItemOffer = {
   aisle?: string;
   /** Filled in when the trip is enriched with handoff links. */
   url?: string;
+  onSale?: boolean;
+  regularPrice?: number;
+  saleEndsOn?: string;
   /** `swap` when this store does not carry the chosen item. */
   matchKind?: "exact" | "swap" | "substitute";
   swapNote?: string;
@@ -209,6 +223,10 @@ function rankedMatches(line: GroceryLine, catalog: CatalogProduct[]): CatalogPro
   // a different pack look like an exact size match and let it beat a cheaper item.
   matches.sort((a, b) => compareProductOffers(line.name, a, b));
   return matches;
+}
+
+function saleFields(product: Pick<CatalogProduct, "price" | "onSale" | "regularPrice" | "saleEndsOn">) {
+  return publishSale(product) ?? {};
 }
 
 function storeKey(name: string): string {
@@ -361,6 +379,7 @@ function toItemOffer(
     ...(product.priceSource ? { priceSource: product.priceSource } : {}),
     department: mapped.departmentName,
     ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    ...saleFields(product),
     ...(extra?.matchKind ? { matchKind: extra.matchKind } : {}),
     ...(extra?.swapNote ? { swapNote: extra.swapNote } : {}),
     ...(extra?.substitutedFor ? { substitutedFor: extra.substitutedFor } : {}),
@@ -420,6 +439,7 @@ function toPicked(
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
     department: mapped.departmentName,
     ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    ...saleFields(best),
     offers,
     ...(extra.exactStore ? { exactStore: extra.exactStore } : {}),
     ...(extra.matchKind

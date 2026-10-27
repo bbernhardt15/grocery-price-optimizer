@@ -104,6 +104,23 @@ const savedListSchema = new Schema(
       default: [],
     },
     revision: { type: Number, required: true, default: 0 },
+    coupons: {
+      type: [
+        new Schema(
+          {
+            id: { type: String, required: true },
+            storeName: { type: String, required: true },
+            lineId: { type: String, required: true },
+            itemName: { type: String, required: true },
+            kind: { type: String, enum: ["dollars", "percent"], required: true },
+            amount: { type: Number, required: true },
+            expiresOn: { type: String },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

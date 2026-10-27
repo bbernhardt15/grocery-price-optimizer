@@ -1,6 +1,7 @@
 import { fetchMatchingProductsForQuery } from "./fetchMatchingProducts";
 import { Product } from "./models/Product";
 import type { CatalogProduct, PriceSource } from "./optimizeGroceryList";
+import { publishSale } from "./pricing/saleFacts";
 import { parseGroceryList } from "./parseGroceryLine";
 import {
   competingStoreNames,
@@ -63,8 +64,17 @@ function toCatalogProduct(doc: {
   lastUpdated?: Date;
   updatedAt?: Date;
   priceSource?: "live" | "weekly_ad" | "seed" | null;
+  onSale?: boolean | null;
+  regularPrice?: number | null;
+  saleEndsOn?: string | null;
 }): CatalogProduct {
   const stored = storedPriceSource(doc.priceSource);
+  const sale = publishSale({
+    price: doc.price,
+    onSale: doc.onSale === true,
+    regularPrice: doc.regularPrice ?? undefined,
+    saleEndsOn: doc.saleEndsOn ?? undefined,
+  });
   return {
     name: doc.name,
     brand: doc.brand,
@@ -79,6 +89,7 @@ function toCatalogProduct(doc: {
     lastUpdated: doc.lastUpdated,
     updatedAt: doc.updatedAt,
     priceSource: stored,
+    ...(sale ?? {}),
   };
 }
 
@@ -147,7 +158,18 @@ export async function upsertLiveProducts(
           lastUpdated: now,
           updatedAt: now,
           priceSource,
+          onSale: Boolean(product.onSale),
+          ...(product.onSale && product.regularPrice != null ? { regularPrice: product.regularPrice } : {}),
+          ...(product.onSale && product.saleEndsOn ? { saleEndsOn: product.saleEndsOn } : {}),
         },
+        ...(product.onSale && product.regularPrice != null && product.saleEndsOn
+          ? {}
+          : {
+              $unset: {
+                ...(product.onSale && product.regularPrice != null ? {} : { regularPrice: "" }),
+                ...(product.onSale && product.saleEndsOn ? {} : { saleEndsOn: "" }),
+              },
+            }),
       },
       {
         upsert: true,

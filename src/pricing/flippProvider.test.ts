@@ -124,12 +124,71 @@ describe("FlippDealsProvider", () => {
     assert.equal(products[0].price, 2.99);
     assert.equal(products[0].priceSource, "weekly_ad");
     assert.equal(products[0].onSale, true);
+    assert.equal(products[0].regularPrice, undefined);
+    assert.equal(products[0].saleEndsOn, "2099-12-31");
     assert.equal(products[0].locationId, "45202");
     assert.equal(products[0].productId, "1039529649");
     assert.equal(products[0].unit, "gal");
     assert.match(calls[0], /postal_code=45202/);
     assert.equal(calls.some((url) => url.includes("AND")), false);
     assert.equal(weeklyAdNameMatches("Milk-Bone Comfort Chews", "milk"), false);
+  });
+
+  it("keeps a flyer was-price and end date, and ignores BOGO text", async () => {
+    process.env.FLIPP_ENABLED = "true";
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.startsWith(`${FLIPP_FLYERS}?`)) {
+        return Response.json({
+          flyers: [{ id: 77, merchant: "ALDI", merchant_id: 2353, name: "Weekly Ad" }],
+        });
+      }
+      if (url.startsWith(`${FLIPP_FLYERS}/77`)) {
+        return Response.json({
+          items: [
+            flippItem({
+              name: "Oreo Cookies",
+              current_price: 3.29,
+              original_price: 4.19,
+              valid_to: "2026-11-08T23:59:00-05:00",
+              flyer_item_id: 1,
+            }),
+            flippItem({
+              name: "Coca-Cola",
+              current_price: 1.25,
+              pre_price_text: "BOGO 25% Off",
+              flyer_item_id: 2,
+            }),
+            flippItem({
+              name: "Ritz Crackers",
+              current_price: 2.5,
+              pre_price_text: "2 for $5",
+              flyer_item_id: 3,
+            }),
+            flippItem({
+              name: "Chex Mix",
+              current_price: 2.5,
+              pre_price_text: "$3.49",
+              flyer_item_id: 4,
+            }),
+          ],
+        });
+      }
+      return Response.json({ items: [] });
+    };
+
+    const provider = new FlippDealsProvider("Aldi");
+    const oreo = await provider.searchProducts("Oreo", { zipCode: "45202" });
+    const cola = await provider.searchProducts("Coca-Cola", { zipCode: "45202" });
+    const ritz = await provider.searchProducts("Ritz", { zipCode: "45202" });
+    const chex = await provider.searchProducts("Chex", { zipCode: "45202" });
+    assert.equal(oreo[0].onSale, true);
+    assert.equal(oreo[0].regularPrice, 4.19);
+    assert.equal(oreo[0].saleEndsOn, "2026-11-08");
+    assert.equal(cola[0].onSale, true);
+    assert.equal(cola[0].regularPrice, undefined);
+    assert.equal(ritz[0].regularPrice, undefined);
+    assert.equal(chex[0].regularPrice, 3.49);
   });
 
   it("maps Target circular hits and skips items without a numeric price", async () => {

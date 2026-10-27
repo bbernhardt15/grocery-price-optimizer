@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
-import { effectiveShares, lookupCallsForTick, tickCallSplit } from "./config";
+import { effectiveShares, lookupCallsForTick, nextTickTurn, tickCallSplit } from "./config";
 
 describe("lookup share", () => {
   it("gives lookups a fraction of the tick and at least one call when the share is above zero", () => {
@@ -35,8 +35,13 @@ describe("lookup share", () => {
 
     const highWalmart = effectiveShares({ staleRatio: 0.34, lookupShare: 0.5, refreshShare: 0.3 });
     assert.equal(highWalmart.mode, "refresh");
+    assert.equal(highWalmart.refreshFirst, true);
     assert.equal(highWalmart.lookupShare, 0.2);
-    assert.equal(highWalmart.refreshShare, 0.6);
+    assert.equal(highWalmart.refreshShare, 0.8);
+    const walmartTick = tickCallSplit(4, highWalmart.lookupShare, highWalmart.refreshShare, true);
+    assert.equal(walmartTick.discovery, 0);
+    assert.equal(walmartTick.refresh, 3);
+    assert.equal(walmartTick.lookup, 1);
 
     const low = effectiveShares({ staleRatio: 0.1, lookupShare: 0.5, refreshShare: 0.6 });
     assert.equal(low.mode, "discover");
@@ -60,6 +65,35 @@ describe("lookup share", () => {
     const allLookup = effectiveShares({ staleRatio: 0.5, lookupShare: 1, refreshShare: 0.6 });
     assert.equal(allLookup.lookupShare, 1);
     assert.equal(allLookup.refreshShare, 0);
+  });
+
+  it("refreshes before crawling while stale, and gives unused lookup calls back to refresh", () => {
+    const base = {
+      lookupPending: true,
+      refreshPending: true,
+      lookupsDone: 0,
+      lookupBudget: 1,
+      refreshesDone: 0,
+      refreshBudget: 3,
+    };
+    assert.equal(nextTickTurn({ ...base, refreshFirst: true }), "refresh");
+    assert.equal(
+      nextTickTurn({ ...base, refreshFirst: true, refreshesDone: 3 }),
+      "lookup"
+    );
+    assert.equal(
+      nextTickTurn({ ...base, refreshFirst: true, lookupPending: false, refreshesDone: 3 }),
+      "refresh"
+    );
+    assert.equal(
+      nextTickTurn({ ...base, refreshFirst: true, refreshPending: false }),
+      "lookup"
+    );
+    assert.equal(
+      nextTickTurn({ ...base, refreshFirst: true, lookupPending: false, refreshPending: false }),
+      "discover"
+    );
+    assert.equal(nextTickTurn({ ...base, refreshFirst: false, lookupBudget: 2, refreshBudget: 1 }), "lookup");
   });
 });
 
