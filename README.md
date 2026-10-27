@@ -2,7 +2,7 @@
 
 The product is **Grocery Gitter**. This GitHub repository’s slug remains `grocery-price-optimizer` (npm package id: `grocery-list-optimizer`).
 
-Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store so you can actually buy the split cart. The shopper UI in `public/` is a mobile-first browse app. On a phone the trip is three steps: **Add items**, **See your plan**, and **Shop**. A step bar and a bottom plan bar stay in thumb reach. The plan uses plain language and about-prices. In the store, items are grouped by store and then by aisle, and the last plan stays on the phone when the connection drops.
+Node.js Express backend (TypeScript) that maps each grocery item to the store selling it at the lowest price, then groups the shopping trip by store so you can actually buy the split cart. The shopper UI in `public/` is a mobile-first browse app. On a phone the trip is three steps: **Add items**, **Your plan**, and **In the store**. One bottom dock stays in thumb reach: Add, Plan, and Shop, plus the item count and about-total. In the store that dock becomes the “left / Done” bar. The plan uses plain language and about-prices. In the store, items are grouped by store and then by aisle, and the last plan stays on the phone when the connection drops.
 
 ## Browse the shelves
 
@@ -11,16 +11,16 @@ Open `/` and shop by department instead of typing a list first.
 - **Departments** — Produce, Dairy & Eggs, Meat & Seafood, Bakery, Deli, Pantry, Frozen, Snacks, Beverages, Breakfast, Baby, Household, Personal Care, Pet
 - **Product cards** — image (or a generated placeholder), name, size, best price and store, sale badge, checkbox, quantity stepper
 - **Search** — debounced typeahead over the cached catalog, with the match highlighted and brand, department, size, and price when the shelf has them. Arrow keys, Enter, and Escape work. Submitting search refreshes from configured providers (cached)
-- **Sort / filter** — relevance, lowest price, lowest unit price, name, on sale first; department, store, brand, size class, price range, on sale, store brand
+- **Refine** — a Suggested shelf (widely stocked, then name — not lowest price), plus lowest price, best unit price, name, and on sale. Narrow by brand, on sale, or budget-friendly brands. Department chips cover the aisle. The app chooses the store, so store names are not a catalog filter.
 - **My list** — saved in the browser, with a live estimated total and a savings meter versus the most expensive store that can fill the list
 - **Price alerts** — opt in on My list, or on a single item. A badge and an Alerts panel show when the best price drops. See [Price drop alerts](#price-drop-alerts)
 - **Theme** — light, dark, or match this device. The choice is remembered in the browser and applied before the first paint so dark mode does not flash pure black
 - **Substitutes** — when a UPC is missing at a store, the closest same-department item is labeled **Substitute**, never as an exact match. **Allow substitutes in the trip plan** lets that item compete on price
 - **Three steps** — Add items (buy again, a starter list, or the shelves), see the plan, then shop it in the store. The planner picks the cheapest store for each item. Move a line or set a preferred store from **Customize**. A swap is a quiet line on the plan (“We swapped milk for the store brand at Kroger”) with **Change**. The savings card compares one store with the split plan and says the figures are estimates. Fewer stops shows up only when the price difference is about $2 or less, and only as an easier option.
-- **Phone chrome** — One Settings button. The header stays short enough that the first product is on screen in portrait and landscape. Department chips show “More” while they still scroll. Quantity and Add stick to the bottom of a tall product card. Price watch on a list row stays behind **Price watch**. Sheets sit above the keyboard and dialogs keep the status-bar inset. Shoppers do not see setup notes (env vars, feed docs, or a coverage console).
+- **Phone chrome** — The header is the logo, the step title, and search. ZIP, alerts, dark mode, Settings, Help, and **Refresh prices** live in a menu drawer. A dot on the menu means unread price alerts. Department chips show “More” while they still scroll. Quantity and Add sit with the product name. Price watch on a list row stays behind **Price watch**. Sheets sit above the keyboard and dialogs keep the status-bar inset. One bottom dock (steps plus the plan summary, or the in-store bar on Shop) keeps the last card reachable. Pull down on the shelf, or use Refresh prices, to load prices again. After Kroger connects, the plan shows **Kroger connected**, **Send to Kroger cart**, and a link to the Kroger cart. Shoppers do not see setup notes (env vars, feed docs, or a coverage console).
 - **In the store** — big rows to check off, grouped by store and then aisle. The screen stays on when the phone allows a wake lock. The last plan is kept on the device (`gg-last-trip`) so it still opens offline. **Not here** offers another pack that is already priced.
 - **Plan the trip** — `POST /api/optimize-list` with the selected `catalogId`s. Checkout handoffs are unchanged (Kroger, Walmart add-to-cart, Instacart when configured). Sign-in waits until you save a list or send a cart. Location is asked only after **Find nearby stores**, not at launch.
-- **ZIP** — remembered in `localStorage`
+- **ZIP** — remembered in `localStorage`. On a phone it lives in the menu, with a short place line such as Cincinnati 45103. The planner opens that field when a ZIP is missing.
 
 `GET /api/search-catalog` (FatSecret autocomplete) still works. The browse API is separate:
 
@@ -307,7 +307,7 @@ The source mark is `assets/logo.svg` (dark canvas `#1c221e`). `npm run assets:ge
 
 ## What it includes
 
-- **Browse app** — department shelves, search, filters, My list, savings meter, then **Plan the trip** (`15 Kroger + 5 Walmart + 10 Target`) with **Live shelf price** / **Weekly ad** labels and a cart, link, or list handoff per store
+- **Browse app** — department shelves, search, Refine, My list, savings meter, then **Plan the trip** (`15 Kroger + 5 Walmart + 10 Target`) with **Live shelf price** / **Weekly ad** labels and a cart, link, or list handoff per store
 - **Product** Mongoose schema: `name`, `brand`, `storeName`, `locationId`, `productId`, `upc`, `price`, `size` (optional retailer package text), `unit`, `normalizedUnit`, `priceSource` (`live` \| `weekly_ad` \| `seed`), `lastUpdated`, `updatedAt`
 - **`optimizeGroceryList`** — pure function that picks one product per item (the product itself, then the fair package price) and groups by `storeName`
 - **`storeHandoff`** — attaches checkout actions (Kroger search / optional cart OAuth, Walmart add-to-cart deep link or search, Target search)

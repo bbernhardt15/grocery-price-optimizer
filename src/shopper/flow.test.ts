@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { FLOW_STEPS, nextFlowStep, planBarCopy, readFlowStep, shouldAskToSignIn } from "../../public/shopper/flow.js";
+import { FLOW_STEPS, bottomChrome, nextFlowStep, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "../../public/shopper/flow.js";
 
 const root = path.resolve(__dirname, "../..");
 
@@ -10,8 +10,15 @@ describe("three-step flow", () => {
   it("stays on add, plan, and shop", () => {
     assert.deepEqual(
       FLOW_STEPS.map((step) => step.label),
-      ["Add items", "See your plan", "Shop"]
+      ["Add", "Plan", "Shop"]
     );
+    assert.equal(stepTitle("add"), "Add items");
+    assert.equal(stepTitle("plan"), "Your plan");
+    assert.equal(stepTitle("shop"), "In the store");
+    assert.equal(bottomChrome("add"), "steps");
+    assert.equal(bottomChrome("plan"), "steps");
+    assert.equal(bottomChrome("shop"), "shop");
+    assert.equal(bottomChrome("nope"), "steps");
     assert.equal(readFlowStep("shop"), "shop");
     assert.equal(readFlowStep("nope"), "add");
     assert.equal(nextFlowStep("add"), "plan");
@@ -28,7 +35,7 @@ describe("three-step flow", () => {
 
     const add = planBarCopy({ step: "add", itemCount: 3, total: 12.5 });
     assert.equal(add.countLabel, "3 items");
-    assert.equal(add.totalLabel, "about $12.50");
+    assert.equal(add.totalLabel, "$12.50");
     assert.equal(add.button, "See your plan");
     assert.equal(add.enabled, true);
 
@@ -46,7 +53,7 @@ describe("three-step flow", () => {
     const shop = planBarCopy({ step: "shop", itemCount: 4, left: 1, total: 9, complete: false });
     assert.equal(shop.countLabel, "1 left");
     assert.equal(shop.button, "Done");
-    assert.equal(shop.enabled, false);
+    assert.equal(shop.enabled, true);
 
     const done = planBarCopy({ step: "shop", itemCount: 4, left: 0, total: 9, complete: true });
     assert.equal(done.countLabel, "All checked");
@@ -65,10 +72,32 @@ describe("three-step flow", () => {
   it("puts the step bar and the plan bar in the page, and does not ask for location on launch", () => {
     const html = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
     const app = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
+    assert.match(html, /id="bottom-dock"/);
     assert.match(html, /id="step-bar"/);
+    assert.match(html, /id="shop-bar"/);
+    assert.match(html, /aria-label="Add items">Add</);
+    assert.match(html, /aria-label="Your plan">Plan</);
+    assert.match(html, /aria-label="In the store">Shop</);
     assert.match(html, /Add items/);
     assert.match(html, /See your plan/);
     assert.match(html, /id="bar-primary"/);
+    assert.match(html, /id="shop-done"/);
+    assert.equal(html.includes('id="filter-store"'), false);
+    assert.equal(html.includes("Lowest price\" selected"), false);
+    assert.match(html, /id="sort"[^>]*>\s*<option value="relevance" selected>Suggested/);
+    assert.match(html, />Refine</);
+    assert.match(html, /Budget-friendly brands/);
+    assert.match(html, /id="menu-open"/);
+    assert.match(html, /id="app-drawer"/);
+    assert.match(html, /id="refresh-prices"/);
+    assert.match(html, /Refresh prices/);
+    assert.match(html, /id="kroger-card"/);
+    assert.match(html, /Kroger connected/);
+    assert.match(html, /Send to Kroger cart/);
+    assert.match(html, /https:\/\/www\.kroger\.com\/cart/);
+    assert.match(html, /id="shop-status"/);
+    assert.match(app, /parseKrogerReturn/);
+    assert.match(app, /releasePageForTaps/);
     assert.match(html, /id="find-stores"/);
     assert.match(html, /Find nearby stores/);
     assert.match(html, /id="account-ask"/);

@@ -3,17 +3,33 @@
  * The sticky bar keeps one primary action for the step you're on.
  */
 
-import { formatMoney } from "./savingsMeter.js";
+import { priceFigure } from "./calmPlan.js";
 
 export const FLOW_STEPS = [
-  { id: "add", label: "Add items" },
-  { id: "plan", label: "See your plan" },
-  { id: "shop", label: "Shop" },
+  { id: "add", label: "Add", title: "Add items" },
+  { id: "plan", label: "Plan", title: "Your plan" },
+  { id: "shop", label: "Shop", title: "In the store" },
 ];
 
 /** @param {string | null | undefined} id */
 export function readFlowStep(id) {
   return FLOW_STEPS.some((step) => step.id === id) ? id : "add";
+}
+
+/** Header title for the step. The bar uses the short label. */
+export function stepTitle(id) {
+  const step = FLOW_STEPS.find((row) => row.id === readFlowStep(id));
+  return step?.title || "Add items";
+}
+
+/**
+ * One bottom area. Add and Plan share the step dock.
+ * The in-store bar is only the Shop step.
+ * @param {string | null | undefined} id
+ * @returns {"steps" | "shop"}
+ */
+export function bottomChrome(id) {
+  return readFlowStep(id) === "shop" ? "shop" : "steps";
 }
 
 /** @param {string | null | undefined} id */
@@ -39,7 +55,7 @@ export function planBarCopy(input = {}) {
     else countLabel = left === 1 ? "1 left" : `${left} left`;
   }
   const amount = Number(input.total);
-  const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? `about ${formatMoney(amount)}` : "";
+  const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
   let button = "See your plan";
   let enabled = count > 0 && !input.planning;
   if (step === "plan") {
@@ -48,7 +64,8 @@ export function planBarCopy(input = {}) {
     if (!input.hasPlan) enabled = count > 0 && !input.planning;
   } else if (step === "shop") {
     button = "Done";
-    enabled = Boolean(input.complete);
+    // A disabled Done swallows the tap. Incomplete trips still respond.
+    enabled = count > 0;
   }
   return { step, countLabel, totalLabel, button, enabled };
 }

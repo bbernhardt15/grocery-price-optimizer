@@ -143,15 +143,29 @@ function parseStartBody(body: unknown): {
 
 const RETURN_MESSAGE_MAX = 240;
 
-/** Same-origin path the shopper app reads to toast the cart result. */
-function shopperReturnPath(kind: "added" | "error", message: string): string {
+/** Same-origin path the shopper app reads to toast the cart result and pick a step. */
+function shopperReturnPath(
+  kind: "added" | "error" | "connected",
+  message: string,
+  step?: "plan" | "shop"
+): string {
   const clean = message
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, RETURN_MESSAGE_MAX);
   const params = new URLSearchParams({ kroger: kind, message: clean });
+  if (step) params.set("step", step);
   return `/?${params.toString()}`;
+}
+
+function returnStepFor(
+  pending: { purpose?: string; items: unknown[] } | undefined,
+  fallback: "plan" | "shop" = "plan"
+): "plan" | "shop" {
+  if (!pending) return fallback;
+  if (pending.purpose === "connect" || pending.items.length === 0) return "plan";
+  return "shop";
 }
 
 function searchUrlForLine(item: KrogerCartLine): string {
@@ -406,7 +420,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
       htmlPage(
         "Kroger OAuth is not configured",
         `<p class="status error">Set KROGER_REDIRECT_URI on Railway to the exact HTTPS callback URL registered on your Kroger developer app.</p>`,
-        shopperReturnPath("error", "Kroger cart sign-in is not set up. Nothing was added to your cart.")
+        shopperReturnPath("error", "Kroger cart sign-in is not set up. Nothing was added to your cart.", "plan")
       )
     );
     return;
@@ -426,7 +440,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
          ${fallbackList}`,
         shopperReturnPath(
           "error",
-          "Kroger login was not completed. Nothing was added to your cart. Use Open at Kroger from your trip plan."
+          "Kroger login was not completed. Nothing was added to your cart. Use Open at Kroger from your trip plan.",
+          returnStepFor(pending, "plan")
         )
       )
     );
@@ -439,7 +454,11 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
         "Missing OAuth code",
         `<p class="status error">Kroger did not return an authorization code. Nothing was added to a cart.</p>
          ${fallbackList}`,
-        shopperReturnPath("error", "Kroger did not return a login code. Nothing was added to your cart.")
+        shopperReturnPath(
+          "error",
+          "Kroger did not return a login code. Nothing was added to your cart.",
+          returnStepFor(pending, "plan")
+        )
       )
     );
     return;
@@ -450,7 +469,7 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
       htmlPage(
         "Kroger cart session expired",
         `<p class="status error">Start again from <strong>Send to Kroger cart</strong> on the trip plan. Signed cart state is valid for about 15 minutes.</p>`,
-        shopperReturnPath("error", "That Kroger cart session expired. Start again from Send to Kroger cart.")
+        shopperReturnPath("error", "That Kroger cart session expired. Start again from Send to Kroger cart.", "plan")
       )
     );
     return;
@@ -467,7 +486,11 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
         `<p class="status error">${escapeHtml(message)}</p>
          <p>The Cart API was not called. Confirm the redirect URI matches KROGER_REDIRECT_URI (including https and hostname) and that the Kroger app is allowed to request <code>cart.basic:write</code>.</p>
          ${fallbackList}`,
-        shopperReturnPath("error", `Could not complete Kroger login. Nothing was added to your cart. ${message}`)
+        shopperReturnPath(
+          "error",
+          `Could not complete Kroger login. Nothing was added to your cart. ${message}`,
+          returnStepFor(pending, "plan")
+        )
       )
     );
     return;
@@ -477,10 +500,17 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
   await rememberAccountKroger(res, config, token);
 
   if (pending.purpose === "connect" || pending.items.length === 0) {
+    const back = shopperReturnPath(
+      "connected",
+      "Kroger connected. Send items from your plan, or open your Kroger cart.",
+      "plan"
+    );
     res.send(
       htmlPage(
-        "Kroger is connected",
-        `<p class="status">You’re signed in with Kroger. Nothing was added to a cart. Return to ${PRODUCT_NAME} and plan a trip when you want items sent.</p>`
+        "Kroger connected",
+        `<p class="status">Kroger connected. Nothing was added yet. Send items from your plan, or open the cart on Kroger.</p>
+       <p><a href="${KROGER_CART_PAGE}" rel="noopener">Open Kroger cart</a></p>`,
+        back
       )
     );
     return;
@@ -498,7 +528,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
          ${fallbackList}`,
         shopperReturnPath(
           "error",
-          `Kroger did not add those items. ${result.error} Use Open at Kroger from your trip plan.`
+          `Kroger did not add those items. ${result.error} Use Open at Kroger from your trip plan.`,
+          "shop"
         )
       )
     );
@@ -513,7 +544,8 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
        <p><a href="${KROGER_CART_PAGE}" rel="noopener" target="_blank">Open Kroger cart</a></p>`,
       shopperReturnPath(
         "added",
-        `Kroger accepted ${addedLabel}. Finish pickup or delivery on kroger.com while logged into the same account.`
+        `Kroger accepted ${addedLabel}. Finish pickup or delivery on kroger.com while logged into the same account.`,
+        "shop"
       )
     )
   );

@@ -36,12 +36,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=calm-coupons-1" />
+    <link rel="stylesheet" href="/styles.css?v=phone-calm-2" />
   </head>
-  <body>
+  <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
     <div class="shell">
+      <div class="top-stack">
       <header class="topbar">
+        <button id="menu-open" type="button" class="icon-btn menu-open" aria-label="Menu" aria-expanded="false" aria-controls="app-drawer">
+          <span class="menu-glyph" aria-hidden="true">☰</span>
+          <span id="menu-badge" class="menu-dot" hidden></span>
+        </button>
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">G</span>
           <div>
@@ -70,39 +75,66 @@
             <ul id="suggestions" role="listbox" hidden></ul>
           </div>
         </form>
+      </header>
 
-        <div class="top-actions">
+        <aside id="app-drawer" class="app-drawer" aria-labelledby="drawer-title" aria-hidden="true" inert>
+          <div class="drawer-head">
+            <h2 id="drawer-title" tabindex="-1">Menu</h2>
+            <button type="button" id="drawer-close" class="text-btn">Close</button>
+          </div>
+          <p id="zip-place" class="zip-place">Add a ZIP for nearby stores</p>
           <label class="zip">
             <span>ZIP</span>
             <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" aria-describedby="zip-hint" />
           </label>
-          <button id="theme-btn" type="button" class="icon-btn" aria-label="Toggle color theme">
-            <span aria-hidden="true" id="theme-glyph">◐</span>
-          </button>
-          <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
+          <p id="zip-hint" class="sr-only">Saved on this phone. Location is used only when you ask to find nearby stores.</p>
+          <button id="find-stores" type="button" class="ghost">Find nearby stores</button>
+          <button id="refresh-prices" type="button" class="ghost">Refresh prices</button>
+          <section id="kroger-card" class="kroger-card" hidden>
+            <h2 id="kroger-card-title">Kroger connected</h2>
+            <button type="button" id="kroger-send" class="primary">Send to Kroger cart</button>
+            <a id="kroger-cart-link" href="https://www.kroger.com/cart" rel="noopener">Open Kroger cart</a>
+          </section>
           <button id="alerts-toggle" type="button" class="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts">
             Alerts
             <span id="alerts-badge" class="count-pill" hidden>0</span>
           </button>
+          <button id="theme-btn" type="button" class="ghost theme-btn" aria-label="Toggle color theme">
+            <span aria-hidden="true" id="theme-glyph">◐</span>
+            <span id="theme-label">Match device</span>
+          </button>
+          <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
             My list
             <span id="list-count" class="count-pill">0</span>
           </button>
-        </div>
-      </header>
-      <p id="zip-hint" class="zip-hint">Saved on this phone.</p>
+          <section class="drawer-help" aria-labelledby="help-title">
+            <h2 id="help-title">Help</h2>
+            <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
+            <nav class="drawer-links" aria-label="About">
+              <a id="help-privacy" href="/privacy">Privacy</a>
+              <a id="help-terms" href="/terms">Terms</a>
+            </nav>
+          </section>
+        </aside>
+      </div>
+      <div id="drawer-scrim" class="drawer-scrim" hidden></div>
 
       <div class="body">
         <aside class="rail" aria-label="Departments and filters">
           <nav id="dept-nav" class="dept-nav" aria-label="Departments"></nav>
-          <form id="filters" class="filters">
+          <form id="filters" class="filters" aria-labelledby="refine-title">
             <div class="filters-head">
-              <h2>Filters</h2>
+              <h2 id="refine-title">Refine</h2>
               <button type="button" class="text-btn" id="filters-close">Close</button>
             </div>
-            <label>Store
-              <select id="filter-store" name="store">
-                <option value="">All stores</option>
+            <label>Sort
+              <select id="sort" aria-label="Sort products">
+                <option value="relevance" selected>Suggested</option>
+                <option value="price">Lowest price</option>
+                <option value="unitPrice">Best unit price</option>
+                <option value="name">Name</option>
+                <option value="onSale">On sale</option>
               </select>
             </label>
             <label>Brand
@@ -110,31 +142,10 @@
                 <option value="">All brands</option>
               </select>
             </label>
-            <label>Subcategory
-              <select id="filter-sub" name="subcategory">
-                <option value="">All</option>
-              </select>
-            </label>
-            <label>Package size
-              <select id="filter-size" name="size">
-                <option value="any">Any size</option>
-                <option value="small">Small</option>
-                <option value="standard">Standard</option>
-                <option value="bulk">Family / bulk</option>
-              </select>
-            </label>
-            <div class="price-row">
-              <label>Min $
-                <input id="filter-min" inputmode="decimal" placeholder="0" />
-              </label>
-              <label>Max $
-                <input id="filter-max" inputmode="decimal" placeholder="20" />
-              </label>
-            </div>
             <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
-            <label class="check-row"><input id="filter-store-brand" type="checkbox" /> Store brands</label>
+            <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
             <div class="filter-actions">
-              <button type="submit" class="primary">Apply</button>
+              <button type="submit" class="primary">Show items</button>
               <button type="button" class="ghost" id="filters-clear">Clear</button>
             </div>
           </form>
@@ -148,17 +159,7 @@
           <div class="toolbar">
             <p id="result-count" class="result-count" aria-live="polite">Loading shelves…</p>
             <div class="toolbar-actions">
-              <label class="sort">
-                <span class="sr-only">Sort</span>
-                <select id="sort" aria-label="Sort products">
-                  <option value="relevance">Relevance</option>
-                  <option value="price" selected>Lowest price</option>
-                  <option value="unitPrice">Lowest unit price</option>
-                  <option value="name">Name</option>
-                  <option value="onSale">On sale first</option>
-                </select>
-              </label>
-              <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">Filters</button>
+              <button id="filters-open" type="button" class="ghost filters-open" aria-controls="filters" aria-expanded="false">Refine</button>
               <button id="coverage-open" type="button" class="text-btn" hidden>Coverage</button>
             </div>
           </div>
@@ -254,23 +255,30 @@
         </aside>
       </div>
 
-      <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
-        <button type="button" data-flow="add" aria-current="step">Add items</button>
-        <button type="button" data-flow="plan">See your plan</button>
-        <button type="button" data-flow="shop">Shop</button>
-      </nav>
-      <div class="list-bar" id="list-bar">
-        <button type="button" id="list-bar-btn" class="list-bar-btn">
-          <span id="bar-count">0 items</span>
-          <span class="bar-figures">
-            <span id="bar-save" class="bar-save" hidden></span>
+      <footer id="bottom-dock" class="bottom-dock">
+        <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
+          <button type="button" data-flow="add" aria-current="step" aria-label="Add items">Add</button>
+          <button type="button" data-flow="plan" aria-label="Your plan">Plan</button>
+          <button type="button" data-flow="shop" aria-label="In the store">Shop</button>
+        </nav>
+        <div class="list-bar" id="list-bar">
+          <button type="button" id="list-bar-btn" class="list-bar-btn">
+            <span id="bar-count">0 items</span>
             <span id="bar-total"></span>
-          </span>
-        </button>
-        <button type="button" id="bar-primary" class="primary bar-primary">See your plan</button>
-        <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
-        <p id="bar-caption" class="bar-caption" hidden>Add items to see savings</p>
-      </div>
+            <span id="bar-save" class="bar-save" hidden></span>
+          </button>
+          <button type="button" id="bar-primary" class="primary bar-primary">See your plan</button>
+          <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
+          <p id="bar-caption" class="bar-caption" hidden>Add items to see savings</p>
+        </div>
+        <div class="shop-bar" id="shop-bar">
+          <button type="button" class="shop-bar-copy" id="shop-status">
+            <span id="shop-count">Nothing to shop</span>
+            <span id="shop-total"></span>
+          </button>
+          <button type="button" id="shop-done" class="primary bar-primary" disabled>Done</button>
+        </div>
+      </footer>
     </div>
 
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
@@ -363,9 +371,14 @@
             <button type="button" class="ghost" id="settings-theme">Theme</button>
             <p id="settings-zip" class="muted">No ZIP saved yet.</p>
             <button type="button" class="ghost" id="settings-zip-edit">Change ZIP</button>
-            <button type="button" id="find-stores" class="ghost">Find nearby stores</button>
+            <button type="button" id="settings-find-stores" class="ghost">Find nearby stores</button>
             <p id="settings-kroger" class="muted">Kroger connect is optional.</p>
             <button type="button" class="ghost" id="settings-kroger-connect" hidden>Connect Kroger</button>
+            <div id="settings-kroger-ready" hidden>
+              <p class="kroger-ready-label">Kroger connected</p>
+              <button type="button" class="primary" id="settings-kroger-send">Send to Kroger cart</button>
+              <a id="settings-kroger-cart" href="https://www.kroger.com/cart" rel="noopener">Open Kroger cart</a>
+            </div>
             <button type="button" class="primary" id="settings-welcome">Show welcome</button>
           </div>
         </section>
@@ -424,6 +437,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=calm-coupons-1"></script>
+    <script type="module" src="/app.js?v=phone-calm-2"></script>
   </body>
 </html>
