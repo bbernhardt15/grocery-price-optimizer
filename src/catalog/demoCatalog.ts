@@ -17,6 +17,49 @@ function placeholder(departmentId: string, title: string): string {
   return `/api/catalog/placeholder.svg?${params.toString()}`;
 }
 
+/** Extra demo families so themed lists have a real shelf to point at. */
+function themedShelves(): Shelf[] {
+  const rows: Array<[string, string, string, string, string, string, number, number, number]> = [
+    ["Sesame Burger Buns", "Martin's", "0099999600116", "bakery", "Rolls & Bagels", "8 ct", 2.48, 2.79, 2.99],
+    ["Hot Dog Buns", "Martin's", "0099999600215", "bakery", "Rolls & Bagels", "8 ct", 2.28, 2.49, 2.69],
+    ["Tomato Ketchup", "Heinz", "0099999600314", "pantry", "Condiments", "20 oz", 2.98, 3.29, 3.49],
+    ["Beef Hot Dogs", "Oscar Mayer", "0099999600413", "meat-seafood", "Beef", "15 oz", 3.98, 4.29, 4.49],
+    ["Flour Tortillas", "Mission", "0099999600512", "bakery", "Tortillas", "10 ct", 2.48, 2.79, 2.99],
+    ["Mild Salsa", "Pace", "0099999600611", "pantry", "Condiments", "16 oz", 2.68, 2.99, 3.19],
+    ["Taco Shells", "Ortega", "0099999600710", "pantry", "Canned", "12 ct", 1.98, 2.19, 2.29],
+    ["Microwave Popcorn", "Orville Redenbacher", "0099999600819", "snacks", "Chips", "6 ct", 3.28, 3.49, 3.79],
+    ["Cranberry Sauce", "Ocean Spray", "0099999600918", "pantry", "Canned", "14 oz", 1.68, 1.89, 1.99],
+    ["Stuffing Mix", "Stove Top", "0099999601014", "pantry", "Canned", "6 oz", 1.98, 2.19, 2.29],
+    ["All-Purpose Flour", "Gold Medal", "0099999601113", "pantry", "Baking", "5 lb", 3.18, 3.49, 3.69],
+    ["Granulated Sugar", "Domino", "0099999601212", "pantry", "Baking", "4 lb", 3.28, 3.59, 3.79],
+    ["Pie Crusts", "Pillsbury", "0099999601311", "frozen", "Meals", "2 ct", 3.48, 3.79, 3.99],
+    ["Dinner Rolls", "King's Hawaiian", "0099999601410", "bakery", "Rolls & Bagels", "12 oz", 3.98, 4.29, 4.49],
+    ["Russet Potatoes", "Fresh", "0099999601519", "produce", "Vegetables", "5 lb", 3.48, 3.99, 4.29],
+    ["Chicken Wings", "Tyson", "0099999601618", "meat-seafood", "Chicken", "2 lb", 6.98, 7.49, 7.99],
+    ["Ranch Dip", "Hidden Valley", "0099999601717", "pantry", "Condiments", "16 oz", 3.28, 3.49, 3.79],
+    ["Semi-Sweet Chocolate Chips", "Nestle", "0099999601816", "pantry", "Baking", "12 oz", 2.98, 3.29, 3.49],
+    ["Vanilla Cake Mix", "Betty Crocker", "0099999601915", "pantry", "Baking", "15.25 oz", 1.68, 1.89, 1.99],
+    ["Milk Chocolate Bar", "Hershey's", "0099999602011", "snacks", "Candy", "1.55 oz", 1.28, 1.49, 1.59],
+    ["Cut Green Beans", "Del Monte", "0099999602110", "pantry", "Canned", "14.5 oz", 0.98, 1.09, 1.19],
+    ["Whole Turkey", "Butterball", "0099999602219", "meat-seafood", "Chicken", "12 lb", 18.98, 21.49, 22.99],
+    ["Paper Plates", "Dixie", "0099999602318", "household", "Paper", "24 ct", 3.98, 4.29, 4.49],
+    ["Whipped Topping", "Reddi-wip", "0099999602417", "frozen", "Desserts", "6.5 oz", 3.28, 3.49, 3.79],
+  ];
+  return rows.map(([name, brand, upc, departmentId, subcategory, size, walmart, kroger, target]) => ({
+    name,
+    brand,
+    upc,
+    departmentId,
+    subcategory,
+    size,
+    offers: [
+      { store: "Walmart", price: walmart },
+      { store: "Kroger", price: kroger },
+      { store: "Target", price: target },
+    ],
+  }));
+}
+
 /**
  * Demo assortment used when a store has no catalog API (and as the shelf
  * underneath live samples). UPCs are synthetic (009999…) so they do not merge
@@ -876,6 +919,7 @@ const SHELVES: Shelf[] = [
       { store: "Target", price: 9.49 },
     ],
   },
+  ...themedShelves(),
 ];
 
 function toRecords(): RawCatalogRecord[] {

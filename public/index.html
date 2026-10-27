@@ -36,7 +36,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=phone-calm-2" />
+    <link rel="stylesheet" href="/styles.css?v=themed-lists-2" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -174,7 +174,7 @@
               <ul id="usuals-list" class="usuals-list"></ul>
             </div>
             <h2>Starter lists</h2>
-            <div id="starter-lists" class="starter-row"></div>
+            <div id="starter-lists" class="list-home"></div>
           </section>
           <p id="catalog-error" class="status" role="alert" hidden></p>
           <div id="grid" class="grid" aria-live="polite"></div>
@@ -281,6 +281,7 @@
       </footer>
     </div>
 
+    <dialog id="list-sheet" class="sheet list-sheet" aria-labelledby="list-sheet-title"></dialog>
     <dialog id="product-dialog" class="sheet" aria-labelledby="dialog-title"></dialog>
     <dialog id="trip-dialog" class="sheet checklist-sheet" aria-labelledby="trip-dialog-title"></dialog>
     <div id="print-root" class="print-root" hidden></div>
@@ -437,6 +438,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=phone-calm-2"></script>
+    <script type="module" src="/app.js?v=themed-lists-2"></script>
   </body>
 </html>
