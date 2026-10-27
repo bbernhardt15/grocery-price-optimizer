@@ -19,7 +19,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
-import { effectiveShares, ingestConfig, refreshShareFor, tickCallSplit, type IngestConfig } from "./config";
+import { effectiveShares, ingestConfig, nextTickTurn, refreshShareFor, tickCallSplit, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
   krogerAdvance,
@@ -388,14 +388,17 @@ async function tickSplitFor(
   maxCalls: number,
   config: IngestConfig,
   staleRatio: number | undefined
-): Promise<{ lookup: number; refresh: number; discovery: number }> {
+): Promise<{ lookup: number; refresh: number; discovery: number; refreshFirst: boolean }> {
   const ratio = staleRatio ?? (await loadStaleRatio());
   const shares = effectiveShares({
     staleRatio: ratio,
     lookupShare: config.matchLookupShare,
     refreshShare: refreshShareFor(config, store),
   });
-  return tickCallSplit(maxCalls, shares.lookupShare, shares.refreshShare, shares.refreshFirst);
+  return {
+    ...tickCallSplit(maxCalls, shares.lookupShare, shares.refreshShare, shares.refreshFirst),
+    refreshFirst: shares.refreshFirst,
+  };
 }
 
 function logWalmartPagePlan(categoryId: string, stored: string | null, plan: WalmartPagePlan): void {
@@ -451,6 +454,7 @@ export async function stepWalmart(options: {
   const split = await tickSplitFor("walmart", options.maxCalls, config, options.staleRatio);
   const lookupBudget = split.lookup;
   const refreshBudget = split.refresh;
+  const refreshFirst = split.refreshFirst;
   let lookupsDone = 0;
   let lookupExhausted = false;
   let refreshesDone = 0;
@@ -499,11 +503,21 @@ export async function stepWalmart(options: {
       cp.nextPage = null;
       cp.pageFallback = false;
     }
-    if (lookupUpcs && !lookupExhausted && lookupsDone < lookupBudget) {
+    const turn = nextTickTurn({
+      refreshFirst,
+      lookupPending: Boolean(lookupUpcs) && !lookupExhausted,
+      refreshPending: Boolean(lookupUpcs) && !refreshExhausted,
+      lookupsDone,
+      lookupBudget,
+      refreshesDone,
+      refreshBudget,
+    });
+    if (turn === "lookup" && lookupUpcs) {
       const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
       const picks = await nextWalmartLookups(nowFn(), limit);
       if (picks.length === 0) {
         lookupExhausted = true;
+        continue;
       } else {
         const codes = [...new Set(picks.map((pick) => pick.code))];
         const params = { request: "items", upc: codes.join(",").slice(0, 300) };
@@ -564,11 +578,12 @@ export async function stepWalmart(options: {
         continue;
       }
     }
-    if (lookupUpcs && !refreshExhausted && refreshesDone < refreshBudget) {
+    if (turn === "refresh" && lookupUpcs) {
       const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
       const picks = await nextRefreshPicks("Walmart", nowFn(), limit);
       if (picks.length === 0) {
         refreshExhausted = true;
+        continue;
       } else {
         const codes = picks.map((pick) => pick.code);
         const params = { request: "items", upc: codes.join(",").slice(0, 300), refresh: true };
@@ -855,6 +870,7 @@ export async function stepKroger(options: {
   const split = await tickSplitFor("kroger", options.maxCalls, config, options.staleRatio);
   const lookupBudget = split.lookup;
   const refreshBudget = split.refresh;
+  const refreshFirst = split.refreshFirst;
   let lookupsDone = 0;
   let lookupExhausted = false;
   let refreshesDone = 0;
@@ -963,10 +979,20 @@ export async function stepKroger(options: {
       }
       continue;
     }
-    if (options.client.lookupProductId && !lookupExhausted && lookupsDone < lookupBudget) {
+    const turn = nextTickTurn({
+      refreshFirst,
+      lookupPending: Boolean(options.client.lookupProductId) && !lookupExhausted,
+      refreshPending: Boolean(options.client.lookupProductId) && !refreshExhausted,
+      lookupsDone,
+      lookupBudget,
+      refreshesDone,
+      refreshBudget,
+    });
+    if (turn === "lookup") {
       const [picked] = await nextKrogerLookups(nowFn(), 1);
       if (!picked) {
         lookupExhausted = true;
+        continue;
       } else {
         const locationId = cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
         const pending: KrogerTermFallback = {
@@ -1037,10 +1063,11 @@ export async function stepKroger(options: {
         continue;
       }
     }
-    if (options.client.lookupProductId && !refreshExhausted && refreshesDone < refreshBudget) {
+    if (turn === "refresh") {
       const [picked] = await nextRefreshPicks("Kroger", nowFn(), 1);
       if (!picked) {
         refreshExhausted = true;
+        continue;
       } else {
         const locationId = picked.locationId || cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
         refreshesDone += 1;

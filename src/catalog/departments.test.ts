@@ -174,6 +174,53 @@ describe("mapToDepartment", () => {
     assert.equal(mapToDepartment(["Laundry"], "Tide Pods").departmentId, "household");
   });
 
+  it("keeps automotive, RV, and tire products out of household", () => {
+    const misses = [
+      {
+        categories: ["Auto & Tires/Automotive Chemicals/Cleaners"],
+        name: "Chemical Guys Nonsense Automotive Cleaner",
+      },
+      {
+        categories: ["Auto & Tires/RV/Waste Water"],
+        name: "Walex Porta-Pak RV Waste Water Treatment",
+      },
+      {
+        categories: ["Auto & Tires/Exterior Care/Degreasers"],
+        name: "Gunk Engine Brite Degreaser",
+      },
+      {
+        categories: ["Automotive/Cleaners"],
+        name: "Super Tech Automotive Degreaser",
+      },
+      {
+        categories: ["Tires & Wheels"],
+        name: "Tire Shine",
+      },
+      {
+        categories: ["Outdoor/Patio"],
+        name: "Patio Furniture Cleaner",
+      },
+    ];
+    for (const row of misses) {
+      const mapped = mapToDepartment(row.categories, row.name);
+      assert.equal(mapped.departmentId, "other", row.name);
+      assert.equal(mapped.signal, "excluded", row.name);
+      assert.equal(mapped.generalMerchandise, true, row.name);
+    }
+    assert.equal(mapToDepartment(undefined, "Chemical Guys Automotive Cleaner").departmentId, "other");
+    assert.equal(mapToDepartment(undefined, "Walex Porta-Pak RV Waste Water Treatment").departmentId, "other");
+    assert.equal(mapToDepartment(undefined, "Gunk Engine Degreaser").departmentId, "other");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "Easy-Off Oven Degreaser").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "Easy-Off Oven Degreaser").subcategory, "Cleaning");
+    assert.equal(
+      mapToDepartment(["Industrial & Scientific/Janitorial/Cleaning Chemicals"], "Commercial Degreaser").departmentId,
+      "household"
+    );
+    assert.equal(mapToDepartment(["Household Essentials/Paper"], "Bounty Paper Towels").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Laundry"], "Tide Pods").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "Hefty Trash Bags").departmentId, "household");
+  });
+
   it("maps grocery leaves that were falling through, and keeps general merchandise in Other", () => {
     assert.equal(mapToDepartment(["Baby/Diapering/Training Pants"], "Parent's Choice Training Pants").departmentId, "baby");
     assert.equal(mapToDepartment(["Baby/Potty Training"], "Parent's Choice Training Pants").departmentId, "baby");
