@@ -113,6 +113,50 @@ export function tickCallSplit(
   return { lookup, refresh, discovery };
 }
 
+/**
+ * Which part of the tick runs next.
+ * While the shelf is stale, refresh runs before lookup. If the lookup queue
+ * is empty, or both reserved shares are met and stale offers remain, the
+ * extra calls keep refreshing. New-category crawling runs only when refresh
+ * cannot use the call. Below the stale line, lookup is reserved first and
+ * any call neither queue takes goes to discovery, which is how Kroger
+ * crawling resumes once staleness is back under 30% and the match queue
+ * is not full.
+ */
+export function nextTickTurn(input: {
+  refreshFirst: boolean;
+  /** Lookup client exists and the queue has not come back empty. */
+  lookupPending: boolean;
+  /** Refresh client exists and the queue has not come back empty. */
+  refreshPending: boolean;
+  lookupsDone: number;
+  lookupBudget: number;
+  refreshesDone: number;
+  refreshBudget: number;
+}): "lookup" | "refresh" | "discover" {
+  const lookupRoom = input.lookupPending && input.lookupsDone < input.lookupBudget;
+  const refreshRoom = input.refreshPending && input.refreshesDone < input.refreshBudget;
+  if (input.refreshFirst) {
+    if (refreshRoom) {
+      return "refresh";
+    }
+    if (lookupRoom) {
+      return "lookup";
+    }
+    if (input.refreshBudget > 0 && input.refreshPending) {
+      return "refresh";
+    }
+    return "discover";
+  }
+  if (lookupRoom) {
+    return "lookup";
+  }
+  if (refreshRoom) {
+    return "refresh";
+  }
+  return "discover";
+}
+
 /** Stale offers above this share of the live shelf take priority over match lookup. */
 export const STALE_RATIO_REFRESH = 0.3;
 /** Below this share, refresh gives budget back to crawling and matching. */
@@ -172,8 +216,9 @@ export function refreshShareFor(config: IngestConfig, store: "walmart" | "kroger
 
 /**
  * Turn configured shares into the shares one tick should use.
- * Above 30% stale, match lookup is cut to at most 0.2 and the freed share is
- * added to refresh (capped at 0.8), and refresh is reserved first.
+ * Above 30% stale, match lookup is cut to at most 0.2 and refresh fills the
+ * rest of the tick up to 0.8, for Walmart and Kroger. Walmart's configured
+ * 0.3 is not left as a crawl slice. Refresh is reserved first.
  * Below 15% stale, refresh is half of its configured share so crawling and
  * matching get the calls back.
  * A refresh share of 0 stays off. A lookup share of 1 keeps the whole tick.
@@ -200,8 +245,7 @@ export function effectiveShares(input: {
 
   if (staleRatio > STALE_RATIO_REFRESH) {
     const lookupShare = Math.min(configuredLookupShare, 0.2);
-    const freed = Math.max(0, configuredLookupShare - lookupShare);
-    const refreshShare = Math.min(0.8, configuredRefreshShare + freed);
+    const refreshShare = Math.min(0.8, Math.max(configuredRefreshShare, 1 - lookupShare));
     return {
       ...base,
       mode: "refresh",
@@ -253,10 +297,13 @@ export function ingestConfig(): IngestConfig {
     refreshHours: intEnv("CATALOG_REFRESH_HOURS", 24, 1, 24 * 30),
     walmartEnabled: boolEnv("WALMART_INGEST_ENABLED", true),
     krogerEnabled: boolEnv("KROGER_INGEST_ENABLED", true),
-    // 500/day: production 429'd at ~660 calls with a 5s gap (2026-09-29).
+    // 500/day stays. Production 429'd near 660 calls with a 5s gap (2026-09-29)
+    // and near 1,137 calls with a 2s gap (2026-09-25). Affiliate docs still do
+    // not publish a daily quota (Marketplace tables are a different API), so
+    // the default is not raised toward the 1,500 clamp. That clamp is a ceiling
+    // on the env var, not Walmart's limit. Stretch the 500 with GET /items?upc=
+    // batching (up to 20 ids per call) instead of more calls.
     // This caps the crawler only. Shopper searches are not charged and are not blocked.
-    // The Affiliate day limit used here is 1,500. A higher env value is clamped
-    // down to that. The default is not raised.
     walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 500, 1, WALMART_AFFILIATE_DAILY_CAP),
     walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 10_000, 0, 120_000),
     krogerDailyBudget: intEnv("KROGER_INGEST_DAILY_BUDGET", 4000, 1, 100_000),

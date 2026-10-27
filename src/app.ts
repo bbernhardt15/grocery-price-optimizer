@@ -62,7 +62,7 @@ app.get("/api", (_req, res) => {
       "GET /api/admin/catalog/suspicious":
         "Read-only audit of grocery departments for names that look like pet apparel, costumes, sweaters, dresses, toys, or decor. Returns a count per department plus examples. Same admin token as status. Nothing is deleted.",
       "POST /api/admin/catalog/recategorize":
-        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route (`clearedExclusions` and `setExclusions`). A grocery department clears refresh exclusion. Other sets it. Nothing is deleted.',
+        'Starts a background remap from stored category paths and returns a jobId immediately. Body { "confirm": "recategorize-catalog" }. Progress is on the status route (`clearedExclusions` and `setExclusions`). A grocery department clears refresh exclusion. Other sets it, including auto, tire, and RV rows that had been filed as household. Nothing is deleted.',
       "GET /api/admin/catalog/other-breakdown":
         "Top stored category paths in Other, with counts, three example names, and how many Other products have a Kroger id. Same admin token as status.",
       "GET /api/admin/catalog/match-queue":

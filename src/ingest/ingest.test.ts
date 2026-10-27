@@ -15,7 +15,7 @@ import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog,
 import { CatalogDemand, CatalogMaster, CatalogOffer, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
-import { matchProgress, nextWalmartLookups } from "./crossLookup";
+import { krogerLookupBlock, matchProgress, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
 import { acquireIngestLock, noteShopperZip, releaseIngestLock, runDemoIngest, stepKroger, stepWalmart } from "./runner";
 import { catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "./status";
 import { nextRefreshPicks } from "./refresh";
@@ -1944,8 +1944,8 @@ describe("catalog ingestion", () => {
     await CatalogOffer.deleteMany({ productKey: key });
     await CatalogMaster.create({
       key,
-      name: "Great Value Black Beans",
-      brand: "Great Value",
+      name: "Bush's Black Beans",
+      brand: "Bush's Best",
       departmentId: "pantry",
       upc: walmartUpc,
       walmartItemId: "beans-1",
@@ -2001,8 +2001,8 @@ describe("catalog ingestion", () => {
             returned: 1,
             records: [
               {
-                name: "Great Value Black Beans",
-                brand: "Great Value",
+                name: "Bush's Black Beans",
+                brand: "Bush's Best",
                 storeName: "Kroger",
                 price: 0.86,
                 upc: "0007070820050",
@@ -2021,7 +2021,7 @@ describe("catalog ingestion", () => {
       now: () => now,
     });
     assert.deepEqual(seenIds, [productId]);
-    assert.deepEqual(seenTerms, ["Great Value Black Beans"]);
+    assert.deepEqual(seenTerms, ["Bush's Black Beans"]);
     const row = await CatalogMaster.findOne({ key });
     assert.equal(row?.krogerProductId, productId);
     assert.equal(row?.walmartItemId, "beans-1");
@@ -2371,5 +2371,546 @@ describe("catalog ingestion", () => {
     const juice = await CatalogMaster.findOne({ key: "local:walmart:gerber-juice-upsert" });
     assert.equal(juice?.departmentId, "beverages");
     assert.notEqual((await CatalogOffer.findOne({ productKey: "local:walmart:gerber-juice-upsert" }))?.refreshExcluded, true);
+  });
+
+  it("moves ingested auto and RV rows to other and keeps them off the refresh queue", async () => {
+    const rows = [
+      {
+        key: "auto-cleaner",
+        name: "Chemical Guys Nonsense Automotive Cleaner",
+        categoryPaths: ["Auto & Tires/Automotive Chemicals/Cleaners"],
+      },
+      {
+        key: "rv-waste",
+        name: "Walex Porta-Pak RV Waste Water Treatment",
+        categoryPaths: ["Auto & Tires/RV/Waste Water"],
+      },
+      {
+        key: "engine-degreaser",
+        name: "Gunk Engine Brite Degreaser",
+        categoryPaths: ["Auto & Tires/Exterior Care/Degreasers"],
+      },
+      {
+        key: "real-paper",
+        name: "Bounty Paper Towels",
+        categoryPaths: ["Household Essentials/Paper"],
+      },
+    ];
+    await CatalogMaster.deleteMany({ key: { $in: rows.map((row) => row.key) } });
+    await CatalogOffer.deleteMany({ productKey: { $in: rows.map((row) => row.key) } });
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: "Walmart",
+        departmentId: "household",
+        categoryPaths: row.categoryPaths,
+        walmartItemId: row.key,
+        lastSeenAt: new Date(),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: row.key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 6,
+        lastSeenAt: new Date(),
+        status: "stale",
+      });
+    }
+    const finished = await recategorizeCatalog();
+    assert.equal(finished.status, "completed");
+    assert.equal((await CatalogMaster.findOne({ key: "auto-cleaner" }))?.departmentId, "other");
+    assert.equal((await CatalogMaster.findOne({ key: "rv-waste" }))?.departmentId, "other");
+    assert.equal((await CatalogMaster.findOne({ key: "engine-degreaser" }))?.departmentId, "other");
+    assert.equal((await CatalogMaster.findOne({ key: "real-paper" }))?.departmentId, "household");
+    assert.equal((await CatalogOffer.findOne({ productKey: "auto-cleaner" }))?.refreshExcluded, true);
+    assert.equal((await CatalogOffer.findOne({ productKey: "rv-waste" }))?.refreshExcluded, true);
+    assert.equal((await CatalogOffer.findOne({ productKey: "engine-degreaser" }))?.refreshExcluded, true);
+    assert.notEqual((await CatalogOffer.findOne({ productKey: "real-paper" }))?.refreshExcluded, true);
+
+    const excluded = await excludeNongroceryFromRefresh();
+    assert.ok(excluded.masters >= 3);
+    assert.equal((await CatalogOffer.findOne({ productKey: "engine-degreaser" }))?.refreshExcluded, true);
+    assert.equal((await CatalogOffer.findOne({ productKey: "real-paper" }))?.refreshExcluded, false);
+    assert.equal(await CatalogMaster.countDocuments({ key: "auto-cleaner" }), 1);
+    assert.equal(await CatalogOffer.countDocuments({ productKey: "auto-cleaner" }), 1);
+  });
+
+  it("does not refresh an automotive cleaner that is still stored as household", async () => {
+    const now = new Date();
+    const paperUpc = "049000042566";
+    const paperKey = upcKey(paperUpc);
+    assert.ok(paperKey);
+    await CatalogMaster.deleteMany({ key: { $in: ["auto-still-household", paperKey] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: ["auto-still-household", paperKey] } });
+    await CatalogOffer.updateMany({ status: "stale" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.create({
+      key: "auto-still-household",
+      name: "Chemical Guys Automotive Cleaner",
+      brand: "Chemical Guys",
+      departmentId: "household",
+      categoryPaths: ["Auto & Tires/Automotive Chemicals/Cleaners"],
+      upc: "070708200500",
+      walmartItemId: "auto-1",
+      lastSeenAt: new Date("2024-01-01T00:00:00.000Z"),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: "auto-still-household",
+      storeName: "Walmart",
+      locationId: "",
+      price: 8,
+      lastSeenAt: new Date("2024-01-01T00:00:00.000Z"),
+      status: "stale",
+    });
+    await CatalogMaster.create({
+      key: paperKey,
+      name: "Bounty Paper Towels",
+      brand: "Bounty",
+      departmentId: "household",
+      categoryPaths: ["Household Essentials/Paper"],
+      upc: paperUpc,
+      walmartItemId: "paper-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: paperKey,
+      storeName: "Walmart",
+      locationId: "",
+      price: 4,
+      lastSeenAt: now,
+      status: "stale",
+    });
+    const picks = await nextRefreshPicks("Walmart", now, 5);
+    assert.equal(
+      picks.some((pick) => pick.productKey === "auto-still-household"),
+      false
+    );
+    assert.equal(picks.some((pick) => pick.productKey === paperKey), true);
+    assert.equal((await CatalogOffer.findOne({ productKey: "auto-still-household" }))?.refreshExcluded, true);
+    assert.notEqual((await CatalogOffer.findOne({ productKey: paperKey }))?.refreshExcluded, true);
+  });
+
+  it("skips Walmart-only and auto rows at Kroger and does not retry a miss the next day", async () => {
+    const now = new Date("2026-10-27T15:00:00.000Z");
+    const yesterday = new Date("2026-10-26T15:00:00.000Z");
+    const tideUpc = "049000042566";
+    const tideKey = upcKey(tideUpc);
+    const gvUpc = "070708200500";
+    const gvKey = upcKey(gvUpc);
+    const recentUpc = "016000275287";
+    const recentKey = upcKey(recentUpc);
+    assert.ok(tideKey && gvKey && recentKey);
+    const keys = [tideKey, gvKey, recentKey, "auto-kroger-lookup"];
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogMaster.create({
+      key: tideKey,
+      name: "Tide Laundry Detergent",
+      brand: "Tide",
+      departmentId: "household",
+      categoryPaths: ["Household Essentials/Laundry"],
+      upc: tideUpc,
+      walmartItemId: "tide-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: gvKey,
+      name: "Great Value Black Beans",
+      brand: "Great Value",
+      departmentId: "pantry",
+      categoryPaths: ["Food/Pantry/Canned"],
+      upc: gvUpc,
+      walmartItemId: "gv-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: "auto-kroger-lookup",
+      name: "Gunk Engine Degreaser",
+      brand: "Gunk",
+      departmentId: "household",
+      categoryPaths: ["Auto & Tires/Exterior Care/Degreasers"],
+      upc: "003063880160",
+      walmartItemId: "gunk-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: recentKey,
+      name: "Cheerios",
+      brand: "General Mills",
+      departmentId: "breakfast",
+      categoryPaths: ["Food/Breakfast Foods/Cereal"],
+      upc: recentUpc,
+      walmartItemId: "cheerios-1",
+      matchKrogerAt: yesterday,
+      matchKrogerVariant: 2,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $nin: keys } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    const picks = await nextKrogerLookups(now, 10);
+    assert.deepEqual(
+      picks.map((pick) => pick.key),
+      [tideKey]
+    );
+    assert.equal(picks[0]?.code, krogerProductIdForLookup(tideUpc));
+    assert.equal((await CatalogMaster.findOne({ key: gvKey }))?.matchKrogerAt?.toISOString(), now.toISOString());
+    assert.equal((await CatalogMaster.findOne({ key: "auto-kroger-lookup" }))?.matchKrogerAt?.toISOString(), now.toISOString());
+    const again = await nextKrogerLookups(new Date(now.getTime() + 86_400_000), 10);
+    assert.equal(
+      again.some((pick) => pick.key === gvKey || pick.key === "auto-kroger-lookup" || pick.key === recentKey),
+      false
+    );
+    assert.equal(krogerLookupBlock({ name: "Great Value Black Beans", brand: "Great Value" }), "walmart-only-brand");
+    assert.equal(
+      krogerLookupBlock({
+        name: "Walex Porta-Pak RV Waste Water Treatment",
+        brand: "Walex",
+        categoryPaths: ["Auto & Tires/RV/Waste Water"],
+      }) !== null,
+      true
+    );
+  });
+
+  it("spends a stale Walmart tick on refresh before new categories", async () => {
+    const now = new Date("2026-10-27T16:00:00.000Z");
+    const staleRows = [
+      { upc: "049000042566", name: "Coca-Cola" },
+      { upc: "016000275287", name: "Cheerios" },
+      { upc: "070708200500", name: "Black Beans" },
+      { upc: "003063880160", name: "Pasta Sauce" },
+    ];
+    const keys = staleRows.map((row) => upcKey(row.upc));
+    assert.ok(keys.every((key) => key));
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Walmart" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.updateMany({}, { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } });
+    for (const [index, row] of staleRows.entries()) {
+      const key = keys[index];
+      assert.ok(key && walmartUpcForLookup(row.upc));
+      await CatalogMaster.create({
+        key,
+        name: row.name,
+        brand: "National",
+        departmentId: "pantry",
+        categoryPaths: ["Food/Pantry"],
+        upc: row.upc,
+        walmartItemId: `refresh-${index}`,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 3 + index,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "stale",
+      });
+    }
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    await IngestCheckpoint.create({
+      provider: "walmart",
+      status: "running",
+      checkpoint: {
+        phase: "categories",
+        taxonomyVersion: 8,
+        categories: [{ id: "auto-clean", name: "Automotive Cleaners", path: "Auto & Tires/Automotive Cleaners", departmentId: "household" }],
+        index: 0,
+        nextPage: null,
+        attempts: 0,
+        rateStrikes: 0,
+        successStreak: 0,
+        matchAttempts: 0,
+        matchHits: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    let refreshes = 0;
+    let pages = 0;
+    const config = ingestConfig();
+    config.walmartDailyBudget = 20;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 1;
+    config.matchLookupShare = 0.5;
+    config.refreshShare = 0.3;
+    config.refreshShareWalmart = 0.3;
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => {
+          throw new Error("taxonomy should not run while refresh can use the tick");
+        },
+        page: async () => {
+          pages += 1;
+          return { items: [], nextPageExist: false };
+        },
+        lookupUpcs: async (upcs: string[]) => {
+          refreshes += 1;
+          return {
+            items: [{ itemId: 9, name: "Tide Pods", brandName: "Tide", salePrice: 11, upc: upcs[0] }],
+          };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.351,
+      now: () => now,
+    });
+    assert.equal(slice.calls, 4);
+    assert.equal(pages, 0);
+    assert.equal(refreshes, 4);
+  });
+
+  it("lets Kroger crawl again once staleness is under 30% and lookups are cached", async () => {
+    const now = new Date("2026-10-27T18:00:00.000Z");
+    const upc = "049000042566";
+    const key = upcKey(upc);
+    assert.ok(key);
+    await CatalogMaster.deleteMany({ key });
+    await CatalogOffer.deleteMany({ productKey: key, storeName: "Kroger" });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Kroger" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.updateMany({}, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await CatalogMaster.create({
+      key,
+      name: "Coca-Cola",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      upc,
+      krogerProductId: krogerProductIdForLookup(upc) ?? undefined,
+      walmartItemId: "coke-refresh",
+      lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: key,
+      storeName: "Kroger",
+      locationId: "01400431",
+      price: 1.2,
+      lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+      status: "stale",
+    });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        matchAttempts: 0,
+        matchHits: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 0.5;
+    config.refreshShareKroger = 0.6;
+    let pages = 0;
+    let refreshes = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400431",
+        lookupProductId: async () => {
+          refreshes += 1;
+          return { returned: 1, records: [] };
+        },
+        page: async () => {
+          pages += 1;
+          return { returned: 1, records: [] };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.22,
+      now: () => now,
+    });
+    assert.equal(refreshes, 1);
+    assert.ok(pages >= 1);
+    const saved = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{ checkpoint?: { queryIndex?: number } }>();
+    assert.ok((saved?.checkpoint?.queryIndex ?? 0) > 4);
+
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await CatalogOffer.updateOne(
+      { productKey: key, storeName: "Kroger" },
+      { $set: { status: "stale", refreshExcluded: false, refreshAttemptAt: null } }
+    );
+    for (const extra of ["kroger-stale-2", "kroger-stale-3", "kroger-stale-4"]) {
+      await CatalogMaster.deleteMany({ key: extra });
+      await CatalogOffer.deleteMany({ productKey: extra });
+      await CatalogMaster.create({
+        key: extra,
+        name: "Cheerios",
+        brand: "General Mills",
+        departmentId: "breakfast",
+        categoryPaths: ["Food/Breakfast Foods/Cereal"],
+        upc: "016000275287",
+        krogerProductId: "0001600027528",
+        walmartItemId: extra,
+        matchKrogerAt: now,
+        matchKrogerVariant: 0,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: extra,
+        storeName: "Kroger",
+        locationId: "01400431",
+        price: 3,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "stale",
+      });
+    }
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        matchAttempts: 0,
+        matchHits: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    let stalePages = 0;
+    let staleRefreshes = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400431",
+        lookupProductId: async () => {
+          staleRefreshes += 1;
+          return { returned: 0, records: [] };
+        },
+        page: async () => {
+          stalePages += 1;
+          return { returned: 1, records: [] };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.351,
+      now: () => now,
+    });
+    assert.equal(stalePages, 0);
+    assert.equal(staleRefreshes, 4);
+  });
+
+  it("raises the local Kroger match rate by skipping private label, auto, and cached misses", () => {
+    type Sample = {
+      name: string;
+      brand: string;
+      upc: string;
+      categoryPaths?: string[];
+      triedDaysAgo?: number;
+      stuckVariant?: boolean;
+      carriesAtKroger: boolean;
+    };
+    const national = (name: string, brand: string, upc: string): Sample => ({
+      name,
+      brand,
+      upc,
+      categoryPaths: ["Food/Pantry"],
+      carriesAtKroger: true,
+    });
+    const rows: Sample[] = [
+      national("Coca-Cola", "Coca-Cola", "049000042566"),
+      national("Cheerios", "General Mills", "016000275287"),
+      ...Array.from({ length: 40 }, (_, index) => ({
+        name: `Great Value Item ${index}`,
+        brand: "Great Value",
+        upc: "070708200500",
+        categoryPaths: ["Food/Pantry/Canned"],
+        carriesAtKroger: false,
+      })),
+      ...Array.from({ length: 40 }, (_, index) => ({
+        name: index % 2 === 0 ? "Chemical Guys Automotive Cleaner" : "Walex RV Waste Water Treatment",
+        brand: index % 2 === 0 ? "Chemical Guys" : "Walex",
+        upc: "003063880160",
+        categoryPaths: index % 2 === 0 ? ["Auto & Tires/Automotive Chemicals/Cleaners"] : ["Auto & Tires/RV/Waste Water"],
+        carriesAtKroger: false,
+      })),
+      ...Array.from({ length: 10 }, (_, index) => ({
+        name: `Cached miss ${index}`,
+        brand: "Gunk",
+        upc: "073214835404",
+        categoryPaths: ["Auto & Tires/Degreasers"],
+        triedDaysAgo: 1,
+        stuckVariant: true,
+        carriesAtKroger: false,
+      })),
+    ];
+    const attempt = (row: Sample, policy: "before" | "after") => {
+      const recent = row.triedDaysAgo !== undefined && row.triedDaysAgo < 14;
+      if (policy === "before") {
+        if (recent && !row.stuckVariant) {
+          return false;
+        }
+      } else if (recent) {
+        return false;
+      }
+      if (policy === "after" && krogerLookupBlock(row)) {
+        return false;
+      }
+      const code = krogerProductIdForLookup(row.upc);
+      return Boolean(code && code.length === 13);
+    };
+    const score = (policy: "before" | "after") => {
+      let attempts = 0;
+      let hits = 0;
+      for (const row of rows) {
+        if (!attempt(row, policy)) {
+          continue;
+        }
+        attempts += 1;
+        if (row.carriesAtKroger) {
+          hits += 1;
+        }
+      }
+      return { attempts, hits, rate: Math.round((hits / attempts) * 1000) / 1000 };
+    };
+    const before = score("before");
+    const after = score("after");
+    assert.equal(before.attempts, 92);
+    assert.equal(before.hits, 2);
+    assert.equal(before.rate, 0.022);
+    assert.equal(after.attempts, 2);
+    assert.equal(after.hits, 2);
+    assert.equal(after.rate, 1);
+    assert.equal(krogerProductIdForLookup("049000042566"), "0004900004256");
+    assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
+    assert.equal(krogerProductIdForLookup("00049000042566"), "0004900004256");
+    assert.equal(krogerProductIdForLookup("49000042566"), "0004900004256");
+    assert.equal(krogerProductIdForLookup("070708200500"), "0007070820050");
   });
 });
