@@ -13,12 +13,24 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-/** @param {number} amount */
-export function aboutMoney(amount) {
+/**
+ * A price on a tile, list, or plan. The screen's one estimate note
+ * carries the "not a receipt" honesty, so the figure itself stays plain.
+ * @param {number} amount
+ */
+export function priceFigure(amount) {
   const value = Number(amount);
   if (!Number.isFinite(value)) return "";
-  return `about ${formatMoney(value)}`;
+  return formatMoney(value);
 }
+
+/** @param {number} amount */
+export function aboutMoney(amount) {
+  const figure = priceFigure(amount);
+  return figure ? `about ${figure}` : "";
+}
+
+export const ESTIMATE_NOTE = "Prices are estimates. Not a receipt.";
 
 /**
  * Quiet swap line. Substitutions stay off the catalog tiles.
@@ -44,7 +56,7 @@ export function calmPriceNote(source) {
     case "cached_weekly_ad":
       return "this week's ad";
     case "seed":
-      return "sample price";
+      return "";
     case "unavailable":
       return "price unavailable";
     default:
@@ -70,8 +82,8 @@ export function shopperCopy(text) {
 export function shelfNote(state) {
   if (!state?.zipOk && state?.weeklyAds) return "Add a ZIP to see this week's ads.";
   if (state?.demo) return "Sample prices. Not a receipt.";
-  if (state?.weeklyAds) return "Some prices are from this week's ad.";
-  return "";
+  if (state?.weeklyAds) return "Some prices are from this week's ad. Not a receipt.";
+  return ESTIMATE_NOTE;
 }
 
 /**
@@ -81,7 +93,7 @@ export function shelfNote(state) {
 export function savingsCard(comparison) {
   const split = roundMoney(Number(comparison?.splitTotal));
   const one = comparison?.singleStore || null;
-  const note = "Estimates from the prices we have. Not a receipt.";
+  const note = ESTIMATE_NOTE;
   if (!Number.isFinite(Number(comparison?.splitTotal))) {
     return {
       title: "We'll price this when the stores answer",
@@ -93,20 +105,20 @@ export function savingsCard(comparison) {
   if (!one) {
     return {
       title: "No one store has this whole list",
-      lines: [{ label: "This plan", value: aboutMoney(split) }],
+      lines: [{ label: "This plan", value: priceFigure(split) }],
       saved: "We'll keep the stops that actually have the items.",
       note,
     };
   }
   const saved = roundMoney(Number(comparison?.savings) || 0);
   let savedText = "Same total as one store.";
-  if (saved > 0.009) savedText = `You save ${aboutMoney(saved)}.`;
-  else if (saved < -0.009) savedText = `This plan costs ${aboutMoney(Math.abs(saved))} more than one store.`;
+  if (saved > 0.009) savedText = `You save ${priceFigure(saved)}.`;
+  else if (saved < -0.009) savedText = `This plan costs ${priceFigure(Math.abs(saved))} more than one store.`;
   return {
     title: "One store or this plan",
     lines: [
-      { label: `Everything at ${one.storeName}`, value: aboutMoney(one.total) },
-      { label: "This plan", value: aboutMoney(split) },
+      { label: `Everything at ${one.storeName}`, value: priceFigure(one.total) },
+      { label: "This plan", value: priceFigure(split) },
     ],
     saved: savedText,
     note,
@@ -148,8 +160,8 @@ export function fewerStopsOffer(stores, capabilities = {}) {
   if (!Object.keys(moves).length) return null;
   let text;
   if (Math.abs(delta) < 0.009) text = "Fewer stops would cost about the same. Only if that sounds easier.";
-  else if (delta > 0) text = `Fewer stops would cost ${aboutMoney(delta)} more. Only if that sounds easier.`;
-  else text = `Fewer stops would cost ${aboutMoney(Math.abs(delta))} less. Only if that sounds easier.`;
+  else if (delta > 0) text = `Fewer stops would cost ${priceFigure(delta)} more. Only if that sounds easier.`;
+  else text = `Fewer stops would cost ${priceFigure(Math.abs(delta))} less. Only if that sounds easier.`;
   return {
     text,
     action: "Use fewer stops",

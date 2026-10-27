@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { aboutMoney, calmPriceNote, fewerStopsOffer, plainSwap, savingsCard, shelfNote, shopperCopy } from "../../public/shopper/calmPlan.js";
+import { aboutMoney, calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "../../public/shopper/calmPlan.js";
 import { singleStoreSavings } from "../../public/shopper/tripPlan.js";
 
 function line(partial: Record<string, unknown>) {
@@ -23,9 +23,11 @@ describe("calm trip plan", () => {
     assert.equal(swap?.change, "Change");
     assert.equal(plainSwap({ name: "Whole Milk", storeName: "Kroger" }), null);
     assert.equal(calmPriceNote("weekly_ad"), "this week's ad");
-    assert.equal(calmPriceNote("seed"), "sample price");
+    assert.equal(calmPriceNote("seed"), "");
     assert.equal(calmPriceNote("live"), "");
     assert.equal(calmPriceNote("cached_live"), "");
+    assert.equal(priceFigure(2.5), "$2.50");
+    assert.equal(priceFigure(Number.NaN), "");
     assert.equal(aboutMoney(2.5), "about $2.50");
     assert.equal(aboutMoney(Number.NaN), "");
     assert.equal(shopperCopy("Aldi has no public product API. Set FLIPP_ACCESS_TOKEN from https://api.flipp.com/flyerkit"), "");
@@ -33,7 +35,8 @@ describe("calm trip plan", () => {
     assert.equal(shopperCopy("Weekly ad, not a shelf price"), "Weekly ad, not a shelf price");
     assert.equal(shelfNote({ demo: true, zipOk: true, weeklyAds: false }), "Sample prices. Not a receipt.");
     assert.equal(shelfNote({ demo: false, zipOk: false, weeklyAds: true }), "Add a ZIP to see this week's ads.");
-    assert.equal(shelfNote({ demo: false, zipOk: true, weeklyAds: false }), "");
+    assert.equal(shelfNote({ demo: false, zipOk: true, weeklyAds: true }), "Some prices are from this week's ad. Not a receipt.");
+    assert.equal(shelfNote({ demo: false, zipOk: true, weeklyAds: false }), ESTIMATE_NOTE);
   });
 
   it("compares one store with the split plan using the prices it was given", () => {
@@ -60,16 +63,15 @@ describe("calm trip plan", () => {
     const card = savingsCard(singleStoreSavings(lines));
     assert.equal(card.title, "One store or this plan");
     assert.equal(card.lines[0].label, "Everything at Aldi");
-    assert.equal(card.lines[0].value, "about $6.00");
+    assert.equal(card.lines[0].value, "$6.00");
     assert.equal(card.lines[1].label, "This plan");
-    assert.equal(card.lines[1].value, "about $5.00");
-    assert.equal(card.saved, "You save about $1.00.");
-    assert.match(card.note, /Estimates/);
-    assert.match(card.note, /Not a receipt/);
+    assert.equal(card.lines[1].value, "$5.00");
+    assert.equal(card.saved, "You save $1.00.");
+    assert.equal(card.note, ESTIMATE_NOTE);
 
     const nowhere = savingsCard({ splitTotal: 5, singleStore: null, savings: 0 });
     assert.equal(nowhere.title, "No one store has this whole list");
-    assert.equal(nowhere.lines[0].value, "about $5.00");
+    assert.equal(nowhere.lines[0].value, "$5.00");
     assert.match(nowhere.saved, /stops that actually have the items/);
   });
 
