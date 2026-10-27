@@ -390,7 +390,7 @@ export function mountImport(deps) {
     $("import-heard").focus();
   }
 
-  async function runAudioBlob(blob) {
+  async function runAudioBlob(blob, seconds) {
     if (!status.speech) {
       setStatus("Voice import isn't switched on yet. Type or paste your list instead.", "error");
       show("home");
@@ -406,7 +406,7 @@ export function mountImport(deps) {
       const body = await post("/api/import/audio", {
         audioBase64,
         mimeType: blob.type || "audio/webm",
-        durationSec: recording?.seconds || undefined,
+        durationSec: seconds || undefined,
       });
       setStatus("");
       showTranscript(body.transcript || "");
@@ -515,27 +515,39 @@ export function mountImport(deps) {
     }
 
     const started = Date.now();
-    recording = {
+    const session = {
       seconds: 0,
       async stop(cancel) {
         window.clearTimeout(stopTimer);
         recognizer?.stop?.();
         if (recorder) {
           const blob = await new Promise((resolve) => {
-            recorder.mediaRecorder.onstop = () => resolve(new Blob(recorder.chunks, { type: recorder.mime }));
-            if (recorder.mediaRecorder.state !== "inactive") recorder.mediaRecorder.stop();
-            else resolve(new Blob(recorder.chunks, { type: recorder.mime }));
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve(new Blob(recorder.chunks, { type: recorder.mime }));
+            };
+            recorder.mediaRecorder.onstop = finish;
+            window.setTimeout(finish, 1500);
+            try {
+              if (recorder.mediaRecorder.state !== "inactive") recorder.mediaRecorder.stop();
+              else finish();
+            } catch {
+              finish();
+            }
           });
           recorder.stream.getTracks().forEach((track) => track.stop());
-          recording.seconds = Math.round((Date.now() - started) / 1000);
-          if (!cancel && status.speech) {
-            await runAudioBlob(blob);
+          session.seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
+          if (!cancel && status.speech && blob.size > 800) {
+            await runAudioBlob(blob, session.seconds);
             return;
           }
         }
         if (!cancel) showTranscript(heard);
       },
     };
+    recording = session;
     show("listen");
     stopTimer = window.setTimeout(() => {
       void stopRecording(false);
