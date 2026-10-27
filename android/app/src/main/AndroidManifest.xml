@@ -41,4 +41,7 @@
     <!-- Optional. Welcome asks only after the shopper taps Use my location, and only for an approximate ZIP. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <!-- Optional. Speak your list asks only after the shopper taps Speak. The recording is not kept. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>

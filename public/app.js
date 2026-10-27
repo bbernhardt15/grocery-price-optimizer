@@ -87,6 +87,7 @@ import {
   parseKrogerReturn,
 } from "./shopper/krogerReturn.js";
 import { STARTER_LISTS, matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
+import { mountImport } from "./shopper/import.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
@@ -4972,6 +4973,18 @@ const welcome = mountWelcome({
   accountsEnabled: () => Boolean(authStatus?.enabled),
   signedIn: () => Boolean(accountState?.id),
   getBilling: () => billingStatus,
+});
+
+mountImport({
+  addProduct,
+  showStep,
+  remember(items) {
+    rememberUsuals(localStorage, items);
+    paintUsuals();
+  },
+  apiUrl,
+  toast,
+  mediaUrl,
 });
 
 void boot().finally(() => {

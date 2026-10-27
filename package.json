@@ -49,6 +49,7 @@
     "@capacitor/geolocation": "^8.2.4",
     "@capacitor/ios": "^8.5.2",
     "@capacitor/splash-screen": "^8.0.2",
+    "@capgo/capacitor-speech-recognition": "^8.4.6",
     "@sentry/browser": "10.69.0",
     "@sentry/capacitor": "4.4.0",
     "@sentry/cli": "3.8.2",
