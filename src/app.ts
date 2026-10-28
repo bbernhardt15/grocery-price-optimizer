@@ -33,11 +33,11 @@ app.use((req, res, next) => {
 });
 app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
-  if (!req.path.startsWith("/api")) {
-    const durable =
-      req.path === "/sw.js" ||
-      req.path === "/manifest.webmanifest" ||
-      req.path.startsWith("/icons/");
+  if (req.path === "/sw.js") {
+    // The shell worker must revalidate. A heuristic cache here keeps an old app open.
+    res.setHeader("Cache-Control", "no-cache");
+  } else if (!req.path.startsWith("/api")) {
+    const durable = req.path === "/manifest.webmanifest" || req.path.startsWith("/icons/");
     if (!durable) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       res.setHeader("Pragma", "no-cache");

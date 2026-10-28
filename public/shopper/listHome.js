@@ -9,6 +9,7 @@ import {
   addListSlot,
   annotateFavoriteSwap,
   arrangeLists,
+  previewLists,
   choiceFromProduct,
   createList,
   deleteList,
@@ -37,10 +38,10 @@ import {
 import {
   detailHtml,
   emptyMyListsHtml,
-  listCardHtml,
+  listsBrowserHtml,
+  listsEntryHtml,
   myListCardHtml,
   nudgeHtml,
-  partyHtml,
   pickerHtml,
   pickerResultsHtml,
   slotMatchHtml,
@@ -83,34 +84,26 @@ export function createListHome(deps) {
     writeSwaps(storage, swaps);
   }
 
+  function mineHtml() {
+    const mine = [...book.lists].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    if (!mine.length) return emptyMyListsHtml(deps.escapeHtml);
+    return `<div id="my-lists" class="starter-row">${mine
+      .map((list) => {
+        const model = listModel(list.id, book);
+        return myListCardHtml({ id: list.id, name: list.name, slots: model?.slots || [] }, deps.escapeHtml);
+      })
+      .join("")}</div>`;
+  }
+
   function paintHome() {
     const root = document.getElementById("starter-lists");
     if (!root) return;
-    const { featured, more } = arrangeLists(new Date());
+    const preview = previewLists(new Date(), 3);
     const showNudge = !book.nudged && Object.keys(book.favorites).length === 0;
-    const seasonal = featured.length
-      ? `<div id="seasonal-block"><h3>Right now</h3><div id="seasonal-lists" class="starter-row">${featured.map((list) => listCardHtml(list, deps.escapeHtml)).join("")}</div></div>`
-      : `<p class="muted" id="seasonal-block">Nothing special on the calendar this week. Everyday lists are under More lists.</p>`;
-    const mine = [...book.lists].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-    const mineHtml = mine.length
-      ? `<div id="my-lists" class="starter-row">${mine
-          .map((list) => {
-            const model = listModel(list.id, book);
-            return myListCardHtml({ id: list.id, name: list.name, slots: model?.slots || [] }, deps.escapeHtml);
-          })
-          .join("")}</div>`
-      : `<div id="my-lists">${emptyMyListsHtml(deps.escapeHtml)}</div>`;
+    const hint = preview.map((list) => list.title).join(" · ");
     root.innerHTML = `
-      ${partyHtml(party, deps.escapeHtml)}
       ${showNudge ? nudgeHtml(deps.escapeHtml) : ""}
-      ${seasonal}
-      <div class="start-head">
-        <h3>My lists</h3>
-        <button type="button" class="ghost" data-my-new>New list</button>
-      </div>
-      ${mineHtml}
-      <h3>More lists</h3>
-      <div id="more-lists" class="starter-row">${more.map((list) => listCardHtml(list, deps.escapeHtml)).join("")}</div>
+      ${listsEntryHtml(hint, deps.escapeHtml)}
     `;
   }
 
@@ -135,6 +128,20 @@ export function createListHome(deps) {
   function paintSheet() {
     const dialog = document.getElementById("list-sheet");
     if (!dialog || !view) return;
+    if (view.kind === "browser") {
+      const preview = previewLists(new Date(), 3);
+      const shown = new Set(preview.map((list) => list.id));
+      const { featured, more } = arrangeLists(new Date());
+      const rest = [...featured, ...more].filter((list) => !shown.has(list.id));
+      dialog.innerHTML = listsBrowserHtml({
+        preview,
+        rest,
+        mineHtml: mineHtml(),
+        showAll: Boolean(view.showAll),
+        escapeHtml: deps.escapeHtml,
+      });
+      return;
+    }
     if (view.kind === "picker") {
       dialog.innerHTML = pickerHtml({
         slotLabel: view.slotLabel,
@@ -266,13 +273,24 @@ export function createListHome(deps) {
     deps.toast(scope === "list" ? "We'll use that on this list." : "We'll remember that favorite.");
   }
 
-  async function addList(listId) {
+  function markBusy(button, on) {
+    if (!(button instanceof HTMLElement)) return;
+    button.classList.toggle("is-busy", on);
+    if (on) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  }
+
+  async function addList(listId, button) {
     if (deps.locked()) {
       deps.toast("This list is view-only.");
       return;
     }
     const model = listModel(listId, book);
-    if (!model) return;
+    if (!model) {
+      deps.toast("That list isn't available.");
+      return;
+    }
+    markBusy(button, true);
     const quantities = view?.listId === listId ? view.quantities : {};
     try {
       const shelf = await deps.loadShelf(picksForShelf(model, book));
@@ -316,6 +334,8 @@ export function createListHome(deps) {
       if (view) closeDialog();
     } catch {
       deps.toast("Couldn't add that list. Try again.");
+    } finally {
+      markBusy(button, false);
     }
   }
 
@@ -360,17 +380,54 @@ export function createListHome(deps) {
       paintHome();
       return true;
     }
+    if (target.closest("[data-nudge-set]")) {
+      const first = previewLists(new Date(), 1)[0];
+      if (!first) {
+        deps.toast("Couldn't open favorites. Try Lists.");
+        return true;
+      }
+      openList(first.id);
+      deps.toast("Pick an item, then Remember for every list.");
+      deps.haptic();
+      return true;
+    }
+    if (target.closest("[data-lists-open]")) {
+      view = { kind: "browser", showAll: false };
+      paintSheet();
+      openDialog();
+      const dialog = document.getElementById("list-sheet");
+      if (!dialog?.open) deps.toast("Couldn't open Lists.");
+      else deps.haptic();
+      return true;
+    }
+    if (target.closest("[data-lists-all]") && view?.kind === "browser") {
+      view.showAll = true;
+      paintSheet();
+      return true;
+    }
     if (target.closest("[data-my-new]")) {
-      book = persist(createList(book, "My list"));
-      const created = book.lists[book.lists.length - 1];
-      paintHome();
-      if (created) openList(created.id);
+      try {
+        book = persist(createList(book, "My list"));
+        const created = book.lists[book.lists.length - 1];
+        paintHome();
+        if (!created) {
+          deps.toast("Couldn't start a list. Try again.");
+          return true;
+        }
+        openList(created.id);
+        const dialog = document.getElementById("list-sheet");
+        if (!dialog?.open) deps.toast("Couldn't open the new list.");
+        else deps.toast("Started a new list.");
+        deps.haptic();
+      } catch {
+        deps.toast("Couldn't start a list. Try again.");
+      }
       return true;
     }
     const add = target.closest("[data-list-add], [data-sheet-add]");
     if (add) {
       const id = add.getAttribute("data-list-add") || add.getAttribute("data-sheet-add");
-      void addList(id);
+      void addList(id, add);
       return true;
     }
     const open = target.closest("[data-list-open], [data-my-open]");

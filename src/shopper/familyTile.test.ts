@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { listItemTitle, stagedQuantity } from "../../public/shopper/familyTile.js";
+import { displayProductName, listItemTitle, stagedQuantity } from "../../public/shopper/familyTile.js";
 
 describe("family tile labels", () => {
   it("shows the family name and the chosen variant, not the retailer title", () => {
@@ -43,6 +43,15 @@ describe("family tile labels", () => {
     });
     assert.equal(saved.title, "Coca-Cola Classic 12 Pack 12 fl oz Cans");
     assert.equal(saved.detail, "12 fl oz");
+  });
+
+  it("drops a repeated brand and quiets shouting", () => {
+    assert.equal(displayProductName("Gerber Gerber Juice, 4 oz", "Gerber"), "Gerber Juice, 4 oz");
+    assert.equal(displayProductName("GERBER Pear juice", "GERBER"), "Gerber Pear juice");
+    assert.equal(displayProductName("GERBER GERBER JUICE", "GERBER"), "Gerber Juice");
+    assert.equal(displayProductName("Coca-Cola Classic 12 Pack 12 fl oz Cans", "Coca-Cola"), "Coca-Cola Classic 12 Pack 12 fl oz Cans");
+    const juice = listItemTitle({ name: "Gerber Gerber Juice, 4 oz", brand: "Gerber" });
+    assert.equal(juice.title, "Gerber Juice, 4 oz");
   });
 
   it("stages a quantity without leaving 1 to 99", () => {

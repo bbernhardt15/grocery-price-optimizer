@@ -73,6 +73,19 @@ export function pullShouldRefresh(distance) {
 }
 
 /**
+ * Label for the pull gesture. Empty unless a finger is down and has moved.
+ * A cancelled touch must not leave "Release to refresh" on screen.
+ * @param {number} distance
+ * @param {boolean} fingerDown
+ */
+export function pullStatusText(distance, fingerDown) {
+  if (!fingerDown) return "";
+  const travel = Number(distance) || 0;
+  if (travel < 16) return "";
+  return pullShouldRefresh(travel) ? "Release to refresh" : "Pull to refresh";
+}
+
+/**
  * How far the keyboard covers the layout viewport.
  * @param {number} innerHeight
  * @param {number} visualHeight

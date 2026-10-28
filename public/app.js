@@ -73,7 +73,7 @@ import {
 } from "./shopper/coupons.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
-import { listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
+import { displayProductName, listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
 import { bottomChrome, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "./shopper/flow.js";
 import { nextTrapTarget, swipeClosesDrawer } from "./shopper/drawer.js";
@@ -92,7 +92,9 @@ import { askIntent } from "./shopper/askIntent.js";
 import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
-import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh } from "./shopper/phone.js";
+import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
+import { fetchWithTimeout, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
+import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -131,6 +133,8 @@ const productDialog = $("product-dialog");
 const coverageDialog = $("coverage-dialog");
 
 const STEP_KEY = "gg-step";
+const SHELL_UPDATED_KEY = "gg-shell-updated";
+const WALMART_RETURN_KEY = "gg-walmart-return";
 const ZIP_KEY = "gg-zip";
 const LIST_KEY = "gg-list";
 const SUBS_KEY = "gg-subs";
@@ -413,11 +417,16 @@ function applyZip(zip, { reload = true } = {}) {
 let toastTimer = 0;
 let flowStep = "add";
 let planning = false;
+/** @type {AbortController | null} */
+let planAbort = null;
 let wakeLock = null;
+let showReturnBanner = false;
+let sawAppHidden = false;
 let accountAskNext = null;
 let accountAskDeclined = false;
 let pullStart = null;
 let pullTravel = 0;
+let pullActive = false;
 let lastBarTotal = 0;
 
 function toast(message, durationMs = 1600) {
@@ -425,6 +434,175 @@ function toast(message, durationMs = 1600) {
   toastEl.classList.add("show");
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+}
+
+function setBusy(el, on) {
+  if (!(el instanceof HTMLElement)) return;
+  el.classList.toggle("is-busy", Boolean(on));
+  if (on) el.setAttribute("aria-busy", "true");
+  else el.removeAttribute("aria-busy");
+}
+
+function hidePullStatus() {
+  pullActive = false;
+  pullStart = null;
+  pullTravel = 0;
+  const status = $("pull-status");
+  if (status) status.hidden = true;
+}
+
+function syncPullStatus() {
+  const status = $("pull-status");
+  if (!status) return;
+  const label = pullStatusText(pullTravel, pullActive);
+  status.hidden = !label;
+  if (label) status.textContent = label;
+}
+
+function markWalmartHandoff() {
+  try {
+    sessionStorage.setItem(WALMART_RETURN_KEY, "1");
+  } catch {
+    /* private browsing */
+  }
+}
+
+function takeWalmartReturn() {
+  let pending = false;
+  try {
+    pending = sessionStorage.getItem(WALMART_RETURN_KEY) === "1";
+    if (pending) sessionStorage.removeItem(WALMART_RETURN_KEY);
+  } catch {
+    pending = false;
+  }
+  return pending;
+}
+
+function showWalmartReturn() {
+  if (!takeWalmartReturn()) return;
+  showReturnBanner = true;
+  if (flowStep !== "shop") showStep("shop");
+  else renderShop();
+  toast("Back in Grocery Gitter: mark what you bought.", 4200);
+}
+
+function noteAppHidden() {
+  sawAppHidden = true;
+}
+
+function noteAppVisible() {
+  if (flowStep === "shop") void engageWake();
+  if (sawAppHidden) showWalmartReturn();
+}
+
+function toastShellUpdate() {
+  try {
+    if (localStorage.getItem(SHELL_UPDATED_KEY) !== "1") return;
+    localStorage.removeItem(SHELL_UPDATED_KEY);
+  } catch {
+    return;
+  }
+  toast("Updated.", 2400);
+}
+
+function shellFlag(key) {
+  try {
+    return sessionStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setShellFlag(key, on) {
+  try {
+    if (on) sessionStorage.setItem(key, "1");
+    else sessionStorage.removeItem(key);
+  } catch {
+    /* private browsing */
+  }
+}
+
+function markShellPending() {
+  try {
+    localStorage.setItem(SHELL_UPDATED_KEY, "1");
+  } catch {
+    /* private browsing */
+  }
+  setShellFlag("gg-apply-shell", true);
+}
+
+function applyShellOnOpen() {
+  const homeScreen = isHomeScreenApp(
+    typeof navigator === "undefined" ? null : navigator,
+    typeof window.matchMedia === "function" ? (query) => window.matchMedia(query) : undefined
+  );
+  if (
+    !shouldApplyShellUpdate({
+      pending: shellFlag("gg-apply-shell"),
+      hidden: document.visibilityState === "hidden",
+      homeScreen,
+      alreadyReloaded: shellFlag("gg-shell-reloaded"),
+      sawHidden: sawAppHidden,
+    })
+  ) {
+    return;
+  }
+  setShellFlag("gg-shell-reloaded", true);
+  setShellFlag("gg-apply-shell", false);
+  window.location.reload();
+}
+
+function nudgeShell(registration) {
+  if (!registration) return;
+  if (registration.waiting && navigator.serviceWorker.controller) {
+    registration.waiting.postMessage({ type: "skip-waiting" });
+  }
+  void registration.update().catch(() => {});
+}
+
+function watchShellUpdates() {
+  if (isNative() || !("serviceWorker" in navigator)) return;
+  let hadController = Boolean(navigator.serviceWorker.controller);
+  /** @type {ServiceWorkerRegistration | null} */
+  let registration = null;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController) {
+      hadController = true;
+      return;
+    }
+    if (shellFlag("gg-shell-reloaded")) return;
+    markShellPending();
+    applyShellOnOpen();
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "price-alerts") void openAlerts(true);
+    if (event.data?.type === "shell-updated" && hadController && !shellFlag("gg-shell-reloaded")) markShellPending();
+  });
+  const onOpen = () => {
+    nudgeShell(registration);
+    applyShellOnOpen();
+  };
+  window.addEventListener("pageshow", onOpen);
+  window.addEventListener("focus", onOpen);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") onOpen();
+  });
+  navigator.serviceWorker
+    .register("/sw.js", { updateViaCache: "none" })
+    .then((next) => {
+      registration = next;
+      nudgeShell(next);
+      next.addEventListener("updatefound", () => {
+        const worker = next.installing;
+        if (!worker) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed" && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: "skip-waiting" });
+          }
+        });
+      });
+    })
+    .catch(() => {});
 }
 
 let landedFromKroger = false;
@@ -1791,6 +1969,7 @@ function swapLine(item) {
 }
 
 function primaryAction(store) {
+  if (!store?.storeName) return "";
   const action = store.handoff?.action;
   if (!action) return "";
   const label = shopperButtonLabel(store);
@@ -1838,7 +2017,30 @@ function renderTrip(payload) {
   lastOptimize = payload;
   tripEdits = { lockedStore: null, moves: {} };
   rememberTrip();
-  paintTrip();
+  if (flowStep === "shop") renderShop();
+  else paintTrip();
+}
+
+function reviewItemLine(item) {
+  const noted = lists().annotate(item);
+  const label = displayProductName(noted.name, noted.brand) || noted.name || "Item";
+  const amount = Number(noted.itemTotal ?? noted.price);
+  const price = Number.isFinite(amount) ? priceFigure(amount) : "";
+  return `${noted.quantity} × ${label}${price ? ` · ${price}` : ""}`;
+}
+
+function reviewSwapLines(store) {
+  return (store.items || [])
+    .map((item) => {
+      const noted = lists().annotate(item);
+      const swap = plainSwap(noted);
+      if (!swap) return "";
+      const change = noted.lineId
+        ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(noted.lineId)}">${escapeHtml(swap.change)}</button>`
+        : "";
+      return `<p class="swap-quiet">${escapeHtml(swap.text)}${change}</p>`;
+    })
+    .join("");
 }
 
 function calmItemRow(item) {
@@ -1927,9 +2129,11 @@ function paintTrip() {
         open: false,
         coupons,
       });
+      const names = (store.items || []).map((item) => reviewItemLine(item)).join(", ");
       return `<article class="calm-store">
         <header><h3>${escapeHtml(store.storeName)}</h3>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
-        <ul class="item-list">${(store.items || []).map(calmItemRow).join("")}</ul>
+        ${names ? `<p class="review-items">${escapeHtml(names)}</p>` : ""}
+        ${reviewSwapLines(store)}
         ${couponsHtml}
         <div class="shop-actions">${primaryAction(store)}</div>
       </article>`;
@@ -2199,18 +2403,61 @@ function restoreOfflineTrip() {
   return true;
 }
 
-async function planTrip() {
-  if (planning) return;
+function paintLocalPreview(note) {
+  const rows = [...list.values()]
+    .map((entry) => {
+      const name = displayProductName(entry.product.familyName || entry.product.name, entry.product.brand) || "Item";
+      return `<li class="calm-item"><p class="item-name">${entry.quantity} × ${escapeHtml(name)}</p><p class="item-price"><strong>…</strong></p></li>`;
+    })
+    .join("");
+  tripEl.innerHTML = `
+    ${krogerBannerHtml()}
+    <section class="calm-store" id="plan-preview">
+      <header><h3>Your list</h3><p class="muted">Prices coming</p></header>
+      <ul class="item-list">${rows}</ul>
+      <p class="muted" id="plan-status-line">${escapeHtml(note || "Checking store prices…")}</p>
+      <button type="button" class="ghost" id="plan-retry" hidden>Try again</button>
+    </section>
+  `;
+}
+
+function ensurePlanRetry(message) {
+  planErrorEl.hidden = false;
+  planErrorEl.textContent = message;
+  const line = $("plan-status-line");
+  if (line) line.textContent = message;
+  let retry = $("plan-retry");
+  if (!retry && tripEl) {
+    retry = document.createElement("button");
+    retry.id = "plan-retry";
+    retry.type = "button";
+    retry.className = "ghost";
+    retry.textContent = "Try again";
+    tripEl.append(retry);
+  }
+  if (retry) retry.hidden = false;
+}
+
+function paintPlanNow() {
+  if (!lastOptimize) loadCachedTrip();
+  if (lastOptimize) paintTrip();
+  else if (list.size) paintLocalPreview("Checking store prices…");
+  else if (tripEl) tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
+}
+
+async function planTrip({ stay = false, trigger = null } = {}) {
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
-  flowStep = "plan";
-  try {
-    localStorage.setItem(STEP_KEY, flowStep);
-  } catch {
-    /* private browsing */
+  if (!stay) {
+    flowStep = "plan";
+    try {
+      localStorage.setItem(STEP_KEY, flowStep);
+    } catch {
+      /* private browsing */
+    }
+    syncStepVisibility();
   }
-  syncStepVisibility();
   if (!ZIP_PATTERN.test(zip)) {
     planning = false;
     tripEl.innerHTML = emptyStateMarkup(
@@ -2229,7 +2476,12 @@ async function planTrip() {
     openDrawer({ focus: "zip" });
     toast(planErrorEl.textContent, 4200);
     paintPlanBar();
-    return;
+    return "fail";
+  }
+  if (!list.size) {
+    paintPlanNow();
+    paintPlanBar();
+    return "ok";
   }
   localStorage.setItem(ZIP_KEY, zip);
   const items = [...list.values()].map((entry) => ({
@@ -2239,45 +2491,85 @@ async function planTrip() {
     catalogId: entry.product.id,
     upc: entry.product.upc,
   }));
+  if (planAbort) planAbort.abort();
+  const controller = new AbortController();
+  planAbort = controller;
   planning = true;
-  planBtn.disabled = true;
-  planBtn.textContent = "See your plan";
-  tripEl.innerHTML = `<div class="plan-skel" aria-busy="true" aria-label="Making your plan">${Array.from({ length: 3 }, () => '<div class="skeleton" aria-hidden="true"></div>').join("")}</div>`;
+  planBtn.disabled = false;
+  planBtn.textContent = "Updating…";
+  setBusy(trigger, true);
+  setBusy(document.querySelector('[data-flow="plan"]'), true);
+  paintPlanNow();
   paintPlanBar();
-  try {
-    const status = await fetch(apiUrl("/api/instacart/status")).then((response) => response.json().catch(() => ({ enabled: false })));
-    instacartEnabled = Boolean(status.enabled);
-    const response = await fetch(apiUrl("/api/optimize-list"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items, zipCode: zip, allowSubstitutes: allowSubsEl.checked }),
+  const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
+    .then((response) => response.json().catch(() => ({ enabled: false })))
+    .then((status) => {
+      instacartEnabled = Boolean(status?.enabled);
+    })
+    .catch(() => {
+      instacartEnabled = false;
     });
+  let result = "ok";
+  try {
+    const response = await fetchWithTimeout(
+      fetch,
+      apiUrl("/api/optimize-list"),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, zipCode: zip, allowSubstitutes: allowSubsEl.checked }),
+        signal: controller.signal,
+      },
+      PLAN_TIMEOUT_MS
+    );
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
     rememberListAsUsuals();
     openList(false);
+    void instacartTask.then(() => {
+      if (planAbort && planAbort !== controller) return;
+      if (flowStep === "shop") renderShop();
+      else if (flowStep === "plan") paintTrip();
+    });
   } catch (error) {
-    if (navigator.onLine === false && loadCachedTrip()) {
+    if (planAbort !== controller) return "replaced";
+    result = "fail";
+    if (navigator.onLine === false && !lastOptimize && loadCachedTrip()) {
       showStep("shop");
       toast("You're offline. Showing the last plan on this phone.");
-      return;
+      return "fail";
     }
-    planErrorEl.hidden = false;
-    const kind = networkKind(error, navigator.onLine);
-    if (kind) {
-      const state = emptyState(kind);
-      planErrorEl.textContent = `${state.title}. ${state.body}`;
+    const timedOut = planTimedOut(error);
+    const kind = timedOut ? null : networkKind(error, navigator.onLine);
+    const message = timedOut
+      ? "Prices are taking too long. Showing what we have."
+      : kind
+        ? `${emptyState(kind).title}. ${emptyState(kind).body}`
+        : error instanceof Error
+          ? error.message
+          : "Could not plan the trip.";
+    if (!lastOptimize && !list.size) {
+      const state = emptyState(kind || "network");
       tripEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
-    } else {
-      planErrorEl.textContent = error instanceof Error ? error.message : "Could not plan the trip.";
+    } else if (!lastOptimize) {
+      paintLocalPreview(message);
     }
+    ensurePlanRetry(message);
+    toast(timedOut ? "Prices are taking too long. Try again." : message);
   } finally {
-    planning = false;
-    planBtn.disabled = list.size === 0;
-    planBtn.textContent = "See your plan";
-    paintPlanBar();
+    if (planAbort === controller) {
+      planning = false;
+      planAbort = null;
+      planBtn.disabled = list.size === 0;
+      planBtn.textContent = "Review the split";
+      setBusy(trigger, false);
+      setBusy(document.querySelector('[data-flow="plan"]'), false);
+      paintPlanBar();
+      if (stay && flowStep === "shop") renderShop();
+    }
   }
+  return result;
 }
 
 async function openInstacart(button) {
@@ -2299,6 +2591,7 @@ async function openInstacart(button) {
     }
   }
   button.disabled = true;
+  setBusy(button, true);
   try {
     const response = await apiFetch("/api/instacart/shopping-list", {
       method: "POST",
@@ -2314,11 +2607,13 @@ async function openInstacart(button) {
     if (!response.ok || !body.productsLinkUrl) throw new Error(body.error || "Instacart did not return a link.");
     await openExternal(body.productsLinkUrl);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not open Instacart.";
     planErrorEl.hidden = false;
-    planErrorEl.textContent = error instanceof Error ? error.message : "Could not open Instacart.";
-    tripEl.prepend(planErrorEl);
+    planErrorEl.textContent = message;
+    toast(message);
   } finally {
     button.disabled = false;
+    setBusy(button, false);
   }
 }
 
@@ -2326,6 +2621,7 @@ async function startKroger(storeName, button) {
   const store = currentTrip()?.stores?.find((entry) => entry.storeName === storeName);
   if (!store) return;
   button.disabled = true;
+  setBusy(button, true);
   try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
@@ -2350,6 +2646,7 @@ async function startKroger(storeName, button) {
     toast(error instanceof Error ? error.message : "Kroger cart failed.");
   } finally {
     button.disabled = false;
+    setBusy(button, false);
   }
 }
 
@@ -3155,8 +3452,25 @@ document.addEventListener("click", (event) => {
   if (walmartCart instanceof HTMLAnchorElement) {
     event.preventDefault();
     maybeAskAccount("cart", () => {
-      void openExternal(walmartCart.href);
+      markWalmartHandoff();
+      setBusy(walmartCart, true);
+      void openExternal(walmartCart.href)
+        .catch(() => {
+          try {
+            sessionStorage.removeItem(WALMART_RETURN_KEY);
+          } catch {
+            /* private browsing */
+          }
+          toast("Couldn't open Walmart.");
+        })
+        .finally(() => setBusy(walmartCart, false));
     });
+    return;
+  }
+  if (target.closest("#plan-retry")) {
+    const retry = target.closest("#plan-retry");
+    setBusy(retry, true);
+    void planTrip({ stay: true, trigger: retry });
     return;
   }
   if (target.closest("[data-kroger]")) {
@@ -3175,7 +3489,12 @@ document.addEventListener("click", (event) => {
       openPaywall();
       return;
     }
-    openChecklist(target.closest("[data-shop-list]").getAttribute("data-shop-list"));
+    const storeButton = target.closest("[data-shop-list]");
+    setBusy(storeButton, true);
+    openChecklist(storeButton.getAttribute("data-shop-list"));
+    setBusy(storeButton, false);
+    const dialog = $("trip-dialog");
+    if (!dialog?.open) toast("Couldn't open that store list.");
     return;
   }
   if (target.closest("[data-instore]")) {
@@ -3434,14 +3753,17 @@ $("usuals-list")?.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-usual]") : null;
   if (!button) return;
   const row = readUsuals(localStorage)[Number(button.getAttribute("data-usual"))];
-  if (row) void addOneUsual(row);
+  if (!row) return;
+  setBusy(button, true);
+  void addOneUsual(row).finally(() => setBusy(button, false));
 });
 $("list-bar-btn").addEventListener("click", () => openList(true));
 $("list-close").addEventListener("click", () => openList(false));
 $("coverage-open").addEventListener("click", openCoverage);
 planBtn.addEventListener("click", () => {
   haptic();
-  void planTrip();
+  setBusy(planBtn, true);
+  void planTrip({ trigger: planBtn });
 });
 $("bar-primary")?.addEventListener("click", onPrimary);
 $("shop-done")?.addEventListener("click", onPrimary);
@@ -4487,6 +4809,7 @@ function syncStepVisibility() {
 }
 
 function showStep(step) {
+  hidePullStatus();
   flowStep = readFlowStep(step);
   try {
     localStorage.setItem(STEP_KEY, flowStep);
@@ -4500,11 +4823,12 @@ function showStep(step) {
     document.querySelector(".list-panel")?.classList.remove("open");
   }
   if (flowStep === "plan") {
-    if (lastOptimize) paintTrip();
-    else if (planning) {
-      /* the skeleton stays up while the plan is on its way */
-    } else if (list.size) void planTrip();
-    else if (tripEl) tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
+    paintPlanNow();
+    if (list.size) {
+      const tab = document.querySelector('[data-flow="plan"]');
+      setBusy(tab, true);
+      void planTrip({ stay: true, trigger: tab });
+    }
   }
   if (flowStep === "shop") {
     if (!lastOptimize) loadCachedTrip();
@@ -4562,7 +4886,10 @@ function renderShop() {
   if (!shop) return;
   const view = currentTrip();
   if (!view?.stores?.length) {
-    shop.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("shop"), escapeHtml)}`;
+    const backPrompt = showReturnBanner
+      ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
+      : "";
+    shop.innerHTML = `${krogerBannerHtml()}${backPrompt}${emptyStateMarkup(emptyState("shop"), escapeHtml)}`;
     paintPlanBar();
     return;
   }
@@ -4581,6 +4908,7 @@ function renderShop() {
               const favoriteSwap = noted !== item ? plainSwap(noted) : null;
               const on = Boolean(item.lineId && checks[item.lineId]);
               const size = item.size ? `, ${escapeHtml(item.size)}` : "";
+              const itemLabel = displayProductName(item.name, item.brand) || item.name;
               const amount = Number(item.itemTotal ?? item.price);
               const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
               const choices = swapChoices(item);
@@ -4600,7 +4928,7 @@ function renderShop() {
               return `<div class="shop-line" data-shop-line="${escapeHtml(item.lineId || "")}">
                 <label class="shop-row${on ? " is-done" : ""}">
                   <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${on ? " checked" : ""} />
-                  <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
+                  <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(itemLabel)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
                 </label>
                 ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
                 ${notHere}
@@ -4612,7 +4940,12 @@ function renderShop() {
         })
         .join("");
       const store = (view.stores || []).find((row) => row.storeName === section.storeName);
-      const hintItems = section.groups.flatMap((group) => group.items || []);
+      const hintItems = section.groups.flatMap((group) =>
+        (group.items || []).map((item) => ({
+          ...item,
+          name: displayProductName(item.name, item.brand) || item.name,
+        }))
+      );
       const hintText = shopCouponHint(hintItems);
       const showHint = Boolean(hintText) && !hintText.startsWith("Nothing on");
       const page = store?.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(section.storeName);
@@ -4626,9 +4959,13 @@ function renderShop() {
       return `<section class="shop-store"><h2>${escapeHtml(section.storeName)}</h2>${hint}${groups}<div class="shop-actions">${store ? primaryAction(store) : ""}</div></section>`;
     })
     .join("");
+  const backPrompt = showReturnBanner
+    ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
+    : "";
   shop.innerHTML = `
     ${krogerBannerHtml()}
-    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Your plan</button></p>
+    ${backPrompt}
+    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
@@ -4672,7 +5009,7 @@ function lists() {
       addProduct,
       loadShelf: loadStarterShelf,
       searchTiles: async (query) => {
-        const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`));
+        const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`), {}, PLAN_TIMEOUT_MS);
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
         for (const tile of body.items || []) rememberTile(tile);
@@ -4702,7 +5039,7 @@ function paintUsuals() {
     .slice(0, 8)
     .map(
       (row, index) =>
-        `<li><button type="button" class="quick-chip" data-usual="${index}">${escapeHtml(row.name)}</button></li>`
+        `<li><button type="button" class="quick-chip" data-usual="${index}">${escapeHtml(displayProductName(row.name, row.brand) || row.name)}</button></li>`
     )
     .join("");
 }
@@ -4747,14 +5084,14 @@ function flattenTiles(tiles) {
 }
 
 async function loadStarterShelf(picks) {
-  const response = await fetch(apiUrl("/api/catalog/browse?limit=80"));
+  const response = await fetchWithTimeout(fetch, apiUrl("/api/catalog/browse?limit=80"), {}, PLAN_TIMEOUT_MS);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
   let tiles = body.items || [];
   let flat = flattenTiles(tiles);
   for (const pick of picks || []) {
     if (matchPick(pick, flat)) continue;
-    const search = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(pick.name)}&limit=12`));
+    const search = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(pick.name)}&limit=12`), {}, PLAN_TIMEOUT_MS);
     const found = await search.json().catch(() => ({}));
     tiles = tiles.concat(found.items || []);
     flat = flattenTiles(tiles);
@@ -4864,7 +5201,10 @@ function maybeAskAccount(intent, next) {
 async function findNearbyStores() {
   openDrawer({ focus: "zip" });
   const button = $("find-stores");
-  if (button) button.disabled = true;
+  if (button) {
+    button.disabled = true;
+    setBusy(button, true);
+  }
   try {
     const coords = await readDeviceCoords();
     const response = await fetch(apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`));
@@ -4881,7 +5221,10 @@ async function findNearbyStores() {
     const denied = Number(error?.code) === 1 || /denied|permission/i.test(message);
     toast(denied ? "Location stayed off. Type a ZIP instead." : "Couldn't use location. Type a ZIP instead.");
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      setBusy(button, false);
+    }
   }
 }
 
@@ -4910,19 +5253,25 @@ function onPrimary() {
 async function refreshPrices() {
   const button = $("refresh-prices");
   if (button) button.disabled = true;
+  setBusy(button, true);
   const step = flowStep;
   try {
     await loadPage(true);
+    let planned = "ok";
     if (list.size && (step === "plan" || step === "shop")) {
-      await planTrip();
-      if (step === "shop") showStep("shop");
+      planned = await planTrip({ stay: true, trigger: button });
+      if (step === "shop" && flowStep !== "shop") showStep("shop");
+      else if (step === "shop") renderShop();
     }
-    toast("Prices refreshed.");
-    haptic();
+    if (planned !== "fail") {
+      toast("Prices refreshed.");
+      haptic();
+    }
   } catch {
     toast("Couldn't refresh prices.");
   } finally {
     if (button) button.disabled = false;
+    setBusy(button, false);
   }
 }
 
@@ -4966,6 +5315,8 @@ async function boot() {
 }
 
 async function bootApp() {
+  toastShellUpdate();
+  watchShellUpdates();
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
   bindKeyboardInset();
   $("dept-chips")?.addEventListener("scroll", syncChipHint, { passive: true });
@@ -5032,10 +5383,11 @@ async function bootApp() {
   syncBrowse();
   paintKrogerConnected(krogerConnectedNow());
   void refreshKrogerFromServer();
-  if (!isNative() && "serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
-    navigator.serviceWorker.addEventListener("message", (event) => {
-      if (event.data?.type === "price-alerts") void openAlerts(true);
+  const browserPlugin = window.Capacitor?.Plugins?.Browser;
+  if (isNative() && browserPlugin?.addListener) {
+    void browserPlugin.addListener("browserFinished", () => {
+      sawAppHidden = true;
+      showWalmartReturn();
     });
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
@@ -5045,7 +5397,15 @@ async function bootApp() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && flowStep === "shop") void engageWake();
+  if (document.visibilityState === "hidden") noteAppHidden();
+  if (document.visibilityState === "visible") noteAppVisible();
+});
+window.addEventListener("blur", noteAppHidden);
+window.addEventListener("focus", () => {
+  if (sawAppHidden) showWalmartReturn();
+});
+window.addEventListener("pageshow", () => {
+  if (sawAppHidden) showWalmartReturn();
 });
 
 const pullHost = document.querySelector(".catalog");
@@ -5057,32 +5417,32 @@ pullHost?.addEventListener(
       $("app-drawer")?.classList.contains("is-open") ||
       document.querySelector("dialog[open]");
     if (blocked) {
-      pullStart = null;
+      hidePullStatus();
       return;
     }
+    pullActive = true;
     pullStart = event.touches[0]?.clientY ?? null;
     pullTravel = 0;
+    syncPullStatus();
   },
   { passive: true }
 );
 pullHost?.addEventListener(
   "touchmove",
   (event) => {
-    if (pullStart == null) return;
+    if (!pullActive || pullStart == null) return;
     pullTravel = pullDistance(pullStart, event.touches[0]?.clientY ?? pullStart, window.scrollY <= 8);
-    const status = $("pull-status");
-    if (!status) return;
-    status.hidden = pullTravel < 16;
-    status.textContent = pullShouldRefresh(pullTravel) ? "Release to refresh" : "Pull to refresh";
+    syncPullStatus();
   },
   { passive: true }
 );
 pullHost?.addEventListener("touchend", () => {
-  const status = $("pull-status");
-  if (status) status.hidden = true;
-  if (pullShouldRefresh(pullTravel)) void refreshPrices();
-  pullStart = null;
-  pullTravel = 0;
+  const should = pullActive && pullShouldRefresh(pullTravel);
+  hidePullStatus();
+  if (should) void refreshPrices();
+});
+pullHost?.addEventListener("touchcancel", () => {
+  hidePullStatus();
 });
 
 document.addEventListener("input", (event) => {

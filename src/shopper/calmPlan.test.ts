@@ -21,6 +21,14 @@ describe("calm trip plan", () => {
     });
     assert.equal(swap?.text, "We swapped Whole Milk for Great Value Milk at Kroger");
     assert.equal(swap?.change, "Change");
+    const messy = plainSwap({
+      matchKind: "swap",
+      substitutedFor: "Pear juice",
+      name: "Gerber Gerber Juice",
+      brand: "Gerber",
+      storeName: "Kroger",
+    });
+    assert.equal(messy?.text, "We swapped Pear juice for Gerber Juice at Kroger");
     assert.equal(plainSwap({ name: "Whole Milk", storeName: "Kroger" }), null);
     assert.equal(calmPriceNote("weekly_ad"), "this week's ad");
     assert.equal(calmPriceNote("seed"), "");

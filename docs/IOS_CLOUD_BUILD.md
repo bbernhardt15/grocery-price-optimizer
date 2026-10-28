@@ -76,3 +76,27 @@ base64 -w 0 grocery-gitter-upload.keystore
 Paste the base64 text into `CM_KEYSTORE`. Keep the `.keystore` file somewhere private. Do not commit it. Every later Play upload has to use this same file.
 
 Play publishing stays off. To turn it on later, uncomment the `google_play` block at the bottom of the Android workflow in `codemagic.yaml`, and add `GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS` (the Play service-account JSON) to `grocery_gitter`. Upload the first AAB to Play yourself. After that, Codemagic can upload later ones.
+
+## If the home-screen icon looks old
+
+Brandon opens Grocery Gitter from an iPhone home-screen icon (Safari → Share → Add to Home Screen). That icon is the website, not the TestFlight app. It loads the live Railway site. No new Railway environment variables and no Codemagic build are required for a website deploy to show up there.
+
+iOS does not load a fresh page every time the icon is tapped. It often resumes the last page, and WebKit will hand the service worker a cached `index.html` or `app.js` unless the worker bypasses the HTTP cache. The worker now does three things about that:
+
+- It calls `skipWaiting()` as soon as it installs, and the page tells a waiting worker to skip waiting too. iOS otherwise leaves the new worker idle while the home-screen page stays open.
+- On activate it calls `clients.claim()` and drops older shell caches.
+- HTML, JavaScript, and CSS are fetched with `cache: "no-store"`. The Cache Storage copy is only for offline. A failed script request is never answered with the cached homepage. `/sw.js` itself is `Cache-Control: no-cache`.
+
+The next time the icon is opened after a deploy, the new shell takes over. If Grocery Gitter was sitting in the app switcher, that open reloads once and shows a short “Updated” toast. Pull to refresh inside the app only reloads prices.
+
+### One-time steps so the icon he has now picks this up
+
+The icon on the phone today can still be a frozen copy from before this worker. Do this once:
+
+1. Swipe Grocery Gitter away in the app switcher so iOS is not holding the old page.
+2. Open **Safari** (not the home-screen icon) to the Grocery Gitter site and reload the page once. That installs the new service worker.
+3. Tap the home-screen icon. The Add screen should be the current one, and a toast says “Updated.”
+
+If the icon still shows the old search header, the “How many people” stepper, or “More lists,” delete that icon, open the site in Safari, and use Share → Add to Home Screen again. iOS sometimes keeps the first snapshot on the icon. After this once, later deploys do not need a new icon. Swipe the app away if it was left open, then tap the icon.
+
+A TestFlight build is a different install. It bundles `public/` and does not use this service worker. That build is not what the home-screen icon runs.
