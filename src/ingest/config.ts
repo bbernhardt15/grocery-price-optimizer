@@ -3,6 +3,8 @@
  * it on, so a deploy does not start calling Walmart or Kroger by itself.
  */
 
+import { WALMART_LOOKUP_IDS_MAX } from "./walmartRefreshBatch";
+
 function intEnv(name: string, fallback: number, min: number, max: number): number {
   const raw = Number(process.env[name]);
   if (!Number.isFinite(raw)) {
@@ -82,8 +84,12 @@ export type IngestConfig = {
   refreshShareKroger: number;
   /** Days before a no-hit lookup is tried again. */
   matchRetryDays: number;
-  /** UPCs per Walmart GET /items call. The Affiliate ids list allows 20. */
+  /** Ids per Walmart GET /items call. Affiliate `ids` and `upc` lists allow 20. */
   walmartLookupBatch: number;
+  /** Crawl share kept even when stale offers are above 30%. */
+  staleDiscoveryShare: number;
+  /** Match share kept even when stale offers are above 30%. */
+  staleLookupShare: number;
 };
 
 /** How many calls in one tick a share gets. At least one when the share is above zero. */
@@ -98,13 +104,23 @@ export function lookupCallsForTick(maxCalls: number, share: number): number {
  * Split one tick across cross-store lookup, stale-offer refresh, and discovery.
  * Lookup is reserved first unless `refreshFirst` is set. The other share takes
  * what remains. Discovery is the rest, and it also receives calls when a queue is empty.
+ * When `discoveryShare` is above zero, that crawl floor is reserved inside the
+ * tick and refresh cannot spend it while its own queue is full.
  */
 export function tickCallSplit(
   maxCalls: number,
   lookupShare: number,
   refreshShare: number,
-  refreshFirst = false
+  refreshFirst = false,
+  discoveryShare = 0
 ): { lookup: number; refresh: number; discovery: number } {
+  if (discoveryShare > 0) {
+    return allocateTickCalls(
+      maxCalls,
+      { lookup: lookupShare, refresh: refreshShare, discovery: discoveryShare },
+      refreshFirst ? ["refresh", "lookup", "discovery"] : ["lookup", "refresh", "discovery"]
+    );
+  }
   const lookupBudget = lookupCallsForTick(maxCalls, lookupShare);
   const refreshBudget = lookupCallsForTick(maxCalls, refreshShare);
   const refresh = refreshFirst ? refreshBudget : Math.min(refreshBudget, Math.max(0, maxCalls - lookupBudget));
@@ -114,14 +130,86 @@ export function tickCallSplit(
 }
 
 /**
+ * Turn fractional shares into whole calls. Each positive share gets one call
+ * when the tick is large enough, then leftover calls follow the largest
+ * remainder. A tick smaller than the number of shares follows `priority`.
+ */
+export function allocateTickCalls(
+  maxCalls: number,
+  weights: { lookup: number; refresh: number; discovery: number },
+  priority: Array<"lookup" | "refresh" | "discovery">
+): { lookup: number; refresh: number; discovery: number } {
+  const result = { lookup: 0, refresh: 0, discovery: 0 };
+  const calls = Math.max(0, Math.floor(maxCalls));
+  if (calls === 0) {
+    return result;
+  }
+  const active = priority.filter((key) => weights[key] > 0);
+  const total = active.reduce((sum, key) => sum + weights[key], 0);
+  if (active.length === 0 || !(total > 0)) {
+    return result;
+  }
+  if (calls < active.length) {
+    for (const key of priority) {
+      if (weights[key] > 0 && result.lookup + result.refresh + result.discovery < calls) {
+        result[key] = 1;
+      }
+    }
+    return result;
+  }
+  const rows = active.map((key) => {
+    const exact = (weights[key] / total) * calls;
+    return { key, base: Math.floor(exact), frac: exact - Math.floor(exact) };
+  });
+  let used = rows.reduce((sum, row) => sum + row.base, 0);
+  const byNeed = [...rows].sort((a, b) => {
+    if (a.base === 0 && b.base !== 0) {
+      return -1;
+    }
+    if (b.base === 0 && a.base !== 0) {
+      return 1;
+    }
+    if (b.frac !== a.frac) {
+      return b.frac - a.frac;
+    }
+    return priority.indexOf(a.key) - priority.indexOf(b.key);
+  });
+  for (const row of byNeed) {
+    if (used >= calls) {
+      break;
+    }
+    if (row.base === 0) {
+      row.base = 1;
+      used += 1;
+    }
+  }
+  for (const row of byNeed) {
+    if (used >= calls) {
+      break;
+    }
+    row.base += 1;
+    used += 1;
+  }
+  while (used > calls) {
+    const donor = [...rows].sort((a, b) => b.base - a.base)[0];
+    if (!donor || donor.base <= 0) {
+      break;
+    }
+    donor.base -= 1;
+    used -= 1;
+  }
+  for (const row of rows) {
+    result[row.key] = row.base;
+  }
+  return result;
+}
+
+/**
  * Which part of the tick runs next.
- * While the shelf is stale, refresh runs before lookup. If the lookup queue
- * is empty, or both reserved shares are met and stale offers remain, the
- * extra calls keep refreshing. New-category crawling runs only when refresh
- * cannot use the call. Below the stale line, lookup is reserved first and
- * any call neither queue takes goes to discovery, which is how Kroger
- * crawling resumes once staleness is back under 30% and the match queue
- * is not full.
+ * While the shelf is stale, refresh runs before lookup. The crawl floor runs
+ * before leftover calls go back to refresh, so a full refresh queue cannot
+ * stall both walks. Below the stale line, lookup is reserved first and any
+ * call neither queue takes goes to discovery.
  */
 export function nextTickTurn(input: {
   refreshFirst: boolean;
@@ -133,15 +221,24 @@ export function nextTickTurn(input: {
   lookupBudget: number;
   refreshesDone: number;
   refreshBudget: number;
+  /** Crawl calls already started this tick. */
+  discoveryDone?: number;
+  /** Crawl calls reserved this tick. Zero keeps the old "leftover" behavior. */
+  discoveryBudget?: number;
 }): "lookup" | "refresh" | "discover" {
   const lookupRoom = input.lookupPending && input.lookupsDone < input.lookupBudget;
   const refreshRoom = input.refreshPending && input.refreshesDone < input.refreshBudget;
+  const discoveryBudget = input.discoveryBudget ?? 0;
+  const discoveryRoom = discoveryBudget > 0 && (input.discoveryDone ?? 0) < discoveryBudget;
   if (input.refreshFirst) {
     if (refreshRoom) {
       return "refresh";
     }
     if (lookupRoom) {
       return "lookup";
+    }
+    if (discoveryRoom) {
+      return "discover";
     }
     if (input.refreshBudget > 0 && input.refreshPending) {
       return "refresh";
@@ -154,6 +251,9 @@ export function nextTickTurn(input: {
   if (refreshRoom) {
     return "refresh";
   }
+  if (discoveryRoom) {
+    return "discover";
+  }
   return "discover";
 }
 
@@ -161,6 +261,13 @@ export function nextTickTurn(input: {
 export const STALE_RATIO_REFRESH = 0.3;
 /** Below this share, refresh gives budget back to crawling and matching. */
 export const STALE_RATIO_DISCOVER = 0.15;
+/**
+ * Crawl floor while the shelf is above {@link STALE_RATIO_REFRESH}.
+ * Refresh used to take the rest of the tick, which stalled both walks.
+ */
+export const DEFAULT_STALE_DISCOVERY_SHARE = 0.15;
+/** Match floor while the shelf is above {@link STALE_RATIO_REFRESH}. Capped by the configured lookup share. */
+export const DEFAULT_STALE_LOOKUP_SHARE = 0.15;
 /**
  * Walmart Affiliate calls the crawler may make in one UTC day.
  * The configured budget stays at or under this. It is never raised.
@@ -174,6 +281,8 @@ export type EffectiveShares = {
   staleRatio: number;
   lookupShare: number;
   refreshShare: number;
+  /** Calls that stay on crawling. Zero in balanced mode means "whatever the split has left". */
+  discoveryShare: number;
   configuredLookupShare: number;
   configuredRefreshShare: number;
   /** When true, refresh is reserved before match lookup. */
@@ -216,9 +325,11 @@ export function refreshShareFor(config: IngestConfig, store: "walmart" | "kroger
 
 /**
  * Turn configured shares into the shares one tick should use.
- * Above 30% stale, match lookup is cut to at most 0.2 and refresh fills the
- * rest of the tick up to 0.8, for Walmart and Kroger. Walmart's configured
- * 0.3 is not left as a crawl slice. Refresh is reserved first.
+ * Above 30% stale, refresh still goes first, but crawl keeps
+ * `staleDiscoveryShare` (default 0.15) and match keeps up to
+ * `staleLookupShare` (default 0.15, and never more than the configured lookup
+ * share). Refresh gets the rest, which is 0.70 at the defaults. A floor of 0
+ * gives that share back to refresh.
  * Below 15% stale, refresh is half of its configured share so crawling and
  * matching get the calls back.
  * A refresh share of 0 stays off. A lookup share of 1 keeps the whole tick.
@@ -227,6 +338,8 @@ export function effectiveShares(input: {
   staleRatio: number;
   lookupShare: number;
   refreshShare: number;
+  staleDiscoveryShare?: number;
+  staleLookupShare?: number;
 }): EffectiveShares {
   const configuredLookupShare = clampShare(input.lookupShare);
   const configuredRefreshShare = clampShare(input.refreshShare);
@@ -234,34 +347,45 @@ export function effectiveShares(input: {
   const base = { staleRatio: roundShare(staleRatio), configuredLookupShare, configuredRefreshShare };
 
   if (configuredRefreshShare <= 0 || configuredLookupShare >= 1) {
+    const refreshShare = configuredLookupShare >= 1 ? 0 : configuredRefreshShare;
     return {
       ...base,
       mode: "balanced",
       lookupShare: configuredLookupShare,
-      refreshShare: configuredLookupShare >= 1 ? 0 : configuredRefreshShare,
+      refreshShare,
+      discoveryShare: roundShare(Math.max(0, 1 - configuredLookupShare - refreshShare)),
       refreshFirst: false,
     };
   }
 
   if (staleRatio > STALE_RATIO_REFRESH) {
-    const lookupShare = Math.min(configuredLookupShare, 0.2);
-    const refreshShare = Math.min(0.8, Math.max(configuredRefreshShare, 1 - lookupShare));
+    let discoveryShare = clampShare(input.staleDiscoveryShare ?? DEFAULT_STALE_DISCOVERY_SHARE);
+    let lookupShare = Math.min(configuredLookupShare, clampShare(input.staleLookupShare ?? DEFAULT_STALE_LOOKUP_SHARE));
+    if (discoveryShare + lookupShare > 1) {
+      const scale = 1 / (discoveryShare + lookupShare);
+      discoveryShare *= scale;
+      lookupShare *= scale;
+    }
+    const refreshShare = Math.max(0, 1 - discoveryShare - lookupShare);
     return {
       ...base,
       mode: "refresh",
-      lookupShare: roundShare(Math.min(lookupShare, Math.max(0, 1 - refreshShare))),
+      lookupShare: roundShare(lookupShare),
       refreshShare: roundShare(refreshShare),
+      discoveryShare: roundShare(discoveryShare),
       refreshFirst: true,
     };
   }
 
   if (staleRatio < STALE_RATIO_DISCOVER) {
     const refreshShare = configuredRefreshShare * 0.5;
+    const lookupShare = Math.min(configuredLookupShare, Math.max(0, 1 - refreshShare));
     return {
       ...base,
       mode: "discover",
-      lookupShare: roundShare(Math.min(configuredLookupShare, Math.max(0, 1 - refreshShare))),
+      lookupShare: roundShare(lookupShare),
       refreshShare: roundShare(refreshShare),
+      discoveryShare: roundShare(Math.max(0, 1 - lookupShare - refreshShare)),
       refreshFirst: false,
     };
   }
@@ -271,6 +395,7 @@ export function effectiveShares(input: {
     mode: "balanced",
     lookupShare: roundShare(configuredLookupShare),
     refreshShare: roundShare(configuredRefreshShare),
+    discoveryShare: roundShare(Math.max(0, 1 - configuredLookupShare - configuredRefreshShare)),
     refreshFirst: false,
   };
 }
@@ -301,8 +426,10 @@ export function ingestConfig(): IngestConfig {
     // and near 1,137 calls with a 2s gap (2026-09-25). Affiliate docs still do
     // not publish a daily quota (Marketplace tables are a different API), so
     // the default is not raised toward the 1,500 clamp. That clamp is a ceiling
-    // on the env var, not Walmart's limit. Stretch the 500 with GET /items?upc=
-    // batching (up to 20 ids per call) instead of more calls.
+    // on the env var, not Walmart's limit. Stretch the 500 with GET /items
+    // batching (up to 20 ids per call) instead of more calls. The default
+    // stays 500. A temporary raise belongs in WALMART_INGEST_DAILY_BUDGET
+    // and must stay at or under 1,500.
     // This caps the crawler only. Shopper searches are not charged and are not blocked.
     walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 500, 1, WALMART_AFFILIATE_DAILY_CAP),
     walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 10_000, 0, 120_000),
@@ -324,7 +451,9 @@ export function ingestConfig(): IngestConfig {
     ),
     refreshShareKroger: floatEnv("CATALOG_REFRESH_SHARE_KROGER", 0.6, 0, 1),
     matchRetryDays: intEnv("CATALOG_MATCH_RETRY_DAYS", 14, 1, 365),
-    walmartLookupBatch: intEnv("WALMART_LOOKUP_BATCH", 20, 1, 20),
+    walmartLookupBatch: intEnv("WALMART_LOOKUP_BATCH", WALMART_LOOKUP_IDS_MAX, 1, WALMART_LOOKUP_IDS_MAX),
+    staleDiscoveryShare: floatEnv("CATALOG_STALE_DISCOVERY_SHARE", DEFAULT_STALE_DISCOVERY_SHARE, 0, 0.5),
+    staleLookupShare: floatEnv("CATALOG_STALE_LOOKUP_SHARE", DEFAULT_STALE_LOOKUP_SHARE, 0, 0.5),
   };
 }
 

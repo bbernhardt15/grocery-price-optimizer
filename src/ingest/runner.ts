@@ -29,7 +29,7 @@ import {
   sanitizeKrogerParam,
 } from "./krogerTerms";
 import { finishLookups, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
-import { finishRefresh, loadStaleRatio, nextRefreshPicks } from "./refresh";
+import { finishRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
@@ -43,6 +43,13 @@ import {
   type WalmartCategory,
   type WalmartPagePlan,
 } from "./walmartWalk";
+import {
+  classifyWalmartRefresh,
+  nextRefreshBatchLimit,
+  planWalmartRefreshBatch,
+  walmartItemsFromPayload,
+  WALMART_LOOKUP_IDS_MAX,
+} from "./walmartRefreshBatch";
 
 const LOCK_ID = "catalog-ingest";
 const LOCK_MS = 180_000;
@@ -68,8 +75,13 @@ export type WalmartCheckpoint = {
   /** UPC lookups of Kroger-only masters. Charged on the Walmart budget. */
   matchAttempts: number;
   matchHits: number;
-  /** A 400 on a multi-UPC lookup switches this cycle to one UPC per call. */
+  /** A 400 on a multi-UPC match lookup switches this cycle to one UPC per call. Refresh does not use this. */
   lookupSingle?: boolean;
+  /**
+   * Next Walmart refresh call sends at most this many ids. Unset uses
+   * WALMART_LOOKUP_BATCH. A 400 shrinks it; a success grows it back.
+   */
+  refreshBatchLimit?: number;
   cooldownUntil?: string;
   nextAllowedAt?: string;
   cycleStartedAt: string;
@@ -187,6 +199,10 @@ function asWalmart(value: unknown, now: Date): WalmartCheckpoint {
     matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
     matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
     lookupSingle: record.lookupSingle === true,
+    refreshBatchLimit:
+      typeof record.refreshBatchLimit === "number" && record.refreshBatchLimit >= 1
+        ? Math.min(WALMART_LOOKUP_IDS_MAX, Math.floor(record.refreshBatchLimit))
+        : undefined,
   };
 }
 
@@ -370,6 +386,23 @@ function noteWalmartSuccess(cp: WalmartCheckpoint): void {
   }
 }
 
+function applyRefreshBatchLimit(cp: WalmartCheckpoint, sent: number, configured: number, failed: boolean): void {
+  const next = nextRefreshBatchLimit(cp.refreshBatchLimit, sent, configured, failed);
+  if (next === undefined) {
+    delete cp.refreshBatchLimit;
+  } else {
+    cp.refreshBatchLimit = next;
+  }
+  if (!failed && sent > 1) {
+    delete cp.lookupSingle;
+  }
+}
+
+function picksByOfferId(picks: RefreshPick[], offerIds: string[]): RefreshPick[] {
+  const wanted = new Set(offerIds);
+  return picks.filter((pick) => wanted.has(pick.offerId));
+}
+
 /** A day-long halt expires into a fresh strike count so the next UTC day can try again. */
 function releaseWalmartHalt(cp: WalmartCheckpoint, now: Date): void {
   if (cp.rateStrikes < WALMART_RATE_HALT_STRIKES) {
@@ -394,9 +427,17 @@ async function tickSplitFor(
     staleRatio: ratio,
     lookupShare: config.matchLookupShare,
     refreshShare: refreshShareFor(config, store),
+    staleDiscoveryShare: config.staleDiscoveryShare,
+    staleLookupShare: config.staleLookupShare,
   });
   return {
-    ...tickCallSplit(maxCalls, shares.lookupShare, shares.refreshShare, shares.refreshFirst),
+    ...tickCallSplit(
+      maxCalls,
+      shares.lookupShare,
+      shares.refreshShare,
+      shares.refreshFirst,
+      shares.refreshFirst ? shares.discoveryShare : 0
+    ),
     refreshFirst: shares.refreshFirst,
   };
 }
@@ -459,6 +500,7 @@ export async function stepWalmart(options: {
   let lookupExhausted = false;
   let refreshesDone = 0;
   let refreshExhausted = false;
+  let discoveriesDone = 0;
   const lookupUpcs =
     options.client.lookupUpcs ??
     (options.client.lookupUpc ? (upcs: string[]) => options.client.lookupUpc!(upcs.join(",")) : undefined);
@@ -506,11 +548,13 @@ export async function stepWalmart(options: {
     const turn = nextTickTurn({
       refreshFirst,
       lookupPending: Boolean(lookupUpcs) && !lookupExhausted,
-      refreshPending: Boolean(lookupUpcs) && !refreshExhausted,
+      refreshPending: Boolean(options.client.lookupIds || lookupUpcs) && !refreshExhausted,
       lookupsDone,
       lookupBudget,
       refreshesDone,
       refreshBudget,
+      discoveryDone: discoveriesDone,
+      discoveryBudget: split.discovery,
     });
     if (turn === "lookup" && lookupUpcs) {
       const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
@@ -578,71 +622,131 @@ export async function stepWalmart(options: {
         continue;
       }
     }
-    if (turn === "refresh" && lookupUpcs) {
-      const limit = cp.lookupSingle ? 1 : config.walmartLookupBatch;
-      const picks = await nextRefreshPicks("Walmart", nowFn(), limit);
+    if (turn === "refresh" && (options.client.lookupIds || lookupUpcs)) {
+      const cap = Math.min(
+        WALMART_LOOKUP_IDS_MAX,
+        cp.refreshBatchLimit && cp.refreshBatchLimit > 0 ? cp.refreshBatchLimit : config.walmartLookupBatch
+      );
+      const picks = await nextRefreshPicks("Walmart", nowFn(), cap);
       if (picks.length === 0) {
         refreshExhausted = true;
         continue;
-      } else {
-        const codes = picks.map((pick) => pick.code);
-        const params = { request: "items", upc: codes.join(",").slice(0, 300), refresh: true };
-        refreshesDone += 1;
-        try {
-          const charged = await spendCall(
-            gate,
-            () => lookupUpcs(codes),
-            () => {
-              calls += 1;
-            },
-            stampPace
-          );
-          if (charged === "budget") {
-            paused = "budget";
-            await persist("paused", { lastError: "Walmart daily budget reached" });
-            break;
-          }
-          const records = recordsFromWalmartPage(charged);
-          let refreshed = 0;
-          if (records.length > 0) {
-            const saved = await upsertCatalogRecords(records, nowFn());
-            upserted += saved.offers;
-            refreshed = saved.offers;
-          }
-          await finishRefresh(picks, nowFn(), refreshed);
-          noteWalmartSuccess(cp);
-          await persist("running", { clearError: true });
-        } catch (error) {
-          const kind = retryClass(error);
-          if (kind === "rate") {
-            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
-            cp = outcome.checkpoint;
-            paused = outcome.paused;
-            await persist(outcome.status, { error: outcome.error });
-            if (outcome.stop) {
-              break;
-            }
-          } else if (kind === "fatal" && httpStatusOf(error) === 400 && picks.length > 1) {
-            cp.lookupSingle = true;
-            cp.attempts = 0;
-            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
-          } else if (kind === "fatal" || cp.attempts >= 2) {
-            await finishRefresh(picks, nowFn(), 0);
-            cp.attempts = 0;
-            await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
-          } else {
-            const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
-            cp = outcome.checkpoint;
-            paused = outcome.paused;
-            await persist(outcome.status, { error: outcome.error });
-            if (outcome.stop) {
-              break;
-            }
-          }
-        }
+      }
+      let plan = planWalmartRefreshBatch(
+        picks.map((pick) => ({ offerId: pick.offerId, code: pick.code, itemId: pick.itemId })),
+        cap
+      );
+      if (plan?.mode === "ids" && !options.client.lookupIds) {
+        plan = planWalmartRefreshBatch(
+          picks.map((pick) => ({ offerId: pick.offerId, code: pick.code })),
+          cap
+        );
+      }
+      if (!plan || (plan.mode === "ids" && !options.client.lookupIds) || (plan.mode === "upc" && !lookupUpcs)) {
+        refreshExhausted = true;
         continue;
       }
+      const sent = picksByOfferId(picks, plan.offerIds);
+      const useIds = plan.mode === "ids";
+      const params = {
+        request: "items" as const,
+        ...(useIds ? { ids: plan.values.join(",").slice(0, 300) } : { upc: plan.values.join(",").slice(0, 300) }),
+        refresh: true,
+        batch: plan.values.length,
+      };
+      refreshesDone += 1;
+      try {
+        const charged = await spendCall(
+          gate,
+          () => (useIds ? options.client.lookupIds!(plan.values) : lookupUpcs!(plan.values)),
+          () => {
+            calls += 1;
+          },
+          stampPace
+        );
+        if (charged === "budget") {
+          paused = "budget";
+          await persist("paused", { lastError: "Walmart daily budget reached" });
+          break;
+        }
+        const records = recordsFromWalmartPage(charged);
+        let refreshed = 0;
+        if (records.length > 0) {
+          const saved = await upsertCatalogRecords(records, nowFn());
+          upserted += saved.offers;
+          refreshed = saved.offers;
+        }
+        const classified = classifyWalmartRefresh(
+          walmartItemsFromPayload(charged),
+          sent.map((pick) => ({ offerId: pick.offerId, code: pick.code, itemId: pick.itemId }))
+        );
+        await settleRefreshOutcome({
+          storeName: "Walmart",
+          now: nowFn(),
+          priced: picksByOfferId(sent, classified.priced),
+          unavailable: picksByOfferId(sent, classified.unavailable),
+          missing: picksByOfferId(sent, classified.missing),
+          refreshedOffers: refreshed,
+          calls: 1,
+        });
+        applyRefreshBatchLimit(cp, plan.values.length, config.walmartLookupBatch, false);
+        noteWalmartSuccess(cp);
+        await persist("running", { clearError: true });
+      } catch (error) {
+        const kind = retryClass(error);
+        const noteUnmatchedCall = () =>
+          settleRefreshOutcome({
+            storeName: "Walmart",
+            now: nowFn(),
+            priced: [],
+            unavailable: [],
+            missing: [],
+            refreshedOffers: 0,
+            calls: 1,
+          });
+        if (kind === "rate") {
+          await noteUnmatchedCall();
+          const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
+          cp = outcome.checkpoint;
+          paused = outcome.paused;
+          await persist(outcome.status, { error: outcome.error });
+          if (outcome.stop) {
+            break;
+          }
+        } else if (kind === "fatal" && httpStatusOf(error) === 400 && plan.values.length > 1) {
+          applyRefreshBatchLimit(cp, plan.values.length, config.walmartLookupBatch, true);
+          await noteUnmatchedCall();
+          cp.attempts = 0;
+          await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
+        } else if (kind === "fatal" || cp.attempts >= 2) {
+          await settleRefreshOutcome({
+            storeName: "Walmart",
+            now: nowFn(),
+            priced: [],
+            unavailable: [],
+            missing: sent,
+            refreshedOffers: 0,
+            calls: 1,
+          });
+          if (plan.values.length <= 1) {
+            applyRefreshBatchLimit(cp, 1, config.walmartLookupBatch, false);
+          }
+          cp.attempts = 0;
+          await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
+        } else {
+          await noteUnmatchedCall();
+          const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
+          cp = outcome.checkpoint;
+          paused = outcome.paused;
+          await persist(outcome.status, { error: outcome.error });
+          if (outcome.stop) {
+            break;
+          }
+        }
+      }
+      continue;
     }
+    discoveriesDone += 1;
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       cp = { ...emptyWalmart(nowFn()), phase: "categories", categories: cp.categories, nextAllowedAt: cp.nextAllowedAt };
     }
@@ -721,7 +825,7 @@ export async function stepWalmart(options: {
       if (cp.index >= cp.categories.length) {
         cp.phase = "done";
         await persist("completed", { finished: true, clearError: true });
-        break;
+        continue;
       }
       await persist("running", { clearError: true });
     } catch (error) {
@@ -875,6 +979,7 @@ export async function stepKroger(options: {
   let lookupExhausted = false;
   let refreshesDone = 0;
   let refreshExhausted = false;
+  let discoveriesDone = 0;
 
   const persist = async (status: string, extra?: PersistExtra) => {
     const callDelta = calls - countedCalls;
@@ -987,6 +1092,8 @@ export async function stepKroger(options: {
       lookupBudget,
       refreshesDone,
       refreshBudget,
+      discoveryDone: discoveriesDone,
+      discoveryBudget: split.discovery,
     });
     if (turn === "lookup") {
       const [picked] = await nextKrogerLookups(nowFn(), 1);
@@ -1128,6 +1235,7 @@ export async function stepKroger(options: {
         continue;
       }
     }
+    discoveriesDone += 1;
     if (cp.phase === "done" && refreshDue(cp.cycleStartedAt, config.refreshHours, nowFn())) {
       const pending = cp.pendingZips;
       cp = { ...emptyKroger(nowFn()), pendingZips: pending, phase: "locations", termFallback: cp.termFallback };

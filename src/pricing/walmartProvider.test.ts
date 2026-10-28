@@ -284,4 +284,23 @@ describe("WalmartPricingProvider", () => {
     assert.match(calls[0], /\/items\?/);
     assert.match(decodeURIComponent(calls[0]), /upc=049000042566,016000275287/);
   });
+
+  it("sends up to 20 item ids in one Affiliate /items call", async () => {
+    installWalmartKeys();
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return Response.json({ items: [] });
+    };
+    const ids = Array.from({ length: 21 }, (_, index) => String(100000 + index));
+    const provider = new WalmartPricingProvider();
+    await provider.lookupByIds(ids);
+    assert.equal(calls.length, 1);
+    const query = decodeURIComponent(calls[0]);
+    assert.match(query, /\/items\?/);
+    assert.match(query, /ids=100000,100001/);
+    const sent = new URL(calls[0]).searchParams.get("ids")?.split(",") ?? [];
+    assert.equal(sent.length, 20);
+    assert.equal(sent.includes("100020"), false);
+  });
 });

@@ -66,7 +66,7 @@ app.get("/api", (_req, res) => {
       "GET /api/admin/catalog/family-sample":
         "How master products group into families (brand + flavor). Reports the share that collapsed into a multi-size tile and a few example groups. Same admin token as status. Optional department, q, limit, and scan.",
       "GET /api/admin/catalog/status":
-        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, the stale ratio, the effective refresh and match shares, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
+        "Catalog ingestion progress, including the cross-store lookup queue, the stale-offer refresh queue, how many offers were refreshed today, refresh calls and offers attempted per source, calls used per source, the stale ratio, the effective refresh, match, and crawl shares, and recategorize job progress. Requires Authorization: Bearer $ADMIN_TOKEN (or x-admin-token). 503 when ADMIN_TOKEN is unset.",
       "GET /api/admin/catalog/suspicious":
         "Read-only audit of grocery departments for names that look like pet apparel, costumes, sweaters, dresses, toys, or decor. Returns a count per department plus examples. Same admin token as status. Nothing is deleted.",
       "POST /api/admin/catalog/recategorize":

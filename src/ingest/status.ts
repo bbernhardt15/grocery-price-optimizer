@@ -8,7 +8,7 @@ import { utcDay, type IngestErrorDetail } from "./budget";
 import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
 import { recategorizeProgress } from "./maintenance";
-import { refreshQueueSize, refreshedToday } from "./refresh";
+import { refreshActivityToday, refreshQueueSize } from "./refresh";
 
 export function presentIngestError(entry: unknown): IngestErrorDetail | { message: string } {
   if (typeof entry === "string") {
@@ -144,7 +144,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshed, recategorize] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshActivity, recategorize] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -166,7 +166,7 @@ export async function catalogStatus() {
     CatalogMaster.countDocuments({ matchKrogerAt: { $type: "date" } }),
     matchProgress(now),
     refreshQueueSize(now),
-    refreshedToday(now),
+    refreshActivityToday(now),
     recategorizeProgress(),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
@@ -182,12 +182,17 @@ export async function catalogStatus() {
     staleRatio,
     lookupShare: config.matchLookupShare,
     refreshShare: config.refreshShareWalmart,
+    staleDiscoveryShare: config.staleDiscoveryShare,
+    staleLookupShare: config.staleLookupShare,
   });
   const krogerShares = effectiveShares({
     staleRatio,
     lookupShare: config.matchLookupShare,
     refreshShare: config.refreshShareKroger,
+    staleDiscoveryShare: config.staleDiscoveryShare,
+    staleLookupShare: config.staleLookupShare,
   });
+  const refreshed = refreshActivity.refreshed;
   return {
     enabled: config.enabled,
     dbFirst: config.dbFirst,
@@ -216,16 +221,23 @@ export async function catalogStatus() {
           mode: walmartShares.mode,
           refreshShare: walmartShares.refreshShare,
           lookupShare: walmartShares.lookupShare,
+          discoveryShare: walmartShares.discoveryShare,
         },
         kroger: {
           mode: krogerShares.mode,
           refreshShare: krogerShares.refreshShare,
           lookupShare: krogerShares.lookupShare,
+          discoveryShare: krogerShares.discoveryShare,
         },
       },
       queue: refreshQueue,
       refreshedToday: refreshed,
-      note: "Refresh uses CATALOG_REFRESH_SHARE_WALMART (default CATALOG_REFRESH_SHARE, 0.3) and CATALOG_REFRESH_SHARE_KROGER (default 0.6), inside the same daily budgets and the Walmart 429 pause. staleRatio is stale offers divided by offers that are not discontinued. Above 30% the effective shares prioritize refresh and cut match lookup. Below 15% they shift calls back to crawling and matching. Saved lists and shared lists go first, then popular items (demand with at least 3 hits), price watches, recent searches, merged products, and the oldest stale offer. A miss waits a day. Offers marked refreshExcluded are skipped. Daily caps are not raised. Nothing is deleted.",
+      callsToday: refreshActivity.calls,
+      attemptedToday: refreshActivity.attempted,
+      batchSize: config.walmartLookupBatch,
+      staleDiscoveryShare: config.staleDiscoveryShare,
+      staleLookupShare: config.staleLookupShare,
+      note: "Refresh uses CATALOG_REFRESH_SHARE_WALMART (default CATALOG_REFRESH_SHARE, 0.3) and CATALOG_REFRESH_SHARE_KROGER (default 0.6), inside the same daily budgets and the Walmart 429 pause. staleRatio is stale offers divided by offers that are not discontinued. Above 30% refresh still goes first, but CATALOG_STALE_DISCOVERY_SHARE (default 0.15) stays on crawling and CATALOG_STALE_LOOKUP_SHARE (default 0.15) stays on matching. Refresh gets the rest. callsToday is HTTP calls spent on refresh. attemptedToday is offers those calls asked about. A Walmart batch of batchSize ids is one call. Below 15% the shares shift calls back to crawling and matching. Saved lists, shared lists, and usuals go first, then popular items (demand with at least 3 hits), price watches, recent searches, merged products, and the oldest stale offer. A miss waits a day. Three misses mark the offer out of stock and skip it. Offers marked refreshExcluded are skipped. Daily caps are not raised. Nothing is deleted.",
     },
     match: {
       merged: masters.merged,

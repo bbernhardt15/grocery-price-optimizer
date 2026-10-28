@@ -1788,7 +1788,13 @@ describe("catalog ingestion", () => {
     assert.equal(typeof status.refresh.share, "number");
     assert.equal(status.refresh.shareKroger, ingestConfig().refreshShareKroger);
     assert.equal(typeof status.refresh.effective.walmart.refreshShare, "number");
+    assert.equal(typeof status.refresh.effective.walmart.discoveryShare, "number");
     assert.equal(typeof status.refresh.effective.kroger.lookupShare, "number");
+    assert.equal(typeof status.refresh.callsToday.walmart, "number");
+    assert.equal(typeof status.refresh.attemptedToday.kroger, "number");
+    assert.equal(typeof status.refresh.batchSize, "number");
+    assert.equal(typeof status.budget.walmart.used, "number");
+    assert.equal(typeof status.budget.kroger.used, "number");
     assert.equal(typeof status.match.effectiveLookupShare.walmart, "number");
     assert.ok(["refresh", "balanced", "discover"].includes(status.refresh.mode));
     const shelf = status.counts.offers - status.counts.discontinuedOffers;
@@ -1955,6 +1961,9 @@ describe("catalog ingestion", () => {
       refresh: process.env.CATALOG_REFRESH_SHARE,
       walmart: process.env.CATALOG_REFRESH_SHARE_WALMART,
       kroger: process.env.CATALOG_REFRESH_SHARE_KROGER,
+      batch: process.env.WALMART_LOOKUP_BATCH,
+      discovery: process.env.CATALOG_STALE_DISCOVERY_SHARE,
+      lookupFloor: process.env.CATALOG_STALE_LOOKUP_SHARE,
     };
     const restore = (name: string, value: string | undefined) => {
       if (value === undefined) {
@@ -1968,10 +1977,16 @@ describe("catalog ingestion", () => {
       delete process.env.CATALOG_REFRESH_SHARE;
       delete process.env.CATALOG_REFRESH_SHARE_WALMART;
       delete process.env.CATALOG_REFRESH_SHARE_KROGER;
+      delete process.env.WALMART_LOOKUP_BATCH;
+      delete process.env.CATALOG_STALE_DISCOVERY_SHARE;
+      delete process.env.CATALOG_STALE_LOOKUP_SHARE;
       assert.equal(ingestConfig().walmartDailyBudget, 500);
       assert.equal(ingestConfig().refreshShare, 0.3);
       assert.equal(ingestConfig().refreshShareWalmart, 0.3);
       assert.equal(ingestConfig().refreshShareKroger, 0.6);
+      assert.equal(ingestConfig().staleDiscoveryShare, 0.15);
+      assert.equal(ingestConfig().staleLookupShare, 0.15);
+      assert.equal(ingestConfig().walmartLookupBatch, 20);
       process.env.WALMART_INGEST_DAILY_BUDGET = "1500";
       assert.equal(ingestConfig().walmartDailyBudget, 1500);
       process.env.WALMART_INGEST_DAILY_BUDGET = "5000";
@@ -1988,6 +2003,9 @@ describe("catalog ingestion", () => {
       restore("CATALOG_REFRESH_SHARE", previous.refresh);
       restore("CATALOG_REFRESH_SHARE_WALMART", previous.walmart);
       restore("CATALOG_REFRESH_SHARE_KROGER", previous.kroger);
+      restore("WALMART_LOOKUP_BATCH", previous.batch);
+      restore("CATALOG_STALE_DISCOVERY_SHARE", previous.discovery);
+      restore("CATALOG_STALE_LOOKUP_SHARE", previous.lookupFloor);
     }
   });
 
@@ -2722,8 +2740,234 @@ describe("catalog ingestion", () => {
       now: () => now,
     });
     assert.equal(slice.calls, 4);
-    assert.equal(pages, 0);
-    assert.equal(refreshes, 4);
+    assert.equal(pages, 1);
+    assert.equal(refreshes, 3);
+  });
+
+  it("refreshes many Walmart offers in one call and does not retry a miss the same day", async () => {
+    const now = new Date("2026-10-28T16:00:00.000Z");
+    const rows = [
+      { upc: "049000042566", itemId: "100001", name: "Coca-Cola", price: 1.25 },
+      { upc: "016000275287", itemId: "100002", name: "Cheerios", price: 3.4 },
+      { upc: "070708200500", itemId: "100003", name: "Black Beans", price: null },
+      { upc: "003063880160", itemId: "100004", name: "Pasta Sauce", price: null },
+    ];
+    const keys = rows.map((row) => upcKey(row.upc));
+    assert.ok(keys.every((key) => key));
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Walmart" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.updateMany({}, { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } });
+    for (const [index, row] of rows.entries()) {
+      const key = keys[index];
+      assert.ok(key);
+      await CatalogMaster.create({
+        key,
+        name: row.name,
+        brand: "National",
+        departmentId: "pantry",
+        categoryPaths: ["Food/Pantry"],
+        upc: row.upc,
+        walmartItemId: row.itemId,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 4,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "stale",
+      });
+    }
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    await CatalogRefreshDay.deleteMany({ day: utcDay(now) });
+    const store = new MemoryBudgetStore();
+    const seen: string[][] = [];
+    const config = ingestConfig();
+    config.walmartDailyBudget = 1;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 20;
+    config.matchLookupShare = 0;
+    config.refreshShareWalmart = 1;
+    const slice = await stepWalmart({
+      client: {
+        taxonomy: async () => {
+          throw new Error("taxonomy should wait until the refresh call is spent");
+        },
+        page: async () => ({ items: [], nextPageExist: false }),
+        lookupIds: async (ids: string[]) => {
+          seen.push(ids);
+          return {
+            items: [
+              { itemId: 100001, name: "Coca-Cola", brandName: "Coca-Cola", salePrice: 1.25, upc: "049000042566" },
+              { itemId: 100002, name: "Cheerios", brandName: "General Mills", salePrice: 3.4, upc: "016000275287" },
+              { itemId: 100003, name: "Black Beans", brandName: "Great Value", stock: "Not available" },
+            ],
+          };
+        },
+      },
+      maxCalls: 4,
+      store,
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.351,
+      now: () => now,
+    });
+    assert.equal(slice.calls, 1);
+    assert.equal(slice.paused, "budget");
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0]?.slice().sort(), ["100001", "100002", "100003", "100004"]);
+    assert.equal(await store.used("walmart", now), 1);
+    assert.equal((await CatalogOffer.findOne({ productKey: keys[0], storeName: "Walmart" }))?.status, "active");
+    assert.equal((await CatalogOffer.findOne({ productKey: keys[1], storeName: "Walmart" }))?.status, "active");
+    const bare = await CatalogOffer.findOne({ productKey: keys[2], storeName: "Walmart" }).lean<{
+      availability?: string;
+      refreshMisses?: number;
+      refreshAttemptAt?: Date;
+    }>();
+    assert.equal(bare?.availability, "out_of_stock");
+    assert.equal(bare?.refreshMisses ?? 0, 0);
+    assert.ok(bare?.refreshAttemptAt);
+    const missing = await CatalogOffer.findOne({ productKey: keys[3], storeName: "Walmart" }).lean<{
+      status?: string;
+      refreshMisses?: number;
+      refreshAttemptAt?: Date;
+      refreshExcluded?: boolean;
+    }>();
+    assert.equal(missing?.status, "stale");
+    assert.equal(missing?.refreshMisses, 1);
+    assert.notEqual(missing?.refreshExcluded, true);
+    assert.ok(missing?.refreshAttemptAt);
+    const again = await nextRefreshPicks("Walmart", now, 20);
+    assert.equal(
+      again.some((pick) => keys.includes(pick.productKey)),
+      false
+    );
+    const status = await catalogStatus();
+    assert.equal(status.refresh.callsToday.walmart, 1);
+    assert.equal(status.refresh.attemptedToday.walmart, 4);
+    assert.ok(status.refresh.refreshedToday.walmart >= 2);
+    assert.equal(status.budget.walmart.limit, ingestConfig().walmartDailyBudget);
+
+    await CatalogOffer.updateOne({ productKey: keys[3] }, { $set: { refreshMisses: 2, refreshAttemptAt: null } });
+    config.walmartDailyBudget = 5;
+    const third = await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [] }),
+        page: async () => ({ items: [], nextPageExist: false }),
+        lookupIds: async () => ({ items: [] }),
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.9,
+      now: () => now,
+    });
+    assert.equal(third.calls, 1);
+    const dropped = await CatalogOffer.findOne({ productKey: keys[3], storeName: "Walmart" }).lean<{
+      refreshMisses?: number;
+      refreshExcluded?: boolean;
+      availability?: string;
+    }>();
+    assert.equal(dropped?.refreshMisses, 3);
+    assert.equal(dropped?.refreshExcluded, true);
+    assert.equal(dropped?.availability, "out_of_stock");
+  });
+
+  it("does not stamp Walmart offers on a 429 and shrinks the next batch after a 400", async () => {
+    const now = new Date("2026-10-28T18:00:00.000Z");
+    const rows = [
+      { upc: "049000042566", itemId: "200001" },
+      { upc: "016000275287", itemId: "200002" },
+    ];
+    const keys = rows.map((row) => upcKey(row.upc));
+    assert.ok(keys[0] && keys[1]);
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Walmart" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.updateMany({}, { $set: { matchWalmartAt: now, matchWalmartVariant: 0 } });
+    for (const [index, row] of rows.entries()) {
+      const key = keys[index];
+      assert.ok(key);
+      await CatalogMaster.create({
+        key,
+        name: "Staple",
+        brand: "National",
+        departmentId: "pantry",
+        categoryPaths: ["Food/Pantry"],
+        upc: row.upc,
+        walmartItemId: row.itemId,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: key,
+        storeName: "Walmart",
+        locationId: "",
+        price: 2,
+        lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+        status: "stale",
+      });
+    }
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const config = ingestConfig();
+    config.walmartDailyBudget = 10;
+    config.walmartMinIntervalMs = 0;
+    config.walmartLookupBatch = 20;
+    config.matchLookupShare = 0;
+    config.refreshShareWalmart = 1;
+    const limited = await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [] }),
+        page: async () => ({ items: [] }),
+        lookupIds: async () => {
+          const error = new Error("slow down") as Error & { status: number };
+          error.status = 429;
+          throw error;
+        },
+      },
+      maxCalls: 2,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.9,
+      now: () => now,
+    });
+    assert.equal(limited.calls, 1);
+    assert.equal(limited.paused, "rate");
+    const untouched = await CatalogOffer.find({ productKey: { $in: keys } }).lean<Array<{ refreshAttemptAt?: Date }>>();
+    assert.equal(untouched.every((row) => !row.refreshAttemptAt), true);
+
+    await IngestCheckpoint.deleteMany({ provider: "walmart" });
+    const rejected = await stepWalmart({
+      client: {
+        taxonomy: async () => ({ categories: [] }),
+        page: async () => ({ items: [] }),
+        lookupIds: async () => {
+          const error = new Error("bad ids") as Error & { status: number };
+          error.status = 400;
+          throw error;
+        },
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.9,
+      now: () => new Date(now.getTime() + 60_000),
+    });
+    assert.equal(rejected.calls, 1);
+    assert.equal(rejected.paused, null);
+    const saved = await IngestCheckpoint.findOne({ provider: "walmart" }).lean<{
+      checkpoint?: { refreshBatchLimit?: number; lookupSingle?: boolean };
+    }>();
+    assert.equal(saved?.checkpoint?.refreshBatchLimit, 1);
+    assert.notEqual(saved?.checkpoint?.lookupSingle, true);
+    const stillWaiting = await CatalogOffer.find({ productKey: { $in: keys } }).lean<Array<{ refreshAttemptAt?: Date }>>();
+    assert.equal(stillWaiting.every((row) => !row.refreshAttemptAt), true);
   });
 
   it("lets Kroger crawl again once staleness is under 30% and lookups are cached", async () => {
@@ -2880,8 +3124,8 @@ describe("catalog ingestion", () => {
       staleRatio: 0.351,
       now: () => now,
     });
-    assert.equal(stalePages, 0);
-    assert.equal(staleRefreshes, 4);
+    assert.equal(stalePages, 1);
+    assert.equal(staleRefreshes, 3);
   });
 
   it("raises the local Kroger match rate by skipping private label, auto, and cached misses", () => {

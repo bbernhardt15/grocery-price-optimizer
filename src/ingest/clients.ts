@@ -12,6 +12,8 @@ export type WalmartCatalogClient = {
   lookupUpc?(upc: string): Promise<unknown>;
   /** One Affiliate call for several UPCs (comma-separated, up to 20). */
   lookupUpcs?(upcs: string[]): Promise<unknown>;
+  /** One Affiliate call for several item ids (`ids`, up to 20). */
+  lookupIds?(ids: string[]): Promise<unknown>;
 };
 
 export type KrogerPageQuery = {
@@ -40,6 +42,7 @@ export function walmartAffiliateClient(): WalmartCatalogClient {
     page: (path) => walmartPricingProvider.getJson(path),
     lookupUpc: (upc) => walmartPricingProvider.lookupByUpc(upc),
     lookupUpcs: (upcs) => walmartPricingProvider.lookupByUpcs(upcs),
+    lookupIds: (ids) => walmartPricingProvider.lookupByIds(ids),
   };
 }
 

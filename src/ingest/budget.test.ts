@@ -25,23 +25,43 @@ describe("lookup share", () => {
     assert.deepEqual(tickCallSplit(1, 0.2, 0.6, true), { lookup: 0, refresh: 1, discovery: 0 });
   });
 
-  it("prioritizes refresh above 30% stale and gives it back below 15%", () => {
+  it("prioritizes refresh above 30% stale and keeps a crawl and match floor", () => {
     const highKroger = effectiveShares({ staleRatio: 0.34, lookupShare: 0.5, refreshShare: 0.6 });
     assert.equal(highKroger.mode, "refresh");
     assert.equal(highKroger.refreshFirst, true);
-    assert.equal(highKroger.lookupShare, 0.2);
-    assert.equal(highKroger.refreshShare, 0.8);
-    assert.ok(highKroger.refreshShare + highKroger.lookupShare <= 1);
+    assert.equal(highKroger.lookupShare, 0.15);
+    assert.equal(highKroger.discoveryShare, 0.15);
+    assert.equal(highKroger.refreshShare, 0.7);
+    assert.ok(highKroger.refreshShare + highKroger.lookupShare + highKroger.discoveryShare <= 1);
 
     const highWalmart = effectiveShares({ staleRatio: 0.34, lookupShare: 0.5, refreshShare: 0.3 });
     assert.equal(highWalmart.mode, "refresh");
     assert.equal(highWalmart.refreshFirst, true);
-    assert.equal(highWalmart.lookupShare, 0.2);
-    assert.equal(highWalmart.refreshShare, 0.8);
-    const walmartTick = tickCallSplit(4, highWalmart.lookupShare, highWalmart.refreshShare, true);
-    assert.equal(walmartTick.discovery, 0);
-    assert.equal(walmartTick.refresh, 3);
+    assert.equal(highWalmart.lookupShare, 0.15);
+    assert.equal(highWalmart.discoveryShare, 0.15);
+    assert.equal(highWalmart.refreshShare, 0.7);
+    const walmartTick = tickCallSplit(
+      4,
+      highWalmart.lookupShare,
+      highWalmart.refreshShare,
+      true,
+      highWalmart.discoveryShare
+    );
+    assert.equal(walmartTick.discovery, 1);
+    assert.equal(walmartTick.refresh, 2);
     assert.equal(walmartTick.lookup, 1);
+    assert.equal(walmartTick.refresh + walmartTick.lookup + walmartTick.discovery, 4);
+
+    const noFloor = effectiveShares({
+      staleRatio: 0.34,
+      lookupShare: 0.5,
+      refreshShare: 0.3,
+      staleDiscoveryShare: 0,
+      staleLookupShare: 0.2,
+    });
+    assert.equal(noFloor.discoveryShare, 0);
+    assert.equal(noFloor.lookupShare, 0.2);
+    assert.equal(noFloor.refreshShare, 0.8);
 
     const low = effectiveShares({ staleRatio: 0.1, lookupShare: 0.5, refreshShare: 0.6 });
     assert.equal(low.mode, "discover");
@@ -92,6 +112,30 @@ describe("lookup share", () => {
     assert.equal(
       nextTickTurn({ ...base, refreshFirst: true, lookupPending: false, refreshPending: false }),
       "discover"
+    );
+    assert.equal(
+      nextTickTurn({
+        ...base,
+        refreshFirst: true,
+        refreshesDone: 2,
+        refreshBudget: 2,
+        lookupsDone: 1,
+        discoveryDone: 0,
+        discoveryBudget: 1,
+      }),
+      "discover"
+    );
+    assert.equal(
+      nextTickTurn({
+        ...base,
+        refreshFirst: true,
+        refreshesDone: 2,
+        refreshBudget: 2,
+        lookupsDone: 1,
+        discoveryDone: 1,
+        discoveryBudget: 1,
+      }),
+      "refresh"
     );
     assert.equal(nextTickTurn({ ...base, refreshFirst: false, lookupBudget: 2, refreshBudget: 1 }), "lookup");
   });
