@@ -838,7 +838,7 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   .print-root pre { white-space: pre-wrap; font: 16px/1.4 sans-serif; }
 }
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
+  position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -1127,6 +1127,7 @@ dialog.list-sheet .sheet-actions { position: static; flex: none; }
 .shop-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .shop-name { font-weight: 700; font-size: 1.05rem; }
 .shop-row.is-done .shop-name { text-decoration: line-through; color: var(--muted); }
+.shop-row.shop-ack { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .done-banner {
   background: var(--accent-soft); color: var(--ink); border-radius: var(--radius); padding: 16px;

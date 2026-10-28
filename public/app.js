@@ -572,7 +572,8 @@ function watchShellUpdates() {
     }
     if (shellFlag("gg-shell-reloaded")) return;
     markShellPending();
-    applyShellOnOpen();
+    // A tap can focus the window. Reloading here would swallow that tap.
+    if (document.visibilityState === "hidden") return;
   });
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "price-alerts") void openAlerts(true);
@@ -583,7 +584,6 @@ function watchShellUpdates() {
     applyShellOnOpen();
   };
   window.addEventListener("pageshow", onOpen);
-  window.addEventListener("focus", onOpen);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") onOpen();
   });
@@ -5242,12 +5242,18 @@ function onPrimary() {
   const view = currentTrip();
   const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : null;
   if (progress?.complete) {
-    toast("Nice. That trip is done.");
+    toast("Nice. That trip is done.", 4500);
     return;
   }
   const left = Math.max(0, Number(progress?.left) || 0);
-  if (left > 0) toast(left === 1 ? "1 left." : `${left} left.`);
-  else toast("Nothing to shop yet.");
+  const message = left === 1 ? "1 left." : left > 0 ? `${left} left.` : "Nothing to shop yet.";
+  toast(message, 4500);
+  const next = document.querySelector("#shop .shop-row:not(.is-done)");
+  if (next instanceof HTMLElement) {
+    next.classList.add("shop-ack");
+    next.scrollIntoView({ block: "center" });
+    window.setTimeout(() => next.classList.remove("shop-ack"), 4500);
+  }
 }
 
 async function refreshPrices() {
