@@ -403,10 +403,27 @@ export class WalmartPricingProvider implements StorePricingProvider {
   }
 
   async lookupByUpcs(upcs: string[]): Promise<unknown> {
+    return this.lookupItems("upc", upcs, (code) => /^\d{12,14}$/.test(code));
+  }
+
+  /**
+   * Affiliate Product Lookup by item id: GET /items?ids={id,id}.
+   * The documented list length is 20, the same cap as `upc` and as OPD
+   * price-availability `offerIds`. Catalog ingest charges the call.
+   */
+  async lookupByIds(ids: string[]): Promise<unknown> {
+    return this.lookupItems("ids", ids, (id) => /^\d{3,14}$/.test(id));
+  }
+
+  private async lookupItems(
+    param: "upc" | "ids",
+    values: string[],
+    accept: (value: string) => boolean
+  ): Promise<unknown> {
     const codes: string[] = [];
-    for (const raw of upcs) {
+    for (const raw of values) {
       const code = raw.trim();
-      if (!/^\d{12,14}$/.test(code) || codes.includes(code)) {
+      if (!accept(code) || codes.includes(code)) {
         continue;
       }
       codes.push(code);
@@ -418,7 +435,7 @@ export class WalmartPricingProvider implements StorePricingProvider {
       return { items: [] };
     }
     const credentials = this.credentialsOrThrow();
-    const params = new URLSearchParams({ upc: codes.join(",") });
+    const params = new URLSearchParams({ [param]: codes.join(",") });
     if (credentials.publisherId) {
       params.set("publisherId", credentials.publisherId);
     }

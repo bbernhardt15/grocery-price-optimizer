@@ -235,6 +235,7 @@ export async function upsertCatalogRecords(
           ...(record.productUrl?.trim() ? { productUrl: record.productUrl.trim() } : {}),
           priceSource,
           lastSeenAt: seenAt,
+          refreshMisses: 0,
           status: "active",
         },
       },

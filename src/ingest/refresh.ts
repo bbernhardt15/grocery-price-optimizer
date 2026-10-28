@@ -1,5 +1,6 @@
 import { itemIsWatched } from "../alerts/compare";
 import { PriceWatch } from "../alerts/models";
+import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
 import { krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
@@ -7,6 +8,9 @@ import { utcDay } from "./budget";
 import { staleRatioOf } from "./config";
 import { CATALOG_DEMAND_DAYS } from "./demand";
 import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay } from "./models";
+import { REFRESH_MAX_MISSES, WALMART_LOOKUP_IDS_MAX, walmartItemIdForLookup } from "./walmartRefreshBatch";
+
+export { REFRESH_MAX_MISSES };
 
 /** A miss waits a day so the same dead offer does not spend the budget again. */
 export const REFRESH_RETRY_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +26,8 @@ export type RefreshPick = {
   storeName: string;
   name: string;
   code: string;
+  /** Numeric Walmart item id when the master has one. Sent on `ids`, not `upc`. */
+  itemId?: string;
   locationId: string;
   priority: RefreshPriority;
 };
@@ -39,6 +45,7 @@ type MasterRow = {
   name: string;
   upc?: string;
   krogerProductId?: string;
+  walmartItemId?: string;
   departmentId?: string;
   categoryPaths?: string[];
 };
@@ -65,6 +72,43 @@ function addKey(bucket: Set<string>, value: string | undefined): void {
   }
 }
 
+/** Saved-list and usuals ids. Skip free-text slot names so they do not crowd the query. */
+function addCatalogId(bucket: Set<string>, value: unknown): void {
+  if (typeof value !== "string") {
+    return;
+  }
+  const raw = value.trim();
+  if (!raw || raw.length > 80 || raw.startsWith("local:")) {
+    return;
+  }
+  if (!(raw.startsWith("upc:") || raw.includes(":") || /^\d{6,14}$/.test(raw))) {
+    return;
+  }
+  addKey(bucket, raw);
+}
+
+function collectCatalogIds(value: unknown, into: Set<string>, depth = 0): void {
+  if (!value || typeof value !== "object" || depth > 8) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectCatalogIds(entry, into, depth + 1);
+    }
+    return;
+  }
+  const row = value as Record<string, unknown>;
+  if (row.cleared === true) {
+    return;
+  }
+  addCatalogId(into, row.catalogId);
+  for (const child of Object.values(row)) {
+    if (child && typeof child === "object") {
+      collectCatalogIds(child, into, depth + 1);
+    }
+  }
+}
+
 function lookupCode(storeName: string, master: MasterRow): string | null {
   if (storeName === "Kroger") {
     const stored = master.krogerProductId?.replace(/\D/g, "") ?? "";
@@ -78,7 +122,7 @@ function lookupCode(storeName: string, master: MasterRow): string | null {
 
 async function loadPriority(now: Date): Promise<PriorityKeys> {
   const since = new Date(now.getTime() - CATALOG_DEMAND_DAYS * 86_400_000);
-  const [demand, lists, watches, merged] = await Promise.all([
+  const [demand, lists, watches, merged, saved] = await Promise.all([
     CatalogDemand.find({ lastSeenAt: { $gte: since } })
       .sort({ hits: -1, lastSeenAt: -1 })
       .limit(120)
@@ -100,6 +144,11 @@ async function loadPriority(now: Date): Promise<PriorityKeys> {
       .select("key")
       .limit(2000)
       .lean<Array<{ key: string }>>(),
+    SavedList.find()
+      .sort({ updatedAt: -1 })
+      .limit(80)
+      .select("items starterBook")
+      .lean<Array<{ items?: Array<{ id?: string; itemId?: string }>; starterBook?: unknown }>>(),
   ]);
   const list = new Set<string>();
   const shared = new Set<string>();
@@ -124,6 +173,13 @@ async function loadPriority(now: Date): Promise<PriorityKeys> {
       }
       addKey(shared, item.catalogId);
     }
+  }
+  for (const savedRow of saved) {
+    for (const item of savedRow.items ?? []) {
+      addCatalogId(list, item.id);
+      addCatalogId(list, item.itemId);
+    }
+    collectCatalogIds(savedRow.starterBook, list);
   }
   for (const row of watches) {
     for (const item of row.items ?? []) {
@@ -183,14 +239,15 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
  * outdoor, and the rest of non-grocery) is flagged refreshExcluded here so
  * the next pass does not spend a call on it. Saved lists and shared lists come first, then popular
  * items, price watches, recent searches, merged products, and the oldest
- * stale offer.
+ * stale offer. Saved lists and usuals (starter-book favorites) share the
+ * list tier, and each tier is the stalest offer first.
  */
 export async function nextRefreshPicks(
   storeName: "Walmart" | "Kroger",
   now: Date,
   limit: number
 ): Promise<RefreshPick[]> {
-  const want = Math.max(0, Math.min(20, Math.floor(limit)));
+  const want = Math.max(0, Math.min(WALMART_LOOKUP_IDS_MAX, Math.floor(limit)));
   if (want === 0) {
     return [];
   }
@@ -234,7 +291,7 @@ export async function nextRefreshPicks(
         break;
       }
       const masters = await CatalogMaster.find({ key: { $in: offers.map((offer) => offer.productKey) } })
-        .select("key name upc krogerProductId categoryPaths")
+        .select("key name upc krogerProductId walmartItemId categoryPaths")
         .lean<MasterRow[]>();
       const byKey = new Map(masters.map((master) => [master.key, master]));
       for (const offer of offers) {
@@ -247,8 +304,9 @@ export async function nextRefreshPicks(
         seen.add(offer.productKey);
         const master = byKey.get(offer.productKey);
         const code = master ? lookupCode(storeName, master) : null;
+        const itemId = storeName === "Walmart" ? walmartItemIdForLookup(master?.walmartItemId) : null;
         const nongrocery = master ? mapToDepartment(master.categoryPaths, master.name).signal === "excluded" : false;
-        if (!master || !code || nongrocery) {
+        if (!master || (!code && !itemId) || nongrocery) {
           if (nongrocery) {
             excludeIds.push(offer._id);
           } else {
@@ -261,7 +319,8 @@ export async function nextRefreshPicks(
           productKey: offer.productKey,
           storeName,
           name: master.name,
-          code,
+          code: code ?? "",
+          ...(itemId ? { itemId } : {}),
           locationId: offer.locationId ?? "",
           priority: tier.priority,
         });
@@ -272,24 +331,112 @@ export async function nextRefreshPicks(
   return chosen;
 }
 
-/** Remember the attempt and add successful price writes to today's count. */
+async function recordRefreshStats(
+  storeName: string,
+  now: Date,
+  stats: { refreshed: number; calls: number; attempted: number }
+): Promise<void> {
+  const refreshed = Math.max(0, Math.floor(stats.refreshed));
+  const calls = Math.max(0, Math.floor(stats.calls));
+  const attempted = Math.max(0, Math.floor(stats.attempted));
+  if (!storeName || (refreshed === 0 && calls === 0 && attempted === 0)) {
+    return;
+  }
+  const kroger = storeName.toLowerCase() === "kroger";
+  const inc: Record<string, number> = {};
+  if (refreshed > 0) {
+    inc[kroger ? "kroger" : "walmart"] = refreshed;
+  }
+  if (calls > 0) {
+    inc[kroger ? "krogerCalls" : "walmartCalls"] = calls;
+  }
+  if (attempted > 0) {
+    inc[kroger ? "krogerAttempted" : "walmartAttempted"] = attempted;
+  }
+  const day = utcDay(now);
+  await CatalogRefreshDay.updateOne({ day }, { $inc: inc, $setOnInsert: { day } }, { upsert: true });
+}
+
+/**
+ * A successful response omitted these ids. One miss waits a day. After
+ * {@link REFRESH_MAX_MISSES} the offer is out of stock and leaves the queue,
+ * so a dead id cannot spend a call every day.
+ */
+async function markRefreshMissing(offerIds: string[], now: Date): Promise<void> {
+  if (offerIds.length === 0) {
+    return;
+  }
+  const rows = await CatalogOffer.find({ _id: { $in: offerIds } })
+    .select("refreshMisses")
+    .lean<Array<{ _id: unknown; refreshMisses?: number }>>();
+  for (const row of rows) {
+    const misses = (row.refreshMisses ?? 0) + 1;
+    const confirmed = misses >= REFRESH_MAX_MISSES;
+    await CatalogOffer.updateOne(
+      { _id: row._id },
+      {
+        $set: {
+          refreshAttemptAt: now,
+          refreshMisses: misses,
+          ...(confirmed ? { availability: "out_of_stock" as const, refreshExcluded: true } : {}),
+        },
+      }
+    );
+  }
+}
+
+/**
+ * Apply one refresh call. Priced rows were upserted by the caller. Unavailable
+ * rows came back without a price. Missing rows were not in the response.
+ * `calls` is 1 for the HTTP request, including a batch.
+ */
+export async function settleRefreshOutcome(input: {
+  storeName: "Walmart" | "Kroger";
+  now: Date;
+  priced: RefreshPick[];
+  unavailable: RefreshPick[];
+  missing: RefreshPick[];
+  refreshedOffers: number;
+  calls: number;
+}): Promise<void> {
+  if (input.priced.length > 0) {
+    await CatalogOffer.updateMany(
+      { _id: { $in: input.priced.map((pick) => pick.offerId) } },
+      { $set: { refreshAttemptAt: input.now, refreshMisses: 0 } }
+    );
+  }
+  if (input.unavailable.length > 0) {
+    await CatalogOffer.updateMany(
+      { _id: { $in: input.unavailable.map((pick) => pick.offerId) } },
+      { $set: { refreshAttemptAt: input.now, availability: "out_of_stock", refreshMisses: 0 } }
+    );
+  }
+  await markRefreshMissing(
+    input.missing.map((pick) => pick.offerId),
+    input.now
+  );
+  await recordRefreshStats(input.storeName, input.now, {
+    refreshed: input.refreshedOffers,
+    calls: input.calls,
+    attempted: input.priced.length + input.unavailable.length + input.missing.length,
+  });
+}
+
+/** Remember the attempt and add successful price writes to today's count. One call, even when several offers were attempted. */
 export async function finishRefresh(picks: RefreshPick[], now: Date, refreshedOffers: number): Promise<void> {
   if (picks.length > 0) {
     await CatalogOffer.updateMany(
       { _id: { $in: picks.map((pick) => pick.offerId) } },
-      { $set: { refreshAttemptAt: now } }
+      refreshedOffers > 0
+        ? { $set: { refreshAttemptAt: now, refreshMisses: 0 } }
+        : { $set: { refreshAttemptAt: now } }
     );
   }
-  if (refreshedOffers <= 0 || picks.length === 0) {
-    return;
-  }
-  const field = picks[0]?.storeName.toLowerCase() === "kroger" ? "kroger" : "walmart";
-  const day = utcDay(now);
-  await CatalogRefreshDay.updateOne(
-    { day },
-    { $inc: { [field]: refreshedOffers }, $setOnInsert: { day } },
-    { upsert: true }
-  );
+  await recordRefreshStats(picks[0]?.storeName ?? "", now, {
+    refreshed: refreshedOffers,
+    calls: picks.length > 0 ? 1 : 0,
+    attempted: picks.length,
+  });
 }
 
 /** Stale offers divided by offers that are still on the shelf (not discontinued). */
@@ -319,7 +466,28 @@ export async function refreshQueueSize(now = new Date()): Promise<{ walmart: num
   return { walmart, kroger };
 }
 
+export type RefreshActivity = {
+  refreshed: { walmart: number; kroger: number };
+  calls: { walmart: number; kroger: number };
+  attempted: { walmart: number; kroger: number };
+};
+
+export async function refreshActivityToday(now = new Date()): Promise<RefreshActivity> {
+  const row = await CatalogRefreshDay.findOne({ day: utcDay(now) }).lean<{
+    walmart?: number;
+    kroger?: number;
+    walmartCalls?: number;
+    krogerCalls?: number;
+    walmartAttempted?: number;
+    krogerAttempted?: number;
+  } | null>();
+  return {
+    refreshed: { walmart: row?.walmart ?? 0, kroger: row?.kroger ?? 0 },
+    calls: { walmart: row?.walmartCalls ?? 0, kroger: row?.krogerCalls ?? 0 },
+    attempted: { walmart: row?.walmartAttempted ?? 0, kroger: row?.krogerAttempted ?? 0 },
+  };
+}
+
 export async function refreshedToday(now = new Date()): Promise<{ walmart: number; kroger: number }> {
-  const row = await CatalogRefreshDay.findOne({ day: utcDay(now) }).lean<{ walmart?: number; kroger?: number } | null>();
-  return { walmart: row?.walmart ?? 0, kroger: row?.kroger ?? 0 };
+  return (await refreshActivityToday(now)).refreshed;
 }

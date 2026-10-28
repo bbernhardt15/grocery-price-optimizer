@@ -67,6 +67,8 @@ const offerSchema = new Schema(
     refreshExcluded: { type: Boolean, default: false },
     /** Last refresh attempt, including a miss. Tried again after a day. */
     refreshAttemptAt: { type: Date },
+    /** Confirmed misses. Three in a row leaves the offer out of the queue. */
+    refreshMisses: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -145,6 +147,12 @@ const refreshDaySchema = new Schema({
   day: { type: String, required: true, unique: true },
   walmart: { type: Number, default: 0 },
   kroger: { type: Number, default: 0 },
+  /** Affiliate or Kroger HTTP calls spent on refresh today. A batch is one call. */
+  walmartCalls: { type: Number, default: 0 },
+  krogerCalls: { type: Number, default: 0 },
+  /** Offers those calls asked about, including misses. */
+  walmartAttempted: { type: Number, default: 0 },
+  krogerAttempted: { type: Number, default: 0 },
 });
 
 const maintenanceJobSchema = new Schema(
@@ -208,6 +216,7 @@ export type CatalogOfferDoc = {
   lastSeenAt: Date;
   refreshExcluded?: boolean;
   refreshAttemptAt?: Date;
+  refreshMisses?: number;
   status: CatalogStatus;
 };
 
