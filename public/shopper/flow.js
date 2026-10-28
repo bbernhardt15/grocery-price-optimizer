@@ -1,13 +1,14 @@
 /**
- * Three steps, in order: add items, see the plan, shop.
+ * Three steps, in order: add items, review the store split, shop.
  * The sticky bar keeps one primary action for the step you're on.
+ * Review is the savings and the split. Shop is where items get checked off.
  */
 
 import { priceFigure } from "./calmPlan.js";
 
 export const FLOW_STEPS = [
   { id: "add", label: "Add", title: "Add items" },
-  { id: "plan", label: "Plan", title: "Your plan" },
+  { id: "plan", label: "Review", title: "Review the split" },
   { id: "shop", label: "Shop", title: "In the store" },
 ];
 
@@ -23,7 +24,7 @@ export function stepTitle(id) {
 }
 
 /**
- * One bottom area. Add and Plan share the step dock.
+ * One bottom area. Add and Review share the step dock.
  * The in-store bar is only the Shop step.
  * @param {string | null | undefined} id
  * @returns {"steps" | "shop"}
@@ -56,15 +57,18 @@ export function planBarCopy(input = {}) {
   }
   const amount = Number(input.total);
   const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
-  let button = "See your plan";
-  let enabled = count > 0 && !input.planning;
+  let button = "Review the split";
+  let enabled = count > 0;
   if (step === "plan") {
-    button = input.hasPlan ? "Shop" : "See your plan";
-    enabled = count > 0 && !input.planning && (Boolean(input.hasPlan) || step === "plan");
-    if (!input.hasPlan) enabled = count > 0 && !input.planning;
+    button = input.hasPlan ? "Shop" : input.planning ? "Updating…" : "Review the split";
+    enabled = count > 0;
   } else if (step === "shop") {
     button = "Done";
     // A disabled Done swallows the tap. Incomplete trips still respond.
+    enabled = count > 0;
+  }
+  if (input.planning && step !== "shop" && !input.hasPlan) {
+    button = "Updating…";
     enabled = count > 0;
   }
   return { step, countLabel, totalLabel, button, enabled };

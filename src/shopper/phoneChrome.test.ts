@@ -157,7 +157,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       assert.ok(add.scroll <= add.inner + 1);
       assert.deepEqual(
         add.labels.map((label: { text: string }) => label.text),
-        ["Add", "Plan", "Shop"]
+        ["Add", "Review", "Shop"]
       );
       for (const label of add.labels) {
         assert.ok(label.height >= 44, `${label.text} is at least 44px`);
@@ -172,7 +172,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       await inPage(page, `
         document.body.dataset.step = "plan";
         const title = document.getElementById("brand-title");
-        if (title) title.textContent = "Your plan";
+        if (title) title.textContent = "Review the split";
       `);
       const plan = await inPage<any>(page, MEASURE_CHROME);
       assert.equal(plan.steps, true);
@@ -376,7 +376,7 @@ describe("phone taps after Kroger", { timeout: 60_000 }, () => {
         };
       `);
       assert.equal(returned.step, "plan");
-      assert.equal(returned.title, "Your plan");
+      assert.equal(returned.title, "Review the split");
       assert.equal(returned.dialog, false);
       assert.equal(returned.cardHidden, false);
       assert.match(returned.cardText, /Kroger connected/);

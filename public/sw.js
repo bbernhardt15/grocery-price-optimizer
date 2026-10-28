@@ -1,8 +1,13 @@
-const CACHE = "grocery-gitter-shell-v16";
+const CACHE = "grocery-gitter-shell-v17";
 const SHARE_CACHE = "gg-import-share";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("message", (event) => {
+  // iOS can leave the new worker waiting while the home-screen page stays open.
+  if (event.data?.type === "skip-waiting") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
@@ -11,6 +16,11 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== SHARE_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
+      .then(() =>
+        self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+          for (const client of clients) client.postMessage({ type: "shell-updated" });
+        })
+      )
   );
 });
 
@@ -50,6 +60,14 @@ async function receiveSharedList(request) {
   }
 }
 
+/** HTML, scripts, and styles. Never a cache-first hit. Icons can wait. */
+function shellAsset(url) {
+  const path = url.pathname;
+  if (path === "/sw.js") return false;
+  if (path === "/" || path === "/index.html") return true;
+  return path.endsWith(".js") || path.endsWith(".css") || path.endsWith(".html") || path.startsWith("/shopper/");
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -63,18 +81,29 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
     return;
   }
+  const shell = shellAsset(url);
   event.respondWith(
     (async () => {
       try {
-        const response = await fetch(request);
+        // cache: "no-store" stops WebKit from answering the worker with a
+        // stale index.html or app.js. The runtime cache is only an offline copy.
+        const response = await fetch(request.url, {
+          cache: shell ? "no-store" : "default",
+          credentials: "same-origin",
+          redirect: "follow",
+        });
         if (response && response.ok && response.type === "basic" && url.pathname !== "/sw.js") {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
         }
         return response;
       } catch {
-        const cached = (await caches.match(request)) || (await caches.match("/"));
+        const cached = await caches.match(request);
         if (cached) return cached;
+        if (request.mode === "navigate") {
+          const home = await caches.match("/");
+          if (home) return home;
+        }
         return new Response("Grocery Gitter is offline.", {
           status: 503,
           headers: { "Content-Type": "text/plain; charset=utf-8" },

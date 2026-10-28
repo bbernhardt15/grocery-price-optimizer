@@ -2,6 +2,7 @@
  * Markup for themed lists. Tiles here never show a price or a store.
  */
 
+import { displayProductName } from "./familyTile.js";
 import { activeChoice, scaleQuantity, slotMatches } from "./themedLists.js";
 
 function text(escapeHtml, value) {
@@ -9,8 +10,8 @@ function text(escapeHtml, value) {
 }
 
 export function choiceDetail(choice) {
-  const title = String(choice?.familyName || choice?.name || "Item").trim();
-  const brand = String(choice?.brand || "").trim();
+  const title = displayProductName(choice?.familyName || choice?.name, choice?.brand) || "Item";
+  const brand = displayProductName(choice?.brand, choice?.brand);
   const size = String(choice?.sizeLabel || "").trim();
   const showBrand = brand && !title.toLowerCase().includes(brand.toLowerCase());
   return { title, detail: [showBrand ? brand : "", size].filter(Boolean).join(" · ") };
@@ -91,15 +92,49 @@ export function partyHtml(people, escapeHtml) {
 export function nudgeHtml(escapeHtml) {
   return `<div class="nudge" id="favorites-nudge">
     <p>Set your favorites once and we'll remember them.</p>
-    <button type="button" class="text-btn" data-nudge-dismiss>Not now</button>
+    <div class="starter-actions">
+      <button type="button" class="primary" data-nudge-set>Set favorites</button>
+      <button type="button" class="text-btn" data-nudge-dismiss>Not now</button>
+    </div>
   </div>`;
 }
 
+export function listsEntryHtml(hint, escapeHtml) {
+  return `<button type="button" class="lists-entry" data-lists-open>
+    <span>Lists</span>
+    <span class="muted">${text(escapeHtml, hint || "Starter lists and your lists")}</span>
+  </button>`;
+}
+
 export function emptyMyListsHtml(escapeHtml) {
-  return `<div class="empty-state">
+  return `<div class="empty-state" id="my-lists-empty">
     <h3>No lists yet</h3>
-    <p>Save a copy of a starter list, or start your own. Your favorites stay with you.</p>
-    <button type="button" class="primary" data-my-new>New list</button>
+    <p>Save a copy of a starter list, or use New list. Your favorites stay with you.</p>
+  </div>`;
+}
+
+export function listsBrowserHtml({ preview, rest, mineHtml, showAll, escapeHtml }) {
+  const seasonal = (preview || []).map((list) => listCardHtml(list, escapeHtml)).join("");
+  const more = showAll ? (rest || []).map((list) => listCardHtml(list, escapeHtml)).join("") : "";
+  const moreButton =
+    (rest || []).length && !showAll
+      ? `<button type="button" class="ghost" data-lists-all>All starter lists</button>`
+      : "";
+  const heading = (preview || []).some((list) => list.season) ? "Right now" : "Starter lists";
+  return `<div class="sheet-body">
+    <div class="list-head">
+      <h2 id="list-sheet-title">Lists</h2>
+      <button type="button" class="text-btn" data-sheet-close>Close</button>
+    </div>
+    <h3>${text(escapeHtml, heading)}</h3>
+    <div class="starter-row">${seasonal}</div>
+    ${moreButton}
+    ${more ? `<div class="starter-row">${more}</div>` : ""}
+    <div class="start-head">
+      <h3>My lists</h3>
+      <button type="button" class="ghost" data-my-new>New list</button>
+    </div>
+    ${mineHtml || ""}
   </div>`;
 }
 

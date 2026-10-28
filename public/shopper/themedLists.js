@@ -164,7 +164,7 @@ export function isInSeason(list, date) {
   return inWindow(date, window[0], window[1]);
 }
 
-/** Seasonal lists first. Everything else stays under More lists. */
+/** Seasonal lists first. Everything else stays available behind the Lists sheet. */
 export function arrangeLists(date) {
   const featured = [];
   const more = [];
@@ -173,6 +173,20 @@ export function arrangeLists(date) {
     else more.push(list);
   }
   return { featured, more };
+}
+
+/**
+ * Two or three lists for the Add screen. In-season lists come first.
+ * When nothing is in season, a few everyday lists stand in so the
+ * entry is not empty. The rest stay behind All starter lists.
+ * @param {Date} date
+ * @param {number} [limit]
+ */
+export function previewLists(date, limit = 3) {
+  const cap = Math.min(3, Math.max(1, Math.floor(Number(limit) || 3)));
+  const { featured, more } = arrangeLists(date);
+  if (featured.length) return featured.slice(0, cap);
+  return more.slice(0, cap);
 }
 
 export function themedList(id) {

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { pickerTileHtml } from "../../public/shopper/themedListsUi.js";
+import { emptyMyListsHtml, nudgeHtml, pickerTileHtml } from "../../public/shopper/themedListsUi.js";
 import {
   arrangeLists,
+  previewLists,
   annotateFavoriteSwap,
   deleteList,
   duplicateThemed,
@@ -105,6 +106,17 @@ describe("themed list slots", () => {
     assert.equal(march.more.length, october.featured.length + october.more.length);
     const july = arrangeLists(new Date(2026, 6, 4));
     assert.equal(july.featured.some((list) => list.id === "july-4"), true);
+    const octoberPreview = previewLists(new Date(2026, 9, 27), 3);
+    assert.deepEqual(
+      octoberPreview.map((list) => list.id),
+      ["thanksgiving", "tailgate"]
+    );
+    assert.ok(previewLists(new Date(2026, 2, 15), 3).length <= 3);
+    assert.ok(previewLists(new Date(2026, 2, 15), 3).length >= 2);
+    const nudge = nudgeHtml(escapeHtml);
+    assert.match(nudge, /Set favorites/);
+    assert.match(nudge, /Not now/);
+    assert.doesNotMatch(emptyMyListsHtml(escapeHtml), /data-my-new/);
   });
 
   it("uses a favorite ahead of the suggestion, and a per-list override ahead of the favorite", () => {

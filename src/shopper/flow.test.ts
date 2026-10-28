@@ -10,10 +10,10 @@ describe("three-step flow", () => {
   it("stays on add, plan, and shop", () => {
     assert.deepEqual(
       FLOW_STEPS.map((step) => step.label),
-      ["Add", "Plan", "Shop"]
+      ["Add", "Review", "Shop"]
     );
     assert.equal(stepTitle("add"), "Add items");
-    assert.equal(stepTitle("plan"), "Your plan");
+    assert.equal(stepTitle("plan"), "Review the split");
     assert.equal(stepTitle("shop"), "In the store");
     assert.equal(bottomChrome("add"), "steps");
     assert.equal(bottomChrome("plan"), "steps");
@@ -30,13 +30,13 @@ describe("three-step flow", () => {
     const empty = planBarCopy({ step: "add", itemCount: 0, total: 12 });
     assert.equal(empty.countLabel, "0 items");
     assert.equal(empty.totalLabel, "");
-    assert.equal(empty.button, "See your plan");
+    assert.equal(empty.button, "Review the split");
     assert.equal(empty.enabled, false);
 
     const add = planBarCopy({ step: "add", itemCount: 3, total: 12.5 });
     assert.equal(add.countLabel, "3 items");
     assert.equal(add.totalLabel, "$12.50");
-    assert.equal(add.button, "See your plan");
+    assert.equal(add.button, "Review the split");
     assert.equal(add.enabled, true);
 
     const missing = planBarCopy({ step: "add", itemCount: 2, total: Number.NaN });
@@ -47,8 +47,8 @@ describe("three-step flow", () => {
     assert.equal(plan.enabled, true);
 
     const planning = planBarCopy({ step: "plan", itemCount: 2, total: 4, hasPlan: false, planning: true });
-    assert.equal(planning.enabled, false);
-    assert.equal(planning.button, "See your plan");
+    assert.equal(planning.enabled, true);
+    assert.equal(planning.button, "Updating…");
 
     const shop = planBarCopy({ step: "shop", itemCount: 4, left: 1, total: 9, complete: false });
     assert.equal(shop.countLabel, "1 left");
@@ -76,10 +76,10 @@ describe("three-step flow", () => {
     assert.match(html, /id="step-bar"/);
     assert.match(html, /id="shop-bar"/);
     assert.match(html, /aria-label="Add items">Add</);
-    assert.match(html, /aria-label="Your plan">Plan</);
+    assert.match(html, /aria-label="Review the split">Review</);
     assert.match(html, /aria-label="In the store">Shop</);
     assert.match(html, /Add items/);
-    assert.match(html, /See your plan/);
+    assert.match(html, /Review the split/);
     assert.match(html, /id="bar-primary"/);
     assert.match(html, /id="shop-done"/);
     assert.equal(html.includes('id="filter-store"'), false);

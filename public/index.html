@@ -36,8 +36,8 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=add-calm-3" />
-    <link rel="stylesheet" href="/shopper/import.css?v=add-calm-3" />
+    <link rel="stylesheet" href="/styles.css?v=add-calm-5" />
+    <link rel="stylesheet" href="/shopper/import.css?v=add-calm-5" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -269,7 +269,7 @@
             Allow substitutes in the trip plan
           </label>
           <p class="muted sub-note">A substitute is a different product: same department, similar name and size. It is never shown as an exact match.</p>
-          <button id="plan-btn" type="button" class="primary plan-btn" disabled>See your plan</button>
+          <button id="plan-btn" type="button" class="primary plan-btn" disabled>Review the split</button>
           <button id="sample-btn" type="button" class="ghost">Try a sample list</button>
           <p id="plan-error" class="status" role="alert" hidden></p>
           <nav class="panel-legal" aria-label="App information">
@@ -283,7 +283,7 @@
       <footer id="bottom-dock" class="bottom-dock">
         <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
           <button type="button" data-flow="add" aria-current="step" aria-label="Add items">Add</button>
-          <button type="button" data-flow="plan" aria-label="Your plan">Plan</button>
+          <button type="button" data-flow="plan" aria-label="Review the split">Review</button>
           <button type="button" data-flow="shop" aria-label="In the store">Shop</button>
         </nav>
         <div class="list-bar" id="list-bar">
@@ -292,7 +292,7 @@
             <span id="bar-total"></span>
             <span id="bar-save" class="bar-save" hidden></span>
           </button>
-          <button type="button" id="bar-primary" class="primary bar-primary">See your plan</button>
+          <button type="button" id="bar-primary" class="primary bar-primary">Review the split</button>
           <div class="meter meter-slim" aria-hidden="true"><span id="bar-meter" class="meter-fill"></span></div>
           <p id="bar-caption" class="bar-caption" hidden>Add items to see savings</p>
         </div>
@@ -463,6 +463,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=add-calm-3"></script>
+    <script type="module" src="/app.js?v=add-calm-5"></script>
   </body>
 </html>

@@ -13,6 +13,10 @@ import { noteCatalogDemand } from "../ingest/demand";
 import { noteShopperZip } from "../ingest/runner";
 import { accessFor } from "../billing/access";
 import { entitlementPayload, lockCartHandoffs } from "../billing/applyPlan";
+import { withDeadline } from "../withDeadline";
+
+/** Nearby-store lookups must not hold the whole plan. Prices still return. */
+const STORE_LOOKUP_MS = 3000;
 
 const router = Router();
 
@@ -199,9 +203,11 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
     const { groceryList, stores, zipCode } = parsed;
 
     let locationId: string | undefined;
+    const walmartStorePromise = withDeadline(lookupWalmartStore(zipCode, stores), STORE_LOOKUP_MS, undefined);
     if (zipCode) {
       void noteShopperZip(zipCode).catch(() => undefined);
-      locationId = await krogerService.getClosestStoreLocation(zipCode);
+      const nearest = await withDeadline(krogerService.getClosestStoreLocation(zipCode), STORE_LOOKUP_MS, "");
+      locationId = nearest || undefined;
     }
     await noteCatalogDemand({
       kind: "list",
@@ -225,7 +231,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       });
       productsResult.products.push(...pinned);
     }
-    const walmartStore = await lookupWalmartStore(zipCode, stores);
+    const walmartStore = await walmartStorePromise;
     const access = await accessFor(res);
     let groupedByStore = enrichOptimizeResult(
       optimizeGroceryList(groceryList, stores, productsResult.products, access.limits.multiStore ? "split" : "single"),

@@ -221,6 +221,35 @@ img { max-width: 100%; display: block; }
 .icon-btn, .list-toggle, .ghost, .primary, .text-btn {
   min-height: 44px; border-radius: 12px;
 }
+button:not(:disabled):active,
+.starter:active,
+.lists-entry:active,
+.quick-chip:active,
+a.handoff-btn:active,
+.step-bar button:active {
+  transform: translateY(1px);
+  filter: brightness(0.94);
+}
+button.is-busy,
+a.is-busy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.step-bar button.is-busy { display: flex; }
+.starter.is-busy { flex-direction: row; align-items: center; }
+button.is-busy::after,
+a.is-busy::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
 .icon-btn {
   width: 44px; border: 1px solid var(--line); background: var(--surface); font-size: 1.2rem;
 }
@@ -809,7 +838,7 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   .print-root pre { white-space: pre-wrap; font: 16px/1.4 sans-serif; }
 }
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
+  position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -829,7 +858,10 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   }
   .ask-import { width: 44px; padding: 0; }
   .ask-import::before { content: "＋"; font-size: 1.25rem; line-height: 1; }
-  .search .ask-field input { padding-right: 100px; }
+  .search .ask-field input { padding-right: 92px; font-size: 0.95rem; }
+}
+@media (max-width: 400px) {
+  .search .ask-field input { padding-right: 88px; font-size: 0.86rem; }
 }
 @media (max-width: 1099px) {
   .brand-kicker, #list-toggle { display: none; }
@@ -885,6 +917,8 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
     border-radius: 16px; border: 1px solid var(--line); z-index: 8;
   }
   #list-close, .list-bar { display: none; }
+  body[data-step="shop"] .shop-bar { display: flex; }
+  body[data-step="shop"] #shop-done { min-height: 44px; }
   .list-panel, .list-panel.open {
     display: flex; flex-direction: column; gap: 10px; position: sticky; top: calc(76px + var(--safe-top));
     max-height: calc(100dvh - 96px - var(--safe-top)); overflow: auto; padding: 14px; border-radius: var(--radius);
@@ -904,6 +938,9 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
 @keyframes shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 .empty-state {
   display: flex;
@@ -984,6 +1021,18 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   margin: 0; padding: 10px 12px; border-radius: 14px; background: var(--accent-soft); color: var(--ink);
 }
 .nudge p { margin: 0; }
+.lists-entry {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  width: 100%; min-height: 72px; text-align: left;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 16px; padding: 14px 16px; font: inherit; font-weight: 700;
+}
+.lists-entry .muted { font-weight: 500; }
+.review-items { margin: 8px 0 0; }
+.return-banner {
+  background: var(--accent-soft); color: var(--ink); border-radius: var(--radius); padding: 16px;
+}
+.return-banner p { margin: 0; font-weight: 700; }
 .slot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .slot-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
@@ -1078,6 +1127,7 @@ dialog.list-sheet .sheet-actions { position: static; flex: none; }
 .shop-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .shop-name { font-weight: 700; font-size: 1.05rem; }
 .shop-row.is-done .shop-name { text-decoration: line-through; color: var(--muted); }
+.shop-row.shop-ack { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .done-banner {
   background: var(--accent-soft); color: var(--ink); border-radius: var(--radius); padding: 16px;

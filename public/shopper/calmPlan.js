@@ -4,6 +4,7 @@
  * labeled as an estimate.
  */
 
+import { displayProductName } from "./familyTile.js";
 import { formatMoney } from "./savingsMeter.js";
 import { consolidateStops, normalizeStoreKey, roundMoney } from "./tripPlan.js";
 
@@ -39,8 +40,8 @@ export const ESTIMATE_NOTE = "Prices are estimates. Not a receipt.";
 export function plainSwap(item) {
   const swapped = item?.matchKind === "swap" || item?.matchKind === "substitute";
   if (!swapped) return null;
-  const from = clean(item.substitutedFor || item.query);
-  const to = clean(item.name);
+  const from = displayProductName(item.substitutedFor || item.query) || clean(item.substitutedFor || item.query);
+  const to = displayProductName(item.name, item.brand) || clean(item.name);
   const store = clean(item.storeName) || "the store";
   if (!from || !to) return null;
   return { text: `We swapped ${from} for ${to} at ${store}`, change: "Change" };

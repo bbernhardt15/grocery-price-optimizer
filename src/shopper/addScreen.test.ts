@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 const html = readFileSync(new URL("../../public/index.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../public/styles.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
+const listHome = readFileSync(new URL("../../public/shopper/listHome.js", import.meta.url), "utf8");
 
 describe("calm add screen", () => {
   it("leads with one ask field, chips, and a collapsed aisle", () => {
@@ -18,6 +19,9 @@ describe("calm add screen", () => {
     assert.match(html, /id="refine-count"/);
     assert.match(app, /askIntent/);
     assert.match(app, /importer\?\.find/);
+    const paint = listHome.slice(listHome.indexOf("function paintHome"), listHome.indexOf("function paintSheet"));
+    assert.doesNotMatch(paint, /partyHtml|More lists|data-my-new/);
+    assert.match(paint, /listsEntryHtml/);
   });
 
   it("keeps Refine collapsed and leaves ZIP in the menu on a wide screen", () => {
