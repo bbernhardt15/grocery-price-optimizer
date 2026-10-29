@@ -56,6 +56,24 @@ function stems(text: string): string[] {
     .filter((token) => token.length > 1 && !IGNORE.has(token));
 }
 
+/** A shelf neighbor that shares one word but is a different food. */
+function kindClash(query: string[], hay: Set<string>): number {
+  const pairs: Array<[string, string]> = [
+    ["tortilla", "chip"],
+    ["butter", "peanut"],
+    ["beef", "dog"],
+    ["chocolate", "cookie"],
+  ];
+  let penalty = 0;
+  for (const [wanted, extra] of pairs) {
+    const hasWanted = query.includes(wanted);
+    const hasExtra = query.includes(extra);
+    if (hay.has(wanted) && hay.has(extra) && hasWanted && !hasExtra) penalty += 0.55;
+    if (hay.has(extra) && !hay.has(wanted) && hasWanted && !hasExtra && extra === "dog") penalty += 0.35;
+  }
+  return penalty;
+}
+
 function hayHas(hay: Set<string>, token: string): boolean {
   if (hay.has(token)) return true;
   if ((token === "coke" || token === "cola") && (hay.has("coke") || hay.has("cola"))) return true;
@@ -100,6 +118,8 @@ function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
     const inQuery = group.some((token) => query.includes(stemGroceryToken(token)));
     if (inProduct && !inQuery) score -= 0.45;
   }
+
+  score -= kindClash(query, hay);
 
   if (item.brand) score += brandHit(item.brand, variant) ? 0.4 : -0.2;
   const wanted = item.size || (parsePackageSize(item.name) ? item.name : undefined);

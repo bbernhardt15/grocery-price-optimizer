@@ -3,6 +3,8 @@
  * share, or speech. Matching stays on our catalog. Tiles do not show prices.
  */
 
+import { describeMeal } from "./mealIdeas.js";
+
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
 
 export function foundLabel(found, total) {
@@ -85,11 +87,11 @@ export function mountImport(deps) {
           <button type="button" class="ghost" id="import-link-go">Read this link</button>
         </div>
         <details class="import-ask" id="import-ask">
-          <summary>Need ideas?</summary>
-          <p class="import-lead">Suggestions need a look before they join your trip.</p>
+          <summary>Need a meal idea?</summary>
+          <p class="import-lead">Try taco night for 6. You'll see the list before anything is added.</p>
           <label class="sr-only" for="import-goal">What are you shopping for?</label>
           <textarea id="import-goal" class="import-goal" maxlength="400" placeholder="Taco night for 6"></textarea>
-          <button type="button" class="ghost" id="import-ask-go">Suggest a list</button>
+          <button type="button" class="ghost" id="import-ask-go">Show this list</button>
         </details>
         <input id="import-photo-input" type="file" accept="image/*" hidden />
         <input id="import-file-input" type="file" accept="image/*,audio/*,.txt,.csv,text/plain,text/csv" hidden />
@@ -132,6 +134,10 @@ export function mountImport(deps) {
     reviewHost.hidden = which !== "review";
     const mic = $("import-mic");
     if (mic) mic.setAttribute("aria-pressed", which === "listen" ? "true" : "false");
+    if (which !== "review") {
+      const title = $("import-title");
+      if (title) title.textContent = "Import your list";
+    }
   }
 
   function open(which) {
@@ -269,11 +275,33 @@ export function mountImport(deps) {
     return item.choices?.find((choice) => choice.product?.id === item.selectedId)?.product || null;
   }
 
+  function reviewHeading() {
+    const idea = review?.idea;
+    const title = $("import-title");
+    if (!title) return;
+    if (!idea) {
+      title.textContent = "Review";
+      return;
+    }
+    title.textContent = idea.namedPeople ? `${idea.title} for ${idea.people}` : idea.title;
+  }
+
+  function reviewLead() {
+    const idea = review?.idea;
+    if (!idea) return `<p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>`;
+    const noun = review.items.length === 1 ? "item" : "items";
+    const count = idea.namedPeople
+      ? `${review.items.length} ${noun} for ${idea.people} people`
+      : `${review.items.length} ${noun}`;
+    return `<p class="import-idea-lead">${escapeHtml(idea.blurb)}</p><p class="import-count" aria-live="polite">${escapeHtml(count)}</p>`;
+  }
+
   function renderReview() {
     if (!review) return;
     const count = acceptedCount();
     const cards = review.items
       .map((item) => {
+        const kicker = review.idea && item.raw ? `<p class="import-kicker">${escapeHtml(item.raw)}</p>` : "";
         if (item.status === "missing" || !item.choices?.length) {
           const hits = (item.searchHits || [])
             .map(
@@ -282,30 +310,35 @@ export function mountImport(deps) {
             )
             .join("");
           return `<li class="import-tile" data-key="${escapeHtml(item.key)}">
-            <h3>${escapeHtml(item.name)}</h3>
-            <p class="import-note">We couldn't find this on the shelf.</p>
+            ${kicker}
+            <h3>${escapeHtml(item.raw || item.name)}</h3>
+            <p class="import-note">Not on the shelf.</p>
             <div class="import-tools">
               <button type="button" class="ghost" data-search="${escapeHtml(item.key)}">Search for it</button>
               <button type="button" class="text-btn" data-skip="${escapeHtml(item.key)}">Skip</button>
             </div>
-            <div class="import-tools">${hits}</div>
+            ${hits ? `<div class="import-tools">${hits}</div>` : ""}
           </li>`;
         }
         const product = choiceProduct(item);
-        const title = product?.familyName || product?.name || item.name;
+        const title = product?.familyName || product?.name || item.raw || item.name;
         const brand = product?.brand && !String(title).toLowerCase().includes(String(product.brand).toLowerCase()) ? product.brand : "";
         const image = product?.imageUrls?.[0] || "";
-        const sizes = (product?.variants || [])
+        const sizeButtons = (product?.variants || [])
           .map((variant) => {
             const label = sizeName(variant);
             if (!label) return "";
             const on = variant.id === item.selectedId;
             return `<button type="button" class="ghost import-size" aria-pressed="${on}" data-size="${escapeHtml(item.key)}" data-id="${escapeHtml(variant.id)}">${escapeHtml(label)}</button>`;
           })
-          .join("");
+          .filter(Boolean);
+        const sizes =
+          sizeButtons.length > 1
+            ? `<div class="import-size-row" role="group" aria-label="Size">${sizeButtons.join("")}</div>`
+            : "";
         const alts =
-          item.choices.length > 1
-            ? `<div class="import-choice-row" role="radiogroup" aria-label="Choices for ${escapeHtml(item.name)}">${item.choices
+          item.openAlts && item.choices.length > 1
+            ? `<div class="import-choice-row" role="radiogroup" aria-label="Choices for ${escapeHtml(item.raw || item.name)}">${item.choices
                 .map((choice) => {
                   const name = choice.product?.familyName || choice.product?.name || "Item";
                   const on = choice.product?.id === item.selectedId;
@@ -313,17 +346,22 @@ export function mountImport(deps) {
                 })
                 .join("")}</div>`
             : "";
+        const change =
+          item.choices.length > 1
+            ? `<button type="button" class="text-btn import-change" data-change="${escapeHtml(item.key)}">${item.openAlts ? "Hide choices" : "Change"}</button>`
+            : "";
         return `<li class="import-tile" data-key="${escapeHtml(item.key)}">
           <div class="import-tile-head">
             ${image ? `<img src="${escapeHtml(media(image))}" alt="" />` : ""}
             <div>
+              ${kicker}
               ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
               <h3>${escapeHtml(title)}</h3>
               ${item.shelfNote ? `<p class="import-note">${escapeHtml(item.shelfNote)}</p>` : ""}
             </div>
           </div>
           ${alts}
-          ${sizes ? `<div class="import-size-row" role="group" aria-label="Size">${sizes}</div>` : ""}
+          ${sizes}
           <div class="import-entry-row">
             <label class="import-check"><input type="checkbox" data-accept="${escapeHtml(item.key)}" ${item.accepted ? "checked" : ""} /> Add</label>
             <div class="import-stepper">
@@ -331,15 +369,16 @@ export function mountImport(deps) {
               <output>${item.quantity}</output>
               <button type="button" data-qty="${escapeHtml(item.key)}" data-delta="1" aria-label="Increase ${escapeHtml(title)}">+</button>
             </div>
+            ${change}
           </div>
         </li>`;
       })
       .join("");
+    reviewHeading();
     reviewHost.innerHTML = `
-      <p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>
-      ${review.suggested ? `<p class="import-note">Suggestions need a look before they join your trip.</p>` : ""}
+      ${reviewLead()}
       <ul class="import-review">${cards}</ul>
-      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save this as a list I can reuse. It shows up under Buy again on this phone.</span></label>
+      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save for next time on this phone.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
         <button type="button" class="primary" id="import-accept" ${count ? "" : "disabled"}>${escapeHtml(acceptLabel(count))}</button>
@@ -353,7 +392,8 @@ export function mountImport(deps) {
       setStatus("Paste a list first.", "error");
       return;
     }
-    setStatus("Matching what you already buy…");
+    const meal = describeMeal(trimmed);
+    setStatus(meal ? "Putting a short list together…" : "Matching what you already buy…");
     try {
       review = await post("/api/import/text", { text: trimmed });
       setStatus("");
@@ -633,13 +673,14 @@ export function mountImport(deps) {
     }
   });
   $("import-ask-go")?.addEventListener("click", async () => {
-    if (!status.ask) {
-      setStatus("Suggestions aren't switched on yet. You can still paste or speak a list.", "error");
+    const goal = $("import-goal").value.trim();
+    if (!goal) {
+      setStatus("Say what you want, like taco night for 6.", "error");
       return;
     }
-    setStatus("Thinking of a list…");
+    setStatus(describeMeal(goal) ? "Putting a short list together…" : "Thinking of a list…");
     try {
-      review = await post("/api/import/ask", { goal: $("import-goal").value });
+      review = await post("/api/import/ask", { goal });
       setStatus("");
       renderReview();
     } catch (error) {
@@ -650,8 +691,16 @@ export function mountImport(deps) {
   reviewHost.addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target || !review) return;
-    const key = target.dataset.accept || target.dataset.qty || target.dataset.choice || target.dataset.size || target.dataset.search || target.dataset.skip || target.dataset.pickSearch;
-    const item = review.items.find((row) => row.key === (target.dataset.accept || target.dataset.qty || target.dataset.choice || target.dataset.size || target.dataset.search || target.dataset.skip || target.dataset.pickSearch));
+    const key =
+      target.dataset.accept ||
+      target.dataset.qty ||
+      target.dataset.choice ||
+      target.dataset.size ||
+      target.dataset.search ||
+      target.dataset.skip ||
+      target.dataset.pickSearch ||
+      target.dataset.change;
+    const item = review.items.find((row) => row.key === key);
     if (target.id === "import-back") {
       show("home");
       return;
@@ -661,6 +710,11 @@ export function mountImport(deps) {
       return;
     }
     if (!item) return;
+    if (target.dataset.change) {
+      item.openAlts = !item.openAlts;
+      renderReview();
+      return;
+    }
     if (target.dataset.qty) {
       item.quantity = Math.min(99, Math.max(1, item.quantity + Number(target.dataset.delta || 0)));
       renderReview();
