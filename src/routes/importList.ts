@@ -5,6 +5,7 @@ import { createRateLimiter } from "../lists/sharedList";
 import { parseModelJson, validateAiItems } from "../import/aiSchema";
 import { importBudget } from "../import/budget";
 import { importConfig } from "../import/config";
+import { constraintNote } from "../import/constraints";
 import { readSharedLink } from "../import/linkFetch";
 import { matchImportItems, type ImportMatchResult } from "../import/matchImport";
 import { IMPORT_MESSAGES, KROGER_HISTORY_REASON } from "../import/messages";
@@ -281,7 +282,7 @@ router.post("/import/ask", async (req, res) => {
     return;
   }
   try {
-    const items = itemsFromModel(await aiAsk(goal));
+    const items = itemsFromModel(await aiAsk(goal, process.env, constraintNote(req.body?.constraints)));
     if (!items?.length) {
       res.status(502).json({ error: IMPORT_MESSAGES.askFailed });
       return;

@@ -38,6 +38,29 @@ import {
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
 import { ONBOARDING_KEY } from "./shopper/onboarding.js";
+import { getUserProfile, mergeProfiles, profileIsStored, saveUserProfile, shouldPromptProfile } from "./shopper/profile.js";
+import {
+  defaultHeadcount,
+  exclusionWarning,
+  filterTiles,
+  firstListId,
+  pinnedUsualRows,
+  profileToConstraints,
+  shapeImportReview,
+  slotIsExcluded,
+} from "./shopper/profileConstraints.js";
+import {
+  acceptAlways,
+  declineAlways,
+  familyFromQuery,
+  familyLabel,
+  guideSlot,
+  learnPreference,
+  resolveProductPreference,
+  shouldAskAlways,
+} from "./shopper/productPreference.js";
+import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
+import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
 import {
   applyTripEdits,
   formatTripText,
@@ -212,6 +235,9 @@ let activeDepartment = "all";
 let query = "";
 let browseOpen = false;
 let importer = null;
+let profileUi = null;
+let myProducts = null;
+let alwaysPrompt = null;
 let nextCursor = null;
 let loading = false;
 let total = 0;
@@ -1142,6 +1168,7 @@ function renderListRows() {
             <strong>${escapeHtml(heading.title)}</strong>
           </label>
           <p class="muted">${escapeHtml(heading.detail)}</p>
+          ${entry.preferenceFamily ? `<button type="button" class="text-btn" data-pref-change="${escapeHtml(entry.preferenceFamily)}">Change</button>` : ""}
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
           <button type="button" class="watch-opt" data-watch-open="${escapeHtml(itemId)}" aria-expanded="${watched || targetValue ? "true" : "false"}" aria-controls="watch-${escapeHtml(itemId)}" aria-label="Price watch for ${escapeHtml(heading.title)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
           <div class="alert-controls" id="watch-${escapeHtml(itemId)}"${watched || targetValue ? "" : " hidden"}>
@@ -1222,8 +1249,32 @@ function addProduct(product, quantity = 1, options = {}) {
     void card.offsetWidth;
     card.classList.add("just-added");
   }
+  if (options.preference?.swapped) {
+    entry.preferenceSwap = options.preference.swapped;
+    entry.preferenceFamily = options.preference.family;
+  } else if (options.preference?.family) {
+    entry.preferenceFamily = options.preference.family;
+  } else if (options.preferenceFamily) {
+    entry.preferenceFamily = options.preferenceFamily;
+  }
+  const family = entry.preferenceFamily || familyFromQuery(`${product.familyName || ""} ${product.name || ""}`);
+  if (family) entry.preferenceFamily = family;
+  if (options.learn !== false && family && !options.skipLearn) {
+    const profile = getUserProfile(localStorage);
+    const learned = learnPreference(profile, product, {
+      family,
+      locked: Boolean(options.lock),
+      source: options.source || "add",
+      replace: Boolean(options.replace),
+    });
+    saveUserProfile(localStorage, learned);
+    scheduleAccountSync();
+  }
   const added = listItemTitle(product);
   if (!options.quiet) toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
+  if (!options.quiet && !options.skipAsk && shouldAskAlways(getUserProfile(localStorage), product)) {
+    alwaysPrompt?.ask(product, familyLabel(family) || added.title);
+  }
   paintPlanBar();
   paintUsuals();
 }
@@ -1540,6 +1591,31 @@ function showCatalogError(message) {
   catalogErrorEl.textContent = message;
 }
 
+function showProfileWarning(message) {
+  const el = $("profile-warning");
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message || "";
+}
+
+function shelfForProfile(items, search) {
+  const profile = getUserProfile(localStorage);
+  const warning = search ? exclusionWarning(profile, search) : "";
+  if (warning) return { items, warning, resolved: null };
+  const filtered = filterTiles(profile, items, search);
+  if (!search) return { items: filtered, warning: "", resolved: null };
+  const resolved = resolveProductPreference({ profile, query: search, products: flattenTiles(filtered) });
+  if (!resolved.product || (resolved.status !== "preferred" && resolved.status !== "brand" && resolved.status !== "swapped")) {
+    return { items: filtered, warning: "", resolved: null };
+  }
+  const id = resolved.product.id;
+  const only = filtered.filter((tile) => {
+    const variants = Array.isArray(tile.variants) ? tile.variants : [];
+    return tile.id === id || tile.defaultVariantId === id || variants.some((variant) => variant.id === id);
+  });
+  return { items: only.length ? only : [resolved.product], warning: "", resolved };
+}
+
 async function loadPage(reset) {
   if (loading) return;
   if (!reset && !nextCursor) return;
@@ -1563,16 +1639,25 @@ async function loadPage(reset) {
     if (reset) fillFacets(body.facets ?? {});
     const items = body.items ?? [];
     for (const product of items) rememberTile(product);
-    const html = items.map(cardHtml).join("");
-    gridEl.innerHTML = reset ? html : gridEl.innerHTML + html;
-    if (!items.length && reset) {
+    const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
+    if (reset) showProfileWarning(viewed.warning);
+    const banner = viewed.resolved
+      ? `<p class="swap-quiet">Your ${escapeHtml(familyLabel(viewed.resolved.family) || "usual")}. <button type="button" class="linkish" data-pref-change="${escapeHtml(viewed.resolved.family)}">Change</button></p>`
+      : "";
+    const html = viewed.items.map(cardHtml).join("");
+    gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
+    if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
       const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
       gridEl.innerHTML = emptyStateMarkup(state, escapeHtml);
       resultCountEl.textContent = state.title;
     } else {
-      const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
-      resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
+      if (viewed.resolved) {
+        resultCountEl.textContent = `Your ${familyLabel(viewed.resolved.family) || "usual"}`;
+      } else {
+        const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
+        resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
+      }
     }
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
@@ -1733,11 +1818,14 @@ async function loadSuggestions(text) {
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
-    suggestions = body.suggestions ?? [];
+    const profile = getUserProfile(localStorage);
+    const warning = exclusionWarning(profile, q);
+    showProfileWarning(warning);
+    suggestions = warning ? body.suggestions ?? [] : filterTiles(profile, body.suggestions ?? [], q);
     suggestionQuery = q;
     activeSuggest = -1;
     if (suggestions.length === 0) {
-      showSuggestStatus(`No matches for “${q}”. Press Enter to search the shelves.`);
+      showSuggestStatus(warning || `No matches for “${q}”. Press Enter to search the shelves.`);
       return;
     }
     renderSuggestionRows(q);
@@ -2021,8 +2109,31 @@ function renderTrip(payload) {
   else paintTrip();
 }
 
+function annotatePreference(item) {
+  const noted = item || {};
+  const name = String(noted.name || "").toLowerCase();
+  for (const entry of list.values()) {
+    if (!entry.preferenceFamily) continue;
+    const productName = String(entry.product?.familyName || entry.product?.name || "").toLowerCase();
+    const swappedTo = String(entry.preferenceSwap?.to || "").toLowerCase();
+    const matches = (name && productName && (name.includes(productName) || productName.includes(name))) || (swappedTo && name.includes(swappedTo));
+    if (!matches) continue;
+    if (entry.preferenceSwap?.from && entry.preferenceSwap?.to) {
+      return {
+        ...noted,
+        matchKind: "swap",
+        preferenceSwap: true,
+        preferenceFamily: entry.preferenceFamily,
+        substitutedFor: entry.preferenceSwap.from,
+      };
+    }
+    return { ...noted, preferenceFamily: entry.preferenceFamily };
+  }
+  return noted;
+}
+
 function reviewItemLine(item) {
-  const noted = lists().annotate(item);
+  const noted = annotatePreference(lists().annotate(item));
   const label = displayProductName(noted.name, noted.brand) || noted.name || "Item";
   const amount = Number(noted.itemTotal ?? noted.price);
   const price = Number.isFinite(amount) ? priceFigure(amount) : "";
@@ -2032,29 +2143,34 @@ function reviewItemLine(item) {
 function reviewSwapLines(store) {
   return (store.items || [])
     .map((item) => {
-      const noted = lists().annotate(item);
+      const noted = annotatePreference(lists().annotate(item));
       const swap = plainSwap(noted);
       if (!swap) return "";
-      const change = noted.lineId
-        ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(noted.lineId)}">${escapeHtml(swap.change)}</button>`
-        : "";
+      const change = noted.preferenceFamily
+        ? ` <button type="button" class="linkish" data-pref-change="${escapeHtml(noted.preferenceFamily)}">${escapeHtml(swap.change)}</button>`
+        : noted.lineId
+          ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(noted.lineId)}">${escapeHtml(swap.change)}</button>`
+          : "";
       return `<p class="swap-quiet">${escapeHtml(swap.text)}${change}</p>`;
     })
     .join("");
 }
 
 function calmItemRow(item) {
-  item = lists().annotate(item);
+  item = annotatePreference(lists().annotate(item));
   const swap = plainSwap(item);
   const rawNote = calmPriceNote(item.priceSource);
   const note = rawNote === "sample price" ? "" : rawNote;
   const size = item.size ? `, ${item.size}` : "";
   const amount = Number(item.itemTotal ?? item.price);
   const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
-  const change =
-    swap && item.lineId
-      ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(item.lineId)}">${escapeHtml(swap.change)}</button>`
-      : "";
+  const change = swap
+    ? item.preferenceFamily
+      ? ` <button type="button" class="linkish" data-pref-change="${escapeHtml(item.preferenceFamily)}">${escapeHtml(swap.change)}</button>`
+      : item.lineId
+        ? ` <button type="button" class="linkish" data-change-line="${escapeHtml(item.lineId)}">${escapeHtml(swap.change)}</button>`
+        : ""
+    : "";
   const sale = saleBadgeMarkup(item);
   return `<li class="calm-item">
     <p class="item-name">${item.quantity} × ${escapeHtml(item.name)}${escapeHtml(size)}${note ? ` <span class="muted">${escapeHtml(note)}</span>` : ""}</p>
@@ -3416,6 +3532,18 @@ document.addEventListener("click", (event) => {
     void addStarter(starter.getAttribute("data-starter"));
     return;
   }
+  const prefChange = target.closest("[data-pref-change]");
+  if (prefChange) {
+    void openPreferenceChange(prefChange.getAttribute("data-pref-change") || "");
+    return;
+  }
+  const prefPick = target.closest("[data-pref-pick]");
+  if (prefPick) {
+    const family = prefPick.getAttribute("data-pref-family") || "";
+    const product = productsById.get(prefPick.getAttribute("data-pref-pick") || "");
+    if (product) choosePreference(family, product);
+    return;
+  }
   const changeLine = target.closest("[data-change-line]");
   if (changeLine) {
     const details = $("customize");
@@ -3643,7 +3771,10 @@ $("search-form").addEventListener("submit", (event) => {
   activeDepartment = "all";
   renderDepartments();
   syncBrowse();
-  void loadPage(true);
+  void (async () => {
+    await addResolvedQuery(text);
+    void loadPage(true);
+  })();
 });
 
 searchEl.addEventListener("input", () => {
@@ -4287,6 +4418,7 @@ function personalListPayload() {
     baseRevision: listRevision || null,
     coupons: readCoupons(localStorage),
     starterBook: lists().payload(),
+    ...(profileIsStored(localStorage) ? { tasteProfile: getUserProfile(localStorage) } : {}),
   };
 }
 
@@ -4359,6 +4491,7 @@ async function pushAccountList() {
     if (body.list?.listId) localStorage.setItem(LIST_ID_KEY, body.list.listId);
     if (Array.isArray(body.list?.coupons)) writeCoupons(localStorage, body.list.coupons);
     if (body.list?.starterBook) lists().applyServer(body.list.starterBook);
+    if (body.list?.tasteProfile) saveUserProfile(localStorage, mergeProfiles(getUserProfile(localStorage), body.list.tasteProfile));
     localStorage.removeItem(REMOVED_KEY);
   } catch {
     /* the list stays on this device and tries again on the next edit */
@@ -4372,6 +4505,10 @@ function rememberServerList(server) {
   if (server.revision) localStorage.setItem(REVISION_KEY, String(server.revision));
   if (server.listId) localStorage.setItem(LIST_ID_KEY, server.listId);
   if (server.starterBook) lists().applyServer(server.starterBook);
+  if (server.tasteProfile) {
+    saveUserProfile(localStorage, mergeProfiles(getUserProfile(localStorage), server.tasteProfile));
+    paintUsuals();
+  }
   if (server.alertsEnabled && listAlertsEl) {
     listAlertsEl.checked = true;
     localStorage.setItem(ALERTS_KEY, "1");
@@ -5020,6 +5157,14 @@ function lists() {
       locked: () => listIsLocked(),
       onChange: () => scheduleAccountSync(),
       mediaUrl,
+      profile: () => getUserProfile(localStorage),
+      slotBlocked: (slot) => slotIsExcluded(getUserProfile(localStorage), slot),
+      guideSlot: (input) => guideSlot({ ...input, profile: getUserProfile(localStorage) }),
+      onFavorite: (product, slotId) => {
+        const next = learnPreference(getUserProfile(localStorage), product, { family: slotId, source: "swap", replace: true });
+        saveUserProfile(localStorage, next);
+        if (shouldAskAlways(next, product)) alwaysPrompt?.ask(product, familyLabel(slotId) || slotId);
+      },
     });
   }
   return listHome;
@@ -5033,7 +5178,8 @@ function paintUsuals() {
   const block = $("usuals-block");
   const listEl = $("usuals-list");
   if (!block || !listEl) return;
-  const rows = readUsuals(localStorage);
+  const profile = getUserProfile(localStorage);
+  const rows = readUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
   block.hidden = rows.length === 0;
   listEl.innerHTML = rows
     .slice(0, 8)
@@ -5081,6 +5227,71 @@ function flattenTiles(tiles) {
     }
   }
   return rows;
+}
+
+async function openPreferenceChange(family) {
+  const label = familyLabel(family) || "that item";
+  let tiles = [];
+  try {
+    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`));
+    const body = await response.json().catch(() => ({}));
+    tiles = filterTiles(getUserProfile(localStorage), body.items || []);
+    for (const tile of tiles) rememberTile(tile);
+  } catch {
+    tiles = [];
+  }
+  const buttons = tiles.slice(0, 6).map((tile) => {
+    const variant = selectedVariant(tile);
+    const name = tile.familyName || tile.name || label;
+    const meta = [tile.brand, variant.variantLabel || variant.sizeLabel || ""].filter(Boolean).join(" · ");
+    const image = variant.imageUrls?.[0] || tile.imageUrls?.[0] || "";
+    return `<button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
+      ${image ? `<img src="${escapeHtml(mediaUrl(image))}" alt="" />` : ""}
+      <span class="staple-name">${escapeHtml(name)}</span>
+      <span class="staple-meta">${escapeHtml(meta)}</span>
+    </button>`;
+  }).join("");
+  productDialog.innerHTML = `<div class="sheet-body">
+    <h2 id="dialog-title">Change ${escapeHtml(label.toLowerCase())}</h2>
+    <p class="muted">Pick the one you buy. No store prices.</p>
+    <div class="staple-row">${buttons || `<p class="muted">Nothing else is on the shelf right now.</p>`}</div>
+    <button type="button" class="ghost" id="dialog-close">Close</button>
+  </div>`;
+  productDialog.showModal();
+  productDialog.querySelector("#dialog-close").onclick = () => productDialog.close();
+}
+
+function choosePreference(family, product) {
+  const profile = getUserProfile(localStorage);
+  const locked = Boolean(profile.productPreferences?.[family]?.locked);
+  for (const [id, entry] of [...list]) {
+    if (entry.preferenceFamily === family) list.delete(id);
+  }
+  productDialog.close();
+  addProduct(product, 1, {
+    preference: { family, status: "preferred" },
+    source: "swap",
+    replace: true,
+    lock: locked,
+    skipAsk: true,
+  });
+  if (!locked) alwaysPrompt?.ask(product, familyLabel(family) || family);
+}
+
+async function addResolvedQuery(text) {
+  const profile = getUserProfile(localStorage);
+  if (exclusionWarning(profile, text)) return false;
+  try {
+    const shelf = await loadStarterShelf([{ name: text }]);
+    const resolved = resolveProductPreference({ profile, query: text, products: shelf });
+    if (!resolved.product) return false;
+    if (resolved.status !== "preferred" && resolved.status !== "brand" && resolved.status !== "swapped") return false;
+    const product = productsById.get(resolved.product.id) || resolved.product;
+    addProduct(product, 1, { preference: resolved, source: resolved.locked ? "manual" : "add" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function loadStarterShelf(picks) {
@@ -5308,7 +5519,10 @@ async function boot() {
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
     await bootApp();
   } finally {
-    if (!landedFromKroger) welcome.maybeAutoOpen();
+    if (!landedFromKroger) {
+      if (shouldPromptProfile(localStorage)) profileUi?.open();
+      else welcome.maybeAutoOpen();
+    }
     else releasePageForTaps();
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
@@ -5532,6 +5746,76 @@ const welcome = mountWelcome({
   getBilling: () => billingStatus,
 });
 
+function finishProfile(profile) {
+  localStorage.setItem(ONBOARDING_KEY, "1");
+  const rows = pinnedUsualRows(profile);
+  if (rows.length) {
+    rememberUsuals(localStorage, rows);
+    paintUsuals();
+  }
+  const head = defaultHeadcount(profile);
+  if (head && !localStorage.getItem("gg-party")) localStorage.setItem("gg-party", String(head));
+  scheduleAccountSync();
+  const id = firstListId(profile);
+  void lists().addThemed(id);
+}
+
+profileUi = mountProfileOnboarding({
+  storage: localStorage,
+  toast,
+  loadStaple: async (search) => {
+    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`));
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return [];
+    const want = familyFromQuery(search);
+    return (body.items || []).filter((tile) => {
+      if (!want) return true;
+      return familyFromQuery(`${tile.familyName || ""} ${tile.name || ""} ${tile.brand || ""}`) === want;
+    }).map((tile) => {
+      const variant = Array.isArray(tile.variants) && tile.variants.length
+        ? tile.variants.find((item) => item.id === tile.defaultVariantId) || tile.variants[0]
+        : tile;
+      return {
+        id: variant.id || tile.id,
+        name: tile.familyName || variant.name || tile.name,
+        familyName: tile.familyName || variant.familyName || tile.name,
+        brand: variant.brand || tile.brand || "",
+        sizeLabel: variant.variantLabel || variant.sizeLabel || variant.label || "",
+        imageUrl: (variant.imageUrls || tile.imageUrls || [])[0] || "",
+        imageUrls: variant.imageUrls || tile.imageUrls || [],
+        upc: variant.upc || tile.upc || "",
+      };
+    });
+  },
+  onDone: finishProfile,
+});
+
+alwaysPrompt = mountAlwaysPrompt({
+  storage: localStorage,
+  onAnswer(choice, product) {
+    const profile = getUserProfile(localStorage);
+    const next = choice === "always" ? acceptAlways(profile, product, "add") : declineAlways(profile, product);
+    saveUserProfile(localStorage, next);
+    scheduleAccountSync();
+    myProducts?.paint?.();
+  },
+});
+
+myProducts = mountMyProducts({
+  storage: localStorage,
+  onEditProfile: () => profileUi?.openEditor(),
+  onChange: () => scheduleAccountSync(),
+});
+
+$("drawer-profile")?.addEventListener("click", () => {
+  closeDrawer();
+  profileUi?.openEditor();
+});
+$("drawer-products")?.addEventListener("click", () => {
+  closeDrawer();
+  myProducts?.open();
+});
+
 importer = mountImport({
   addProduct,
   showStep,
@@ -5542,6 +5826,22 @@ importer = mountImport({
   apiUrl,
   toast,
   mediaUrl,
+  askConstraints() {
+    return profileToConstraints(getUserProfile(localStorage));
+  },
+  shapeReview(review) {
+    return shapeImportReview(review, getUserProfile(localStorage));
+  },
+  prepareAdd(item, product) {
+    const profile = getUserProfile(localStorage);
+    const shelf = [product, ...(item.choices || []).map((choice) => choice.product).filter(Boolean)];
+    const resolved = resolveProductPreference({ profile, query: item.name || product?.name || "", products: shelf });
+    if (resolved.status === "excluded") return null;
+    if (resolved.product && (resolved.status === "preferred" || resolved.status === "swapped" || resolved.status === "brand")) {
+      return { product: resolved.product, options: { quiet: true, preference: resolved, source: "import", skipAsk: true } };
+    }
+    return { product, options: { quiet: true, source: "import", skipAsk: true } };
+  },
 });
 
 void boot().finally(() => {

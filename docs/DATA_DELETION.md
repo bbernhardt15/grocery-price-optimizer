@@ -26,6 +26,7 @@ Cleared in the page after a successful response. Every key that starts with `gg-
 
 | Key | What it holds |
 | --- | --- |
+| `gg-profile` | Taste profile: why they shop, household, foods, cuisines, allergies, diets, brand preference, and the exact products they buy. No prices. Guests keep it on the device. A signed-in shopper also syncs it on the saved list as `tasteProfile`. |
 | `gg-device` | Anonymous device id. Not a hardware id and not an advertising id. Created with `crypto.randomUUID` when the browser has it. |
 | `gg-list-id` | Id for the on-device list, used as `listId` on a price watch until a list is shared. |
 | `gg-list` | Saved list: name, brand, size, quantity, checked, catalog id, baseline price, watch mode, target price. |
@@ -64,7 +65,7 @@ A guest who only has the share link can delete their own device rows. They canno
 | `AuthIdentity` | Apple, Google, and email subjects for that account. |
 | `AuthSession` | Every session, not only this device. The response also clears `gg_session`. |
 | `MagicLink` | Unused links for that email address. |
-| `SavedList` | The synced list. |
+| `SavedList` | The synced list, starter-list favorites, and the taste profile (`tasteProfile`) when the shopper is signed in. |
 | `PriceWatch`, `PriceAlert`, `PushSubscription` | Rows with that `accountId`, including another device on the same account. |
 | `SharedList` | Lists tagged with that `accountId`. Collaborator watches of a sealed share token are deleted too. |
 

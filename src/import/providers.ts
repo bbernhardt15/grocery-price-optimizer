@@ -101,10 +101,14 @@ export async function aiParseText(note: string, env: NodeJS.ProcessEnv = process
   return complete(config, config.aiProvider, PARSE_SYSTEM, note.slice(0, 50_000));
 }
 
-export async function aiAsk(goal: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+export async function aiAsk(goal: string, env: NodeJS.ProcessEnv = process.env, constraints = ""): Promise<string> {
   const config = importConfig(env);
   if (!config.aiProvider) throw new ModelError("unconfigured");
-  return complete(config, config.aiProvider, ASK_SYSTEM, goal.slice(0, 400));
+  const note = constraints.trim();
+  const user = note
+    ? `${goal.slice(0, 400)}\n\nShopper constraints. Obey them. Do not invent products or prices.\n${note.slice(0, 800)}`
+    : goal.slice(0, 400);
+  return complete(config, config.aiProvider, ASK_SYSTEM, user);
 }
 
 export async function aiReadImage(
