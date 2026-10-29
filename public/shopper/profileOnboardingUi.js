@@ -19,7 +19,8 @@ import {
   stepById,
   summarySections,
 } from "./profileOnboarding.js";
-import { STAPLES, learnPreference } from "./productPreference.js";
+import { learnPreference, forgetPreference } from "./productPreference.js";
+import { cutsInShelf, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -47,6 +48,14 @@ export function mountProfileOnboarding(deps = {}) {
   let returnTo = "";
   /** @type {Record<string, object>} */
   let picks = {};
+  let categoryIndex = 0;
+  let shelf = [];
+  let loadedFor = "";
+  let categoryDraft = blankCategory();
+
+  function blankCategory() {
+    return { mode: "", brand: "", productId: "", attributes: [], product: null };
+  }
 
   function persist(next) {
     draft = saveUserProfile(storage, next);
@@ -89,9 +98,7 @@ export function mountProfileOnboarding(deps = {}) {
       const sizes = [1, 2, 3, 4, 5]
         .map((count) => choiceButton(String(count), count === 5 ? "5+" : String(count), size === count))
         .join("");
-      return `<p class="profile-label">How many people</p><div class="choice-grid" role="group" aria-label="Household size">${sizes}</div>
-        ${yesNo("Kids", "kids", draft.household?.kids)}
-        ${yesNo("Picky eaters", "picky", draft.household?.picky)}`;
+      return `<p class="profile-label">How many people</p><div class="choice-grid" role="group" aria-label="Household size">${sizes}</div>`;
     }
     if (step.kind === "cuisine") {
       return `<div class="choice-grid" role="group">${stepById("cuisines") && PROFILE_CUISINES()
@@ -130,7 +137,61 @@ export function mountProfileOnboarding(deps = {}) {
         <p class="profile-label">Different for an aisle</p>${aisles}`;
     }
     if (step.kind === "products") {
-      return `<div id="staple-host"><p class="muted">Looking on the shelf…</p></div>`;
+      const categories = preferenceCategories();
+      const current = categories[categoryIndex] || categories[0];
+      const saved = draft.categoryPreferences?.[current?.id] || {};
+      const mode = categoryDraft.mode || (!categoryDraft.touched ? saved.mode : "") || "";
+      const brand = categoryDraft.brand || (!categoryDraft.touched ? saved.brand : "") || "";
+      const attributes = categoryDraft.touched ? categoryDraft.attributes || [] : saved.attributes || [];
+      const cuts = cutsInShelf(shelf, current?.id || "");
+      const modes = [
+        ["brand", "Name brand"],
+        ["storeBrand", "Store brand"],
+        ["cheapest", "Cheapest"],
+      ];
+      const modeButtons = modes
+        .map(([id, label]) => choiceButton(id, label, mode === id, `data-buy="${id}"`))
+        .join("");
+      const brands = nameBrandsFor(shelf, current?.id || "");
+      const brandButtons = brands
+        .map(
+          (row) =>
+            `<button type="button" class="mini-chip" data-buy-brand="${escapeText(row.brand)}" data-buy-product="${escapeText(row.product?.id || "")}" aria-pressed="${brand.toLowerCase() === row.brand.toLowerCase() ? "true" : "false"}">${escapeText(row.brand)}</button>`
+        )
+        .join("");
+      const cutButtons = cuts
+        .map(
+          (row) =>
+            `<button type="button" class="mini-chip" data-buy-attr="${escapeText(row.id)}" aria-pressed="${attributes.includes(row.id) ? "true" : "false"}">${escapeText(row.label)}</button>`
+        )
+        .join("");
+      const ready = loadedFor === current?.id;
+      const cutBlock = !ready
+        ? `<p class="muted">Looking on the shelf…</p>`
+        : cutButtons
+          ? `<p class="profile-label">What kind?</p><div class="mini-row">${cutButtons}</div>`
+          : "";
+      const declined = mode === "never";
+      const brandBlock =
+        declined || mode !== "brand"
+          ? ""
+          : `<p class="profile-label">Which name brand?</p>${
+              brandButtons
+                ? `<div class="mini-row">${brandButtons}</div>`
+                : `<p class="muted">${ready ? "No name brands are on the shelf for this one." : "Looking on the shelf…"}</p>`
+            }`;
+      const label = String(current?.label || "this").toLowerCase();
+      const question = (current?.attributes || []).length ? `What kind of ${label}?` : `How do you buy ${label}?`;
+      return `<p class="profile-label">${escapeText(current?.label || "This")} · ${categoryIndex + 1} of ${categories.length}</p>
+        <h3 class="buy-question">${escapeText(question)}</h3>
+        ${cutBlock}
+        <div class="choice-stack" role="group">
+          ${choiceButton("never", `I don't buy ${String(current?.label || "this").toLowerCase()}`, declined, `data-buy="never"`)}
+          ${declined ? "" : modeButtons}
+        </div>
+        ${brandBlock}
+        <button type="button" class="ghost" id="profile-skip-rest">Skip rest, I'll teach it as I shop</button>
+        <div id="staple-host" hidden></div>`;
     }
     const sections = summarySections(draft)
       .map(
@@ -167,6 +228,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (id === "shopping") return draft.style?.shopping;
     if (id === "cooking") return draft.style?.cooking;
     if (id === "time") return draft.style?.time;
+    if (id === "stops") return draft.style?.stops;
     return null;
   }
 
@@ -191,41 +253,53 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function loadProducts() {
-    const host = $("staple-host");
-    if (!host || !deps.loadStaple) {
-      if (host) host.innerHTML = `<p class="muted">The shelf isn't available right now. You can skip this one.</p>`;
-      return;
+    const current = preferenceCategories()[categoryIndex];
+    if (!current || !deps.loadStaple || loadedFor === current.id) return;
+    const request = current.id;
+    let tiles = [];
+    try {
+      tiles = await deps.loadStaple(current.search);
+    } catch {
+      tiles = [];
     }
-    const blocks = [];
-    for (const staple of STAPLES) {
-      let tiles = [];
-      try {
-        tiles = await deps.loadStaple(staple.search);
-      } catch {
-        tiles = [];
-      }
-      if (stepId !== "products") return;
-      const saved = draft.productPreferences?.[staple.id];
-      const buttons = (tiles || []).slice(0, 4).map((tile) => {
-        const id = tile.id || tile.defaultVariantId;
-        const name = tile.familyName || tile.name || staple.label;
-        const brand = tile.brand || "";
-        const size = tile.variantLabel || tile.sizeLabel || "";
-        const image = tile.imageUrls?.[0] || tile.imageUrl || "";
-        const pressed = picks[staple.id]?.id === id || (!picks[staple.id] && saved?.catalogId === id);
-        return `<button type="button" class="staple-tile" data-staple="${escapeText(staple.id)}" data-product="${escapeText(id)}" aria-pressed="${pressed ? "true" : "false"}">
-          ${image ? `<img src="${escapeText(image)}" alt="" />` : `<span class="staple-fallback" aria-hidden="true"></span>`}
-          <span class="staple-name">${escapeText(name)}</span>
-          <span class="staple-meta">${escapeText([brand, size].filter(Boolean).join(" · "))}</span>
-        </button>`;
-      });
-      blocks.push(
-        `<section class="staple-block"><h3>${escapeText(staple.label)}</h3>${
-          buttons.length ? `<div class="staple-row">${buttons.join("")}</div>` : `<p class="muted">Nothing on the shelf for ${escapeText(staple.label.toLowerCase())} right now.</p>`
-        }</section>`
-      );
+    if (stepId !== "products" || preferenceCategories()[categoryIndex]?.id !== request) return;
+    shelf = tiles || [];
+    loadedFor = request;
+    const stage = $("profile-stage");
+    if (stage) stage.innerHTML = stageHtml(stepById("products"));
+  }
+
+  function showCategory(index) {
+    const categories = preferenceCategories();
+    categoryIndex = Math.max(0, Math.min(index, categories.length - 1));
+    categoryDraft = blankCategory();
+    shelf = [];
+    loadedFor = "";
+    render();
+  }
+
+  function saveCategory(mode, at) {
+    const current = preferenceCategories()[categoryIndex];
+    if (!current) return draft;
+    const chosen = mode || categoryDraft.mode || "skip";
+    draft = setCategoryPreference(
+      draft,
+      {
+        family: current.id,
+        mode: chosen,
+        brand: chosen === "brand" ? categoryDraft.brand || "" : "",
+        productId: chosen === "brand" ? categoryDraft.productId || "" : "",
+        size: categoryDraft.product?.sizeLabel || "",
+        attributes: categoryDraft.attributes || [],
+      },
+      at
+    );
+    if (chosen === "brand" && categoryDraft.product?.id) {
+      draft = learnPreference(draft, categoryDraft.product, { family: current.id, locked: true, source: "onboarding", at });
+    } else if (chosen !== "brand") {
+      draft = forgetPreference(draft, current.id, at);
     }
-    if ($("staple-host")) $("staple-host").innerHTML = blocks.join("");
+    return draft;
   }
 
   function currentAnswer() {
@@ -253,8 +327,25 @@ export function mountProfileOnboarding(deps = {}) {
     return next;
   }
 
-  function advance(skipped) {
+  function advance(skipped, skipRest) {
     const at = Date.now();
+    if (stepId === "products" && !returnTo) {
+      const categories = preferenceCategories();
+      if (skipRest) {
+        saveCategory("skip", at);
+        for (let index = categoryIndex + 1; index < categories.length; index += 1) {
+          draft = setCategoryPreference(draft, { family: categories[index].id, mode: "skip", brand: "", productId: "", size: "", attributes: [] }, at);
+        }
+      } else if (categoryIndex < categories.length - 1) {
+        saveCategory(skipped ? "skip" : categoryDraft.mode || "skip", at);
+        persist(draft);
+        showCategory(categoryIndex + 1);
+        focusTitle();
+        return;
+      } else {
+        saveCategory(skipped ? "skip" : categoryDraft.mode || "skip", at);
+      }
+    }
     if (stepId === "products" && !skipped) draft = rememberPicks(at);
     const answer = skipped ? undefined : currentAnswer();
     if (returnTo && stepId !== "summary") {
@@ -299,6 +390,10 @@ export function mountProfileOnboarding(deps = {}) {
     }
     stepId = stepById(id || resumeStep(draft)).id;
     returnTo = "";
+    categoryIndex = 0;
+    categoryDraft = blankCategory();
+    shelf = [];
+    loadedFor = "";
     render();
     if (!dialog.open) dialog.showModal();
     focusTitle();
@@ -310,6 +405,11 @@ export function mountProfileOnboarding(deps = {}) {
   });
   $("profile-skip")?.addEventListener("click", () => advance(true));
   $("profile-back")?.addEventListener("click", () => {
+    if (stepId === "products" && categoryIndex > 0 && !returnTo) {
+      showCategory(categoryIndex - 1);
+      focusTitle();
+      return;
+    }
     if (returnTo) {
       stepId = "summary";
       returnTo = "";
@@ -332,13 +432,56 @@ export function mountProfileOnboarding(deps = {}) {
       focusTitle();
       return;
     }
-    if (target.dataset.choice && !target.dataset.yesno) {
+    if (target.id === "profile-skip-rest") {
+      advance(true, true);
+      return;
+    }
+    if (target.dataset.buy) {
+      categoryDraft = { ...categoryDraft, mode: target.dataset.buy, touched: true };
+      if (target.dataset.buy !== "brand") {
+        categoryDraft.brand = "";
+        categoryDraft.productId = "";
+        categoryDraft.product = null;
+      }
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      return;
+    }
+    if (target.dataset.buyBrand) {
+      const product = (shelf || []).find((item) => (item.id || item.defaultVariantId) === target.dataset.buyProduct) || {
+        id: target.dataset.buyProduct,
+        brand: target.dataset.buyBrand,
+        name: target.dataset.buyBrand,
+      };
+      categoryDraft = {
+        ...categoryDraft,
+        mode: "brand",
+        touched: true,
+        brand: target.dataset.buyBrand,
+        productId: product.id || "",
+        product,
+      };
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      return;
+    }
+    if (target.dataset.buyAttr) {
+      const attributes = new Set(categoryDraft.attributes || []);
+      if (attributes.has(target.dataset.buyAttr)) attributes.delete(target.dataset.buyAttr);
+      else attributes.add(target.dataset.buyAttr);
+      categoryDraft = { ...categoryDraft, attributes: [...attributes], touched: true, mode: categoryDraft.mode || "brand" };
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      return;
+    }
+    if (target.dataset.choice && !target.dataset.yesno && !target.dataset.buy) {
       const step = stepById(stepId);
       const id = target.dataset.choice;
       if (step.kind === "single") {
         if (step.id === "shopping") draft.style = { ...draft.style, shopping: id };
         if (step.id === "cooking") draft.style = { ...draft.style, cooking: id };
         if (step.id === "time") draft.style = { ...draft.style, time: id };
+        if (step.id === "stops") draft.style = { ...draft.style, stops: id };
         if (step.id === "brand") draft.brand = { ...draft.brand, default: id };
       } else if (step.kind === "multi") {
         const list = new Set(draftList(step.id));
@@ -417,6 +560,11 @@ export function mountProfileOnboarding(deps = {}) {
     },
     openEditor() {
       openAt("summary");
+    },
+    openCategory(familyId) {
+      openAt("products");
+      const index = preferenceCategories().findIndex((category) => category.id === familyId);
+      if (index >= 0) showCategory(index);
     },
     shouldPrompt() {
       return shouldPromptProfile(storage);

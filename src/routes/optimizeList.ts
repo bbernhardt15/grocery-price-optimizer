@@ -66,12 +66,16 @@ function readSelections(value: unknown): BrowseSelection[] | undefined {
     const brand = typeof record.brand === "string" ? record.brand.trim() : undefined;
     const catalogId = typeof record.catalogId === "string" ? record.catalogId.trim() : undefined;
     const upc = typeof record.upc === "string" ? record.upc.trim() : undefined;
+    const preferenceMode = typeof record.preferenceMode === "string" ? record.preferenceMode.trim() : undefined;
+    const family = typeof record.family === "string" ? record.family.trim() : undefined;
     return {
       name: item.name.trim(),
       quantity: quantityOf(item.quantity),
       ...(brand ? { brand } : {}),
       ...(catalogId ? { catalogId } : {}),
       ...(upc ? { upc } : {}),
+      ...(preferenceMode ? { preferenceMode } : {}),
+      ...(family ? { family } : {}),
     };
   });
 }

@@ -1,3 +1,4 @@
+import { familyFromQuery, productMatchesFamily } from "./stapleFamilies";
 import type { BrowseFilters, BrowseProduct, BrowseSort, SizeClass } from "./types";
 
 export function sizeClassOf(product: BrowseProduct): SizeClass | "unknown" {
@@ -81,9 +82,14 @@ export function filterProducts(products: BrowseProduct[], filters: BrowseFilters
       return false;
     }
     if (tokens.length > 0) {
-      const text = haystack(product);
-      if (!tokens.every((token) => text.includes(token))) {
-        return false;
+      const familyId = familyFromQuery(filters.query ?? "");
+      if (familyId) {
+        if (!productMatchesFamily(product, familyId)) return false;
+      } else {
+        const text = haystack(product);
+        if (!tokens.every((token) => text.includes(token))) {
+          return false;
+        }
       }
     }
     return true;

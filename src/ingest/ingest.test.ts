@@ -2745,7 +2745,8 @@ describe("catalog ingestion", () => {
   });
 
   it("refreshes many Walmart offers in one call and does not retry a miss the same day", async () => {
-    const now = new Date("2026-10-28T16:00:00.000Z");
+    const now = new Date();
+    now.setUTCMinutes(0, 0, 0);
     const rows = [
       { upc: "049000042566", itemId: "100001", name: "Coca-Cola", price: 1.25 },
       { upc: "016000275287", itemId: "100002", name: "Cheerios", price: 3.4 },
