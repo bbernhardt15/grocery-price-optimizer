@@ -42,6 +42,10 @@ export function plainSwap(item) {
   if (!swapped) return null;
   const from = displayProductName(item.substitutedFor || item.query) || clean(item.substitutedFor || item.query);
   const to = displayProductName(item.name, item.brand) || clean(item.name);
+  if (item?.preferenceSwap) {
+    if (!from || !to) return null;
+    return { text: `We swapped ${from} for ${to}`, change: "Change" };
+  }
   const store = clean(item.storeName) || "the store";
   if (!from || !to) return null;
   return { text: `We swapped ${from} for ${to} at ${store}`, change: "Change" };

@@ -271,6 +271,11 @@ export function mountImport(deps) {
 
   function renderReview() {
     if (!review) return;
+    if (deps.shapeReview && !review.profileShaped) {
+      const shaped = deps.shapeReview(review);
+      review = shaped.review || review;
+      if (shaped.note) setStatus(shaped.note);
+    }
     const count = acceptedCount();
     const cards = review.items
       .map((item) => {
@@ -639,7 +644,8 @@ export function mountImport(deps) {
     }
     setStatus("Thinking of a list…");
     try {
-      review = await post("/api/import/ask", { goal: $("import-goal").value });
+      const constraints = deps.askConstraints ? deps.askConstraints() : null;
+      review = await post("/api/import/ask", constraints ? { goal: $("import-goal").value, constraints } : { goal: $("import-goal").value });
       setStatus("");
       renderReview();
     } catch (error) {
@@ -756,9 +762,18 @@ export function mountImport(deps) {
   function acceptAll() {
     const chosen = (review?.items || []).filter((item) => item.accepted && choiceProduct(item));
     if (!chosen.length) return;
+    let addedCount = 0;
     for (const item of chosen) {
       const product = choiceProduct(item);
-      deps.addProduct(product, item.quantity, { quiet: true });
+      const prepared = deps.prepareAdd ? deps.prepareAdd(item, product) : { product, options: { quiet: true } };
+      if (!prepared?.product) continue;
+      deps.addProduct(prepared.product, item.quantity, { quiet: true, ...(prepared.options || {}) });
+      addedCount += item.quantity;
+    }
+    if (!addedCount) {
+      toast("Those items don't fit your taste profile.");
+      close();
+      return;
     }
     if ($("import-save")?.checked && deps.remember) {
       deps.remember(
@@ -773,8 +788,7 @@ export function mountImport(deps) {
         })
       );
     }
-    const count = chosen.reduce((sum, item) => sum + item.quantity, 0);
-    toast(count === 1 ? "Added 1 item." : `Added ${count} items.`);
+    toast(addedCount === 1 ? "Added 1 item." : `Added ${addedCount} items.`);
     close();
     deps.showStep("plan");
   }
