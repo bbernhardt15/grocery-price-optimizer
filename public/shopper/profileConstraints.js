@@ -204,6 +204,21 @@ function dietHit(id, text) {
       return halalHit(text) ? "Halal" : "";
     case "kosher":
       return halalHit(text) || shellfishHit(text) ? "Kosher" : "";
+    case "carnivore":
+      return /\b(breads?|pastas?|rices?|cereals?|sodas?|cand(?:y|ies)|flours?|sugars?|chips|lettuce|onions?|tomatoes?|cilantro|apples?|bananas?)\b/i.test(text)
+        ? "Carnivore"
+        : "";
+    case "atkins":
+    case "low-carb":
+      return ketoHit(text) ? (id === "atkins" ? "Atkins" : "Low-carb") : "";
+    case "paleo":
+      return /\b(breads?|pastas?|rices?|cereals?|milks?|cheeses?|yogurts?|beans?|peanuts?|sodas?|sugars?|flours?)\b/i.test(text) ? "Paleo" : "";
+    case "whole30":
+      return /\b(breads?|pastas?|rices?|cereals?|milks?|cheeses?|sugars?|sodas?|beans?|soy|alcohol|wines?|beers?)\b/i.test(text) ? "Whole30" : "";
+    case "diabetic-friendly":
+      return /\b(sodas?|colas?|cand(?:y|ies)|sugars?|cookies?|cakes?)\b/i.test(text) ? "Diabetic-friendly" : "";
+    case "low-sodium":
+      return "";
     default:
       return "";
   }
@@ -232,6 +247,8 @@ export function exclusionForText(profile, text) {
     const label = dietHit(id, hay);
     if (label) return rule("diet", id, label);
   }
+  const dietNote = neverPhraseHit(hay, profile.dietNotes);
+  if (dietNote) return rule("diet", "other", dietNote);
   for (const id of profile.avoids || []) {
     const pattern = FOOD_WORDS[id];
     if (pattern && pattern.test(hay)) return rule("avoid", id, id.charAt(0).toUpperCase() + id.slice(1));

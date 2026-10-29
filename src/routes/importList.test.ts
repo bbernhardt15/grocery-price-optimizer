@@ -151,6 +151,10 @@ describe("import routes", () => {
     assert.equal(statusBody.photo, false);
     assert.equal(statusBody.speech, false);
     assert.equal(statusBody.ask, false);
+    const health = await fetch(`${origin}/api/health`);
+    const healthBody = (await health.json()) as { ai: boolean; vision: boolean; speech: boolean };
+    assert.equal(health.status, 200);
+    assert.deepEqual(healthBody, { ai: false, vision: false, speech: false });
     assert.equal(statusBody.krogerHistory, false);
     assert.match(statusBody.krogerHistoryReason, /cart\.basic:write/);
     assert.equal(statusBody.krogerHistoryReason, KROGER_HISTORY_REASON);

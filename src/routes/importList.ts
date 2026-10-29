@@ -134,6 +134,15 @@ function sendMatch(
   });
 }
 
+router.get("/health", (_req, res) => {
+  const config = importConfig();
+  res.json({
+    ai: config.ai,
+    vision: config.photo,
+    speech: config.speech,
+  });
+});
+
 router.get("/import/status", (_req, res) => {
   const config = importConfig();
   res.json({
@@ -141,6 +150,7 @@ router.get("/import/status", (_req, res) => {
     file: true,
     link: true,
     photo: config.photo,
+    vision: config.photo,
     speech: config.speech,
     ai: config.ai,
     ask: config.ask,

@@ -3,6 +3,8 @@
  * share, or speech. Matching stays on our catalog. Tiles do not show prices.
  */
 
+import { createSilenceWatch } from "./speechListen.js";
+
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
 
 export function foundLabel(found, total) {
@@ -96,7 +98,7 @@ export function mountImport(deps) {
       </div>
       <div id="import-listen" hidden>
         <div class="import-listening">
-          <p><span class="import-pulse" aria-hidden="true"></span>Listening… tap stop when you're done.</p>
+          <p><span class="import-pulse" aria-hidden="true"></span><span id="import-listen-label">Listening… a pause adds the list.</span></p>
           <p id="import-live" aria-live="polite"></p>
         </div>
         <button type="button" class="primary" id="import-stop">Stop</button>
@@ -174,6 +176,23 @@ export function mountImport(deps) {
     } catch {
       /* paste still works */
     }
+    deps.onStatus?.(status);
+  }
+
+  async function deliverSpoken(text) {
+    const spoken = String(text || "").trim();
+    if (!spoken) {
+      showTranscript("");
+      return;
+    }
+    if (deps.onSpoken) {
+      const handled = await deps.onSpoken(spoken, status);
+      if (handled) {
+        close();
+        return;
+      }
+    }
+    showTranscript(spoken);
   }
 
   function bindAsk() {
@@ -516,18 +535,25 @@ export function mountImport(deps) {
           return;
         }
         let heard = "";
+        const silence = createSilenceWatch({
+          onSilence: () => {
+            void stopRecording(false);
+          },
+        });
         const listener = await plugin.addListener?.("partialResults", (event) => {
           heard = event?.matches?.[0] || heard;
           const live = $("import-live");
           if (live) live.textContent = heard;
+          if (heard.trim()) silence.heard();
         });
         await plugin.start({ language: "en-US", partialResults: true, maxResults: 1, popup: false });
         recording = {
           seconds: 0,
           async stop(cancel) {
+            silence.stop();
             await plugin.stop?.().catch(() => undefined);
             await listener?.remove?.().catch(() => undefined);
-            if (!cancel) showTranscript(heard);
+            if (!cancel) await deliverSpoken(heard);
           },
         };
         show("listen");
@@ -540,6 +566,11 @@ export function mountImport(deps) {
 
     let recognizer = null;
     let heard = "";
+    const silence = createSilenceWatch({
+      onSilence: () => {
+        void stopRecording(false);
+      },
+    });
     const web = webRecognizer();
     if (web) {
       recognizer = web;
@@ -548,9 +579,11 @@ export function mountImport(deps) {
       recognizer.lang = "en-US";
       recognizer.onresult = (event) => {
         heard = "";
-        for (let i = 0; i < event.results.length; i += 1) heard += event.results[i][0]?.transcript || "";
+        for (let i = 0; i < event.results.length; i += 1) heard += `${event.results[i][0]?.transcript || ""} `;
+        heard = heard.replace(/\s+/g, " ").trim();
         const live = $("import-live");
         if (live) live.textContent = heard;
+        if (heard) silence.heard();
       };
       try {
         recognizer.start();
@@ -595,6 +628,7 @@ export function mountImport(deps) {
     const session = {
       seconds: 0,
       async stop(cancel) {
+        silence.stop();
         window.clearTimeout(stopTimer);
         recognizer?.stop?.();
         if (recorder) {
@@ -621,7 +655,7 @@ export function mountImport(deps) {
             return;
           }
         }
-        if (!cancel) showTranscript(heard);
+        if (!cancel) await deliverSpoken(heard);
       },
     };
     recording = session;

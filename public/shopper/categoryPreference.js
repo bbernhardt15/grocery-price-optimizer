@@ -10,12 +10,14 @@
 import { parseProfile } from "./profile.js";
 import { productExcluded } from "./profileConstraints.js";
 import { isStoreBrand, priceOf } from "./productPreference.js";
+import { brandFromProduct, isProduceFamily, productImage, shouldAskNameBrand } from "./brandNames.js";
 import {
   attributeTests,
   classifyProduct,
   familyFromQuery,
   familyLabel,
   isHouseBrand,
+  knownBrandNames,
   pickAtStore,
   PREFERENCE_CATEGORIES,
   productMatchesFamily,
@@ -85,10 +87,14 @@ function matchesAttributes(product, familyId, attributes) {
   return tests.every((row) => row.test.test(text));
 }
 
-function brandHit(product, brand) {
-  const wanted = clean(brand, 80).toLowerCase();
-  if (!wanted) return false;
-  return String(product?.brand || "").toLowerCase().includes(wanted);
+function brandHit(product, brand, familyId) {
+  const wanted = brandFromProduct({ brand, name: brand }, knownBrandNames(familyId));
+  const have = brandFromProduct(product, knownBrandNames(familyId));
+  if (!wanted || !have) {
+    const raw = clean(brand, 80).toLowerCase();
+    return Boolean(raw) && String(product?.brand || "").toLowerCase().includes(raw);
+  }
+  return have.key === wanted.key || have.key.includes(wanted.key) || wanted.key.includes(have.key);
 }
 
 function labelOf(product) {
@@ -123,7 +129,7 @@ export function resolveCategoryPreference(input) {
   if (pref.mode === "brand") {
     const exact = pref.productId ? rows.find((product) => product.id === pref.productId) : null;
     if (exact) return { status: "brand", family, product: exact, mode: "brand", swapped: null, ask: false };
-    const branded = pref.brand ? rows.filter((product) => brandHit(product, pref.brand)) : [];
+    const branded = pref.brand ? rows.filter((product) => brandHit(product, pref.brand, family)) : [];
     const pick = (branded.length ? branded : rows)
       .slice()
       .sort((a, b) => rankFamilyScore(b, family, pref.brand) - rankFamilyScore(a, family, pref.brand))[0];
@@ -169,18 +175,55 @@ export function resolveCategoryPreference(input) {
  * "I need bread, milk, eggs, bacon, steak, chili, cilantro" -> those families.
  * @param {string} text
  */
+const LEAD_IN =
+  /^(?:(?:hey|hi|ok|okay|so|well|um+|uh+)\s+)*(?:(?:i|we)\s+)?(?:need|want|would like|wanna|gonna (?:get|need)|am getting|am looking for)\s+/i;
+
+function scanFamilies(text) {
+  const tokens = String(text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9%']+/)
+    .filter((token) => token && !/^(?:some|a|an|the|of|my|please|just|also|then)$/.test(token));
+  const hits = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const two = tokens.slice(index, index + 2).join(" ");
+    const pair = familyFromQuery(two);
+    const one = familyFromQuery(tokens[index]);
+    const family = pair || one || "";
+    if (!family) continue;
+    if (hits[hits.length - 1]?.family === family) continue;
+    hits.push({ raw: pair ? two : tokens[index], family });
+    if (pair) index += 1;
+  }
+  return hits;
+}
+
 export function parseNeedItems(text) {
-  const cleaned = String(text || "")
-    .replace(/^(?:i need|we need|please (?:get|add)|get me|add)\s+/i, "")
+  let cleaned = String(text || "")
+    .replace(/[.?!]/g, ",")
+    .replace(/\b(?:um+|uh+|please|thanks|thank you)\b/gi, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(LEAD_IN, "")
+    .replace(/^(?:get me|add|please get)\s+/i, "");
   if (!cleaned) return [];
-  return cleaned
-    .split(/\s*(?:,|;|\n|\band\b)\s*/i)
-    .map((part) => part.replace(/^[-*•]\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 24)
-    .map((raw) => ({ raw, family: familyFromQuery(raw) || "" }));
+  const parts = cleaned.split(/\s*(?:,|;|\n|\band\b|\bplus\b|&)\s*/i);
+  const items = [];
+  for (const part of parts) {
+    const raw = part
+      .replace(/^[-*•]\s*/, "")
+      .replace(/^(?:some|a|an|the|of|my)\s+/i, "")
+      .trim();
+    if (!raw) continue;
+    const family = familyFromQuery(raw) || "";
+    if (family) {
+      items.push({ raw, family });
+      continue;
+    }
+    const scanned = scanFamilies(raw);
+    if (scanned.length) items.push(...scanned);
+    else items.push({ raw, family: "" });
+  }
+  return items.slice(0, 24);
 }
 
 /** A grocery list of staples, not a meal sentence. */
@@ -243,25 +286,53 @@ export function cutsInShelf(products, familyId) {
 }
 
 export function nameBrandsFor(products, familyId) {
+  if (isProduceFamily(familyId)) return [];
+  const known = knownBrandNames(familyId);
   const counts = new Map();
   for (const product of products || []) {
     if (!productMatchesFamily(product, familyId)) continue;
     if (isHouseBrand(product) || isStoreBrand(product.brand, product)) continue;
-    const brand = clean(product.brand, 80);
-    if (!brand || /^(fresh|produce|organic)$/i.test(brand)) continue;
-    const key = brand.toLowerCase();
-    const row = counts.get(key) || { brand, count: 0, score: 0, product: product };
+    const canon = brandFromProduct(product, known);
+    if (!canon) continue;
+    const row = counts.get(canon.key) || {
+      brand: canon.display,
+      key: canon.key,
+      count: 0,
+      score: 0,
+      product,
+      imageUrl: "",
+      productId: product.id || "",
+    };
     row.count += 1;
     const score = rankFamilyScore(product, familyId);
     if (score >= row.score) {
       row.score = score;
       row.product = product;
+      row.productId = product.id || "";
+      row.imageUrl = productImage(product);
+      row.brand = canon.display;
     }
-    counts.set(key, row);
+    counts.set(canon.key, row);
   }
   return [...counts.values()]
     .sort((a, b) => b.score - a.score || b.count - a.count || a.brand.localeCompare(b.brand))
     .slice(0, 8);
+}
+
+/** Name brand is a question only when the shelf has several real brands. */
+export function asksNameBrand(products, familyId) {
+  return shouldAskNameBrand(familyId, nameBrandsFor(products, familyId).length);
+}
+
+/** Cheapest for every category that is still unset or skipped. Never-buy stays. */
+export function applyCheapestDefaults(profile, at = Date.now()) {
+  let next = parseProfile(profile);
+  for (const category of PREFERENCE_CATEGORIES) {
+    const current = next.categoryPreferences?.[category.id];
+    if (current?.mode === "never" || current?.mode === "brand" || current?.mode === "storeBrand" || current?.mode === "cheapest") continue;
+    next = setCategoryPreference(next, { family: category.id, mode: "cheapest", brand: "", productId: "", size: "", attributes: [] }, at);
+  }
+  return next;
 }
 
 export function learnCategoryFromProduct(profile, product, at = Date.now()) {

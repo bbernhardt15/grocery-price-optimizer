@@ -516,15 +516,11 @@ function meaningful(text) {
     .filter((token) => token.length > 2 && !STOP.has(token) && !/^\d+$/.test(token));
 }
 
-/** Closest remaining family when a favorite is gone. Unrelated items stay unmatched. */
+/** Closest remaining family when a favorite is gone. The slot's own search words all have to be on the product. */
 export function closestProduct(slotDef, wanted, products) {
-  const want = new Set([
-    ...meaningful(slotDef?.search),
-    ...meaningful(slotDef?.label),
-    ...meaningful(wanted?.name),
-    ...meaningful(wanted?.familyName),
-    ...meaningful(wanted?.brand),
-  ]);
+  const required = meaningful(slotDef?.search);
+  if (!required.length) return null;
+  const extra = new Set([...meaningful(slotDef?.label), ...meaningful(wanted?.name), ...meaningful(wanted?.familyName)]);
   const brand = norm(wanted?.brand);
   let best = null;
   let bestScore = 0;
@@ -537,15 +533,16 @@ export function closestProduct(slotDef, wanted, products) {
       ...meaningful(product.catalogName),
       ...meaningful(product.brand),
     ]);
-    let score = 0;
-    for (const token of want) if (tokens.has(token)) score += 2;
+    if (!required.every((token) => tokens.has(token))) continue;
+    let score = required.length * 2;
+    for (const token of extra) if (tokens.has(token)) score += 1;
     if (brand && norm(product.brand) === brand) score += 3;
     if (score > bestScore) {
       bestScore = score;
       best = product;
     }
   }
-  return bestScore >= 2 ? best : null;
+  return best;
 }
 
 export function choiceLabel(choice) {

@@ -28,7 +28,7 @@ const STEP_DEFS = [
   {
     id: "products",
     title: "What do you buy?",
-    hint: "One item at a time. Pick the cut, then name brand, store brand, or cheapest. No store prices.",
+    hint: "Mark what you never buy, then a short question for the rest. Name brand only when the shelf has real brands.",
     kind: "products",
   },
   { id: "summary", title: "Here's what we'll shop for", hint: "Edit anything that looks off, then start shopping.", kind: "summary" },
@@ -77,6 +77,11 @@ const LABELS = {
   fish: "Fish",
   shellfish: "Shellfish",
   sesame: "Sesame",
+  carnivore: "Carnivore",
+  atkins: "Atkins",
+  paleo: "Paleo",
+  whole30: "Whole30",
+  "low-carb": "Low-carb",
   vegetarian: "Vegetarian",
   vegan: "Vegan",
   "gluten-free": "Gluten-free",
@@ -85,6 +90,8 @@ const LABELS = {
   keto: "Keto",
   halal: "Halal",
   kosher: "Kosher",
+  "low-sodium": "Low sodium",
+  "diabetic-friendly": "Diabetic-friendly",
   name: "Name brand",
   store: "Store brand",
   cheaper: "Whichever is cheaper",
@@ -176,7 +183,15 @@ export function answerStep(profile, stepId, answer, at = Date.now()) {
   if (stepId === "avoids") next.avoids = answer || [];
   if (stepId === "cuisines") next.cuisines = answer || {};
   if (stepId === "allergies") next.allergies = answer || [];
-  if (stepId === "diets") next.diets = answer || [];
+  if (stepId === "diets") {
+    if (answer && typeof answer === "object" && !Array.isArray(answer)) {
+      next.diets = answer.diets || [];
+      next.dietNotes = phrases(answer.notes);
+    } else {
+      next.diets = answer || [];
+      if (answer == null) next.dietNotes = [];
+    }
+  }
   if (stepId === "always-never") {
     next.always = phrases(answer?.always);
     next.never = phrases(answer?.never);
@@ -272,7 +287,7 @@ export function summarySections(profile) {
   return [
     { id: "household", step: "household", label: "People", value: parsed.household?.size ? (parsed.household.size >= 5 ? "5 or more" : String(parsed.household.size)) : "Not set yet" },
     { id: "allergies", step: "allergies", label: "Allergies", value: joinLabels(parsed.allergies) },
-    { id: "diets", step: "diets", label: "Diets", value: joinLabels(parsed.diets) },
+    { id: "diets", step: "diets", label: "Diets", value: [joinLabels(parsed.diets), (parsed.dietNotes || []).join(", ")].filter((part) => part && part !== "Not set yet").join(" · ") || "Not set yet" },
     { id: "stops", step: "stops", label: "Stores", value: stopLabel },
     { id: "products", step: "products", label: "What you buy", value: preferenceLine(parsed, products) },
   ];

@@ -16,7 +16,23 @@ const WHY = ["save-money", "less-stress", "feed-family", "meal-ideas", "specific
 const FOODS = ["fruit", "vegetables", "chicken", "beef", "pork", "seafood", "eggs", "dairy", "cheese", "bread", "pasta", "rice", "beans", "snacks", "sweets", "coffee", "soda"];
 const CUISINES = ["mexican", "italian", "american", "chinese", "indian", "mediterranean", "thai", "southern", "japanese", "middle-eastern"];
 const ALLERGIES = ["peanut", "tree-nut", "milk", "egg", "wheat", "soy", "fish", "shellfish", "sesame"];
-const DIETS = ["vegetarian", "vegan", "gluten-free", "dairy-free", "pescatarian", "keto", "halal", "kosher"];
+const DIETS = [
+  "carnivore",
+  "atkins",
+  "paleo",
+  "whole30",
+  "low-carb",
+  "keto",
+  "gluten-free",
+  "vegetarian",
+  "vegan",
+  "pescatarian",
+  "halal",
+  "kosher",
+  "low-sodium",
+  "diabetic-friendly",
+  "dairy-free",
+];
 const BRANDS = ["name", "store", "cheaper"];
 const BRAND_AISLES = ["dairy", "meat", "produce", "pantry", "snacks", "drinks"];
 const SHOPPING = ["one-stop", "split", "weekly", "quick"];
@@ -37,6 +53,8 @@ function blank(now = 0) {
     cuisines: {},
     allergies: [],
     diets: [],
+    dietNotes: [],
+    shopStores: [],
     always: [],
     never: [],
     mustHaves: [],
@@ -66,6 +84,18 @@ function pickIds(value, allowed, max = 24) {
     if (!allowed.includes(id) || out.includes(id)) continue;
     out.push(id);
     if (out.length >= max) break;
+  }
+  return out;
+}
+
+function pickStoreNames(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const entry of value) {
+    const name = clean(entry, 40);
+    if (!/^[A-Za-z0-9&.' -]{2,40}$/.test(name) || out.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
+    out.push(name);
+    if (out.length >= 24) break;
   }
   return out;
 }
@@ -172,6 +202,8 @@ export function parseProfile(raw) {
   profile.cuisines = cuisines;
   profile.allergies = pickIds(row.allergies, ALLERGIES);
   profile.diets = pickIds(row.diets, DIETS);
+  profile.dietNotes = phrases(row.dietNotes).slice(0, 8);
+  profile.shopStores = pickStoreNames(row.shopStores);
   profile.always = phrases(row.always);
   profile.never = phrases(row.never);
   profile.mustHaves = phrases(row.mustHaves).length ? phrases(row.mustHaves) : profile.always.slice();
@@ -206,7 +238,7 @@ export function parseProfile(raw) {
   const categoryPreferences = {};
   const sourceCategories = row.categoryPreferences;
   if (sourceCategories && typeof sourceCategories === "object" && !Array.isArray(sourceCategories)) {
-    for (const [key, entry] of Object.entries(sourceCategories).slice(0, 40)) {
+    for (const [key, entry] of Object.entries(sourceCategories).slice(0, 48)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const mode = ["brand", "storeBrand", "cheapest", "skip", "never"].includes(entry.mode) ? entry.mode : "";
       const family = clean(entry.family || key, 40).toLowerCase();

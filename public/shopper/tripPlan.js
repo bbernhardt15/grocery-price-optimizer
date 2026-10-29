@@ -610,6 +610,30 @@ export function consolidateStops(stores, minSavings = 2, capabilities = {}) {
 
 const CART_RANK = ["kroger", "walmart"];
 
+/** Chains the planner can price. Deals-only banners stay off this picker. */
+export function planningStoreNames() {
+  return STORES.filter((store) => !store.dealsOnly).map((store) => store.name);
+}
+
+/**
+ * Keep a trip inside the stores the shopper checked.
+ * An empty allow-list means they have not narrowed it.
+ */
+export function filterTripStores(stores, allowed) {
+  const names = (allowed || []).map((name) => String(name || "").trim()).filter(Boolean);
+  if (!names.length) return stores || [];
+  const keys = new Set(names.map((name) => normalizeStoreKey(name)));
+  return (stores || [])
+    .filter((store) => keys.has(normalizeStoreKey(store.storeName)))
+    .map((store) => ({
+      ...store,
+      items: (store.items || []).map((item) => ({
+        ...item,
+        offers: (item.offers || []).filter((offer) => keys.has(normalizeStoreKey(offer.storeName))),
+      })),
+    }));
+}
+
 function itemCover(storeName, item) {
   if (sameStore(storeName, item.storeName) && Number.isFinite(Number(item.price))) {
     return { price: Number(item.price), storeName: item.storeName, offer: null };

@@ -10,9 +10,9 @@ See [FAMILIES.md](FAMILIES.md) for how a word becomes a grocery family and how a
 
 1. How many people. That number scales quantities. It does not plan meals.
 2. Allergies. These are never included.
-3. Diets. A diet beats a saved product.
+3. Diets. The list includes carnivore, Atkins, paleo, Whole30, low-carb, keto, gluten-free, vegetarian, vegan, pescatarian, halal, kosher, low sodium, and diabetic-friendly, plus a free-text other. A diet beats a saved product. Low sodium is saved and is not used as a hard ban, because salt shows up on too many labels.
 4. How many stores are worth it: 1, 2, 3, or as many as it takes. The plan can still switch between the lowest price and fewer stores.
-5. What they buy, one category at a time. A category with cuts on the shelf asks what kind (New York strip, sirloin, ribeye, filet, flank for steak; fat percent for milk; size for eggs). **I don't buy this** keeps that family off later suggestions. Then name brand, store brand, or cheapest. Name brands are the ones on the shelf. Tiles do not show a price or a store. **Skip rest, I'll teach it as I shop** leaves the rest unset.
+5. What they buy. First a compact list of all categories, so they can mark **I don't buy this** before any drill-down. Then one category at a time, with progress such as **12 of 29**. A category asks the cut or variety (and packaged versus loose for produce) before the brand. Name brand appears only when at least three real brands are on the shelf. Chicken cuts are not brands. Cereal sub-brands show as the parent. Fresh produce asks variety and offers store brand, cheapest, or organic. **Use defaults: cheapest for everything I skip** fills the rest. **Skip rest** leaves the rest unset. Tiles do not show a price or a store. Switching modes keeps the cut and the brand.
 6. A summary. Each section has Edit. **Start shopping** closes the guide.
 
 Pickup, delivery, and in-store are chosen in the store's own cart when that store has one. Kroger can take a cart. Walmart opens an add-to-cart link. Other stores get a list.
