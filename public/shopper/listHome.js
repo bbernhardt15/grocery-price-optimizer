@@ -360,8 +360,8 @@ export function createListHome(deps) {
         const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
         deps.toast(`Added ${model.title}. ${phrase}.`);
       }
-      else if (swapped.length) deps.toast(`Added ${model.title}. A favorite changed — you'll see it on the plan.`);
-      else if (added) deps.toast(`Added ${model.title}.`);
+      else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
+      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
       else deps.toast(`${model.title} is already on your list.`);
       deps.haptic();
       if (view) closeDialog();
@@ -414,14 +414,12 @@ export function createListHome(deps) {
       return true;
     }
     if (target.closest("[data-nudge-set]")) {
-      const first = previewLists(new Date(), 1)[0];
-      if (!first) {
-        deps.toast("Couldn't open favorites. Try Lists.");
+      if (deps.onEditFavorites) {
+        deps.onEditFavorites();
+        deps.haptic();
         return true;
       }
-      openList(first.id);
-      deps.toast("Pick an item, then Remember for every list.");
-      deps.haptic();
+      deps.toast("Couldn't open what you buy. Try the menu.");
       return true;
     }
     if (target.closest("[data-lists-open]")) {

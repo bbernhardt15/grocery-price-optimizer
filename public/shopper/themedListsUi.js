@@ -91,9 +91,9 @@ export function partyHtml(people, escapeHtml) {
 
 export function nudgeHtml(escapeHtml) {
   return `<div class="nudge" id="favorites-nudge">
-    <p>Set your favorites once and we'll remember them.</p>
+    <p>Tell us what you buy and we'll use it on every list.</p>
     <div class="starter-actions">
-      <button type="button" class="primary" data-nudge-set>Set favorites</button>
+      <button type="button" class="primary" data-nudge-set>Edit what I buy</button>
       <button type="button" class="text-btn" data-nudge-dismiss>Not now</button>
     </div>
   </div>`;
@@ -101,8 +101,8 @@ export function nudgeHtml(escapeHtml) {
 
 export function listsEntryHtml(hint, escapeHtml) {
   return `<button type="button" class="lists-entry" data-lists-open>
-    <span>Lists</span>
-    <span class="muted">${text(escapeHtml, hint || "Starter lists and your lists")}</span>
+    <span>Themed lists</span>
+    <span class="muted">${text(escapeHtml, hint || "Holiday baking and other lists")}</span>
   </button>`;
 }
 

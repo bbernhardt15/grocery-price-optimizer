@@ -148,15 +148,17 @@ const DEFS = [
     attr("cheddar", "Cheddar", /\bcheddar\b/i),
     attr("sliced", "Sliced", /\bsliced\b/i),
   ]),
-  food("chicken", "Chicken", "chicken breast", 9, ["meat-seafood", "frozen"], ["Chicken"], ["chicken"], ["breast", "breasts", "thigh", "thighs", "wing", "wings", "drumstick", "drumsticks", "tender", "tenders", "tenderloin", "leg", "legs", "quarter", "quarters", "whole", "ground", "cutlet", "cutlets", "boneless", "skinless", "thin", "family", "pack", "tray", "air", "chilled"], [READY_CHICKEN, SOUP, PET, CANDY, /\b(?:broth|stock|soup|noodle|nugget|flavor|flavored|patty|patties)\b/i], /\bchicken\b/i, ["just bare", "perdue", "tyson", "bell & evans", "sanderson farms"], { dim: "weight", ideal: 16, min: 12, max: 48 }, [
+  food("chicken", "Chicken", "chicken breast", 9, ["meat-seafood", "frozen"], ["Chicken"], ["chicken"], ["breast", "breasts", "thigh", "thighs", "wing", "wings", "drumstick", "drumsticks", "tender", "tenders", "tenderloin", "leg", "legs", "quarter", "quarters", "whole", "ground", "cutlet", "cutlets", "boneless", "skinless", "thin", "family", "pack", "tray", "air", "chilled"], [READY_CHICKEN, SOUP, PET, CANDY, /\b(?:broth|stock|soup|noodle|nugget|flavor|flavored|patty|patties)\b/i], /\bchicken\b/i, ["perdue", "tyson", "pilgrim's", "springer mountain", "miller farms", "miller", "just bare", "bell & evans", "sanderson farms"], { dim: "weight", ideal: 16, min: 12, max: 48 }, [
     attr("breast", "Breast", /\bbreast/i),
     attr("thighs", "Thighs", /\bthigh/i),
+    attr("drums", "Drums", /\bdrums?\b|\bdrumsticks?\b/i),
+    attr("wings", "Wings", /\bwings?\b/i),
   ]),
   food("ground-beef", "Ground beef", "ground beef", 10, ["meat-seafood"], ["Beef"], ["ground beef"], ["lean", "chuck", "sirloin", "round"], [PET, CANDY, SOUP, /\b(?:jerky|dog|chili|sauce|broth)\b/i], /\bground beef\b|\bbeef\b/i, ["all natural", "laura's lean", "meyer"], { dim: "weight", ideal: 16, min: 12, max: 48 }, [
     attr("80/20", "80/20", /\b80\s*\/\s*20\b|\b80\/20\b/i),
     attr("90/10", "90/10", /\b90\s*\/\s*10\b/i),
   ]),
-  food("steak", "Steak", "steak", 11, ["meat-seafood"], ["Beef"], ["steak", "filet mignon"], ["ribeye", "sirloin", "strip", "ny", "new", "york", "t", "bone", "filet", "mignon", "flank", "skirt", "choice", "select", "usda", "beef"], [/\b(?:sauce|seasoning|fries|fry|burger|dog)\b/i, PET, CANDY], /\bsteak\b|\bfilet\b/i, ["usda", "choice", "certified angus beef"], { dim: "weight", ideal: 16, min: 8, max: 32 }, [
+  food("steak", "Steak", "steak", 11, ["meat-seafood"], ["Beef"], ["steak", "filet mignon"], ["ribeye", "sirloin", "strip", "ny", "new", "york", "t", "bone", "filet", "mignon", "flank", "skirt", "choice", "select", "usda", "beef"], [/\b(?:sauce|seasoning|fries|fry|burger|dog)\b/i, PET, CANDY], /\bsteak\b|\bfilet\b/i, ["certified angus beef", "omaha steaks", "national beef"], { dim: "weight", ideal: 16, min: 8, max: 32 }, [
     attr("ny-strip", "New York strip", /\b(?:ny|new york)\s+strip\b|\bstrip steak\b/i),
     attr("sirloin", "Sirloin", /\bsirloin\b/i),
     attr("ribeye", "Ribeye", /\bribeye\b/i),
@@ -170,7 +172,7 @@ const DEFS = [
     attr("white", "White", /\bwhite\b/i),
     attr("brown", "Brown", /\bbrown\b/i),
   ]),
-  food("cereal", "Cereal", "cereal", 14, ["breakfast"], ["Cereal"], ["cereal"], ["toasted", "oats", "whole", "grain", "family", "size"], [/\b(?:bar|bars|treat|treats|candy|marshmallow snack)\b/i, CANDY, PET, SOUP], /\bcereal/i, ["general mills", "kellogg's", "post", "cheerios", "quaker"], { dim: "weight", ideal: 12, min: 8, max: 18 }, []),
+  food("cereal", "Cereal", "cereal", 14, ["breakfast"], ["Cereal"], ["cereal"], ["toasted", "oats", "whole", "grain", "family", "size"], [/\b(?:bar|bars|treat|treats|candy|marshmallow snack)\b/i, /\belf on the shelf\b/i, CANDY, PET, SOUP], /\bcereal/i, ["general mills", "kellogg's", "post", "quaker", "malt-o-meal"], { dim: "weight", ideal: 12, min: 8, max: 18 }, []),
   food("coffee", "Coffee", "ground coffee", 15, ["beverages", "pantry"], ["Coffee & Tea"], ["coffee"], ["ground", "grounds", "whole", "bean", "beans", "roast", "medium", "dark", "light", "breakfast", "blend", "classic", "pods", "pod", "k", "cups", "cup", "kcup"], [/\b(?:creamer|candy|cake|syrup|liqueur|ice cream)\b/i, CANDY, ALCOHOL], /\bcoffee\b/i, ["folgers", "maxwell house", "peet's", "starbucks", "dunkin'"], { dim: "weight", ideal: 16, min: 10, max: 32 }, [
     attr("ground", "Ground", /\bground\b/i),
   ]),
@@ -179,18 +181,33 @@ const DEFS = [
     attr("greek", "Greek", /\bgreek\b/i),
     attr("plain", "Plain", /\bplain\b/i),
   ]),
-  food("cilantro", "Cilantro", "cilantro", 18, ["produce"], ["Fresh Herbs", "Vegetables"], ["cilantro", "coriander"], ["fresh", "organic", "bunch"], [CANDY, PET], /\bcilantro\b|\bcoriander\b/i, [], null, []),
-  food("lettuce", "Lettuce", "lettuce", 19, ["produce"], ["Vegetables"], ["lettuce"], ["romaine", "iceberg", "butter", "green", "red", "leaf", "organic", "hearts", "shredded"], [CANDY, PET, SOUP], /\blettuce\b/i, [], null, [
-    attr("romaine", "Romaine", /\bromaine\b/i),
+  food("cilantro", "Cilantro", "cilantro", 18, ["produce"], ["Fresh Herbs", "Vegetables"], ["cilantro", "coriander"], ["fresh", "organic", "bunch", "packaged"], [CANDY, PET], /\bcilantro\b|\bcoriander\b/i, [], null, [
+    attr("bunch", "Bunch", /\bbunch\b/i),
+    attr("packaged", "Packaged", /\b(?:packaged|clamshell|container|chopped)\b/i),
+    attr("organic", "Organic", /\borganic\b/i),
   ]),
-  food("onions", "Onions", "onions", 20, ["produce"], ["Vegetables"], ["onion", "onions"], ["yellow", "white", "red", "sweet", "vidalia", "organic", "whole"], [/\b(?:ring|rings|powder|soup|salt|chips)\b/i, CANDY, PET], /\bonions?\b/i, [], null, [
+  food("lettuce", "Lettuce", "lettuce", 19, ["produce"], ["Vegetables"], ["lettuce"], ["romaine", "iceberg", "butter", "green", "red", "leaf", "organic", "hearts", "shredded", "head"], [CANDY, PET, SOUP], /\blettuce\b/i, [], null, [
+    attr("romaine", "Romaine head", /\bromaine\b/i),
+    attr("hearts", "Hearts", /\bhearts?\b/i),
+    attr("packaged", "Packaged", /\b(?:packaged|bag|clamshell)\b/i),
+    attr("organic", "Organic", /\borganic\b/i),
+  ]),
+  food("onions", "Onions", "onions", 20, ["produce"], ["Vegetables"], ["onion", "onions"], ["yellow", "white", "red", "sweet", "vidalia", "organic", "whole", "bag"], [/\b(?:ring|rings|powder|soup|salt|chips)\b/i, CANDY, PET], /\bonions?\b/i, [], null, [
     attr("yellow", "Yellow", /\byellow\b/i),
+    attr("red", "Red", /\bred\b/i),
+    attr("sweet", "Sweet", /\bsweet\b|\bvidalia\b/i),
+    attr("packaged", "Packaged", /\b(?:bag|packaged)\b/i),
+    attr("organic", "Organic", /\borganic\b/i),
   ]),
   food("tomatoes", "Tomatoes", "tomatoes", 21, ["produce"], ["Vegetables", "Fruit"], ["tomato", "tomatoes"], ["roma", "grape", "cherry", "beefsteak", "vine", "organic", "hot", "house"], [/\b(?:sauce|soup|paste|ketchup|juice|canned)\b/i, CANDY, PET], /\btomatoes?\b/i, [], null, [
     attr("roma", "Roma", /\broma\b/i),
+    attr("vine", "Vine", /\bvine\b/i),
+    attr("grape", "Grape", /\bgrape\b/i),
+    attr("packaged", "Packaged", /\b(?:clamshell|container|packaged)\b/i),
+    attr("organic", "Organic", /\borganic\b/i),
   ]),
   food("bananas", "Bananas", "bananas", 22, ["produce"], ["Fruit"], ["banana", "bananas"], ["organic", "fresh", "bunch"], [/\b(?:chip|chips|pudding|bread|candy)\b/i, CANDY], /\bbananas?\b/i, [], null, []),
-  food("peanut-butter", "Peanut butter", "peanut butter", 23, ["pantry"], ["Condiments"], ["peanut butter"], ["creamy", "crunchy", "smooth", "natural", "organic", "no", "stir"], [/\b(?:cup|cups|candy|cookie|pie|cracker|sandwich|cereal)\b/i, CANDY, /\bcookie\s+butter\b/i], /peanut butter/i, ["jif", "skippy", "smucker's", "justin's"], { dim: "weight", ideal: 16, min: 12, max: 40 }, [
+  food("peanut-butter", "Peanut butter", "peanut butter", 23, ["pantry"], ["Condiments"], ["peanut butter"], ["creamy", "crunchy", "smooth", "natural", "organic", "no", "stir"], [/\b(?:cup|cups|candy|cookie|pie|cracker|sandwich|cereal)\b/i, CANDY, /\bcookie\s+butter\b/i], /peanut butter/i, ["jif", "skippy", "peter pan", "smucker's", "smucker's natural", "justin's"], { dim: "weight", ideal: 16, min: 12, max: 40 }, [
     attr("creamy", "Creamy", /\bcreamy\b/i),
     attr("crunchy", "Crunchy", /\bcrunchy\b/i),
   ]),
@@ -200,7 +217,7 @@ const DEFS = [
     attr("olive", "Olive", /\bolive\b/i),
   ]),
   house("laundry-detergent", "Laundry detergent", "laundry detergent", 26, ["household"], ["Laundry"], ["laundry detergent", "detergent"], ["liquid", "pods", "powder", "free", "clear", "sensitive", "original"], [/\bdish\b/i, PET], /laundry detergent|\bdetergent\b/i, ["tide", "gain", "persil", "all", "arm & hammer"], { dim: "volume", ideal: 92, min: 46, max: 150 }, []),
-  house("dish-soap", "Dish soap", "dish soap", 27, ["household"], ["Cleaning"], ["dish soap", "dishwashing liquid"], ["original", "ultra", "free", "clear"], [/\blaundry\b/i, PET], /dish soap|dishwashing/i, ["dawn", "palmolive", "ajax", "seventh generation"], { dim: "volume", ideal: 18, min: 12, max: 32 }, []),
+  house("dish-soap", "Dish soap", "dish soap", 27, ["household"], ["Cleaning"], ["dish soap", "dishwashing liquid"], ["original", "ultra", "free", "clear"], [/\blaundry\b/i, PET], /dish soap|dishwashing/i, ["dawn", "mrs. meyer's", "mrs meyers", "palmolive", "ajax", "seventh generation"], { dim: "volume", ideal: 18, min: 12, max: 32 }, []),
   food("chili", "Chili", "chili", 28, ["pantry"], ["Canned"], ["chili"], ["beans", "with", "beef", "turkey", "no", "canned", "hot", "mild"], [/\b(?:powder|dog|seasoning|flakes|candy|cheese)\b/i, PET, CANDY], /\bchili\b/i, ["hormel", "stagg", "wolf brand", "dennison's"], { dim: "weight", ideal: 15, min: 10, max: 19 }, []),
   food("chips", "Chips", "potato chips", 29, ["snacks"], ["Chips"], ["chips", "chip"], ["potato", "classic", "original", "wavy", "kettle", "barbecue", "bbq", "sour", "cream"], [/\bchocolate\s+chips\b/i, CANDY, PET], /\bchips\b/i, ["lay's", "ruffles", "kettle brand"], { dim: "weight", ideal: 8, min: 5, max: 13 }, []),
 ];
@@ -263,11 +280,31 @@ function taxonomyOk(product, family) {
   return true;
 }
 
+function escapeHead(head) {
+  return String(head).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** "Cilantro & White Onions" is a prepared mix, not cilantro and not onions. */
+export function isMixedStaple(name) {
+  const text = String(name || "");
+  if (!/[&/]|\band\b|\bwith\b/i.test(text)) return false;
+  const parts = text.split(/\s*(?:&|\/|\band\b|\bwith\b)\s*/i).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return false;
+  const ids = new Set();
+  for (const part of parts) {
+    for (const family of FAMILIES) {
+      if (family.heads.some((head) => new RegExp(`\\b${escapeHead(head)}\\b`, "i").test(part))) ids.add(family.id);
+    }
+  }
+  return ids.size >= 2;
+}
+
 export function productMatchesFamily(product, familyId) {
   const family = BY_ID.get(familyId);
   if (!family || !product) return false;
   const nameText = [product.name, product.familyName, product.catalogName].filter(Boolean).join(" ");
   if (!nameText.trim()) return false;
+  if (isMixedStaple(nameText)) return false;
   const exclusionText = blob(product, true);
   if (family.humanFood && blockedFoodDepartment(product)) return false;
   for (const rule of family.exclude) {
@@ -335,6 +372,10 @@ export const PREFERENCE_CATEGORIES = FAMILIES.map((family) => ({
 
 export function attributeTests(familyId) {
   return BY_ID.get(familyId)?.attributes || [];
+}
+
+export function knownBrandNames(familyId) {
+  return (BY_ID.get(familyId)?.brands || []).slice();
 }
 
 const PLACEHOLDER_IMAGE = /placeholder|no[-_]?image|image[-_]?not[-_]?available|noimage|missing[-_]?image|default[-_]?image|place-holder/i;

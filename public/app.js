@@ -58,7 +58,7 @@ import {
   resolveProductPreference,
   shouldAskAlways,
 } from "./shopper/productPreference.js";
-import { isPreferenceList, learnCategoryFromProduct, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
+import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
 import { selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
@@ -74,6 +74,8 @@ import {
   shareItemId,
   consolidateStops,
   fewerStorePlan,
+  filterTripStores,
+  planningStoreNames,
   handoffMark,
   singleStoreSavings,
   swapSentence,
@@ -1979,18 +1981,32 @@ function tripId() {
   return tripFingerprint(lastOptimize?.stores || []);
 }
 
+function selectedStoreNames() {
+  const all = planningStoreNames();
+  const picked = getUserProfile(localStorage).shopStores;
+  if (!Array.isArray(picked) || !picked.length) return all;
+  const next = all.filter((name) => picked.includes(name));
+  return next.length ? next : all;
+}
+
+function narrowStores(stores) {
+  return filterTripStores(stores, selectedStoreNames());
+}
+
 function spreadTrip() {
   if (!lastOptimize) return null;
   const threshold = tripEdits.fewerStops ? 8 : 2;
   const base = applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
-  if (planLimited("multiStoreSplit")) return base;
-  return consolidateStops(base.stores, threshold, lastOptimize.capabilities || {});
+  const stores = narrowStores(base.stores);
+  if (planLimited("multiStoreSplit")) return { ...base, stores };
+  const consolidated = consolidateStops(stores, threshold, lastOptimize.capabilities || {});
+  return { ...consolidated, stores: narrowStores(consolidated.stores || []) };
 }
 
 function currentTrip() {
   const spread = spreadTrip();
   if (!spread || planLimited("multiStoreSplit") || tripEdits.planMode !== "fewer") return spread;
-  const fewer = fewerStorePlan(spread.stores, lastOptimize.capabilities || {});
+  const fewer = fewerStorePlan(narrowStores(spread.stores), lastOptimize.capabilities || {});
   return { ...spread, stores: fewer.stores, total: fewer.total };
 }
 
@@ -2281,7 +2297,7 @@ function paintTrip() {
     .map((line) => `<li><span>${escapeHtml(line.label)}</span><strong>${escapeHtml(line.value)}</strong></li>`)
     .join("");
   const spreadView = spreadTrip();
-  const fewerPlan = spreadView && !planLimited("multiStoreSplit") ? fewerStorePlan(spreadView.stores, lastOptimize?.capabilities || {}) : null;
+  const fewerPlan = spreadView && !planLimited("multiStoreSplit") ? fewerStorePlan(narrowStores(spreadView.stores), lastOptimize?.capabilities || {}) : null;
   const spreadTotal = fewerPlan?.spreadTotal;
   const mode = tripEdits.planMode === "fewer" ? "fewer" : "spread";
   const spreadStops = (spreadView?.stores || []).length;
@@ -2715,7 +2731,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, zipCode: zip, allowSubstitutes: allowSubsEl.checked }),
+        body: JSON.stringify({ items, zipCode: zip, stores: selectedStoreNames(), allowSubstitutes: allowSubsEl.checked }),
         signal: controller.signal,
       },
       PLAN_TIMEOUT_MS
@@ -4108,10 +4124,17 @@ zipEl.addEventListener("change", () => {
   zipEl.value = zip;
   paintZipPlace();
   if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
+  paintStorePicker();
+  if (ZIP_PATTERN.test(zip)) showZipStatus(`Using ${zipPlaceLabel(zip) || zip.slice(0, 5)}.`);
   scheduleWatchSync();
   if (shelfRequested()) void loadPage(true);
 });
 zipEl.addEventListener("input", paintZipPlace);
+$("app-drawer")?.addEventListener("change", (event) => {
+  const box = event.target;
+  if (!(box instanceof HTMLInputElement) || !box.dataset.shopStore) return;
+  saveStorePicker();
+});
 $("theme-btn").addEventListener("click", () => {
   applyTheme(nextTheme(document.documentElement.dataset.theme || "system"));
 });
@@ -5269,7 +5292,33 @@ function lists() {
       mediaUrl,
       profile: () => getUserProfile(localStorage),
       slotBlocked: (slot) => slotIsExcluded(getUserProfile(localStorage), slot),
-      guideSlot: (input) => guideSlot({ ...input, profile: getUserProfile(localStorage) }),
+      guideSlot: (input) => {
+        const profile = getUserProfile(localStorage);
+        const slot = input?.slot || {};
+        const family = familyFromQuery(slot.id) || familyFromQuery(slot.search) || familyFromQuery(slot.label);
+        const base = guideSlot({ ...input, profile });
+        if (!family || (input?.override && input.override.cleared !== true)) return base;
+        const resolved = resolveCategoryPreference({
+          profile,
+          family,
+          query: slot.search || slot.label || "",
+          products: input?.products || [],
+        });
+        if (resolved.declined) return { ...base, product: null, excluded: true, missing: true, status: "excluded" };
+        if (resolved.product && !resolved.ask) {
+          return {
+            ...base,
+            product: resolved.product,
+            source: resolved.mode || base.source,
+            swapped: resolved.swapped || null,
+            missing: false,
+            excluded: false,
+            status: resolved.status,
+          };
+        }
+        return base;
+      },
+      onEditFavorites: () => profileUi?.openFavorites?.(),
       onFavorite: (product, slotId) => {
         const next = learnPreference(getUserProfile(localStorage), product, { family: slotId, source: "swap", replace: true });
         saveUserProfile(localStorage, next);
@@ -5413,7 +5462,9 @@ function preferenceReview(rows, note) {
   }
   const lines = rows
     .map((row) => {
-      const name = row.product?.familyName || row.product?.name || row.raw;
+      const productName = row.product?.familyName || row.product?.name || row.raw;
+      const brand = row.product?.brand && !String(productName).toLowerCase().includes(String(row.product.brand).toLowerCase()) ? row.product.brand : "";
+      const name = [brand, productName].filter(Boolean).join(" ");
       const change = row.family ? `<button type="button" class="linkish" data-pref-change="${escapeHtml(row.family)}">Change</button>` : "";
       const why = row.declined ? "Left off. You don't buy this." : row.swapped ? `We swapped ${row.swapped.from} for ${row.swapped.to}` : row.mode === "cheapest" ? "Cheapest" : row.mode === "storeBrand" ? "Store brand" : row.brand || "";
       return `<li><span>${escapeHtml(name)}</span> <span class="muted">${escapeHtml(why)}</span> ${change}</li>`;
@@ -5462,8 +5513,11 @@ async function addFromPreferences(text) {
     ...result.skipped.map((row) => ({ ...row, product: { name: row.raw } })),
   ];
   const leftOff = result.skipped.filter((row) => row.declined).length;
+  const fromFavorites = added > 0 && result.added.every((row) => row.mode && row.mode !== "skip");
   const note = added
-    ? `Added ${added} ${added === 1 ? "item" : "items"} using your preferences`
+    ? fromFavorites
+      ? `Added ${added} ${added === 1 ? "item" : "items"} from your favorites`
+      : `Added ${added} ${added === 1 ? "item" : "items"} using your preferences`
     : leftOff
       ? "Those are items you don't buy"
       : "Nothing on the shelf matched that list";
@@ -5504,20 +5558,25 @@ async function addResolvedQuery(text) {
 }
 
 async function loadStarterShelf(picks) {
-  const response = await fetchWithTimeout(fetch, apiUrl("/api/catalog/browse?limit=80"), {}, PLAN_TIMEOUT_MS);
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
-  let tiles = body.items || [];
-  let flat = flattenTiles(tiles);
+  const queries = [];
+  const seen = new Set();
   for (const pick of picks || []) {
-    if (matchPick(pick, flat)) continue;
-    const search = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(pick.name)}&limit=12`), {}, PLAN_TIMEOUT_MS);
-    const found = await search.json().catch(() => ({}));
-    tiles = tiles.concat(found.items || []);
-    flat = flattenTiles(tiles);
+    const name = String(pick?.name || "").trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    queries.push(name);
   }
+  const pages = await Promise.all(
+    queries.slice(0, 12).map((name) =>
+      fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`), {}, 4000)
+        .then((response) => response.json().catch(() => ({})))
+        .catch(() => ({}))
+    )
+  );
+  const tiles = pages.flatMap((body) => body.items || []);
   for (const tile of tiles) rememberTile(tile);
-  return flat;
+  return flattenTiles(tiles);
 }
 
 async function addStarter(id) {
@@ -5618,28 +5677,97 @@ function maybeAskAccount(intent, next) {
   if (!dialog.open) dialog.showModal();
 }
 
+function showZipStatus(message, kind) {
+  const el = $("zip-status");
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message || "";
+  el.dataset.kind = kind || "";
+}
+
+function paintStorePicker() {
+  const host = $("store-picker-list");
+  if (!host) return;
+  const selected = new Set(selectedStoreNames());
+  const place = zipPlaceLabel(normalizeZip(zipEl?.value || ""));
+  const note = $("store-picker-note");
+  if (note) note.textContent = place ? `Near ${place}. Uncheck a store to leave it out.` : "Uncheck a store to leave it out of the plan.";
+  host.innerHTML = planningStoreNames()
+    .map((name) => {
+      const on = selected.has(name);
+      return `<label class="check-row"><input type="checkbox" data-shop-store="${escapeHtml(name)}" ${on ? "checked" : ""} /> ${escapeHtml(name)}</label>`;
+    })
+    .join("");
+}
+
+function saveStorePicker() {
+  const boxes = [...document.querySelectorAll("[data-shop-store]")];
+  const picked = boxes.filter((box) => box.checked).map((box) => box.getAttribute("data-shop-store")).filter(Boolean);
+  if (!picked.length) {
+    toast("Pick at least one store.");
+    paintStorePicker();
+    return;
+  }
+  const all = planningStoreNames();
+  const profile = getUserProfile(localStorage);
+  const shopStores = picked.length === all.length ? [] : picked;
+  saveUserProfile(localStorage, { ...profile, shopStores });
+}
+
 async function findNearbyStores() {
   openDrawer({ focus: "zip" });
   const button = $("find-stores");
+  const typed = normalizeZip(zipEl.value);
+  if (ZIP_PATTERN.test(typed)) {
+    applyZip(typed);
+    const place = zipPlaceLabel(typed);
+    showZipStatus(place ? `Using ${place}.` : `Using ZIP ${typed.slice(0, 5)}.`);
+    paintStorePicker();
+    toast(place ? `Nearby stores for ${place}.` : `Nearby stores for ${typed.slice(0, 5)}.`);
+    haptic();
+    return;
+  }
   if (button) {
     button.disabled = true;
     setBusy(button, true);
   }
+  showZipStatus("Looking up this location…");
   try {
-    const coords = await readDeviceCoords();
-    const response = await fetch(apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`));
+    const coords = await Promise.race([
+      readDeviceCoords(),
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(Object.assign(new Error("Location timed out"), { code: 3 })), 8000);
+      }),
+    ]);
+    const response = await fetchWithTimeout(
+      fetch,
+      apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`),
+      {},
+      8000
+    );
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !/^\d{5}/.test(String(body.zip || ""))) {
+      showZipStatus("Couldn't read a ZIP from this location. Type one and try again.", "error");
       toast("Couldn't read a ZIP from this location. Type it instead.");
       return;
     }
     applyZip(body.zip);
-    toast(`Nearby stores for ${body.zip}.`);
+    const place = zipPlaceLabel(body.zip);
+    showZipStatus(place ? `Using ${place}.` : `Using ZIP ${body.zip}.`);
+    paintStorePicker();
+    toast(`Nearby stores for ${place || body.zip}.`);
     haptic();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     const denied = Number(error?.code) === 1 || /denied|permission/i.test(message);
-    toast(denied ? "Location stayed off. Type a ZIP instead." : "Couldn't use location. Type a ZIP instead.");
+    const timedOut = Number(error?.code) === 3 || /timed out|timeout/i.test(message);
+    const text = denied
+      ? "Location stayed off. Type a ZIP and try again."
+      : timedOut
+        ? "Location timed out. Type a ZIP and try again."
+        : "Couldn't use location. Type a ZIP and try again.";
+    showZipStatus(text, "error");
+    toast(text);
   } finally {
     if (button) {
       button.disabled = false;
@@ -5754,6 +5882,7 @@ async function bootApp() {
   paintPlanBar();
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   paintZipPlace();
+  paintStorePicker();
   syncDrawerMode();
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
   if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
@@ -5890,7 +6019,12 @@ document.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
   if (!button) return;
   const action = button.getAttribute("data-empty-action");
-  if (action === "browse" || action === "add-items") {
+  if (action === "add-items") {
+    openList(false);
+    void openAlerts(false);
+    showStep("add");
+    searchEl.focus();
+  } else if (action === "browse") {
     openList(false);
     void openAlerts(false);
     showStep("add");
@@ -6027,6 +6161,18 @@ $("drawer-products")?.addEventListener("click", () => {
 });
 
 importer = mountImport({
+  onStatus(importStatus) {
+    const hint = $("ask-hint");
+    if (hint && importStatus && importStatus.ai === false) {
+      hint.textContent = "Smart parsing is off; basic matching used. A product like milk, or a list like bread, milk, eggs.";
+    }
+  },
+  async onSpoken(text) {
+    const items = parseNeedItems(text);
+    if (!items.some((item) => item.family) && !isPreferenceList(text)) return false;
+    await addFromPreferences(text);
+    return true;
+  },
   addProduct,
   showStep,
   remember(items) {

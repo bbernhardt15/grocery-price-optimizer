@@ -36,8 +36,8 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=profile-3" />
-    <link rel="stylesheet" href="/shopper/import.css?v=profile-3" />
+    <link rel="stylesheet" href="/styles.css?v=profile-4" />
+    <link rel="stylesheet" href="/shopper/import.css?v=profile-4" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -105,7 +105,13 @@
           </label>
           <p id="zip-hint" class="sr-only">Saved on this phone. Location is used only when you ask to find nearby stores.</p>
           <button id="find-stores" type="button" class="ghost">Find nearby stores</button>
+          <p id="zip-status" class="status" role="status" hidden></p>
           <button id="refresh-prices" type="button" class="ghost">Refresh prices</button>
+          <fieldset id="store-picker" class="store-picker">
+            <legend>Stores to shop</legend>
+            <p id="store-picker-note" class="muted">Uncheck a store to leave it out of the plan.</p>
+            <div id="store-picker-list"></div>
+          </fieldset>
           <section id="kroger-card" class="kroger-card" hidden>
             <h2 id="kroger-card-title">Kroger connected</h2>
             <button type="button" id="kroger-send" class="primary">Send to Kroger cart</button>
@@ -502,6 +508,6 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=profile-3"></script>
+    <script type="module" src="/app.js?v=profile-4"></script>
   </body>
 </html>

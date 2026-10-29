@@ -114,7 +114,7 @@ describe("themed list slots", () => {
     assert.ok(previewLists(new Date(2026, 2, 15), 3).length <= 3);
     assert.ok(previewLists(new Date(2026, 2, 15), 3).length >= 2);
     const nudge = nudgeHtml(escapeHtml);
-    assert.match(nudge, /Set favorites/);
+    assert.match(nudge, /Edit what I buy/);
     assert.match(nudge, /Not now/);
     assert.doesNotMatch(emptyMyListsHtml(escapeHtml), /data-my-new/);
   });

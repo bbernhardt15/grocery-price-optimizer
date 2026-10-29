@@ -412,7 +412,16 @@ export function guideSlot(input) {
   const prefBlocked = pref && (productExcluded(profile, { name: pref.name, brand: pref.brand }).excluded || isBlockedProduct(profile, pref));
   const override = input.override && input.override.cleared === true ? null : input.override || null;
   const favorite = input.favorite || (!override && pref && !prefBlocked ? choiceFromPreference(pref) : null);
-  const shelf = matching.length ? matching : allowed;
+  const searchTokens = String(slot?.search || slot?.label || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 2 && !/^(?:the|and|with|for)$/.test(token));
+  const named = allowed.filter((product) => {
+    if (!searchTokens.length) return false;
+    const have = productHaystack(product).toLowerCase();
+    return searchTokens.every((token) => have.includes(token));
+  });
+  const shelf = matching.length ? matching : named;
   if (!favorite && !override) {
     const mode = brandModeFor(profile, categoryForFamily(slot?.id) || categoryForFamily(familyFromQuery(slot?.search)));
     if (mode && matching.length) {

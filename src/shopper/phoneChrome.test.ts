@@ -27,7 +27,7 @@ function chromeExecutable(): string {
 
 describe("menu drawer and ZIP place", () => {
   it("names a known ZIP and leaves an unknown one as digits", () => {
-    assert.equal(zipPlaceLabel("45103"), "Cincinnati 45103");
+    assert.equal(zipPlaceLabel("45103"), "Batavia 45103");
     assert.equal(zipPlaceLabel("45202"), "Cincinnati 45202");
     assert.equal(zipPlaceLabel("10001-1234"), "New York 10001");
     assert.equal(zipPlaceLabel("99999"), "99999");
@@ -166,7 +166,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       for (const control of add.headerButtons) {
         assert.ok((control.left ?? 0) < 0, `${control.selector} stays in the closed drawer`);
       }
-      assert.equal(add.place, "Cincinnati 45103");
+      assert.equal(add.place, "Batavia 45103");
       assert.ok(add.headerPad >= 47, "header keeps the top safe area");
 
       await inPage(page, `
@@ -185,7 +185,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
         if (title) title.textContent = "In the store";
       `);
       const shop = await inPage<any>(page, MEASURE_CHROME);
-      assert.equal(shop.steps, false);
+      assert.equal(shop.steps, true);
       assert.equal(shop.summary, false);
       assert.equal(shop.shop, true);
       assert.equal(shop.title, "In the store");

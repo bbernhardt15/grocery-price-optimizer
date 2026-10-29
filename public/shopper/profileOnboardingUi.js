@@ -20,7 +20,9 @@ import {
   summarySections,
 } from "./profileOnboarding.js";
 import { learnPreference, forgetPreference } from "./productPreference.js";
-import { cutsInShelf, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
+import { applyCheapestDefaults, asksNameBrand, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
+import { isProduceFamily } from "./brandNames.js";
+import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -52,6 +54,9 @@ export function mountProfileOnboarding(deps = {}) {
   let shelf = [];
   let loadedFor = "";
   let categoryDraft = blankCategory();
+  let phase = "gate";
+  /** @type {Set<string>} */
+  let neverIds = new Set();
 
   function blankCategory() {
     return { mode: "", brand: "", productId: "", attributes: [], product: null };
@@ -89,9 +94,13 @@ export function mountProfileOnboarding(deps = {}) {
   function stageHtml(step) {
     if (step.kind === "multi" || step.kind === "single") {
       const selected = new Set(step.kind === "single" ? [draftValue(step.id)].filter(Boolean) : draftList(step.id));
-      return `<div class="${step.kind === "single" ? "choice-stack" : "choice-grid"}" role="group">${step.choices
+      const grid = `<div class="${step.kind === "single" ? "choice-stack" : "choice-grid"}" role="group">${step.choices
         .map((choice) => choiceButton(choice.id, choice.label, selected.has(choice.id)))
         .join("")}</div>`;
+      if (step.id === "diets") {
+        return `${grid}<label class="profile-field">Other diet<input id="profile-diet-other" type="text" maxlength="80" placeholder="Or type one" value="${escapeText((draft.dietNotes || []).join(", "))}" /></label>`;
+      }
+      return grid;
     }
     if (step.kind === "household") {
       const size = draft.household?.size;
@@ -138,60 +147,28 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (step.kind === "products") {
       const categories = preferenceCategories();
+      if (phase === "gate") return categoryGateHtml({ categories, declined: [...neverIds] });
       const current = categories[categoryIndex] || categories[0];
       const saved = draft.categoryPreferences?.[current?.id] || {};
       const mode = categoryDraft.mode || (!categoryDraft.touched ? saved.mode : "") || "";
       const brand = categoryDraft.brand || (!categoryDraft.touched ? saved.brand : "") || "";
-      const attributes = categoryDraft.touched ? categoryDraft.attributes || [] : saved.attributes || [];
-      const cuts = cutsInShelf(shelf, current?.id || "");
-      const modes = [
-        ["brand", "Name brand"],
-        ["storeBrand", "Store brand"],
-        ["cheapest", "Cheapest"],
-      ];
-      const modeButtons = modes
-        .map(([id, label]) => choiceButton(id, label, mode === id, `data-buy="${id}"`))
-        .join("");
-      const brands = nameBrandsFor(shelf, current?.id || "");
-      const brandButtons = brands
-        .map(
-          (row) =>
-            `<button type="button" class="mini-chip" data-buy-brand="${escapeText(row.brand)}" data-buy-product="${escapeText(row.product?.id || "")}" aria-pressed="${brand.toLowerCase() === row.brand.toLowerCase() ? "true" : "false"}">${escapeText(row.brand)}</button>`
-        )
-        .join("");
-      const cutButtons = cuts
-        .map(
-          (row) =>
-            `<button type="button" class="mini-chip" data-buy-attr="${escapeText(row.id)}" aria-pressed="${attributes.includes(row.id) ? "true" : "false"}">${escapeText(row.label)}</button>`
-        )
-        .join("");
+      const attributes = categoryDraft.attributes?.length ? categoryDraft.attributes : !categoryDraft.touched ? saved.attributes || [] : categoryDraft.attributes || [];
       const ready = loadedFor === current?.id;
-      const cutBlock = !ready
-        ? `<p class="muted">Looking on the shelf…</p>`
-        : cutButtons
-          ? `<p class="profile-label">What kind?</p><div class="mini-row">${cutButtons}</div>`
-          : "";
-      const declined = mode === "never";
-      const brandBlock =
-        declined || mode !== "brand"
-          ? ""
-          : `<p class="profile-label">Which name brand?</p>${
-              brandButtons
-                ? `<div class="mini-row">${brandButtons}</div>`
-                : `<p class="muted">${ready ? "No name brands are on the shelf for this one." : "Looking on the shelf…"}</p>`
-            }`;
-      const label = String(current?.label || "this").toLowerCase();
-      const question = (current?.attributes || []).length ? `What kind of ${label}?` : `How do you buy ${label}?`;
-      return `<p class="profile-label">${escapeText(current?.label || "This")} · ${categoryIndex + 1} of ${categories.length}</p>
-        <h3 class="buy-question">${escapeText(question)}</h3>
-        ${cutBlock}
-        <div class="choice-stack" role="group">
-          ${choiceButton("never", `I don't buy ${String(current?.label || "this").toLowerCase()}`, declined, `data-buy="never"`)}
-          ${declined ? "" : modeButtons}
-        </div>
-        ${brandBlock}
-        <button type="button" class="ghost" id="profile-skip-rest">Skip rest, I'll teach it as I shop</button>
-        <div id="staple-host" hidden></div>`;
+      const brands = ready ? nameBrandsFor(shelf, current?.id || "") : [];
+      const askBrand = ready && asksNameBrand(shelf, current?.id || "");
+      return `${ready ? "" : `<p class="muted">Looking on the shelf…</p>`}${categoryDetailHtml({
+        category: current,
+        index: categoryIndex,
+        total: categories.length,
+        mode,
+        brand,
+        attributes,
+        attributeChoices: current?.attributes || [],
+        brands: brands.map((row) => ({ brand: row.brand, imageUrl: row.imageUrl, productId: row.productId || row.product?.id || "" })),
+        askBrand,
+        produce: isProduceFamily(current?.id),
+        pending: !ready,
+      })}`;
     }
     const sections = summarySections(draft)
       .map(
@@ -269,10 +246,52 @@ export function mountProfileOnboarding(deps = {}) {
     if (stage) stage.innerHTML = stageHtml(stepById("products"));
   }
 
+  function rememberDietNotes() {
+    const field = $("profile-diet-other");
+    if (!field) return;
+    draft.dietNotes = String(field.value || "")
+      .split(/[\n,]/)
+      .map((part) => part.replace(/\s+/g, " ").trim())
+      .filter((part) => part.length >= 3)
+      .slice(0, 8);
+  }
+
+  function syncNever() {
+    neverIds = new Set(
+      Object.values(draft.categoryPreferences || {})
+        .filter((row) => row?.mode === "never")
+        .map((row) => row.family)
+    );
+  }
+
+  function saveNevers(at) {
+    for (const id of neverIds) {
+      draft = setCategoryPreference(draft, { family: id, mode: "never", brand: "", productId: "", size: "", attributes: [] }, at);
+    }
+    return draft;
+  }
+
+  function nextDetailIndex(from) {
+    const categories = preferenceCategories();
+    for (let index = from; index < categories.length; index += 1) {
+      if (!neverIds.has(categories[index].id)) return index;
+    }
+    return -1;
+  }
+
   function showCategory(index) {
     const categories = preferenceCategories();
+    phase = "detail";
     categoryIndex = Math.max(0, Math.min(index, categories.length - 1));
-    categoryDraft = blankCategory();
+    const saved = draft.categoryPreferences?.[categories[categoryIndex]?.id] || {};
+    categoryDraft = {
+      mode: saved.mode && saved.mode !== "never" ? saved.mode : "",
+      brand: saved.brand || "",
+      productId: saved.productId || "",
+      attributes: saved.attributes || [],
+      product: null,
+      touched: false,
+    };
     shelf = [];
     loadedFor = "";
     render();
@@ -314,6 +333,10 @@ export function mountProfileOnboarding(deps = {}) {
         never: $("profile-never")?.value || "",
       };
     }
+    if (step.id === "diets") {
+      rememberDietNotes();
+      return { diets: draft.diets || [], notes: (draft.dietNotes || []).join(", ") };
+    }
     if (step.kind === "brand") return draft.brand;
     return null;
   }
@@ -327,19 +350,42 @@ export function mountProfileOnboarding(deps = {}) {
     return next;
   }
 
+  function finishProducts(at) {
+    saveNevers(at);
+    draft = applyCheapestDefaults(draft, at);
+    return draft;
+  }
+
   function advance(skipped, skipRest) {
     const at = Date.now();
+    if (stepId === "diets") rememberDietNotes();
     if (stepId === "products" && !returnTo) {
       const categories = preferenceCategories();
-      if (skipRest) {
-        saveCategory("skip", at);
+      if (phase === "gate") {
+        saveNevers(at);
+        if (!skipped && !skipRest) {
+          const first = nextDetailIndex(0);
+          persist(draft);
+          if (first >= 0) {
+            showCategory(first);
+            focusTitle();
+            return;
+          }
+        } else if (skipRest) {
+          draft = finishProducts(at);
+        }
+      } else if (skipRest) {
+        saveCategory(categoryDraft.mode || "skip", at);
         for (let index = categoryIndex + 1; index < categories.length; index += 1) {
+          if (neverIds.has(categories[index].id)) continue;
+          const existing = draft.categoryPreferences?.[categories[index].id];
+          if (existing?.mode === "brand" || existing?.mode === "storeBrand" || existing?.mode === "cheapest" || existing?.mode === "never") continue;
           draft = setCategoryPreference(draft, { family: categories[index].id, mode: "skip", brand: "", productId: "", size: "", attributes: [] }, at);
         }
-      } else if (categoryIndex < categories.length - 1) {
+      } else if (nextDetailIndex(categoryIndex + 1) >= 0) {
         saveCategory(skipped ? "skip" : categoryDraft.mode || "skip", at);
         persist(draft);
-        showCategory(categoryIndex + 1);
+        showCategory(nextDetailIndex(categoryIndex + 1));
         focusTitle();
         return;
       } else {
@@ -394,6 +440,8 @@ export function mountProfileOnboarding(deps = {}) {
     categoryDraft = blankCategory();
     shelf = [];
     loadedFor = "";
+    phase = "gate";
+    syncNever();
     render();
     if (!dialog.open) dialog.showModal();
     focusTitle();
@@ -422,12 +470,30 @@ export function mountProfileOnboarding(deps = {}) {
     render();
     focusTitle();
   });
+  $("profile-stage")?.addEventListener("mousedown", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("button") : null;
+    if (target) event.preventDefault();
+  });
   $("profile-stage")?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
     if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
     if (target.dataset.edit) {
       returnTo = "summary";
       stepId = target.dataset.edit;
+      render();
+      focusTitle();
+      return;
+    }
+    if (target.id === "profile-use-defaults") {
+      const at = Date.now();
+      if (phase === "detail") saveCategory(categoryDraft.mode || "cheapest", at);
+      saveNevers(at);
+      draft = applyCheapestDefaults(draft, at);
+      persist(draft);
+      stepId = "summary";
+      phase = "gate";
       render();
       focusTitle();
       return;
@@ -436,13 +502,22 @@ export function mountProfileOnboarding(deps = {}) {
       advance(true, true);
       return;
     }
+    if (target.dataset.gate) {
+      if (neverIds.has(target.dataset.gate)) neverIds.delete(target.dataset.gate);
+      else neverIds.add(target.dataset.gate);
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      return;
+    }
     if (target.dataset.buy) {
-      categoryDraft = { ...categoryDraft, mode: target.dataset.buy, touched: true };
-      if (target.dataset.buy !== "brand") {
-        categoryDraft.brand = "";
-        categoryDraft.productId = "";
-        categoryDraft.product = null;
-      }
+      categoryDraft = {
+        ...categoryDraft,
+        mode: target.dataset.buy,
+        touched: true,
+        brand: categoryDraft.brand || "",
+        productId: categoryDraft.productId || "",
+        attributes: categoryDraft.attributes || [],
+      };
       const stage = $("profile-stage");
       if (stage) stage.innerHTML = stageHtml(stepById("products"));
       return;
@@ -469,7 +544,7 @@ export function mountProfileOnboarding(deps = {}) {
       const attributes = new Set(categoryDraft.attributes || []);
       if (attributes.has(target.dataset.buyAttr)) attributes.delete(target.dataset.buyAttr);
       else attributes.add(target.dataset.buyAttr);
-      categoryDraft = { ...categoryDraft, attributes: [...attributes], touched: true, mode: categoryDraft.mode || "brand" };
+      categoryDraft = { ...categoryDraft, attributes: [...attributes], touched: true, mode: categoryDraft.mode || "" };
       const stage = $("profile-stage");
       if (stage) stage.innerHTML = stageHtml(stepById("products"));
       return;
@@ -492,7 +567,10 @@ export function mountProfileOnboarding(deps = {}) {
         if (step.id === "loves") draft.loves = values;
         if (step.id === "avoids") draft.avoids = values;
         if (step.id === "allergies") draft.allergies = values;
-        if (step.id === "diets") draft.diets = values;
+        if (step.id === "diets") {
+          rememberDietNotes();
+          draft.diets = values;
+        }
       } else if (step.kind === "household" && /^[1-5]$/.test(id)) {
         draft.household = { ...draft.household, size: Number(id) };
       } else if (step.kind === "brand") {
@@ -565,6 +643,9 @@ export function mountProfileOnboarding(deps = {}) {
       openAt("products");
       const index = preferenceCategories().findIndex((category) => category.id === familyId);
       if (index >= 0) showCategory(index);
+    },
+    openFavorites() {
+      openAt("products");
     },
     shouldPrompt() {
       return shouldPromptProfile(storage);
