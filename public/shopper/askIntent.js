@@ -1,10 +1,8 @@
 /**
  * One Add field. A short product name searches the shelf.
- * A meal goal or a list uses the same matcher as Import.
+ * A sentence or a list uses the same matcher as Import.
  * Nothing here invents a product.
  */
-
-import { describeMeal } from "./mealIdeas.js";
 
 const COMPOUND =
   /^(?:bread and butter|mac and cheese|salt and pepper|fish and chips|pork and beans|sweet and sour|peanut butter and jelly)$/i;
@@ -17,7 +15,6 @@ export function askIntent(raw) {
   const original = String(raw ?? "");
   const text = original.replace(/\s+/g, " ").trim();
   if (!text) return "empty";
-  if (describeMeal(text)) return "list";
   if (/[,;\n•]/.test(original)) return "list";
   if (/\bfor\s+\d{1,2}\b/i.test(text)) return "list";
   const words = text.split(/\s+/);

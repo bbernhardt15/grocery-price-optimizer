@@ -8,7 +8,6 @@ import { importConfig } from "../import/config";
 import { constraintNote } from "../import/constraints";
 import { readSharedLink } from "../import/linkFetch";
 import { matchImportItems, type ImportMatchResult } from "../import/matchImport";
-import { mealFromAsk, type MealIdea } from "../import/mealIdeas";
 import { IMPORT_MESSAGES, KROGER_HISTORY_REASON } from "../import/messages";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
 import { aiAsk, aiParseText, aiReadImage, ModelError, transcribeAudio } from "../import/providers";
@@ -93,25 +92,9 @@ type ReadResult = {
   aiFallback: boolean;
   paused: boolean;
   suggested?: boolean;
-  idea?: MealIdea;
 };
 
-async function fromMeal(text: string): Promise<ReadResult | null> {
-  const meal = mealFromAsk(text);
-  if (!meal) return null;
-  return {
-    match: await review(meal.items),
-    parser: "rules",
-    aiFallback: false,
-    paused: false,
-    suggested: true,
-    idea: meal.idea,
-  };
-}
-
 async function interpret(text: string, key: string, allowAi: boolean): Promise<ReadResult> {
-  const meal = await fromMeal(text);
-  if (meal) return meal;
   const config = importConfig();
   if (allowAi && config.ai) {
     const budget = importBudget.take(key, config.dailyLimit, config.globalDailyCap);
@@ -147,7 +130,6 @@ function sendMatch(
     aiFallback: result.aiFallback,
     paused: result.paused,
     ...(result.suggested ? { suggested: true } : {}),
-    ...(result.idea ? { idea: result.idea } : {}),
     ...extra,
   });
 }
@@ -302,11 +284,6 @@ router.post("/import/ask", async (req, res) => {
   }
   if (goal.length > 400) {
     res.status(400).json({ error: IMPORT_MESSAGES.tooLong });
-    return;
-  }
-  const meal = await fromMeal(goal);
-  if (meal) {
-    sendMatch(res, meal);
     return;
   }
   const config = importConfig();

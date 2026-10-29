@@ -4,18 +4,21 @@
  */
 
 const MEALS = [
-  { title: "Taco night", blurb: "Ground beef, tortillas, salsa, cheese, and chips.", aliases: ["taco night", "taco tuesday", "taco dinner", "tacos for dinner"] },
-  { title: "Breakfast", blurb: "Eggs, bread, milk, bananas, coffee, and juice.", aliases: ["breakfast", "breakfast basics"] },
-  { title: "Cookout", blurb: "Beef, buns, chips, soda, and ketchup.", aliases: ["cookout", "cook out", "bbq", "barbecue", "barbeque", "burger night"] },
-  { title: "Weeknight dinner", blurb: "Chicken, pasta, salad, and bread.", aliases: ["dinner", "weeknight", "weeknight dinner", "weeknight dinners", "dinner tonight"] },
-  { title: "Pasta night", blurb: "Spaghetti, cheese, salad, and bread.", aliases: ["pasta night", "spaghetti night", "spaghetti dinner"] },
-  { title: "Movie night", blurb: "Popcorn, soda, chocolate, and ice cream.", aliases: ["movie night"] },
-  { title: "Game day", blurb: "Wings, chips, dip, soda, and cookies.", aliases: ["game day", "super bowl", "wing night"] },
-  { title: "Birthday party", blurb: "Cake, ice cream, chips, soda, and plates.", aliases: ["birthday", "birthday party"] },
-  { title: "Lunch", blurb: "Bread, turkey, apples, and juice.", aliases: ["lunch", "lunches", "back to school", "back to school lunches"] },
-  { title: "Holiday baking", blurb: "Flour, sugar, butter, eggs, chocolate chips, and milk.", aliases: ["holiday baking", "baking"] },
-  { title: "Thanksgiving", blurb: "Turkey, stuffing, cranberry, potatoes, rolls, and pie.", aliases: ["thanksgiving", "thanksgiving dinner"] },
+  { title: "Taco night", blurb: "Ground beef, cheese, and chips.", aliases: ["taco night", "taco tuesday", "taco dinner", "tacos for dinner"], items: [item("ground beef", "ground-beef"), item("cheddar", "cheese"), item("potato chips", "chips")] },
+  { title: "Breakfast", blurb: "Eggs, bread, milk, bananas, and coffee.", aliases: ["breakfast", "breakfast basics"], items: [item("large eggs", "eggs"), item("sandwich bread", "bread"), item("whole milk", "milk"), item("bananas", "bananas"), item("ground coffee", "coffee")] },
+  { title: "Cookout", blurb: "Ground beef, chips, soda, and ketchup.", aliases: ["cookout", "cook out", "bbq", "barbecue", "barbeque", "burger night"], items: [item("ground beef", "ground-beef"), item("potato chips", "chips"), item("cola", "soda"), item("ketchup", "ketchup")] },
+  { title: "Weeknight dinner", blurb: "Chicken, pasta, and bread.", aliases: ["dinner", "weeknight", "weeknight dinner", "weeknight dinners", "dinner tonight"], items: [item("chicken breast", "chicken"), item("spaghetti", "pasta"), item("sandwich bread", "bread")] },
+  { title: "Pasta night", blurb: "Spaghetti, cheese, and bread.", aliases: ["pasta night", "spaghetti night", "spaghetti dinner"], items: [item("spaghetti", "pasta"), item("cheddar", "cheese"), item("sandwich bread", "bread")] },
+  { title: "Movie night", blurb: "Chips and soda.", aliases: ["movie night"], items: [item("potato chips", "chips"), item("cola", "soda")] },
+  { title: "Game day", blurb: "Wings, chips, and soda.", aliases: ["game day", "super bowl", "wing night"], items: [item("chicken wings", "chicken"), item("potato chips", "chips"), item("cola", "soda")] },
+  { title: "Birthday party", blurb: "Chips and soda.", aliases: ["birthday", "birthday party"], items: [item("potato chips", "chips"), item("cola", "soda")] },
+  { title: "Lunch", blurb: "Bread and chips.", aliases: ["lunch", "lunches", "back to school", "back to school lunches"], items: [item("sandwich bread", "bread"), item("potato chips", "chips")] },
+  { title: "Holiday baking", blurb: "Butter, eggs, and milk.", aliases: ["holiday baking", "baking"], items: [item("salted butter", "butter"), item("large eggs", "eggs"), item("whole milk", "milk")] },
 ];
+
+function item(raw, family) {
+  return { raw, family };
+}
 
 const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, dozen: 12 };
 const FILLER = /^(?:please|hey|ok|okay|um|so)\s+/;
@@ -75,4 +78,13 @@ export function describeMeal(raw) {
   const found = ALIASES.find((row) => row.alias === text);
   if (!found) return null;
   return { title: found.meal.title, people, namedPeople, blurb: found.meal.blurb };
+}
+
+/** Ingredients for a meal phrase. Each raw line is a staple family query. */
+export function mealPlan(raw) {
+  const preview = describeMeal(raw);
+  if (!preview) return null;
+  const meal = MEALS.find((row) => row.title === preview.title);
+  if (!meal) return null;
+  return { ...preview, items: meal.items.map((row) => ({ raw: row.raw, family: row.family })) };
 }

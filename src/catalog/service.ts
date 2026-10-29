@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { demoBrowseProducts, demoRecords } from "./demoCatalog";
 import { catalogCoverage, type CoverageFlags } from "./coverage";
 import { facetsFor, filterProducts, paginateProducts, sortProducts } from "./browse";
+import { familyFromQuery, preferRealImages, productMatchesFamily, rankFamilyScore } from "./stapleFamilies";
 import { groupOffersByUpc } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
@@ -132,6 +133,7 @@ function queryTokens(query: string): string[] {
 
 function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCatalogRecord[] {
   const tokens = queryTokens(scope.query ?? "");
+  const family = familyFromQuery(scope.query ?? "");
   return demoRecords().filter((record) => {
     if (scope.departmentId && record.departmentId !== scope.departmentId) {
       return false;
@@ -139,6 +141,7 @@ function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCa
     if (tokens.length === 0) {
       return !scope.query;
     }
+    if (family) return productMatchesFamily(record, family);
     const text = `${record.name} ${record.brand}`.toLowerCase();
     return tokens.every((token) => text.includes(token));
   });
@@ -492,10 +495,19 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     ...(query ? { query } : {}),
     ...(departmentId && departmentId !== "all" ? { departmentId } : {}),
   });
-  const filtered = filterProducts(scope.products, filters);
+  const familyId = query ? familyFromQuery(query) : "";
+  const filtered = familyId ? preferRealImages(filterProducts(scope.products, filters)) : filterProducts(scope.products, filters);
   const families = groupBrowseFamilies(filtered);
   const sort = request.sort ?? "relevance";
-  const sorted = query ? diversifyFamilies(sortProducts(families, sort, filters)) : sortProducts(families, sort, filters);
+  const sorted = familyId
+    ? diversifyFamilies(
+        [...families].sort(
+          (a, b) => rankFamilyScore(b, familyId, query || "") - rankFamilyScore(a, familyId, query || "") || a.name.localeCompare(b.name)
+        )
+      )
+    : query
+      ? diversifyFamilies(sortProducts(families, sort, filters))
+      : sortProducts(families, sort, filters);
   const offset = Number(request.cursor ?? "0");
   const limit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const page = paginateProducts(sorted, offset, limit);

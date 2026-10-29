@@ -4,6 +4,7 @@
  */
 
 import { groupBrowseFamilies, type BrowseTile } from "../catalog/family";
+import { familyFromQuery, productMatchesFamily } from "../catalog/stapleFamilies";
 import type { BrowseProduct } from "../catalog/types";
 import { parsePackageSize } from "../packageSize";
 import { groceryWordTokens, stemGroceryToken } from "../productSearchQuery";
@@ -164,6 +165,7 @@ function withSelection(tile: BrowseTile, variantId: string): BrowseTile {
 export function matchImportItems(items: ParsedImportItem[], products: BrowseProduct[]): ImportMatchResult {
   const families = groupBrowseFamilies(products);
   const review: ImportReviewItem[] = items.slice(0, 80).map((item, index) => {
+    const family = familyFromQuery(item.name);
     const ranked = families
       .map((tile) => {
         let best = -Infinity;
@@ -171,6 +173,7 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
         return { tile, score: best };
       })
       .filter((row) => row.score > 0.2)
+      .filter((row) => !family || row.tile.variants.some((variant) => productMatchesFamily(variant, family)))
       .sort((a, b) => b.score - a.score);
 
     const branded = item.brand ? ranked.filter((row) => row.tile.variants.some((variant) => brandHit(item.brand, variant))) : [];

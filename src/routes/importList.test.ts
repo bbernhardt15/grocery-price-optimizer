@@ -164,25 +164,9 @@ describe("import routes", () => {
     assert.equal(((await audio.json()) as { error: string }).error, IMPORT_MESSAGES.speechOff);
 
     const ask = await post("/api/import/ask", { goal: "taco night for 6" });
-    assert.equal(ask.status, 200);
-    const askBody = (await ask.json()) as {
-      suggested: boolean;
-      parser: string;
-      idea: { title: string; people: number; namedPeople: boolean };
-      items: Array<{ name: string; quantity: number; status: string }>;
-    };
-    assert.equal(askBody.suggested, true);
-    assert.equal(askBody.parser, "rules");
-    assert.equal(askBody.idea.title, "Taco night");
-    assert.equal(askBody.idea.people, 6);
-    assert.equal(askBody.idea.namedPeople, true);
-    assert.equal(askBody.items[0]?.name, "ground beef");
-    assert.equal(askBody.items[0]?.quantity, 2);
+    assert.equal(ask.status, 503);
+    assert.equal(((await ask.json()) as { error: string }).error, IMPORT_MESSAGES.askOff);
     assert.equal(calls.length, 0);
-
-    const unknown = await post("/api/import/ask", { goal: "a very specific potluck theme" }, "device-import-ask-off");
-    assert.equal(unknown.status, 503);
-    assert.equal(((await unknown.json()) as { error: string }).error, IMPORT_MESSAGES.askOff);
   });
 
   it("reads a photo and a voice memo when a key is set, without logging them", async () => {

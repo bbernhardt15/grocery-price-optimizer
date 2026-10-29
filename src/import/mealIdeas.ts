@@ -1,6 +1,6 @@
 /**
- * Turns a short meal goal ("taco night for 6") into a shoppable list.
- * Quantities follow the same packs-per-people rule as starter lists.
+ * Recognizes a meal phrase such as "taco night for 6".
+ * The ask box resolves the staple queries through saved preferences.
  * A grocery list or a single product is left alone.
  */
 
@@ -29,141 +29,26 @@ type Meal = {
 };
 
 const MEALS: Meal[] = [
-  {
-    title: "Taco night",
-    blurb: "Ground beef, tortillas, salsa, cheese, and chips.",
-    aliases: ["taco night", "taco tuesday", "taco dinner", "tacos for dinner"],
-    items: [
-      { label: "Ground beef", search: "ground beef", serves: 4 },
-      { label: "Tortillas", search: "flour tortillas", serves: 4 },
-      { label: "Salsa", search: "mild salsa", serves: 4 },
-      { label: "Cheese", search: "shredded cheddar", serves: 4 },
-      { label: "Chips", search: "potato chips", serves: 4 },
-    ],
-  },
-  {
-    title: "Breakfast",
-    blurb: "Eggs, bread, milk, bananas, coffee, and juice.",
-    aliases: ["breakfast", "breakfast basics"],
-    items: [
-      { label: "Eggs", search: "large eggs", serves: 4 },
-      { label: "Bread", search: "sandwich bread", serves: 4 },
-      { label: "Milk", search: "whole milk", serves: 4 },
-      { label: "Bananas", search: "bananas", serves: 4 },
-      { label: "Coffee", search: "ground coffee", serves: 8 },
-      { label: "Juice", search: "orange juice", serves: 4 },
-    ],
-  },
-  {
-    title: "Cookout",
-    blurb: "Beef, buns, chips, soda, and ketchup.",
-    aliases: ["cookout", "cook out", "bbq", "barbecue", "barbeque", "burger night"],
-    items: [
-      { label: "Ground beef", search: "ground beef", serves: 4 },
-      { label: "Buns", search: "burger buns", serves: 8 },
-      { label: "Chips", search: "potato chips", serves: 4 },
-      { label: "Soda", search: "coca-cola", serves: 6 },
-      { label: "Ketchup", search: "ketchup", serves: 12 },
-    ],
-  },
-  {
-    title: "Weeknight dinner",
-    blurb: "Chicken, pasta, salad, and bread.",
-    aliases: ["dinner", "weeknight", "weeknight dinner", "weeknight dinners", "dinner tonight"],
-    items: [
-      { label: "Chicken", search: "chicken breast", serves: 4 },
-      { label: "Pasta", search: "spaghetti", serves: 4 },
-      { label: "Salad", search: "baby spinach", serves: 4 },
-      { label: "Bread", search: "sandwich bread", serves: 4 },
-    ],
-  },
-  {
-    title: "Pasta night",
-    blurb: "Spaghetti, cheese, salad, and bread.",
-    aliases: ["pasta night", "spaghetti night", "spaghetti dinner"],
-    items: [
-      { label: "Pasta", search: "spaghetti", serves: 4 },
-      { label: "Cheese", search: "shredded cheddar", serves: 4 },
-      { label: "Salad", search: "baby spinach", serves: 4 },
-      { label: "Bread", search: "sandwich bread", serves: 4 },
-    ],
-  },
-  {
-    title: "Movie night",
-    blurb: "Popcorn, soda, chocolate, and ice cream.",
-    aliases: ["movie night"],
-    items: [
-      { label: "Popcorn", search: "microwave popcorn", serves: 4 },
-      { label: "Soda", search: "coca-cola", serves: 6 },
-      { label: "Chocolate", search: "milk chocolate", serves: 4 },
-      { label: "Ice cream", search: "vanilla ice cream", serves: 6 },
-    ],
-  },
-  {
-    title: "Game day",
-    blurb: "Wings, chips, dip, soda, and cookies.",
-    aliases: ["game day", "super bowl", "wing night"],
-    items: [
-      { label: "Wings", search: "chicken wings", serves: 4 },
-      { label: "Chips", search: "potato chips", serves: 4 },
-      { label: "Dip", search: "ranch dip", serves: 6 },
-      { label: "Soda", search: "coca-cola", serves: 6 },
-      { label: "Cookies", search: "oreo", serves: 6 },
-    ],
-  },
-  {
-    title: "Birthday party",
-    blurb: "Cake, ice cream, chips, soda, and plates.",
-    aliases: ["birthday", "birthday party"],
-    items: [
-      { label: "Cake", search: "vanilla cake mix", serves: 8 },
-      { label: "Ice cream", search: "vanilla ice cream", serves: 6 },
-      { label: "Chips", search: "potato chips", serves: 4 },
-      { label: "Soda", search: "coca-cola", serves: 6 },
-      { label: "Plates", search: "paper plates", serves: 8 },
-    ],
-  },
-  {
-    title: "Lunch",
-    blurb: "Bread, turkey, apples, and juice.",
-    aliases: ["lunch", "lunches", "back to school", "back to school lunches"],
-    items: [
-      { label: "Bread", search: "sandwich bread", serves: 4 },
-      { label: "Turkey", search: "sliced turkey", serves: 4 },
-      { label: "Apples", search: "gala apples", serves: 4 },
-      { label: "Juice", search: "orange juice", serves: 4 },
-    ],
-  },
-  {
-    title: "Holiday baking",
-    blurb: "Flour, sugar, butter, eggs, chocolate chips, and milk.",
-    aliases: ["holiday baking", "baking"],
-    items: [
-      { label: "Flour", search: "all-purpose flour", serves: 8 },
-      { label: "Sugar", search: "granulated sugar", serves: 8 },
-      { label: "Butter", search: "salted butter", serves: 8 },
-      { label: "Eggs", search: "large eggs", serves: 4 },
-      { label: "Chocolate chips", search: "semi-sweet chocolate chips", serves: 8 },
-      { label: "Milk", search: "whole milk", serves: 4 },
-    ],
-  },
-  {
-    title: "Thanksgiving",
-    blurb: "Turkey, stuffing, cranberry, potatoes, rolls, and pie.",
-    aliases: ["thanksgiving", "thanksgiving dinner"],
-    items: [
-      { label: "Turkey", search: "whole turkey", serves: 12 },
-      { label: "Stuffing", search: "stuffing mix", serves: 8 },
-      { label: "Cranberry sauce", search: "cranberry sauce", serves: 8 },
-      { label: "Potatoes", search: "russet potatoes", serves: 6 },
-      { label: "Dinner rolls", search: "dinner rolls", serves: 6 },
-      { label: "Green beans", search: "green beans", serves: 4 },
-      { label: "Butter", search: "salted butter", serves: 8 },
-      { label: "Pie crust", search: "pie crust", serves: 8 },
-      { label: "Whipped topping", search: "whipped topping", serves: 8 },
-    ],
-  },
+  meal("Taco night", "Ground beef, cheese, and chips.", ["taco night", "taco tuesday", "taco dinner", "tacos for dinner"], ["ground beef", "cheddar", "potato chips"]),
+  meal("Breakfast", "Eggs, bread, milk, bananas, and coffee.", ["breakfast", "breakfast basics"], ["large eggs", "sandwich bread", "whole milk", "bananas", "ground coffee"]),
+  meal("Cookout", "Ground beef, chips, soda, and ketchup.", ["cookout", "cook out", "bbq", "barbecue", "barbeque", "burger night"], ["ground beef", "potato chips", "cola", "ketchup"]),
+  meal("Weeknight dinner", "Chicken, pasta, and bread.", ["dinner", "weeknight", "weeknight dinner", "weeknight dinners", "dinner tonight"], ["chicken breast", "spaghetti", "sandwich bread"]),
+  meal("Pasta night", "Spaghetti, cheese, and bread.", ["pasta night", "spaghetti night", "spaghetti dinner"], ["spaghetti", "cheddar", "sandwich bread"]),
+  meal("Movie night", "Chips and soda.", ["movie night"], ["potato chips", "cola"]),
+  meal("Game day", "Wings, chips, and soda.", ["game day", "super bowl", "wing night"], ["chicken wings", "potato chips", "cola"]),
+  meal("Birthday party", "Chips and soda.", ["birthday", "birthday party"], ["potato chips", "cola"]),
+  meal("Lunch", "Bread and chips.", ["lunch", "lunches", "back to school", "back to school lunches"], ["sandwich bread", "potato chips"]),
+  meal("Holiday baking", "Butter, eggs, and milk.", ["holiday baking", "baking"], ["salted butter", "large eggs", "whole milk"]),
 ];
+
+function meal(title: string, blurb: string, aliases: string[], searches: string[]): Meal {
+  return {
+    title,
+    blurb,
+    aliases,
+    items: searches.map((search) => ({ label: search, search, serves: 4 })),
+  };
+}
 
 const WORDS: Record<string, number> = {
   one: 1,

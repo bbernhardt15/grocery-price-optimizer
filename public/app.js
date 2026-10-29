@@ -43,7 +43,6 @@ import {
   defaultHeadcount,
   exclusionWarning,
   filterTiles,
-  firstListId,
   pinnedUsualRows,
   profileToConstraints,
   shapeImportReview,
@@ -59,6 +58,8 @@ import {
   resolveProductPreference,
   shouldAskAlways,
 } from "./shopper/productPreference.js";
+import { isPreferenceList, learnCategoryFromProduct, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
+import { selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
 import {
@@ -72,6 +73,8 @@ import {
   saveTripSnapshot,
   shareItemId,
   consolidateStops,
+  fewerStorePlan,
+  handoffMark,
   singleStoreSavings,
   swapSentence,
   tripFingerprint,
@@ -112,7 +115,7 @@ import {
 import { matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
 import { mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
-import { describeMeal } from "./shopper/mealIdeas.js";
+import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
@@ -1258,6 +1261,7 @@ function addProduct(product, quantity = 1, options = {}) {
   } else if (options.preferenceFamily) {
     entry.preferenceFamily = options.preferenceFamily;
   }
+  if (options.preferenceMode) entry.preferenceMode = options.preferenceMode;
   const family = entry.preferenceFamily || familyFromQuery(`${product.familyName || ""} ${product.name || ""}`);
   if (family) entry.preferenceFamily = family;
   if (options.learn !== false && family && !options.skipLearn) {
@@ -1758,8 +1762,17 @@ function showMealIdea(meal) {
   searchEl.removeAttribute("aria-activedescendant");
 }
 
-function showListAsk(value) {
+function quietMeal(value) {
+  if (isPreferenceList(value)) return null;
   const meal = describeMeal(value);
+  if (!meal) return null;
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2 && !meal.namedPeople) return null;
+  return meal;
+}
+
+function showListAsk(value) {
+  const meal = quietMeal(value);
   if (meal) {
     showMealIdea(meal);
     return;
@@ -1820,10 +1833,10 @@ async function loadSuggestions(text) {
     suggestions = [];
     suggestionQuery = "";
     activeSuggest = -1;
-    showSuggestStatus("Type a product, or a meal like taco night for 6.");
+    showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
     return;
   }
-  if (askIntent(q) === "list") {
+  if (askIntent(q) === "list" || quietMeal(q)) {
     suggestAbort?.abort();
     suggestions = [];
     suggestionQuery = q;
@@ -1966,12 +1979,19 @@ function tripId() {
   return tripFingerprint(lastOptimize?.stores || []);
 }
 
-function currentTrip() {
+function spreadTrip() {
   if (!lastOptimize) return null;
   const threshold = tripEdits.fewerStops ? 8 : 2;
   const base = applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
   if (planLimited("multiStoreSplit")) return base;
   return consolidateStops(base.stores, threshold, lastOptimize.capabilities || {});
+}
+
+function currentTrip() {
+  const spread = spreadTrip();
+  if (!spread || planLimited("multiStoreSplit") || tripEdits.planMode !== "fewer") return spread;
+  const fewer = fewerStorePlan(spread.stores, lastOptimize.capabilities || {});
+  return { ...spread, stores: fewer.stores, total: fewer.total };
 }
 
 function rememberTrip() {
@@ -2260,6 +2280,24 @@ function paintTrip() {
   const lineItems = (card.lines || [])
     .map((line) => `<li><span>${escapeHtml(line.label)}</span><strong>${escapeHtml(line.value)}</strong></li>`)
     .join("");
+  const spreadView = spreadTrip();
+  const fewerPlan = spreadView && !planLimited("multiStoreSplit") ? fewerStorePlan(spreadView.stores, lastOptimize?.capabilities || {}) : null;
+  const spreadTotal = fewerPlan?.spreadTotal;
+  const mode = tripEdits.planMode === "fewer" ? "fewer" : "spread";
+  const spreadStops = (spreadView?.stores || []).length;
+  const fewerNote = !fewerPlan
+    ? ""
+    : fewerPlan.delta > 0.009
+      ? `costs ${priceFigure(fewerPlan.delta)} more`
+      : fewerPlan.delta < -0.009
+        ? `saves ${priceFigure(Math.abs(fewerPlan.delta))}`
+        : "about the same";
+  const choiceHtml = fewerPlan && spreadStops > 1
+    ? `<section class="plan-choice" role="group" aria-label="Lowest price or fewer stores">
+        <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Spread across stores<span>Lowest price · ${spreadStops} ${spreadStops === 1 ? "store" : "stores"}${Number.isFinite(spreadTotal) ? ` · ${escapeHtml(priceFigure(spreadTotal))}` : ""}</span></button>
+        <button type="button" data-plan-mode="fewer" aria-pressed="${mode === "fewer" ? "true" : "false"}">Fewer stores<span>${fewerPlan.stops} ${fewerPlan.stops === 1 ? "store" : "stores"}, cart stores first${Number.isFinite(fewerPlan.total) ? ` · ${escapeHtml(priceFigure(fewerPlan.total))}` : ""} · ${escapeHtml(fewerNote)}</span></button>
+      </section>`
+    : "";
   const fewerHtml = fewer
     ? `<section class="fewer-card"><p>${escapeHtml(fewer.text)}</p><button type="button" class="ghost" id="use-fewer-stops">${escapeHtml(fewer.action)}</button></section>`
     : "";
@@ -2277,8 +2315,9 @@ function paintTrip() {
         coupons,
       });
       const names = (store.items || []).map((item) => reviewItemLine(item)).join(", ");
+      const mark = handoffMark(store);
       return `<article class="calm-store">
-        <header><h3>${escapeHtml(store.storeName)}</h3>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
+        <header><h3>${escapeHtml(store.storeName)}</h3><p class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</p>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
         ${names ? `<p class="review-items">${escapeHtml(names)}</p>` : ""}
         ${reviewSwapLines(store)}
         ${couponsHtml}
@@ -2292,6 +2331,7 @@ function paintTrip() {
   tripEl.innerHTML = `
     ${krogerBannerHtml()}
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
+    ${choiceHtml}
     <div class="store-grid">${storeHtml}</div>
     ${missing}
     <section class="savings-card">
@@ -2307,6 +2347,15 @@ function paintTrip() {
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
     ${customizeBlock(stores)}
   `;
+  tripEl.querySelectorAll("[data-plan-mode]").forEach((button) => {
+    button.onclick = () => {
+      tripEdits = { ...tripEdits, planMode: button.getAttribute("data-plan-mode") === "fewer" ? "fewer" : "spread", planChosen: true };
+      rememberTrip();
+      paintTrip();
+      if (flowStep === "shop") renderShop();
+      haptic();
+    };
+  });
   const fewerButton = $("use-fewer-stops");
   if (fewerButton && fewer) {
     fewerButton.onclick = () => {
@@ -2637,6 +2686,8 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     quantity: entry.quantity,
     catalogId: entry.product.id,
     upc: entry.product.upc,
+    ...(entry.preferenceMode ? { preferenceMode: entry.preferenceMode } : {}),
+    ...(entry.preferenceFamily ? { family: entry.preferenceFamily } : {}),
   }));
   if (planAbort) planAbort.abort();
   const controller = new AbortController();
@@ -3796,6 +3847,20 @@ $("search-form").addEventListener("submit", (event) => {
     searchEl.focus();
     return;
   }
+  if (isPreferenceList(text)) {
+    window.clearTimeout(shelfTimer);
+    query = "";
+    syncBrowse();
+    void addFromPreferences(text);
+    return;
+  }
+  if (quietMeal(text)) {
+    window.clearTimeout(shelfTimer);
+    query = "";
+    syncBrowse();
+    void addMealFromPreferences(text);
+    return;
+  }
   if (askIntent(text) === "list") {
     window.clearTimeout(shelfTimer);
     query = "";
@@ -3828,11 +3893,11 @@ searchEl.addEventListener("input", () => {
     syncBrowse();
     if (browseOpen) void loadPage(true);
     else if (gridEl) gridEl.innerHTML = "";
-    if (document.activeElement === searchEl) showSuggestStatus("Type a product, or a meal like taco night for 6.");
+    if (document.activeElement === searchEl) showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
     else closeSuggestions();
     return;
   }
-  if (askIntent(value) === "list") {
+  if (askIntent(value) === "list" || quietMeal(value)) {
     window.clearTimeout(shelfTimer);
     suggestAbort?.abort();
     suggestions = [];
@@ -3863,8 +3928,8 @@ searchEl.addEventListener("input", () => {
 });
 
 searchEl.addEventListener("focus", () => {
-  if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a meal like taco night for 6.");
-  else if (askIntent(searchEl.value) === "list") showListAsk(searchEl.value);
+  if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
+  else if (askIntent(searchEl.value) === "list" || quietMeal(searchEl.value)) showListAsk(searchEl.value);
   else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
 });
 
@@ -5323,11 +5388,110 @@ function choosePreference(family, product) {
   if (!locked) alwaysPrompt?.ask(product, familyLabel(family) || family);
 }
 
+async function loadFamilyShelf(families) {
+  let tiles = [];
+  const seen = new Set();
+  for (const family of families) {
+    const search = categorySearch(family) || family;
+    if (seen.has(search)) continue;
+    seen.add(search);
+    const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`), {}, PLAN_TIMEOUT_MS);
+    const body = await response.json().catch(() => ({}));
+    tiles = tiles.concat(body.items || []);
+  }
+  for (const tile of tiles) rememberTile(tile);
+  return flattenTiles(tiles);
+}
+
+function preferenceReview(rows, note) {
+  let host = $("preference-review");
+  if (!host) {
+    host = document.createElement("section");
+    host.id = "preference-review";
+    host.className = "preference-review";
+    $("ask-hint")?.insertAdjacentElement("afterend", host);
+  }
+  const lines = rows
+    .map((row) => {
+      const name = row.product?.familyName || row.product?.name || row.raw;
+      const change = row.family ? `<button type="button" class="linkish" data-pref-change="${escapeHtml(row.family)}">Change</button>` : "";
+      const why = row.declined ? "Left off. You don't buy this." : row.swapped ? `We swapped ${row.swapped.from} for ${row.swapped.to}` : row.mode === "cheapest" ? "Cheapest" : row.mode === "storeBrand" ? "Store brand" : row.brand || "";
+      return `<li><span>${escapeHtml(name)}</span> <span class="muted">${escapeHtml(why)}</span> ${change}</li>`;
+    })
+    .join("");
+  host.hidden = false;
+  host.innerHTML = `<h2>${escapeHtml(note)}</h2><ul>${lines}</ul><button type="button" class="primary" id="preference-plan">Review the split</button>`;
+  host.querySelector("#preference-plan").onclick = () => {
+    void planTrip();
+  };
+}
+
+async function addMealFromPreferences(text) {
+  const meal = mealPlan(text);
+  if (!meal?.items?.length) return;
+  await addFromPreferences(meal.items.map((item) => item.raw).join(", "));
+}
+
+async function addFromPreferences(text) {
+  const profile = getUserProfile(localStorage);
+  const preview = resolveNeedList({ profile, text, products: [] });
+  const families = [...new Set(preview.items.map((item) => item.family).filter(Boolean))];
+  let shelf = [];
+  try {
+    shelf = await loadFamilyShelf(families);
+  } catch {
+    toast("The shelf didn't load.");
+    return;
+  }
+  const result = resolveNeedList({ profile, text, products: shelf });
+  let added = 0;
+  for (const row of result.added) {
+    const product = productsById.get(row.product.id) || row.product;
+    if (!product?.id || findListEntry(product.id)) continue;
+    addProduct(product, 1, {
+      preference: { family: row.family, status: row.status, swapped: row.swapped || null },
+      preferenceMode: row.mode,
+      source: "add",
+      skipAsk: true,
+      quiet: true,
+    });
+    added += 1;
+  }
+  const reviewRows = [
+    ...result.added.map((row) => ({ ...row, brand: row.product?.brand })),
+    ...result.skipped.map((row) => ({ ...row, product: { name: row.raw } })),
+  ];
+  const leftOff = result.skipped.filter((row) => row.declined).length;
+  const note = added
+    ? `Added ${added} ${added === 1 ? "item" : "items"} using your preferences`
+    : leftOff
+      ? "Those are items you don't buy"
+      : "Nothing on the shelf matched that list";
+  if (reviewRows.length) preferenceReview(reviewRows, note);
+  if (result.ask.length) {
+    const first = result.ask[0];
+    toast(first?.raw ? `Which ${first.raw}? Pick it once and we'll remember.` : "Pick the ones you haven't set yet.");
+    if (first?.family) profileUi?.openCategory?.(first.family);
+  }
+  if (added) openList(false);
+}
+
 async function addResolvedQuery(text) {
   const profile = getUserProfile(localStorage);
   if (exclusionWarning(profile, text)) return false;
   try {
-    const shelf = await loadStarterShelf([{ name: text }]);
+    const family = familyFromQuery(text);
+    const shelf = family ? await loadFamilyShelf([family]) : await loadStarterShelf([{ name: text }]);
+    const category = family ? resolveCategoryPreference({ profile, family, query: text, products: shelf }) : null;
+    if (category?.declined) {
+      toast(`Left off ${familyLabel(family) || text}. You don't buy it.`);
+      return false;
+    }
+    if (category?.product && !category.ask) {
+      const product = productsById.get(category.product.id) || category.product;
+      addProduct(product, 1, { preference: category, preferenceMode: category.mode, source: category.mode === "brand" ? "manual" : "add" });
+      return true;
+    }
     const resolved = resolveProductPreference({ profile, query: text, products: shelf });
     if (!resolved.product) return false;
     if (resolved.status !== "preferred" && resolved.status !== "brand" && resolved.status !== "swapped") return false;
@@ -5800,9 +5964,9 @@ function finishProfile(profile) {
   }
   const head = defaultHeadcount(profile);
   if (head && !localStorage.getItem("gg-party")) localStorage.setItem("gg-party", String(head));
+  const stops = profile?.style?.stops;
+  if (!tripEdits.planChosen && (stops === "1" || stops === "2")) tripEdits = { ...tripEdits, planMode: "fewer" };
   scheduleAccountSync();
-  const id = firstListId(profile);
-  void lists().addThemed(id);
 }
 
 profileUi = mountProfileOnboarding({
@@ -5813,10 +5977,8 @@ profileUi = mountProfileOnboarding({
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return [];
     const want = familyFromQuery(search);
-    return (body.items || []).filter((tile) => {
-      if (!want) return true;
-      return familyFromQuery(`${tile.familyName || ""} ${tile.name || ""} ${tile.brand || ""}`) === want;
-    }).map((tile) => {
+    const matched = want ? selectStapleTiles(body.items || [], want, 12, search) : body.items || [];
+    return matched.map((tile) => {
       const variant = Array.isArray(tile.variants) && tile.variants.length
         ? tile.variants.find((item) => item.id === tile.defaultVariantId) || tile.variants[0]
         : tile;
@@ -5828,6 +5990,8 @@ profileUi = mountProfileOnboarding({
         sizeLabel: variant.variantLabel || variant.sizeLabel || variant.label || "",
         imageUrl: (variant.imageUrls || tile.imageUrls || [])[0] || "",
         imageUrls: variant.imageUrls || tile.imageUrls || [],
+        catalogName: variant.catalogName || variant.name || tile.catalogName || tile.name,
+        variants: tile.variants || [],
         upc: variant.upc || tile.upc || "",
       };
     });
@@ -5839,7 +6003,7 @@ alwaysPrompt = mountAlwaysPrompt({
   storage: localStorage,
   onAnswer(choice, product) {
     const profile = getUserProfile(localStorage);
-    const next = choice === "always" ? acceptAlways(profile, product, "add") : declineAlways(profile, product);
+    const next = choice === "always" ? learnCategoryFromProduct(acceptAlways(profile, product, "add"), product) : declineAlways(profile, product);
     saveUserProfile(localStorage, next);
     scheduleAccountSync();
     myProducts?.paint?.();
@@ -5849,6 +6013,7 @@ alwaysPrompt = mountAlwaysPrompt({
 myProducts = mountMyProducts({
   storage: localStorage,
   onEditProfile: () => profileUi?.openEditor(),
+  onEditCategory: (family) => profileUi?.openCategory?.(family),
   onChange: () => scheduleAccountSync(),
 });
 

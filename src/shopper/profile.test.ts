@@ -82,14 +82,14 @@ describe("taste profile storage", () => {
 
   it("resumes after a skip and does not nag a finished older welcome", () => {
     const store = memory();
-    let profile = answerStep(emptyProfile(), "why", ["save-money"], 20);
-    profile = skipStep(profile, "household", 30);
+    let profile = answerStep(emptyProfile(), "household", { size: 2, kids: null, picky: null }, 20);
+    profile = skipStep(profile, "allergies", 30);
     assert.equal(profile.onboarding.status, "in_progress");
-    assert.equal(profile.onboarding.step, "loves");
-    assert.equal(profile.household.size, null);
-    assert.deepEqual(profile.why, ["save-money"]);
+    assert.equal(profile.onboarding.step, "diets");
+    assert.equal(profile.household.size, 2);
+    assert.deepEqual(profile.allergies, []);
     saveUserProfile(store, profile, 30);
-    assert.equal(resumeStep(getUserProfile(store)), "loves");
+    assert.equal(resumeStep(getUserProfile(store)), "diets");
     assert.equal(shouldPromptProfile(store), true);
 
     const legacy = memory({ [ONBOARDING_KEY]: "1" });
@@ -98,7 +98,7 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), true);
     assert.equal(profileSteps().every((step) => step.id), true);
     assert.equal(SKIP_LABEL, "Skip this one");
-    assert.equal(primaryLabel("summary"), "Build my first list");
+    assert.equal(primaryLabel("summary"), "Start shopping");
     assert.equal(summarySections(profile).some((section) => section.step === "allergies"), true);
   });
 

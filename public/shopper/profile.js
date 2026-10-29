@@ -20,6 +20,7 @@ const DIETS = ["vegetarian", "vegan", "gluten-free", "dairy-free", "pescatarian"
 const BRANDS = ["name", "store", "cheaper"];
 const BRAND_AISLES = ["dairy", "meat", "produce", "pantry", "snacks", "drinks"];
 const SHOPPING = ["one-stop", "split", "weekly", "quick"];
+const STOPS = ["1", "2", "3", "more"];
 const COOKING = ["beginner", "comfortable", "confident"];
 const TIME = ["15", "30", "60", "unhurried"];
 const SOURCES = ["onboarding", "add", "swap", "import", "manual"];
@@ -28,7 +29,7 @@ function blank(now = 0) {
   return {
     version: PROFILE_VERSION,
     updatedAt: now,
-    onboarding: { status: "new", step: "why", updatedAt: now },
+    onboarding: { status: "new", step: "household", updatedAt: now },
     why: [],
     household: { size: null, kids: null, picky: null },
     loves: [],
@@ -42,6 +43,7 @@ function blank(now = 0) {
     brand: { default: null, organicIfClose: false, overrides: {} },
     style: { shopping: null, cooking: null, time: null },
     productPreferences: {},
+    categoryPreferences: {},
     neverProducts: [],
     askedLock: {},
   };
@@ -188,6 +190,7 @@ export function parseProfile(raw) {
   const style = row.style && typeof row.style === "object" ? row.style : {};
   profile.style = {
     shopping: SHOPPING.includes(style.shopping) ? style.shopping : null,
+    stops: STOPS.includes(style.stops) ? style.stops : null,
     cooking: COOKING.includes(style.cooking) ? style.cooking : null,
     time: TIME.includes(style.time) ? style.time : null,
   };
@@ -200,6 +203,29 @@ export function parseProfile(raw) {
     }
   }
   profile.productPreferences = prefs;
+  const categoryPreferences = {};
+  const sourceCategories = row.categoryPreferences;
+  if (sourceCategories && typeof sourceCategories === "object" && !Array.isArray(sourceCategories)) {
+    for (const [key, entry] of Object.entries(sourceCategories).slice(0, 40)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const mode = ["brand", "storeBrand", "cheapest", "skip", "never"].includes(entry.mode) ? entry.mode : "";
+      const family = clean(entry.family || key, 40).toLowerCase();
+      if (!mode || !/^[a-z0-9-]{2,40}$/.test(family)) continue;
+      const productId = clean(entry.productId || entry.catalogId, 80);
+      categoryPreferences[family] = {
+        family,
+        mode,
+        brand: clean(entry.brand, 80),
+        productId: /^[A-Za-z0-9:_-]{1,80}$/.test(productId) ? productId : "",
+        size: clean(entry.size || entry.sizeLabel, 80),
+        attributes: Array.isArray(entry.attributes)
+          ? entry.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
+          : [],
+        updatedAt: stamp(entry.updatedAt),
+      };
+    }
+  }
+  profile.categoryPreferences = categoryPreferences;
   profile.neverProducts = Array.isArray(row.neverProducts)
     ? row.neverProducts.map(neverOf).filter(Boolean).slice(0, 40)
     : [];
@@ -283,7 +309,12 @@ export function mergeProfiles(local, remote) {
     const sameTimeLock = current && pref.updatedAt === current.updatedAt && pref.locked && !current.locked;
     if (newerTime || sameTimeLock) productPreferences[key] = pref;
   }
-  return { ...newer, productPreferences, updatedAt: Math.max(left.updatedAt, right.updatedAt) };
+  const categoryPreferences = { ...(older.categoryPreferences || {}) };
+  for (const [key, pref] of Object.entries(newer.categoryPreferences || {})) {
+    const current = categoryPreferences[key];
+    if (!current || pref.updatedAt > current.updatedAt) categoryPreferences[key] = pref;
+  }
+  return { ...newer, productPreferences, categoryPreferences, updatedAt: Math.max(left.updatedAt, right.updatedAt) };
 }
 
 /**
@@ -318,6 +349,7 @@ export const PROFILE_OPTIONS = {
   brands: BRANDS,
   aisles: BRAND_AISLES,
   shopping: SHOPPING,
+  stops: STOPS,
   cooking: COOKING,
   time: TIME,
 };

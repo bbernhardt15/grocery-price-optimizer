@@ -17,9 +17,9 @@ describe("what do you need", () => {
     assert.equal(askIntent("taco night for 6, milk, eggs, bread"), "list");
     assert.equal(askIntent("milk, eggs, bread"), "list");
     assert.equal(askIntent("milk\neggs\nbread"), "list");
-    assert.equal(askIntent("taco night"), "list");
-    assert.equal(askIntent("breakfast"), "list");
-    assert.equal(askIntent("movie night"), "list");
+    assert.equal(askIntent("taco night"), "search");
+    assert.equal(askIntent("breakfast"), "search");
+    assert.equal(askIntent("movie night"), "search");
     assert.equal(askIntent("taco night for 6"), "list");
     assert.equal(askIntent("burgers"), "search");
     assert.equal(askIntent("milk and eggs"), "list");

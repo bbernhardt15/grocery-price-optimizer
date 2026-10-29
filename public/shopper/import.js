@@ -3,8 +3,6 @@
  * share, or speech. Matching stays on our catalog. Tiles do not show prices.
  */
 
-import { describeMeal } from "./mealIdeas.js";
-
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
 
 export function foundLabel(found, total) {
@@ -87,11 +85,11 @@ export function mountImport(deps) {
           <button type="button" class="ghost" id="import-link-go">Read this link</button>
         </div>
         <details class="import-ask" id="import-ask">
-          <summary>Need a meal idea?</summary>
-          <p class="import-lead">Try taco night for 6. You'll see the list before anything is added.</p>
+          <summary>Need ideas?</summary>
+          <p class="import-lead">Suggestions need a look before they join your trip.</p>
           <label class="sr-only" for="import-goal">What are you shopping for?</label>
           <textarea id="import-goal" class="import-goal" maxlength="400" placeholder="Taco night for 6"></textarea>
-          <button type="button" class="ghost" id="import-ask-go">Show this list</button>
+          <button type="button" class="ghost" id="import-ask-go">Suggest a list</button>
         </details>
         <input id="import-photo-input" type="file" accept="image/*" hidden />
         <input id="import-file-input" type="file" accept="image/*,audio/*,.txt,.csv,text/plain,text/csv" hidden />
@@ -397,8 +395,7 @@ export function mountImport(deps) {
       setStatus("Paste a list first.", "error");
       return;
     }
-    const meal = describeMeal(trimmed);
-    setStatus(meal ? "Putting a short list together…" : "Matching what you already buy…");
+    setStatus("Matching what you already buy…");
     try {
       review = await post("/api/import/text", { text: trimmed });
       setStatus("");
@@ -678,14 +675,14 @@ export function mountImport(deps) {
     }
   });
   $("import-ask-go")?.addEventListener("click", async () => {
-    const goal = $("import-goal").value.trim();
-    if (!goal) {
-      setStatus("Say what you want, like taco night for 6.", "error");
+    if (!status.ask) {
+      setStatus("Suggestions aren't switched on yet. You can still paste or speak a list.", "error");
       return;
     }
-    setStatus(describeMeal(goal) ? "Putting a short list together…" : "Thinking of a list…");
+    setStatus("Thinking of a list…");
     try {
       const constraints = deps.askConstraints ? deps.askConstraints() : null;
+      const goal = $("import-goal").value;
       review = await post("/api/import/ask", constraints ? { goal, constraints } : { goal });
       setStatus("");
       renderReview();

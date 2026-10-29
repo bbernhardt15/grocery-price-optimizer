@@ -36,8 +36,19 @@ export type TasteProfile = {
   brand: { default: string | null; organicIfClose: boolean; overrides: Record<string, string> };
   style: { shopping: string | null; cooking: string | null; time: string | null };
   productPreferences: Record<string, TastePreference>;
+  categoryPreferences: Record<string, TasteCategoryPreference>;
   neverProducts: Array<{ family: string; catalogId: string; upc: string; brand: string; name: string; updatedAt: number }>;
   askedLock: Record<string, string>;
+};
+
+export type TasteCategoryPreference = {
+  family: string;
+  mode: string;
+  brand: string;
+  productId: string;
+  size: string;
+  attributes: string[];
+  updatedAt: number;
 };
 
 function clean(value: unknown, max: number): string {
@@ -89,9 +100,35 @@ export function parseTasteProfile(value: unknown): TasteProfile | { error: strin
     }
   }
   const copy = JSON.parse(encoded) as TasteProfile;
+  const categories: TasteProfile["categoryPreferences"] = {};
+  const categorySource = row.categoryPreferences;
+  if (categorySource && typeof categorySource === "object" && !Array.isArray(categorySource)) {
+    for (const [key, entry] of Object.entries(categorySource as Record<string, unknown>).slice(0, 40)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const pref = entry as Record<string, unknown>;
+      if ("price" in pref || "storeName" in pref) return { error: "tasteProfile cannot include a price or a store." };
+      const family = clean(pref.family || key, 40).toLowerCase();
+      const mode = clean(pref.mode, 20);
+      if (!/^[a-z0-9-]{2,40}$/.test(family) || !["brand", "storeBrand", "cheapest", "skip", "never"].includes(mode)) continue;
+      const productId = clean(pref.productId, 80);
+      const attributes = Array.isArray(pref.attributes)
+        ? pref.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
+        : [];
+      categories[family] = {
+        family,
+        mode,
+        brand: clean(pref.brand, 80),
+        productId: /^[A-Za-z0-9:_-]{1,80}$/.test(productId) ? productId : "",
+        size: clean(pref.size, 80),
+        attributes,
+        updatedAt: stamp(pref.updatedAt),
+      };
+    }
+  }
   copy.version = 1;
   copy.updatedAt = stamp(row.updatedAt);
   copy.productPreferences = prefs;
+  copy.categoryPreferences = categories;
   return copy;
 }
 
@@ -111,5 +148,10 @@ export function mergeTasteProfiles(base: unknown, incoming: unknown): TasteProfi
       productPreferences[key] = pref;
     }
   }
-  return { ...newer, productPreferences, updatedAt: Math.max(local.updatedAt, remote.updatedAt) };
+  const categoryPreferences = { ...(older.categoryPreferences || {}) };
+  for (const [key, pref] of Object.entries(newer.categoryPreferences || {})) {
+    const current = categoryPreferences[key];
+    if (!current || pref.updatedAt > current.updatedAt) categoryPreferences[key] = pref;
+  }
+  return { ...newer, productPreferences, categoryPreferences, updatedAt: Math.max(local.updatedAt, remote.updatedAt) };
 }

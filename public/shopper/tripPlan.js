@@ -608,6 +608,97 @@ export function consolidateStops(stores, minSavings = 2, capabilities = {}) {
   );
 }
 
+const CART_RANK = ["kroger", "walmart"];
+
+function itemCover(storeName, item) {
+  if (sameStore(storeName, item.storeName) && Number.isFinite(Number(item.price))) {
+    return { price: Number(item.price), storeName: item.storeName, offer: null };
+  }
+  const offer = (item.offers || []).find(
+    (row) => sameStore(row.storeName, storeName) && Number.isFinite(Number(row.price))
+  );
+  if (!offer) return null;
+  return { price: Number(offer.price), storeName: offer.storeName, offer };
+}
+
+/**
+ * Pull the trip down to two stops when the offers allow it.
+ * Kroger and Walmart stay first because they can take a cart.
+ * A line that neither cart store sells stays on its own list.
+ */
+export function fewerStorePlan(stores, capabilities = {}) {
+  const groups = (stores || []).filter((store) => (store.items || []).length);
+  const spreadTotal = roundMoney(groups.reduce((sum, store) => sum + Number(store.subtotal || 0), 0));
+  if (groups.length <= 1) {
+    return { stores: groups, total: spreadTotal, stops: groups.length, delta: 0, spreadTotal };
+  }
+  const items = groups.flatMap((store) => store.items || []);
+  const names = new Set(groups.map((store) => store.storeName));
+  for (const item of items) {
+    for (const offer of item.offers || []) {
+      if (offer?.storeName) names.add(offer.storeName);
+    }
+  }
+  const ranked = [...names].sort((a, b) => {
+    const rank = (name) => {
+      const key = normalizeStoreKey(name);
+      const cart = CART_RANK.indexOf(key);
+      return cart === -1 ? 10 : cart;
+    };
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
+  const chosen = [];
+  for (const name of ranked) {
+    if (chosen.length >= 2) break;
+    if (items.some((item) => itemCover(name, item))) chosen.push(name);
+  }
+  const buckets = new Map(chosen.map((name) => [normalizeStoreKey(name), { storeName: name, items: [] }]));
+  const leftover = new Map();
+  for (const item of items) {
+    const options = chosen
+      .map((name) => itemCover(name, item))
+      .filter(Boolean)
+      .sort((a, b) => a.price - b.price);
+    if (!options.length) {
+      const key = normalizeStoreKey(item.storeName);
+      if (!leftover.has(key)) leftover.set(key, { storeName: item.storeName, items: [] });
+      leftover.get(key).items.push(item);
+      continue;
+    }
+    const best = options[0];
+    const bucket = buckets.get(normalizeStoreKey(best.storeName));
+    bucket.items.push(best.offer ? lineFromOffer(item, best.offer) : { ...item, storeName: best.storeName });
+  }
+  const next = [...buckets.values(), ...leftover.values()].filter((store) => store.items.length);
+  const rebuilt = applyTripEdits(
+    next.map((group) => ({
+      storeName: group.storeName,
+      items: group.items,
+      subtotal: roundMoney(group.items.reduce((sum, item) => sum + Number(item.itemTotal || Number(item.price) || 0), 0)),
+    })),
+    {},
+    capabilities
+  );
+  const total = roundMoney((rebuilt.stores || []).reduce((sum, store) => sum + Number(store.subtotal || 0), 0));
+  return {
+    stores: rebuilt.stores || [],
+    total,
+    stops: (rebuilt.stores || []).length,
+    delta: roundMoney(total - spreadTotal),
+    spreadTotal,
+  };
+}
+
+/** Cart means Kroger or Walmart can take the items. Every other store is a list. */
+export function handoffMark(store) {
+  const tier = store?.handoff?.tier || tierForStore(store?.storeName);
+  const type = store?.handoff?.action?.type || "";
+  if (tier === "cart" || type === "kroger_cart" || type === "walmart_cart") {
+    return { kind: "cart", label: "Cart" };
+  }
+  return { kind: "list", label: "List" };
+}
+
 export function formatItemLine(item) {
   const quantity = Math.max(1, Math.floor(Number(item?.quantity) || 1));
   const name = String(item?.name || "Item").replace(/\s+/g, " ").trim();

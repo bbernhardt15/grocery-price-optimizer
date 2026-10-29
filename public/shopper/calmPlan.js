@@ -47,7 +47,7 @@ export function plainSwap(item) {
     return { text: `We swapped ${from} for ${to}`, change: "Change" };
   }
   const store = clean(item.storeName) || "the store";
-  if (!from || !to) return null;
+  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return null;
   return { text: `We swapped ${from} for ${to} at ${store}`, change: "Change" };
 }
 
