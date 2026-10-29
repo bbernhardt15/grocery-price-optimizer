@@ -3,6 +3,7 @@ import { publishSale } from "../pricing/saleFacts";
 import { parseGroceryUnit } from "../pricing/parseGroceryUnit";
 import { upcKey } from "./normalize";
 import { gapsForProduct } from "./substitutes";
+import { familyFromQuery, pickAtStore, productMatchesFamily } from "./stapleFamilies";
 import type { BrowseProduct, CatalogOffer, OfferPriceSource } from "./types";
 
 export type BrowseSelection = {
@@ -11,6 +12,9 @@ export type BrowseSelection = {
   brand?: string;
   catalogId?: string;
   upc?: string;
+  /** brand | storeBrand | cheapest | skip. Absent keeps the pinned product. */
+  preferenceMode?: string;
+  family?: string;
 };
 
 const TRIP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
@@ -104,6 +108,22 @@ export function pinnedRowsForSelections(
 ): CatalogProduct[] {
   const rows: CatalogProduct[] = [];
   for (const selection of selections) {
+    const family = selection.family || familyFromQuery(selection.name);
+    if ((selection.preferenceMode === "cheapest" || selection.preferenceMode === "storeBrand") && family) {
+      for (const storeName of TRIP_STORES) {
+        const picked = pickAtStore(products, family, selection.preferenceMode, storeName, { brand: selection.brand });
+        const offer = picked?.offers?.find((entry) => entry.storeName.toLowerCase() === storeName.toLowerCase());
+        if (!picked || !offer) continue;
+        rows.push(
+          toOptimizerProduct(picked as BrowseProduct, offer as CatalogOffer, {
+            sourceQuery: selection.name.trim(),
+            offerRole: "substitute",
+            substitutedFor: selection.name.trim(),
+          })
+        );
+      }
+      continue;
+    }
     const product = findBrowseProduct(selection, products);
     if (!product) {
       continue;
@@ -126,6 +146,9 @@ export function pinnedRowsForSelections(
         continue;
       }
       const substitute = products.find((entry) => entry.id === gap.substitute?.productId);
+      if (family && substitute && !productMatchesFamily(substitute, family)) {
+        continue;
+      }
       const offer = substitute?.offers.find((entry) => entry.storeName === gap.storeName);
       if (!substitute || !offer) {
         continue;

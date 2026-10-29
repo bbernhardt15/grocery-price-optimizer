@@ -5,6 +5,7 @@
 
 import { getUserProfile, saveUserProfile } from "./profile.js";
 import { familyLabel, forgetPreference, unblockProduct } from "./productPreference.js";
+import { modeLabel } from "./categoryPreference.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -26,6 +27,9 @@ export function mountMyProducts(deps = {}) {
   function paint() {
     if (!body) return;
     const profile = getUserProfile(storage);
+    const categories = Object.values(profile.categoryPreferences || {})
+      .filter((row) => row?.mode && row.mode !== "skip")
+      .sort((a, b) => a.family.localeCompare(b.family));
     const prefs = Object.values(profile.productPreferences || {}).sort((a, b) => a.family.localeCompare(b.family));
     const blocked = profile.neverProducts || [];
     const rows = prefs.length
@@ -44,7 +48,9 @@ export function mountMyProducts(deps = {}) {
             </li>`;
           })
           .join("")
-      : `<p class="muted">No go-to products yet. Add butter, or pick them in your taste profile, and they'll show up here.</p>`;
+      : categories.length
+        ? ""
+        : `<p class="muted">No go-to products yet. Set them in your taste profile, and they'll show up here.</p>`;
     const blocks = blocked.length
       ? `<h3>Never this product</h3><ul class="my-product-list">${blocked
           .map(
@@ -53,7 +59,15 @@ export function mountMyProducts(deps = {}) {
           )
           .join("")}</ul>`
       : "";
-    body.innerHTML = `<ul class="my-product-list">${rows}</ul>${blocks}`;
+    const how = categories.length
+      ? `<h3>How you buy</h3><ul class="my-product-list">${categories
+          .map(
+            (row) => `<li class="my-product"><div><strong>${escapeText(familyLabel(row.family) || row.family)}</strong><p>${escapeText(modeLabel(row.mode))}${row.brand ? ` · ${escapeText(row.brand)}` : ""}</p></div>
+            <button type="button" class="text-btn" data-edit-category="${escapeText(row.family)}">Change</button></li>`
+          )
+          .join("")}</ul>`
+      : "";
+    body.innerHTML = `${how}<ul class="my-product-list">${rows}</ul>${blocks}`;
   }
 
   function open() {
@@ -71,6 +85,11 @@ export function mountMyProducts(deps = {}) {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
     if (!target) return;
     const profile = getUserProfile(storage);
+    if (target.dataset.editCategory) {
+      dialog.close();
+      deps.onEditCategory?.(target.dataset.editCategory);
+      return;
+    }
     if (target.dataset.forget) saveUserProfile(storage, forgetPreference(profile, target.dataset.forget));
     if (target.dataset.unblock) saveUserProfile(storage, unblockProduct(profile, target.dataset.unblock));
     deps.onChange?.();

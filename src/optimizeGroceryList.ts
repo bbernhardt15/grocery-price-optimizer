@@ -1,4 +1,5 @@
 import { upcKey } from "./catalog/normalize";
+import { familyFromQuery, productMatchesFamily } from "./catalog/stapleFamilies";
 import { mapToDepartment } from "./catalog/departments";
 import { parsePackageSize } from "./packageSize";
 import { publishSale } from "./pricing/saleFacts";
@@ -199,6 +200,7 @@ function productsMatchingQuery(
     return dedupeCandidates([...pinned, ...substitutes]);
   }
 
+  const family = familyFromQuery(item);
   let matches: CatalogProduct[] = [];
   for (const tokens of matchTokenSets(item)) {
     const found = catalog.filter((product) => nameContainsAllTokens(product.name, tokens));
@@ -206,6 +208,11 @@ function productsMatchingQuery(
       matches = found;
       break;
     }
+  }
+  if (family) {
+    matches = matches.filter((product) =>
+      productMatchesFamily({ name: product.name, brand: product.brand, categories: product.categories }, family)
+    );
   }
 
   if (matches.length === 0) {

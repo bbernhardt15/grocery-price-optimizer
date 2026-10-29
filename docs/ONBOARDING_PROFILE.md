@@ -1,23 +1,21 @@
 # Taste profile and My products
 
-Grocery Gitter asks a new shopper a short series of questions before the first list. Each screen is one question. They tap a chip, then Next. Every screen has Back and **Skip this one**. The guide is built to finish in about a minute. Closing it saves the step, and the next visit starts there.
+Grocery Gitter asks a new shopper a short series of questions before the first list. The point is the groceries they want and how many stores are worth the trip. Each screen is one question. They tap a chip, then Next. Every screen has Back and **Skip this one**. Closing it saves the step, and the next visit starts there.
 
 A phone that already finished the older two-screen welcome is not sent through the guide again. **Edit my taste profile** in the menu opens the summary so they can fill it in.
 
+See [FAMILIES.md](FAMILIES.md) for how a word becomes a grocery family and how a preference picks a product.
+
 ## What it asks
 
-1. Why they are here: save money, less stress, feed a family, meal ideas, a specific diet, or stock up.
-2. Household size, kids, and picky eaters. The size becomes the default headcount on starter lists when they have not set one.
-3. Foods they love. These float matching starter lists up.
-4. Foods they avoid. A starter list made only of avoided foods is hidden. A slot whose name is an avoid is left off.
-5. Cuisines. Tap once for like, again for dislike, again to clear.
-6. Allergies. These are never included.
-7. Diets. A diet beats a saved product.
-8. Always and never, as short text. Always items are pinned under Your usuals.
-9. Name brand, store brand, or whichever is cheaper, with an optional aisle override. Organic is chosen only when both prices are already on the catalog rows and the organic price is within 15 percent.
-10. How they shop, how they cook, and how much time they have.
-11. Optional go-to products for staples such as butter, milk, eggs, bread, cheese, coffee, cereal, chicken, ground beef, and pasta. The tiles are catalog rows. The image is the catalog image. The screen does not show a price or a store.
-12. A summary. Each section has Edit. **Build my first list** adds a starter list that fits the answers.
+1. How many people. That number scales quantities. It does not plan meals.
+2. Allergies. These are never included.
+3. Diets. A diet beats a saved product.
+4. How many stores are worth it: 1, 2, 3, or as many as it takes. The plan can still switch between the lowest price and fewer stores.
+5. What they buy, one category at a time. A category with cuts on the shelf asks what kind (New York strip, sirloin, ribeye, filet, flank for steak; fat percent for milk; size for eggs). **I don't buy this** keeps that family off later suggestions. Then name brand, store brand, or cheapest. Name brands are the ones on the shelf. Tiles do not show a price or a store. **Skip rest, I'll teach it as I shop** leaves the rest unset.
+6. A summary. Each section has Edit. **Start shopping** closes the guide.
+
+Pickup, delivery, and in-store are chosen in the store's own cart when that store has one. Kroger can take a cart. Walmart opens an add-to-cart link. Other stores get a list.
 
 ## Modules the ask box should call
 

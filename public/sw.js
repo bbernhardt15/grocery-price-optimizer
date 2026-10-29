@@ -1,4 +1,4 @@
-const CACHE = "grocery-gitter-shell-v18";
+const CACHE = "grocery-gitter-shell-v19";
 const SHARE_CACHE = "gg-import-share";
 
 self.addEventListener("install", (event) => {

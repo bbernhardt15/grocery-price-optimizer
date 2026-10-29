@@ -1,4 +1,5 @@
 import type { SizeDimension } from "../packageSize";
+import { classifyProduct } from "./stapleFamilies";
 import { groceryWordTokens, stemGroceryToken } from "../productSearchQuery";
 import { upcKey } from "./normalize";
 import type { BrowseProduct, CatalogGap, CatalogOffer } from "./types";
@@ -107,6 +108,11 @@ export function scoreSubstitute(
     return null;
   }
   if (target.departmentId === "other") {
+    return null;
+  }
+  const targetFamily = classifyProduct(target);
+  const candidateFamily = classifyProduct(candidate);
+  if (targetFamily && candidateFamily !== targetFamily) {
     return null;
   }
   const targetUpc = upcKey(target.upc);

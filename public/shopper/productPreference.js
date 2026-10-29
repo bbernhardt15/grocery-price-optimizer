@@ -11,6 +11,13 @@
 import { parseProfile } from "./profile.js";
 import { productExcluded, productHaystack, exclusionForText, slotText } from "./profileConstraints.js";
 import { resolveSlot, scaleQuantity } from "./themedLists.js";
+import {
+  classifyProduct,
+  familyFromQuery as familyFromStaple,
+  familyLabel as stapleFamilyLabel,
+  PREFERENCE_CATEGORIES,
+  productMatchesFamily as stapleMatches,
+} from "./stapleFamilies.js";
 
 const STORE_BRANDS = new Set(
   [
@@ -51,38 +58,7 @@ export function priceOf(product) {
   return amount;
 }
 
-const FAMILIES = [
-  { id: "peanut-butter", label: "Peanut butter", test: (text) => /\bpeanut butter\b/i.test(text) },
-  {
-    id: "butter",
-    label: "Butter",
-    test: (text) => /\bbutter\b/i.test(text) && !/\b(peanut|almond|cashew|sunflower|apple|cocoa|shea|cookie) butter\b/i.test(text),
-  },
-  {
-    id: "milk",
-    label: "Milk",
-    test: (text) =>
-      /\bmilks?\b/i.test(text) &&
-      !/\b(almond|oat|soy|coconut|rice|cashew|flax|hemp) milk\b/i.test(text) &&
-      !/\bmilk chocolate\b/i.test(text),
-  },
-  { id: "eggs", label: "Eggs", test: (text) => /\beggs?\b/i.test(text) && !/\beggplant/i.test(text) },
-  { id: "bread", label: "Bread", test: (text) => /\bbreads?\b/i.test(text) && !/\bbreadcrumbs?\b/i.test(text) },
-  { id: "cheese", label: "Cheese", test: (text) => /\b(cheeses?|cheddar)\b/i.test(text) },
-  { id: "coffee", label: "Coffee", test: (text) => /\bcoffees?\b/i.test(text) },
-  { id: "cereal", label: "Cereal", test: (text) => /\bcereals?\b/i.test(text) },
-  {
-    id: "chicken",
-    label: "Chicken",
-    test: (text) => /\bchicken\b/i.test(text) && !/\bchicken (broth|stock|soup|noodle)\b/i.test(text),
-  },
-  { id: "ground-beef", label: "Ground beef", test: (text) => /\bground beef\b/i.test(text) || /^beef$/i.test(text.trim()) },
-  { id: "pasta", label: "Pasta", test: (text) => /\b(pastas?|spaghetti)\b/i.test(text) },
-  { id: "soda", label: "Soda", test: (text) => /\b(sodas?|colas?|coke|coca-cola|pepsi|sprite)\b/i.test(text) },
-  { id: "yogurt", label: "Yogurt", test: (text) => /\byogurts?\b/i.test(text) },
-  { id: "chips", label: "Chips", test: (text) => /\bchips\b/i.test(text) && !/\bchocolate chips\b/i.test(text) },
-  { id: "bananas", label: "Bananas", test: (text) => /\bbananas?\b/i.test(text) },
-];
+const FAMILIES = PREFERENCE_CATEGORIES;
 
 const FAMILY_CATEGORY = {
   butter: "dairy",
@@ -102,34 +78,18 @@ const FAMILY_CATEGORY = {
   "peanut-butter": "pantry",
 };
 
-export const STAPLES = [
-  { id: "butter", label: "Butter", search: "butter" },
-  { id: "milk", label: "Milk", search: "whole milk" },
-  { id: "eggs", label: "Eggs", search: "large eggs" },
-  { id: "bread", label: "Bread", search: "sandwich bread" },
-  { id: "cheese", label: "Cheese", search: "cheddar cheese" },
-  { id: "coffee", label: "Coffee", search: "ground coffee" },
-  { id: "cereal", label: "Cereal", search: "cereal" },
-  { id: "chicken", label: "Chicken", search: "chicken breast" },
-  { id: "ground-beef", label: "Ground beef", search: "ground beef" },
-  { id: "pasta", label: "Pasta", search: "spaghetti" },
-  { id: "soda", label: "Soda", search: "cola" },
-  { id: "yogurt", label: "Yogurt", search: "greek yogurt" },
-  { id: "chips", label: "Chips", search: "potato chips" },
-  { id: "bananas", label: "Bananas", search: "bananas" },
-];
+export const STAPLES = PREFERENCE_CATEGORIES.map((family) => ({
+  id: family.id,
+  label: family.label,
+  search: family.search,
+}));
 
 export function familyFromQuery(query) {
-  const text = String(query || "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
-  for (const family of FAMILIES) {
-    if (family.test(text)) return family.id;
-  }
-  return "";
+  return familyFromStaple(query);
 }
 
 export function familyLabel(id) {
-  return FAMILIES.find((family) => family.id === id)?.label || "";
+  return stapleFamilyLabel(id);
 }
 
 export function brandModeFor(profile, category) {
@@ -157,7 +117,7 @@ function allowedProducts(profile, products) {
 }
 
 function productMatchesFamily(product, family) {
-  return familyFromQuery(productHaystack(product)) === family || familyFromQuery(product?.familyName) === family;
+  return stapleMatches(product, family);
 }
 
 const STOP = new Set(["the", "and", "with", "for", "pack", "oz", "fl", "ct", "classic", "size", "original", "style"]);
@@ -309,7 +269,7 @@ export function resolveProductPreference(input) {
 
 export function learnPreference(profile, product, options = {}) {
   const next = parseProfile(profile);
-  const family = options.family || familyFromQuery(productHaystack(product));
+  const family = options.family || classifyProduct(product);
   if (!family || !product) return next;
   if (productExcluded(next, product).excluded || isBlockedProduct(next, product)) return next;
   const current = next.productPreferences[family];
@@ -340,7 +300,7 @@ export function learnPreference(profile, product, options = {}) {
 
 export function blockProduct(profile, product, at = Date.now()) {
   const next = parseProfile(profile);
-  const family = familyFromQuery(productHaystack(product));
+  const family = classifyProduct(product);
   const row = {
     family,
     catalogId: String(product?.id || product?.catalogId || ""),
@@ -377,7 +337,7 @@ export function unblockProduct(profile, catalogId, at = Date.now()) {
 }
 
 export function shouldAskAlways(profile, product) {
-  const family = familyFromQuery(productHaystack(product));
+  const family = classifyProduct(product);
   if (!family || !product?.id) return false;
   if (productExcluded(profile, product).excluded) return false;
   const pref = profile?.productPreferences?.[family];
@@ -388,7 +348,7 @@ export function shouldAskAlways(profile, product) {
 
 export function acceptAlways(profile, product, source = "add", at = Date.now()) {
   const next = learnPreference(profile, product, { locked: true, source, at });
-  const family = familyFromQuery(productHaystack(product));
+  const family = classifyProduct(product);
   if (family) {
     const asked = { ...next.askedLock };
     delete asked[family];
@@ -429,13 +389,21 @@ export function guideSlot(input) {
   const slot = input.slot;
   const people = input.people;
   const quantity = input.quantity == null ? scaleQuantity(slot?.serves || 4, people) : input.quantity;
+  if (profile.categoryPreferences?.[slot?.id]?.mode === "never") {
+    return { quantity: quantity || 1, product: null, source: "excluded", swapped: null, missing: true, excluded: true, status: "excluded" };
+  }
   const products = input.products || [];
   const allowed = allowedProducts(profile, products);
   const matching = allowed.filter((product) => {
     const family = familyFromQuery(slot?.id) || familyFromQuery(slot?.search) || familyFromQuery(slot?.label);
-    if (family && productMatchesFamily(product, family)) return true;
-    const want = String(slot?.search || slot?.label || "").toLowerCase();
-    return want && productHaystack(product).toLowerCase().includes(want);
+    if (family) return productMatchesFamily(product, family);
+    const want = String(slot?.search || slot?.label || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 2);
+    if (!want.length) return false;
+    const have = new Set(productHaystack(product).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+    return want.every((token) => have.has(token));
   });
   if (exclusionForText(profile, slotText(slot)).excluded && matching.length === 0) {
     return { quantity: quantity || 1, product: null, source: "excluded", swapped: null, missing: true, excluded: true, status: "excluded" };

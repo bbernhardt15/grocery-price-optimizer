@@ -4,45 +4,34 @@
  */
 
 import { emptyProfile, parseProfile, PROFILE_OPTIONS } from "./profile.js";
+import { familyLabel } from "./productPreference.js";
 
 export const SKIP_LABEL = "Skip this one";
 
 const STEP_DEFS = [
-  { id: "why", title: "Why are you here?", hint: "Pick any that fit. You can change this later.", kind: "multi", options: "why" },
-  { id: "household", title: "Who are you shopping for?", hint: "A guess is fine.", kind: "household" },
-  { id: "loves", title: "Foods you love", hint: "We'll lean starter lists toward these.", kind: "multi", options: "foods" },
-  { id: "avoids", title: "Foods you avoid", hint: "We'll keep these off starter lists.", kind: "multi", options: "foods" },
-  { id: "cuisines", title: "Cuisines", hint: "Tap once if you like it. Tap again if you don't.", kind: "cuisine", options: "cuisines" },
+  { id: "household", title: "How many people?", hint: "Used only to scale quantities. A guess is fine.", kind: "household" },
   {
     id: "allergies",
     title: "Any allergies?",
-    hint: "These are never included. We filter by the words on the product. Shoppers should still read the label.",
+    hint: "These are never included. We match the words on the product. Still read the label.",
     kind: "multi",
     options: "allergies",
   },
-  { id: "diets", title: "Any diets?", hint: "A diet beats a favorite product.", kind: "multi", options: "diets" },
+  { id: "diets", title: "Any diets?", hint: "A diet beats a saved product.", kind: "multi", options: "diets" },
   {
-    id: "always-never",
-    title: "Always or never",
-    hint: "Things you always buy are pinned under Your usuals.",
-    kind: "text",
+    id: "stops",
+    title: "How many stores is worth it?",
+    hint: "Fewer stores is more convenient. More stores can cost less. You can switch this on the plan.",
+    kind: "single",
+    options: "stops",
   },
-  {
-    id: "brand",
-    title: "Name brand or store brand?",
-    hint: "You can set a different choice for an aisle. Organic is used only when the price is close.",
-    kind: "brand",
-  },
-  { id: "shopping", title: "How do you like to shop?", hint: "We'll keep this in mind for the trip.", kind: "single", options: "shopping" },
-  { id: "cooking", title: "How do you cook?", hint: "Meal ideas stay inside this.", kind: "single", options: "cooking" },
-  { id: "time", title: "How much time do you have?", hint: "Most nights, not a special occasion.", kind: "single", options: "time" },
   {
     id: "products",
-    title: "Pick your go-to products",
-    hint: "Optional. Tap the one you actually buy. No store prices.",
+    title: "What do you buy?",
+    hint: "One item at a time. Pick the cut, then name brand, store brand, or cheapest. No store prices.",
     kind: "products",
   },
-  { id: "summary", title: "Here's what we learned", hint: "Edit anything that looks off, then build your first list.", kind: "summary" },
+  { id: "summary", title: "Here's what we'll shop for", hint: "Edit anything that looks off, then start shopping.", kind: "summary" },
 ];
 
 const LABELS = {
@@ -104,6 +93,10 @@ const LABELS = {
   split: "Split for the best price",
   weekly: "A weekly shop",
   quick: "Quick trips",
+  1: "1 store",
+  2: "2 stores",
+  3: "3 stores",
+  more: "As many as it takes",
   beginner: "I'm just starting",
   comfortable: "I can follow a recipe",
   confident: "I cook most nights",
@@ -150,7 +143,7 @@ export function progressLabel(id) {
 }
 
 export function primaryLabel(id) {
-  return id === "summary" ? "Build my first list" : "Next";
+  return id === "summary" ? "Start shopping" : "Next";
 }
 
 function withStep(profile, stepId, at) {
@@ -199,6 +192,7 @@ export function answerStep(profile, stepId, answer, at = Date.now()) {
   if (stepId === "shopping") next.style = { ...next.style, shopping: answer || null };
   if (stepId === "cooking") next.style = { ...next.style, cooking: answer || null };
   if (stepId === "time") next.style = { ...next.style, time: answer || null };
+  if (stepId === "stops") next.style = { ...next.style, stops: answer || null };
   return parseProfile(withStep(next, nextStepId(stepId), at));
 }
 
@@ -273,50 +267,35 @@ function styleLine(style) {
 export function summarySections(profile) {
   const parsed = parseProfile(profile);
   const products = Object.values(parsed.productPreferences || {});
+  const stops = parsed.style?.stops;
+  const stopLabel = stops === "1" ? "1 store" : stops === "more" ? "As many as it takes" : stops ? `${stops} stores` : "Not set yet";
   return [
-    { id: "why", step: "why", label: "Why you're here", value: joinLabels(parsed.why) },
-    { id: "household", step: "household", label: "Household", value: householdLine(parsed.household) },
-    { id: "loves", step: "loves", label: "Foods you love", value: joinLabels(parsed.loves) },
-    { id: "avoids", step: "avoids", label: "Foods you avoid", value: joinLabels(parsed.avoids) },
-    { id: "cuisines", step: "cuisines", label: "Cuisines", value: cuisineLine(parsed.cuisines) },
+    { id: "household", step: "household", label: "People", value: parsed.household?.size ? (parsed.household.size >= 5 ? "5 or more" : String(parsed.household.size)) : "Not set yet" },
     { id: "allergies", step: "allergies", label: "Allergies", value: joinLabels(parsed.allergies) },
     { id: "diets", step: "diets", label: "Diets", value: joinLabels(parsed.diets) },
-    {
-      id: "always-never",
-      step: "always-never",
-      label: "Always / never",
-      value: `Always: ${parsed.always.join(", ") || "—"}. Never: ${parsed.never.join(", ") || "—"}.`,
-    },
-    { id: "brand", step: "brand", label: "Brands", value: brandLine(parsed.brand) },
-    { id: "shopping", step: "shopping", label: "How you shop", value: styleLine(parsed.style) },
-    {
-      id: "products",
-      step: "products",
-      label: "Go-to products",
-      value: products.length ? products.map((pref) => `${familyName(pref.family)}: ${pref.brand ? `${pref.brand} ` : ""}${pref.name}`).join(", ") : "Not set yet",
-    },
+    { id: "stops", step: "stops", label: "Stores", value: stopLabel },
+    { id: "products", step: "products", label: "What you buy", value: preferenceLine(parsed, products) },
   ];
 }
 
+function preferenceLine(profile, products) {
+  const modes = { brand: "Name brand", storeBrand: "Store brand", cheapest: "Cheapest" };
+  const rows = Object.values(profile.categoryPreferences || {}).filter((row) => row?.mode && row.mode !== "skip");
+  if (rows.length) {
+    return rows
+      .slice(0, 8)
+      .map((row) => {
+        const name = familyName(row.family);
+        const how = modes[row.mode] || row.mode;
+        return row.brand ? `${name}: ${how}, ${row.brand}` : `${name}: ${how}`;
+      })
+      .join(", ");
+  }
+  return products.length ? products.map((pref) => `${familyName(pref.family)}: ${pref.brand ? `${pref.brand} ` : ""}${pref.name}`).join(", ") : "Not set yet";
+}
+
 function familyName(id) {
-  return (
-    {
-      butter: "Butter",
-      milk: "Milk",
-      eggs: "Eggs",
-      bread: "Bread",
-      cheese: "Cheese",
-      coffee: "Coffee",
-      cereal: "Cereal",
-      chicken: "Chicken",
-      "ground-beef": "Ground beef",
-      pasta: "Pasta",
-      soda: "Soda",
-      yogurt: "Yogurt",
-      chips: "Chips",
-      bananas: "Bananas",
-    }[id] || id
-  );
+  return familyLabel(id) || id;
 }
 
 export const AISLE_LABELS = [
