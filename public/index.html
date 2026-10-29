@@ -36,8 +36,8 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
-    <link rel="stylesheet" href="/styles.css?v=ask-meals-1" />
-    <link rel="stylesheet" href="/shopper/import.css?v=ask-meals-1" />
+    <link rel="stylesheet" href="/styles.css?v=profile-1" />
+    <link rel="stylesheet" href="/shopper/import.css?v=profile-1" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -120,6 +120,8 @@
             <span id="theme-label">Match device</span>
           </button>
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
+          <button id="drawer-profile" type="button" class="ghost">Edit my taste profile</button>
+          <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
           <section class="drawer-help" aria-labelledby="help-title">
             <h2 id="help-title">Help</h2>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
@@ -139,7 +141,8 @@
 
         <main id="catalog" class="catalog" tabindex="-1">
           <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
-          <p id="ask-hint" class="ask-hint">A product like milk, or a meal like taco night for 6.</p>
+          <p id="ask-hint" class="ask-hint">A product like milk, or a list like taco night for 6.</p>
+          <p id="profile-warning" class="profile-warning" role="status" hidden></p>
           <section id="start-here" class="start-here" aria-label="Start from a list">
             <div id="usuals-block" hidden>
               <div class="start-head">
@@ -459,10 +462,46 @@
         </div>
       </form>
     </dialog>
+    <dialog id="profile-onboard" class="sheet profile-onboard" aria-labelledby="profile-title">
+      <form id="profile-form" class="sheet-body">
+        <div class="profile-top">
+          <button type="button" id="profile-back" class="ghost">Back</button>
+          <p id="profile-progress" class="onboard-progress">1 of 14</p>
+          <button type="button" id="profile-skip" class="text-btn">Skip this one</button>
+        </div>
+        <div id="profile-dots" class="profile-dots" aria-hidden="true"></div>
+        <h2 id="profile-title" tabindex="-1">Why are you here?</h2>
+        <p id="profile-hint"></p>
+        <div id="profile-stage"></div>
+        <div class="profile-actions">
+          <button type="submit" id="profile-next" class="primary">Next</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="products-dialog" class="sheet" aria-labelledby="products-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="products-title" tabindex="-1">My products</h2>
+          <button type="button" class="text-btn" id="products-close">Close</button>
+        </div>
+        <div id="products-body"></div>
+        <button type="button" class="ghost" id="products-edit-profile">Edit my taste profile</button>
+      </div>
+    </dialog>
+    <dialog id="always-prompt" class="sheet always-prompt" aria-labelledby="always-title">
+      <form class="sheet-body" method="dialog">
+        <h2 id="always-title" tabindex="-1">Always use this butter?</h2>
+        <p id="always-body">We'll use it the next time you ask. Just this time leaves it as a one-off.</p>
+        <div class="choice-stack">
+          <button type="button" class="primary" id="always-yes">Always</button>
+          <button type="button" class="ghost" id="always-once">Just this time</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/app.js?v=ask-meals-1"></script>
+    <script type="module" src="/app.js?v=profile-1"></script>
   </body>
 </html>

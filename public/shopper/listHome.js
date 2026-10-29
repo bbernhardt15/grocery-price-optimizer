@@ -10,6 +10,7 @@ import {
   annotateFavoriteSwap,
   arrangeLists,
   previewLists,
+  THEMED_LISTS,
   choiceFromProduct,
   createList,
   deleteList,
@@ -19,6 +20,7 @@ import {
   moveList,
   moveListSlot,
   newSlotId,
+  PARTY_KEY,
   partySize,
   picksForShelf,
   readBook,
@@ -35,6 +37,8 @@ import {
   writeParty,
   writeSwaps,
 } from "./themedLists.js";
+import { getUserProfile } from "./profile.js";
+import { defaultHeadcount, orderStarterLists } from "./profileConstraints.js";
 import {
   detailHtml,
   emptyMyListsHtml,
@@ -69,6 +73,10 @@ export function createListHome(deps) {
   const storage = deps.storage || localStorage;
   let book = readBook(storage);
   let party = readParty(storage);
+  if (!storage.getItem(PARTY_KEY)) {
+    const head = defaultHeadcount(getUserProfile(storage));
+    if (head) party = head;
+  }
   let swaps = readSwaps(storage);
   let view = null;
   let searchTimer = 0;
@@ -95,10 +103,21 @@ export function createListHome(deps) {
       .join("")}</div>`;
   }
 
+  function profileNow() {
+    return deps.profile ? deps.profile() : getUserProfile(storage);
+  }
+
+  function rankedLists() {
+    const { featured } = arrangeLists(new Date());
+    const boost = new Set(featured.map((list) => list.id));
+    return orderStarterLists(THEMED_LISTS, profileNow(), boost);
+  }
+
   function paintHome() {
     const root = document.getElementById("starter-lists");
     if (!root) return;
-    const preview = previewLists(new Date(), 3);
+    const preview = rankedLists().slice(0, 3);
+    if (!preview.length) preview.push(...previewLists(new Date(), 3));
     const showNudge = !book.nudged && Object.keys(book.favorites).length === 0;
     const hint = preview.map((list) => list.title).join(" · ");
     root.innerHTML = `
@@ -129,10 +148,9 @@ export function createListHome(deps) {
     const dialog = document.getElementById("list-sheet");
     if (!dialog || !view) return;
     if (view.kind === "browser") {
-      const preview = previewLists(new Date(), 3);
+      const preview = rankedLists().slice(0, 3);
       const shown = new Set(preview.map((list) => list.id));
-      const { featured, more } = arrangeLists(new Date());
-      const rest = [...featured, ...more].filter((list) => !shown.has(list.id));
+      const rest = rankedLists().filter((list) => !shown.has(list.id));
       dialog.innerHTML = listsBrowserHtml({
         preview,
         rest,
@@ -153,7 +171,10 @@ export function createListHome(deps) {
       });
       return;
     }
-    const model = listModel(view.listId, book);
+    const rawModel = listModel(view.listId, book);
+    const model = rawModel
+      ? { ...rawModel, slots: rawModel.slots.filter((slot) => !deps.slotBlocked?.(slot)) }
+      : null;
     if (!model) {
       closeDialog();
       paintHome();
@@ -263,6 +284,7 @@ export function createListHome(deps) {
     const at = Date.now();
     if (scope === "list") book = persist(setOverride(book, view.listId, view.slotId, choice, at));
     else book = persist(rememberEverywhere(book, view.listId, view.slotId, choice, at));
+    if (stored) deps.onFavorite?.(stored, view.slotId);
     const listId = view.listId;
     const quantities = view.quantities;
     const touched = view.touched;
@@ -298,16 +320,27 @@ export function createListHome(deps) {
       const missing = [];
       const swapped = [];
       for (const slotDef of model.slots) {
+        if (deps.slotBlocked?.(slotDef)) continue;
         const override = book.overrides[model.id]?.[slotDef.id];
         const favorite = book.favorites[slotDef.id] || null;
-        const resolved = resolveSlot({
-          slot: slotDef,
-          people: party,
-          favorite: favorite && favorite.cleared !== true ? favorite : null,
-          override: override && override.cleared !== true ? override : null,
-          products: shelf,
-          quantity: quantities[slotDef.id],
-        });
+        const resolved = deps.guideSlot
+          ? deps.guideSlot({
+              slot: slotDef,
+              people: party,
+              favorite: favorite && favorite.cleared !== true ? favorite : null,
+              override: override && override.cleared !== true ? override : null,
+              products: shelf,
+              quantity: quantities[slotDef.id],
+            })
+          : resolveSlot({
+              slot: slotDef,
+              people: party,
+              favorite: favorite && favorite.cleared !== true ? favorite : null,
+              override: override && override.cleared !== true ? override : null,
+              products: shelf,
+              quantity: quantities[slotDef.id],
+            });
+        if (resolved.excluded) continue;
         if (!resolved.product?.id) {
           missing.push(slotDef.label);
           continue;
@@ -562,6 +595,9 @@ export function createListHome(deps) {
     },
     annotate(item) {
       return annotateFavoriteSwap(item, swaps);
+    },
+    addThemed(listId) {
+      return addList(listId);
     },
   };
 }

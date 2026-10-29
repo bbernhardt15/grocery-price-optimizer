@@ -1,5 +1,6 @@
 import { SavedList, type RemovedItem, type SavedListItem } from "./models";
 import { mergeStarterBooks, parseStarterBook, type StarterBook } from "./starterBook";
+import { mergeTasteProfiles, parseTasteProfile, type TasteProfile } from "./tasteProfile";
 
 export type { RemovedItem, SavedListItem };
 
@@ -31,6 +32,8 @@ export type SavedListWrite = {
   coupons?: SavedCoupon[];
   /** Absent means "leave stored favorites and My lists alone." Present merges by time. */
   starterBook?: StarterBook;
+  /** Absent means "leave the stored taste profile alone." Present merges by time. */
+  tasteProfile?: TasteProfile;
 };
 
 export type PublicSavedList = {
@@ -41,6 +44,7 @@ export type PublicSavedList = {
   items: SavedListItem[];
   coupons: SavedCoupon[];
   starterBook?: StarterBook;
+  tasteProfile?: TasteProfile;
   revision: number;
   updatedAt: string | null;
 };
@@ -166,6 +170,8 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
   if (coupons && "error" in coupons) return coupons;
   const starterBook = parseStarterBook(row.starterBook);
   if (starterBook && "error" in starterBook) return starterBook;
+  const tasteProfile = parseTasteProfile(row.tasteProfile);
+  if (tasteProfile && "error" in tasteProfile) return tasteProfile;
   return {
     listId,
     listName: cleanText(row.listName, 80) || "My list",
@@ -176,6 +182,7 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
     baseRevision,
     ...(coupons ? { coupons } : {}),
     ...(starterBook ? { starterBook } : {}),
+    ...(tasteProfile ? { tasteProfile } : {}),
   };
 }
 
@@ -215,10 +222,12 @@ export function toPublicSavedList(doc: {
   items?: SavedListItem[];
   coupons?: SavedCoupon[];
   starterBook?: unknown;
+  tasteProfile?: unknown;
   revision: number;
   updatedAt?: Date;
 }): PublicSavedList {
   const starterBook = parseStarterBook(doc.starterBook);
+  const tasteProfile = parseTasteProfile(doc.tasteProfile);
   return {
     listId: doc.listId,
     listName: doc.listName || "My list",
@@ -227,6 +236,7 @@ export function toPublicSavedList(doc: {
     items: Array.isArray(doc.items) ? doc.items : [],
     coupons: Array.isArray(doc.coupons) ? doc.coupons.map(parseSavedCoupon).filter((coupon): coupon is SavedCoupon => Boolean(coupon)) : [],
     ...(starterBook && !("error" in starterBook) ? { starterBook } : {}),
+    ...(tasteProfile && !("error" in tasteProfile) ? { tasteProfile } : {}),
     revision: doc.revision,
     updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
   };
@@ -251,6 +261,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
       items,
       coupons: write.coupons ?? [],
       ...(write.starterBook ? { starterBook: write.starterBook } : {}),
+      ...(write.tasteProfile ? { tasteProfile: write.tasteProfile } : {}),
       removed: write.removed.slice(-MAX_ITEMS),
       revision: 1,
     });
@@ -276,6 +287,9 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
         ...(write.coupons ? { coupons: write.coupons } : {}),
         ...(write.starterBook
           ? { starterBook: mergeStarterBooks((existing as { starterBook?: unknown }).starterBook, write.starterBook) }
+          : {}),
+        ...(write.tasteProfile
+          ? { tasteProfile: mergeTasteProfiles((existing as { tasteProfile?: unknown }).tasteProfile, write.tasteProfile) }
           : {}),
         removed: [...priorRemoved, ...write.removed].slice(-MAX_ITEMS),
         revision: current.revision + 1,

@@ -109,6 +109,11 @@ const savedListSchema = new Schema(
      * A missing field on a later write leaves this alone.
      */
     starterBook: { type: Schema.Types.Mixed },
+    /**
+     * Taste profile and product preferences. Absent until a device sends them.
+     * A missing field on a later write leaves this alone.
+     */
+    tasteProfile: { type: Schema.Types.Mixed },
     coupons: {
       type: [
         new Schema(
