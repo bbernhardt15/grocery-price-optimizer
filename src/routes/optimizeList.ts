@@ -62,7 +62,13 @@ function readSelections(value: unknown): BrowseSelection[] | undefined {
     return undefined;
   }
   return value.map((item) => {
-    const record = item as VerifiedProduct & { catalogId?: unknown; upc?: unknown; brand?: unknown };
+    const record = item as VerifiedProduct & {
+      catalogId?: unknown;
+      upc?: unknown;
+      brand?: unknown;
+      preferenceMode?: unknown;
+      family?: unknown;
+    };
     const brand = typeof record.brand === "string" ? record.brand.trim() : undefined;
     const catalogId = typeof record.catalogId === "string" ? record.catalogId.trim() : undefined;
     const upc = typeof record.upc === "string" ? record.upc.trim() : undefined;

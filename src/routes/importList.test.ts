@@ -203,7 +203,7 @@ describe("import routes", () => {
     assert.equal(body.suggested, true);
     assert.equal(body.parser, "ai");
     assert.equal(body.items[0]?.name, "bananas");
-    const second = await post("/api/import/ask", { goal: "lunches" }, "device-import-1");
+    const second = await post("/api/import/ask", { goal: "a picnic with no obvious list" }, "device-import-1");
     assert.equal(second.status, 429);
     assert.match(((await second.json()) as { error: string }).error, /paste a list/);
     assert.equal(logs.some((line) => line.includes("DO-NOT-LOG")), false);

@@ -115,6 +115,7 @@ import {
 import { matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
 import { mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
+import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
@@ -1740,6 +1741,45 @@ function paintActiveSuggest() {
   else searchEl.removeAttribute("aria-activedescendant");
 }
 
+function mealLabel(meal) {
+  return meal.namedPeople ? `${meal.title} for ${meal.people}` : meal.title;
+}
+
+function showMealIdea(meal) {
+  suggestions = [];
+  suggestionQuery = searchEl.value.trim();
+  activeSuggest = -1;
+  suggestStatus.hidden = true;
+  suggestionsEl.hidden = false;
+  suggestionsEl.innerHTML = `<li role="presentation"><button type="button" class="suggest-option meal-idea" role="option" id="suggest-meal" data-meal="1" aria-selected="false">
+    <span>
+      <span class="suggest-name">${escapeHtml(mealLabel(meal))}</span>
+      <span class="suggest-meta">${escapeHtml(meal.blurb)}</span>
+    </span>
+  </button></li>`;
+  suggestPanel.hidden = false;
+  searchEl.setAttribute("aria-expanded", "true");
+  searchEl.removeAttribute("aria-activedescendant");
+}
+
+function quietMeal(value) {
+  if (isPreferenceList(value)) return null;
+  const meal = describeMeal(value);
+  if (!meal) return null;
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2 && !meal.namedPeople) return null;
+  return meal;
+}
+
+function showListAsk(value) {
+  const meal = quietMeal(value);
+  if (meal) {
+    showMealIdea(meal);
+    return;
+  }
+  showSuggestStatus("Press Enter to match these items.");
+}
+
 function showSuggestStatus(message) {
   suggestPanel.hidden = false;
   suggestionsEl.hidden = true;
@@ -1796,12 +1836,12 @@ async function loadSuggestions(text) {
     showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
     return;
   }
-  if (askIntent(q) === "list") {
+  if (askIntent(q) === "list" || quietMeal(q)) {
     suggestAbort?.abort();
     suggestions = [];
     suggestionQuery = q;
     activeSuggest = -1;
-    showSuggestStatus("Press Enter to match these items.");
+    showListAsk(q);
     return;
   }
   window.clearTimeout(suggestLoadingTimer);
@@ -3518,6 +3558,12 @@ document.addEventListener("click", (event) => {
     setQuantity(id, (list.get(id)?.quantity ?? 1) - 1);
     return;
   }
+  const mealIdea = target.closest("[data-meal]");
+  if (mealIdea) {
+    event.preventDefault();
+    $("search-form")?.requestSubmit();
+    return;
+  }
   const suggest = target.closest("[data-suggest]");
   if (suggest) {
     chooseSuggestion(Number(suggest.getAttribute("data-suggest")));
@@ -3808,6 +3854,13 @@ $("search-form").addEventListener("submit", (event) => {
     void addFromPreferences(text);
     return;
   }
+  if (quietMeal(text)) {
+    window.clearTimeout(shelfTimer);
+    query = "";
+    syncBrowse();
+    void addMealFromPreferences(text);
+    return;
+  }
   if (askIntent(text) === "list") {
     window.clearTimeout(shelfTimer);
     query = "";
@@ -3844,11 +3897,19 @@ searchEl.addEventListener("input", () => {
     else closeSuggestions();
     return;
   }
-  if (askIntent(value) === "list") {
+  if (askIntent(value) === "list" || quietMeal(value)) {
     window.clearTimeout(shelfTimer);
     suggestAbort?.abort();
     suggestions = [];
-    showSuggestStatus("Press Enter to match these items.");
+    if (query) {
+      query = "";
+      activeDepartment = "all";
+      renderDepartments();
+      syncBrowse();
+      if (browseOpen) void loadPage(true);
+      else if (gridEl) gridEl.innerHTML = "";
+    }
+    showListAsk(value);
     return;
   }
   searchTimer = window.setTimeout(() => void loadSuggestions(value), SUGGEST_DEBOUNCE_MS);
@@ -3868,7 +3929,7 @@ searchEl.addEventListener("input", () => {
 
 searchEl.addEventListener("focus", () => {
   if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
-  else if (askIntent(searchEl.value) === "list") showSuggestStatus("Press Enter to match these items.");
+  else if (askIntent(searchEl.value) === "list" || quietMeal(searchEl.value)) showListAsk(searchEl.value);
   else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
 });
 
@@ -5363,6 +5424,12 @@ function preferenceReview(rows, note) {
   host.querySelector("#preference-plan").onclick = () => {
     void planTrip();
   };
+}
+
+async function addMealFromPreferences(text) {
+  const meal = mealPlan(text);
+  if (!meal?.items?.length) return;
+  await addFromPreferences(meal.items.map((item) => item.raw).join(", "));
 }
 
 async function addFromPreferences(text) {

@@ -86,7 +86,15 @@ function decodeBase64(value: unknown, max: number): Buffer | null {
   return buffer;
 }
 
-async function interpret(text: string, key: string, allowAi: boolean) {
+type ReadResult = {
+  match: ImportMatchResult;
+  parser: "rules" | "ai";
+  aiFallback: boolean;
+  paused: boolean;
+  suggested?: boolean;
+};
+
+async function interpret(text: string, key: string, allowAi: boolean): Promise<ReadResult> {
   const config = importConfig();
   if (allowAi && config.ai) {
     const budget = importBudget.take(key, config.dailyLimit, config.globalDailyCap);
@@ -116,7 +124,14 @@ function sendMatch(
     res.status(422).json({ error: IMPORT_MESSAGES.empty, parser: result.parser });
     return;
   }
-  res.json({ ...result.match, parser: result.parser, aiFallback: result.aiFallback, paused: result.paused, ...extra });
+  res.json({
+    ...result.match,
+    parser: result.parser,
+    aiFallback: result.aiFallback,
+    paused: result.paused,
+    ...(result.suggested ? { suggested: true } : {}),
+    ...extra,
+  });
 }
 
 router.get("/import/status", (_req, res) => {
@@ -262,11 +277,6 @@ router.post("/import/link", async (req, res) => {
 
 router.post("/import/ask", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
-  const config = importConfig();
-  if (!config.ask) {
-    res.status(503).json({ error: IMPORT_MESSAGES.askOff, code: "unconfigured" });
-    return;
-  }
   const goal = readText(req.body?.goal).trim();
   if (!goal) {
     res.status(400).json({ error: IMPORT_MESSAGES.goalMissing });
@@ -274,6 +284,11 @@ router.post("/import/ask", async (req, res) => {
   }
   if (goal.length > 400) {
     res.status(400).json({ error: IMPORT_MESSAGES.tooLong });
+    return;
+  }
+  const config = importConfig();
+  if (!config.ask) {
+    res.status(503).json({ error: IMPORT_MESSAGES.askOff, code: "unconfigured" });
     return;
   }
   const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);

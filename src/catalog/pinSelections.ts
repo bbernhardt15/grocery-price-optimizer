@@ -112,7 +112,7 @@ export function pinnedRowsForSelections(
     if ((selection.preferenceMode === "cheapest" || selection.preferenceMode === "storeBrand") && family) {
       for (const storeName of TRIP_STORES) {
         const picked = pickAtStore(products, family, selection.preferenceMode, storeName, { brand: selection.brand });
-        const offer = picked?.offers?.find((entry) => entry.storeName.toLowerCase() === storeName.toLowerCase());
+        const offer = picked?.offers?.find((entry) => entry.storeName?.toLowerCase() === storeName.toLowerCase());
         if (!picked || !offer) continue;
         rows.push(
           toOptimizerProduct(picked as BrowseProduct, offer as CatalogOffer, {
