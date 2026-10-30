@@ -7,28 +7,35 @@ import { CATALOG_DEMAND_DAYS, demandText } from "./demand";
 import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer } from "./models";
 
 /**
- * Shopper demand first (saved lists, then recent searches), then staple
- * aisles, then the rest. A miss keeps the next GTIN variant eligible
- * immediately. After the last variant misses, the master waits out the
- * cooldown and is tried again. Nothing is deleted.
+ * Shopper demand first (saved lists, then recent searches), then grocery
+ * departments, then lower-match aisles. General merchandise is not looked
+ * up. A miss keeps the next GTIN variant eligible immediately. After the
+ * last variant misses, the master waits out the cooldown and is tried
+ * again. A 503 is a short hold, not a miss. Nothing is deleted.
  */
-const STAPLE_DEPARTMENTS = [
+const GROCERY_DEPARTMENTS = [
   "dairy-eggs",
   "produce",
   "meat-seafood",
   "bakery",
+  "deli",
   "beverages",
   "breakfast",
   "pantry",
   "frozen",
   "snacks",
-  "household",
-  "deli",
-  "baby",
-  "personal-care",
-  "pet",
-  "other",
 ] as const;
+
+/** Kroger carries these, but they match less often than food. */
+const LOW_MATCH_DEPARTMENTS = ["household", "baby", "personal-care", "pet"] as const;
+
+const STAPLE_DEPARTMENTS = [...GROCERY_DEPARTMENTS, ...LOW_MATCH_DEPARTMENTS] as const;
+
+/** Household rows Kroger actually stocks. The rest of that aisle is general merchandise. */
+const KROGER_HOUSEHOLD = new Set(["Paper", "Cleaning", "Laundry"]);
+
+/** A server error is not a miss. Hold the row for a day, then try again. */
+const LOOKUP_ERROR_HOLD_MS = 86_400_000;
 
 const BATCH = 30;
 
@@ -79,16 +86,38 @@ export function isWalmartOnlyBrand(brand: string | undefined): boolean {
 
 /**
  * Why a Walmart master should not be sent to Kroger.
- * Private label, general merchandise, and auto/RV/outdoor rows miss.
+ * Private label, general merchandise, auto/RV/outdoor rows, and household
+ * items Kroger does not stock miss. Paper, cleaning, and laundry still match.
  * Null means the row is still worth a lookup.
  */
-export function krogerLookupBlock(row: { name: string; brand?: string; categoryPaths?: string[] }): string | null {
+export function krogerLookupBlock(row: {
+  name: string;
+  brand?: string;
+  categoryPaths?: string[];
+  departmentId?: string;
+}): string | null {
   if (isWalmartOnlyBrand(row.brand)) {
     return "walmart-only-brand";
   }
   const mapped = mapToDepartment(row.categoryPaths, row.name);
   if (mapped.signal === "excluded") {
     return mapped.reason ?? "non-grocery";
+  }
+  const stored = row.departmentId?.trim() ?? "";
+  const storedGrocery = (GROCERY_DEPARTMENTS as readonly string[]).includes(stored);
+  // A grocery department wins over a vague name. General merchandise still does not.
+  if (!storedGrocery && (mapped.generalMerchandise || mapped.departmentId === "other")) {
+    return mapped.reason ?? "general-merchandise";
+  }
+  if (!storedGrocery && (mapped.departmentId === "household" || stored === "household")) {
+    if (KROGER_HOUSEHOLD.has(mapped.subcategory ?? "")) {
+      return null;
+    }
+    const named = mapToDepartment(undefined, row.name);
+    if (named.departmentId === "household" && KROGER_HOUSEHOLD.has(named.subcategory ?? "")) {
+      return null;
+    }
+    return "household-low-match";
   }
   return null;
 }
@@ -118,14 +147,18 @@ function dueClauses(side: Side, now: Date): Record<string, unknown>[] {
   const has = side === "walmart" ? "krogerProductId" : "walmartItemId";
   const missing = side === "walmart" ? "walmartItemId" : "krogerProductId";
   const cutoff = new Date(now.getTime() - retryMs());
+  const hold = side === "walmart" ? "matchWalmartHoldUntil" : "matchKrogerHoldUntil";
   // Negative cache: a finished miss stores match*At and is not due again until
   // the retry window, even if a variant index was left above zero. An in-progress
   // variant (no timestamp yet) is still due, so the next GTIN can run immediately.
+  // A 503 sets match*HoldUntil and is also skipped until that time, without
+  // counting as a miss.
   return [
     { key: { $not: /^local:/ } },
     { [has]: { $type: "string", $ne: "" } },
     { $or: [{ [missing]: { $exists: false } }, { [missing]: null }, { [missing]: "" }] },
     { $or: [{ [tried]: { $exists: false } }, { [tried]: null }, { [tried]: { $lte: cutoff } }] },
+    { $or: [{ [hold]: { $exists: false } }, { [hold]: null }, { [hold]: { $lte: now } }] },
   ];
 }
 
@@ -250,9 +283,30 @@ async function nextLookups(side: Side, now: Date, limit: number, dryRun: boolean
   for (const phrase of demand.searchNames.slice(0, 5)) {
     passes.push({ priority: "search", extra: { name: { $regex: escapeRegex(phrase), $options: "i" } } });
   }
-  for (const departmentId of STAPLE_DEPARTMENTS) {
+  const departments =
+    side === "kroger"
+      ? STAPLE_DEPARTMENTS
+      : ([
+          "dairy-eggs",
+          "produce",
+          "meat-seafood",
+          "bakery",
+          "beverages",
+          "breakfast",
+          "pantry",
+          "frozen",
+          "snacks",
+          "household",
+          "deli",
+          "baby",
+          "personal-care",
+          "pet",
+          "other",
+        ] as const);
+  for (const departmentId of departments) {
+    const grocery = (GROCERY_DEPARTMENTS as readonly string[]).includes(departmentId);
     passes.push({
-      priority: departmentId === "other" ? "catalog" : "staple",
+      priority: side === "kroger" ? (grocery ? "staple" : "catalog") : departmentId === "other" ? "catalog" : "staple",
       extra: { departmentId },
     });
   }
@@ -325,6 +379,12 @@ export async function nextWalmartLookup(now: Date): Promise<{ key: string; name:
 export async function nextKrogerLookup(now: Date): Promise<{ key: string; name: string; productId: string } | null> {
   const [row] = await nextKrogerLookups(now, 1);
   return row ? { key: row.key, name: row.name, productId: row.code } : null;
+}
+
+/** Skip a row after a server error. Does not count as a hit or a miss. */
+export async function holdLookup(side: Side, key: string, now: Date): Promise<void> {
+  const field = side === "walmart" ? "matchWalmartHoldUntil" : "matchKrogerHoldUntil";
+  await CatalogMaster.updateOne({ key }, { $set: { [field]: new Date(now.getTime() + LOOKUP_ERROR_HOLD_MS) } });
 }
 
 export async function markLookupResult(

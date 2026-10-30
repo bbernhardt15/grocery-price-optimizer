@@ -12,7 +12,7 @@ import { MemoryBudgetStore, MongoBudgetStore, utcDay } from "./budget";
 import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
-import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
 import { krogerLookupBlock, matchProgress, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
@@ -3215,5 +3215,280 @@ describe("catalog ingestion", () => {
     assert.equal(krogerProductIdForLookup("00049000042566"), "0004900004256");
     assert.equal(krogerProductIdForLookup("49000042566"), "0004900004256");
     assert.equal(krogerProductIdForLookup("070708200500"), "0007070820050");
+    assert.equal(krogerProductIdForLookup("70708200500"), "0007070820050");
+  });
+
+  it("stores a UPC as the same 13-digit Kroger id lookup sends", async () => {
+    const key = upcKey("049000042566");
+    const beanKey = upcKey("070708200500");
+    assert.ok(key && beanKey);
+    await CatalogMaster.deleteMany({ key: { $in: [key, beanKey] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: [key, beanKey] } });
+    await upsertCatalogRecords([
+      {
+        name: "Coca-Cola Classic",
+        brand: "Coca-Cola",
+        storeName: "Walmart",
+        price: 1.25,
+        upc: "49000042566",
+        productId: "4242",
+        retailerItemId: "4242",
+        priceSource: "live",
+        categories: ["Beverages"],
+      },
+    ]);
+    const walmart = await CatalogMaster.findOne({ key });
+    assert.equal(walmart?.upc, "0004900004256");
+    assert.equal(krogerProductIdForLookup(walmart?.upc), "0004900004256");
+    assert.equal(walmartUpcForLookup(walmart?.upc), "049000042566");
+    assert.equal(walmart?.walmartItemId, "4242");
+    assert.equal(walmart?.krogerProductId ?? "", "");
+    await upsertCatalogRecords([
+      {
+        name: "Coca-Cola Classic",
+        brand: "Coca-Cola",
+        storeName: "Kroger",
+        price: 1.3,
+        upc: "49000042566",
+        productId: "49000042566",
+        priceSource: "live",
+        categories: ["Beverages"],
+      },
+    ]);
+    const merged = await CatalogMaster.findOne({ key });
+    assert.equal(merged?.krogerProductId, "0004900004256");
+    assert.equal(merged?.upc, "0004900004256");
+    assert.equal(merged?.walmartItemId, "4242");
+    await upsertCatalogRecords([
+      {
+        name: "Bush's Black Beans",
+        brand: "Bush's Best",
+        storeName: "Walmart",
+        price: 0.86,
+        upc: "070708200500",
+        productId: "beans-1",
+        retailerItemId: "beans-1",
+        priceSource: "live",
+        categories: ["Canned Goods"],
+      },
+    ]);
+    const beans = await CatalogMaster.findOne({ key: beanKey });
+    assert.equal(krogerProductIdForLookup(beans?.upc), "0007070820050");
+    assert.equal(walmartUpcForLookup(beans?.upc), walmartUpcForLookup("070708200500"));
+  });
+
+  it("looks up grocery before household and skips general merchandise and recent misses", async () => {
+    const now = new Date("2026-10-30T12:00:00.000Z");
+    const rows = [
+      {
+        key: "match-deli",
+        name: "Sliced Turkey",
+        brand: "Oscar Mayer",
+        departmentId: "deli",
+        categoryPaths: ["Deli/Sliced Meat"],
+        upc: "049000042566",
+      },
+      {
+        key: "match-paper",
+        name: "Bounty Paper Towels",
+        brand: "Bounty",
+        departmentId: "household",
+        categoryPaths: ["Household Essentials/Paper"],
+        upc: "016000275287",
+      },
+      {
+        key: "match-organizer",
+        name: "Sterilite Closet Organizer",
+        brand: "Sterilite",
+        departmentId: "household",
+        categoryPaths: ["Household Essentials/Storage"],
+        upc: "070708200500",
+      },
+      {
+        key: "match-lamp",
+        name: "Honeywell Table Lamp",
+        brand: "Honeywell",
+        departmentId: "other",
+        categoryPaths: ["Home/Furniture"],
+        upc: "003063880160",
+      },
+      {
+        key: "match-recent-miss",
+        name: "Cheerios",
+        brand: "General Mills",
+        departmentId: "breakfast",
+        categoryPaths: ["Food/Breakfast Foods/Cereal"],
+        upc: "073214835404",
+        matchKrogerAt: new Date(now.getTime() - 86_400_000),
+      },
+    ];
+    await CatalogMaster.deleteMany({ key: { $in: rows.map((row) => row.key) } });
+    await CatalogDemand.deleteMany({});
+    await CatalogMaster.updateMany({}, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    for (const row of rows) {
+      await CatalogMaster.create({
+        key: row.key,
+        name: row.name,
+        brand: row.brand,
+        departmentId: row.departmentId,
+        categoryPaths: row.categoryPaths,
+        upc: row.upc,
+        walmartItemId: row.key,
+        ...(row.matchKrogerAt ? { matchKrogerAt: row.matchKrogerAt, matchKrogerVariant: 0 } : {}),
+        lastSeenAt: now,
+        status: "active",
+      });
+    }
+    const picks = await nextKrogerLookups(now, 5);
+    assert.deepEqual(
+      picks.map((pick) => pick.key),
+      ["match-deli", "match-paper"]
+    );
+    assert.equal(picks[0]?.code, krogerProductIdForLookup("049000042566"));
+    assert.equal(picks[0]?.priority, "staple");
+    assert.equal(picks[1]?.code, krogerProductIdForLookup("016000275287"));
+    assert.equal(krogerLookupBlock({ name: "Sterilite Closet Organizer", brand: "Sterilite", categoryPaths: ["Household Essentials/Storage"] }), "household-low-match");
+    assert.equal(
+      krogerLookupBlock({ name: "Honeywell Table Lamp", brand: "Honeywell", categoryPaths: ["Home/Furniture"] }) !== null,
+      true
+    );
+    const again = await nextKrogerLookups(new Date(now.getTime() + 86_400_000), 5);
+    assert.equal(
+      again.some((pick) => pick.key === "match-recent-miss" || pick.key === "match-organizer" || pick.key === "match-lamp"),
+      false
+    );
+  });
+
+  it("does not count a Kroger 503 as a miss or look that product up again the same day", async () => {
+    const now = new Date("2026-10-30T15:00:00.000Z");
+    const cokeUpc = "049000042566";
+    const millsUpc = "016000275287";
+    const cokeKey = upcKey(cokeUpc);
+    const millsKey = upcKey(millsUpc);
+    const cokeId = krogerProductIdForLookup(cokeUpc);
+    const millsId = krogerProductIdForLookup(millsUpc);
+    assert.ok(cokeKey && millsKey && cokeId && millsId);
+    await CatalogMaster.deleteMany({ key: { $in: [cokeKey, millsKey] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: [cokeKey, millsKey] } });
+    await CatalogDemand.deleteMany({});
+    await CatalogMatchDay.deleteMany({ day: utcDay(now) });
+    await CatalogMaster.create({
+      key: cokeKey,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      categoryPaths: ["Beverages/Soda"],
+      upc: cokeUpc,
+      walmartItemId: "coke-503",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: millsKey,
+      name: "Cheerios",
+      brand: "General Mills",
+      departmentId: "breakfast",
+      categoryPaths: ["Food/Breakfast Foods/Cereal"],
+      upc: millsUpc,
+      walmartItemId: "mills-503",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany(
+      { key: { $nin: [cokeKey, millsKey] } },
+      { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } }
+    );
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45255"],
+        zipCursor: 1,
+        locations: [{ zip: "45255", locationId: "01400431" }],
+        locationIndex: 0,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const seen: string[] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    const client = {
+      resolveLocation: async () => "01400431",
+      page: async () => {
+        throw new Error("discovery should not run");
+      },
+      lookupTerm: async () => {
+        throw new Error("a 503 is not a miss and should not fall through to a name search");
+      },
+      lookupProductId: async (id: string) => {
+        seen.push(id);
+        if (id === cokeId) {
+          const error = new Error("Kroger products request failed (503)") as Error & { status: number };
+          error.status = 503;
+          throw error;
+        }
+        return {
+          returned: 1,
+          records: [
+            {
+              name: "Cheerios",
+              brand: "General Mills",
+              storeName: "Kroger",
+              price: 3.48,
+              upc: millsId,
+              productId: millsId,
+              priceSource: "live" as const,
+              categories: ["Cereal"],
+            },
+          ],
+        };
+      },
+    };
+    const first = await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.equal(first.calls, 1);
+    assert.equal(first.paused, "server");
+    assert.deepEqual(seen, [cokeId]);
+    const held = await CatalogMaster.findOne({ key: cokeKey }).lean<{ matchKrogerAt?: Date; matchKrogerHoldUntil?: Date }>();
+    assert.equal(held?.matchKrogerAt, undefined);
+    assert.ok(held?.matchKrogerHoldUntil && held.matchKrogerHoldUntil.getTime() > now.getTime());
+    assert.equal((await matchProgress(now)).hitRate.krogerAttempts, 0);
+    seen.length = 0;
+    const second = await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => new Date(now.getTime() + 60_000),
+    });
+    assert.equal(second.calls, 1);
+    assert.deepEqual(seen, [millsId]);
+    const progress = await matchProgress(now);
+    assert.equal(progress.hitRate.krogerAttempts, 1);
+    assert.equal(progress.hitRate.krogerHits, 1);
+    const coke = await CatalogMaster.findOne({ key: cokeKey });
+    assert.equal(coke?.krogerProductId ?? "", "");
+    assert.equal(coke?.matchKrogerAt, undefined);
   });
 });

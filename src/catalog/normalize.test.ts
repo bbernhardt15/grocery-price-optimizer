@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { expandUpcE, gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
+import { expandUpcE, gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -74,9 +74,19 @@ describe("upcKey", () => {
     const kroger = krogerLookupCodes("012345000065");
     assert.deepEqual(kroger, ["0001234500006"]);
     assert.equal(krogerProductIdForLookup("070708200500"), "0007070820050");
+    assert.equal(krogerProductIdForLookup("70708200500"), "0007070820050");
     assert.equal(krogerProductIdForLookup("003063880160"), "0000306388016");
     assert.equal(krogerProductIdForLookup("073214835404"), "0007321483540");
     assert.deepEqual(krogerLookupCodes("070708200500"), ["0007070820050"]);
+    assert.equal(upcForStorage("049000042566"), "0004900004256");
+    assert.equal(upcForStorage("49000042566"), "0004900004256");
+    assert.equal(upcForStorage("0004900004256"), "0004900004256");
+    // A non-GS1 check digit cannot be rebuilt from the 13-digit body, so the
+    // stored Walmart code stays put. Lookup still zero-pads it to 13.
+    assert.equal(krogerProductIdForLookup(upcForStorage("070708200500")), "0007070820050");
+    assert.equal(krogerProductIdForLookup(upcForStorage("70708200500")), "0007070820050");
+    assert.equal(walmartUpcForLookup(upcForStorage("070708200500")), walmartUpcForLookup("070708200500"));
+    assert.equal(walmartUpcForLookup(upcForStorage("049000042566")), "049000042566");
     const zeroBody = "01200000345";
     const zeroCheck = String(gtinCheckDigit(zeroBody));
     assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);

@@ -21,6 +21,9 @@ const masterSchema = new Schema(
     /** Last finished cross-store lookup. A miss is tried again after the cooldown. Not a delete. */
     matchWalmartAt: { type: Date },
     matchKrogerAt: { type: Date },
+    /** Server error hold. The row is not a miss and is not counted in the hit rate. */
+    matchWalmartHoldUntil: { type: Date },
+    matchKrogerHoldUntil: { type: Date },
     /** Next GTIN variant to send. Zero means the primary code. */
     matchWalmartVariant: { type: Number },
     matchKrogerVariant: { type: Number },
@@ -193,6 +196,8 @@ export type CatalogMasterDoc = {
   lastSeenAt: Date;
   matchWalmartAt?: Date;
   matchKrogerAt?: Date;
+  matchWalmartHoldUntil?: Date;
+  matchKrogerHoldUntil?: Date;
   matchWalmartVariant?: number;
   matchKrogerVariant?: number;
   mergedAt?: Date;
