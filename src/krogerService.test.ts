@@ -336,5 +336,14 @@ describe("KrogerService.searchProducts", () => {
     assert.match(productUrl, /filter\.productId=0004900004256/);
     assert.match(productUrl, /filter\.locationId=01400431/);
     assert.equal(productUrl.includes("filter.term"), false);
+
+    const padded = await service.productsById("070708200500", "01400431");
+    assert.equal(padded.returned, 1);
+    const paddedUrl = urls.filter((url) => url.includes("/products")).at(-1) ?? "";
+    assert.match(paddedUrl, /filter\.productId=0007070820050/);
+    const numeric = await service.productsById("70708200500");
+    assert.equal(numeric.returned, 1);
+    const numericUrl = urls.filter((url) => url.includes("/products")).at(-1) ?? "";
+    assert.match(numericUrl, /filter\.productId=0007070820050/);
   });
 });

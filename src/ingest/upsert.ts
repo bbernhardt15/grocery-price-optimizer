@@ -1,7 +1,7 @@
 import { identifyFamily } from "../catalog/family";
 import { formatUnitPrice, parsePackageSize } from "../packageSize";
 import { mapToDepartment } from "../catalog/departments";
-import { upcKey } from "../catalog/normalize";
+import { krogerProductIdForLookup, upcForStorage, upcKey } from "../catalog/normalize";
 import type { RawCatalogRecord } from "../catalog/types";
 import { ingestConfig } from "./config";
 import { CatalogMaster, CatalogOffer, type CatalogStatus } from "./models";
@@ -167,10 +167,12 @@ export async function upsertCatalogRecords(
       storeName.toLowerCase() === "walmart"
         ? record.retailerItemId?.trim() || record.productId?.trim() || existing?.walmartItemId
         : existing?.walmartItemId;
+    const krogerRaw = record.productId?.trim() || record.retailerItemId?.trim() || "";
     const krogerProductId =
       storeName.toLowerCase() === "kroger"
-        ? record.productId?.trim() || record.retailerItemId?.trim() || existing?.krogerProductId
+        ? krogerProductIdForLookup(krogerRaw) || krogerRaw || existing?.krogerProductId
         : existing?.krogerProductId;
+    const storedUpc = upcForStorage(record.upc);
     const hadBoth = Boolean(existing?.walmartItemId?.trim() && existing?.krogerProductId?.trim());
     const bothNow = Boolean(walmartItemId?.trim() && krogerProductId?.trim());
     await CatalogMaster.updateOne(
@@ -178,7 +180,7 @@ export async function upsertCatalogRecords(
       {
         $set: {
           key,
-          ...(upcKey(record.upc) ? { upc: record.upc?.replace(/\D/g, "") } : {}),
+          ...(storedUpc ? { upc: storedUpc } : {}),
           name: !existing || name.length >= existing.name.length ? name : existing.name,
           brand: !existing || brand.length >= (existing.brand?.length ?? 0) ? brand : existing.brand,
           imageUrls: images,

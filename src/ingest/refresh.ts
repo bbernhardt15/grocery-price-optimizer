@@ -111,11 +111,7 @@ function collectCatalogIds(value: unknown, into: Set<string>, depth = 0): void {
 
 function lookupCode(storeName: string, master: MasterRow): string | null {
   if (storeName === "Kroger") {
-    const stored = master.krogerProductId?.replace(/\D/g, "") ?? "";
-    if (stored.length === 13 || stored.length === 14) {
-      return krogerProductIdForLookup(stored) ?? stored;
-    }
-    return krogerProductIdForLookup(master.upc || stored || master.key);
+    return krogerProductIdForLookup(master.krogerProductId) || krogerProductIdForLookup(master.upc || master.key);
   }
   return walmartUpcForLookup(master.upc || master.key);
 }

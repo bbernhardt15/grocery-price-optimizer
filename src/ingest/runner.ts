@@ -28,7 +28,7 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
-import { finishLookups, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
+import { finishLookups, holdLookup, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { finishRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
@@ -604,12 +604,17 @@ export async function stepWalmart(options: {
             cp.lookupSingle = true;
             cp.attempts = 0;
             await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
-          } else if (kind === "fatal" || cp.attempts >= 2) {
+          } else if (kind === "fatal") {
             const finished = await finishLookups("walmart", picks, nowFn(), { forceMiss: true });
             cp.matchAttempts += finished.attempts;
             cp.attempts = 0;
             await persist("running", { error: ingestErrorDetail("walmart", error, params, nowFn()) });
           } else {
+            if (kind === "server") {
+              for (const pick of picks) {
+                await holdLookup("walmart", pick.key, nowFn());
+              }
+            }
             const outcome = await failWalmart(cp, error, sleep, nowFn(), params);
             cp = outcome.checkpoint;
             paused = outcome.paused;
@@ -1062,9 +1067,12 @@ export async function stepKroger(options: {
         return "done";
       }
       const kind = retryClass(error);
-      if (kind === "fatal" || cp.attempts >= 2) {
+      if (kind === "fatal") {
         await markKrogerLookupMiss(lookupPickFromTerm(pending));
         return "done";
+      }
+      if (kind === "server") {
+        await holdLookup("kroger", pending.key, nowFn());
       }
       cp.termFallback = pending;
       const outcome = await failKroger(cp, error, sleep, nowFn(), { request: "products", term, lookup: true });
@@ -1147,7 +1155,7 @@ export async function stepKroger(options: {
             if (outcome === "stop") {
               break;
             }
-          } else if (kind === "fatal" || cp.attempts >= 2) {
+          } else if (kind === "fatal") {
             const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true });
             cp.matchAttempts += finished.attempts;
             cp.attempts = 0;
@@ -1155,6 +1163,9 @@ export async function stepKroger(options: {
               error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code }, nowFn()),
             });
           } else {
+            if (kind === "server") {
+              await holdLookup("kroger", picked.key, nowFn());
+            }
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",
               productId: picked.code,

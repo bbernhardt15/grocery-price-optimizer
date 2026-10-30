@@ -253,7 +253,7 @@ export async function catalogStatus() {
       },
       retryDays: progress.retryDays,
       walmartBatch: progress.walmartBatch,
-      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1) and the body is zero-padded, so 070708200500 becomes 0007070820050. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. The old 3/1220 hit rate was those invalid ids. With valid ids, the hit rate should track how many of those UPCs Kroger stocks at the queried store, often tens of percent for national brands. A miss is tried again after the cooldown. Nothing is deleted.",
+      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1, and when a leading zero was lost) and the body is zero-padded, so 070708200500 and 70708200500 become 0007070820050. Stored UPCs use that same id when it still matches the Walmart code. Grocery departments are looked up before household, baby, personal care, and pet. General merchandise and household rows that are not paper, cleaning, or laundry are not looked up. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. A 503 is not a miss and is not counted in the hit rate; that product waits a day and is tried again. A real miss waits out the cooldown. Nothing is deleted.",
     },
     recategorize,
     caps: {

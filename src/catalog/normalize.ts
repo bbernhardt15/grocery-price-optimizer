@@ -181,8 +181,9 @@ export function upcKey(upc: string | undefined | null): string | null {
  * 13-digit Kroger `filter.productId`.
  * UPC-A is 12 digits and the last digit is the check digit. Drop it and
  * left-pad, even when that digit fails GS1: Walmart codes such as
- * `070708200500` are still sent as `0007070820050`. A 13-digit Kroger id
- * is left intact when its last digit is not a check digit.
+ * `070708200500` are still sent as `0007070820050`. The same code with its
+ * leading zero dropped (`70708200500`) takes that path too. A 13-digit Kroger
+ * id is left intact when its last digit is not a check digit.
  */
 export function krogerProductIdForLookup(upc: string | undefined | null): string | null {
   if (!upc) {
@@ -196,7 +197,12 @@ export function krogerProductIdForLookup(upc: string | undefined | null): string
   if (digits.length < 8 || digits.length > 14) {
     return null;
   }
-  if (digits.length === 12) {
+  // UPC-A is 12 digits including the check digit. An 11-digit code that does
+  // not start with 0 is that same UPC with the leading zero dropped (JSON
+  // numbers do this). Drop the check digit even when it fails GS1, matching
+  // the 12-digit rule. An 11-digit code that starts with 0 is the UPC body
+  // with no check digit, so it is only shortened when the padded form checks.
+  if (digits.length === 12 || (digits.length === 11 && digits[0] !== "0")) {
     return digits.slice(0, -1).padStart(13, "0");
   }
   if ((digits.length === 8 || digits.length === 13 || digits.length === 14) && hasStandardCheckDigit(digits)) {
@@ -211,6 +217,29 @@ export function krogerProductIdForLookup(upc: string | undefined | null): string
     return null;
   }
   return digits.padStart(13, "0");
+}
+
+/**
+ * Digits to store for a UPC. This is the same 13-digit Kroger id
+ * {@link krogerProductIdForLookup} sends, so lookup and storage stay aligned.
+ * The raw digits are kept when padding would change the shared UPC key or the
+ * Walmart check-digit form.
+ */
+export function upcForStorage(upc: string | undefined | null): string | undefined {
+  const digits = upc?.replace(/\D/g, "") ?? "";
+  if (!digits || !upcKey(digits)) {
+    return undefined;
+  }
+  const padded = krogerProductIdForLookup(digits);
+  if (!padded || upcKey(padded) !== upcKey(digits)) {
+    return digits;
+  }
+  const walmartBefore = walmartUpcForLookup(digits);
+  const walmartAfter = walmartUpcForLookup(padded);
+  if (walmartBefore && walmartAfter && walmartBefore !== walmartAfter) {
+    return digits;
+  }
+  return padded;
 }
 
 /** 12-digit UPC-A with check digit, for Walmart Affiliate `GET /items?upc=`. */
