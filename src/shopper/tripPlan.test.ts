@@ -183,7 +183,7 @@ describe("applyTripEdits", () => {
     assert.equal(aldi?.items[0].name, "White Bread");
     assert.equal(next.total, 6.75);
     assert.equal(walmart?.handoff.action.type, "walmart_cart");
-    assert.equal(walmart?.handoff.action.label, "Send to Walmart cart");
+    assert.equal(walmart?.handoff.action.label, "Open in Walmart cart");
   });
 
   it("locks a store for every line that store can fill", () => {

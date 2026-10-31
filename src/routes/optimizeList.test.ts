@@ -923,7 +923,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(byStore.Walmart.nearbyStore?.name, "WM Supercenter");
       assert.equal(byStore.Walmart.nearbyStore?.storeId, "2066");
       assert.equal(byStore.Walmart.handoff.action.type, "walmart_cart");
-      assert.equal(byStore.Walmart.handoff.action.label, "Send to Walmart cart");
+      assert.equal(byStore.Walmart.handoff.action.label, "Open in Walmart cart");
       const walmartCart = new URL(byStore.Walmart.handoff.action.url ?? "");
       assert.match(walmartCart.pathname, /\/c\/impact-1\/568844\/9383$/);
       const walmartDestination = new URL(walmartCart.searchParams.get("u") ?? "");

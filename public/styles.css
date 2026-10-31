@@ -862,8 +862,39 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
 .calm-item .item-name { flex: 1 1 10rem; min-width: 0; }
 .calm-item .item-price { flex: 0 1 auto; }
 .calm-item .swap-quiet { flex: 1 0 100%; }
-.calm-store header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.calm-store header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .calm-store header p { margin: 0; font-weight: 700; }
+.handoff-note { margin: 8px 0 0; color: var(--muted); }
+.store-ready { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.store-ready h4 { margin: 0; font-size: 1.05rem; }
+.ready-hint { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
+.ready-group h5 { margin: 8px 0 6px; font-size: 0.85rem; color: var(--muted); font-weight: 700; }
+.ready-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ready-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; background: var(--bg);
+}
+.ready-check { display: flex; gap: 10px; align-items: flex-start; flex: 1 1 12rem; min-width: 0; }
+.ready-check input { width: 1.35rem; height: 1.35rem; margin-top: 2px; flex: none; }
+.ready-name { font-weight: 700; overflow-wrap: anywhere; }
+.ready-line.is-done .ready-name { text-decoration: line-through; color: var(--muted); }
+.ready-price { font-weight: 750; margin-left: auto; }
+.ready-search { min-height: 44px; display: inline-flex; align-items: center; }
+.ready-subtotal { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0 0; font-weight: 750; }
+.store-ready .handoff-btn { margin-top: 4px; }
+dialog.shopping-mode {
+  width: min(640px, 100%);
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0 auto;
+  border-radius: 0;
+}
+dialog.shopping-mode .sheet-body { max-height: 100dvh; }
+dialog.shopping-mode .ready-name { font-size: 1.55rem; line-height: 1.2; }
+dialog.shopping-mode .ready-price { font-size: 1.35rem; }
+dialog.shopping-mode .ready-line { min-height: 88px; padding: 12px; }
+dialog.shopping-mode .ready-group h5 { font-size: 1.05rem; }
+dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 .shop-coupon-hint {
   margin: 0 0 4px; color: var(--muted); font-size: 0.82rem; line-height: 1.35;
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px;

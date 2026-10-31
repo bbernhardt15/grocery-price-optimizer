@@ -538,11 +538,11 @@ function walmartAction(
 
   return {
     type: "walmart_cart",
-    label: "Send to Walmart cart",
+    label: "Open in Walmart cart",
     url,
     status: "ready",
     ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-    detail: `Opens walmart.com with the items in the cart link (${count} item${count === 1 ? "" : "s"}). ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
+    detail: `Opens a Walmart link with the items in the cart (${count} item${count === 1 ? "" : "s"}). This is a link, not a write to a Walmart account. ${attribution} Grocery Gitter does not call a Walmart cart API and does not report the cart as filled. Prices are walmart.com catalog; the Affiliate search API has no store-price filter.${skippedWalmartNote(skippedNames)}`,
   };
 }
 

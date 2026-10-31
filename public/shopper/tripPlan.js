@@ -354,11 +354,11 @@ export function buildHandoff(storeName, items, capabilities = {}, prior) {
     if (url) {
       action = {
         type: "walmart_cart",
-        label: `Send to ${storeName} cart`,
+        label: "Open in Walmart cart",
         url,
         status: "ready",
         ...(firstUrl ? { fallbackUrl: firstUrl } : {}),
-        detail: "Opens walmart.com with the items in the cart link. Grocery Gitter does not report the cart as filled.",
+        detail: "Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.",
       };
     }
   }
@@ -718,13 +718,14 @@ export function fewerStorePlan(stores, capabilities = {}) {
   };
 }
 
-/** Cart means Kroger or Walmart can take the items. Every other store is a list. */
+/** Kroger can write the account cart. Walmart is only a cart link. Every other store is a list. */
 export function handoffMark(store) {
   const tier = store?.handoff?.tier || tierForStore(store?.storeName);
   const type = store?.handoff?.action?.type || "";
-  if (tier === "cart" || type === "kroger_cart" || type === "walmart_cart") {
-    return { kind: "cart", label: "Cart" };
-  }
+  const key = normalizeStoreKey(store?.storeName);
+  if (type === "walmart_cart") return { kind: "link", label: "Cart link" };
+  if (key === "walmart") return { kind: "list", label: "List" };
+  if (tier === "cart" || type === "kroger_cart") return { kind: "cart", label: "Cart" };
   return { kind: "list", label: "List" };
 }
 
