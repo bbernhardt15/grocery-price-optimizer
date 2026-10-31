@@ -12,10 +12,16 @@ export const SKIP_LABEL = "Skip for now";
 
 const FLOW = [
   {
-    id: "place",
+    id: "zip",
     title: "Where do you shop?",
-    hint: "A ZIP picks nearby stores. Leave a store unchecked to keep it out of the plan.",
-    kind: "place",
+    hint: "Enter a ZIP. We'll look for stores within about 25 miles.",
+    kind: "zip",
+  },
+  {
+    id: "stores",
+    title: "Stores near you",
+    hint: "Deselect any you don't want to include.",
+    kind: "stores",
   },
   {
     id: "receipts",
@@ -40,8 +46,8 @@ const EXTRA = [
   { id: "summary", title: "Here's what we'll shop for", hint: "Edit anything that looks off, then start shopping.", kind: "summary" },
   {
     id: "products",
-    title: "What do you buy?",
-    hint: "Optional. Mark what you never buy, or answer one category when you add it.",
+    title: "Review my products",
+    hint: "Tap a category you never buy. Everything else stays available.",
     kind: "products",
   },
 ];
@@ -192,7 +198,9 @@ export function progressLabel(id) {
 }
 
 export function primaryLabel(id) {
-  return id === "summary" ? "Start shopping" : "Next";
+  if (id === "summary") return "Start shopping";
+  if (id === "zip") return "Find stores";
+  return "Next";
 }
 
 function withStep(profile, stepId, at) {
@@ -221,7 +229,7 @@ export function answerStep(profile, stepId, answer, at = Date.now()) {
       picky: answer?.picky ?? null,
     };
   }
-  if (stepId === "place" && answer && typeof answer === "object") {
+  if ((stepId === "place" || stepId === "stores") && answer && typeof answer === "object") {
     next.shopStores = Array.isArray(answer.stores) ? answer.stores : next.shopStores;
   }
   if (stepId === "loves") next.loves = answer || [];
@@ -289,6 +297,7 @@ export function resumeStep(profile) {
   if (parsed.onboarding.status === "done" || parsed.onboarding.status === "skipped") return "summary";
   const steps = profileSteps();
   if (steps.some((step) => step.id === parsed.onboarding.step)) return parsed.onboarding.step;
+  if (parsed.onboarding.step === "place") return parsed.shopStores?.length ? "receipts" : "zip";
   if (parsed.onboarding.step === "allergies" || parsed.onboarding.step === "diets" || parsed.shopStores?.length) return "receipts";
   return steps[0]?.id || "place";
 }
@@ -340,7 +349,7 @@ export function summarySections(profile) {
   const products = Object.values(parsed.productPreferences || {});
   const stores = (parsed.shopStores || []).join(", ");
   return [
-    { id: "place", step: "place", label: "Stores", value: stores || "Not set yet" },
+    { id: "stores", step: "stores", label: "Stores", value: stores || "Not set yet" },
     { id: "allergies", step: "allergies", label: "Allergies", value: joinLabels(parsed.allergies) },
     { id: "diets", step: "diets", label: "Diets", value: [joinLabels(parsed.diets), (parsed.dietNotes || []).join(", ")].filter((part) => part && part !== "Not set yet").join(" · ") || "Not set yet" },
     { id: "receipts", step: "receipts", label: "From your receipts", value: preferenceLine(parsed, products) },

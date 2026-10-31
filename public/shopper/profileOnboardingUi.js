@@ -24,7 +24,7 @@ import {
   summarySections,
 } from "./profileOnboarding.js";
 import { learnPreference, forgetPreference, isStoreBrand } from "./productPreference.js";
-import { applyCheapestDefaults, asksNameBrand, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
+import { applyCheapestDefaults, asksNameBrand, categorySearch, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
 import { displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
@@ -77,6 +77,8 @@ export function mountProfileOnboarding(deps = {}) {
   /** @type {File[]} */
   let pendingFiles = [];
   let editingFamily = "";
+  /** @type {Record<string, object[]>} */
+  let brandShelves = {};
   let lazyFamily = "";
   let resumeStatus = "";
   let dietMode = false;
@@ -84,7 +86,7 @@ export function mountProfileOnboarding(deps = {}) {
   let dietDone = null;
 
   function blankCategory() {
-    return { mode: "", brand: "", productId: "", attributes: [], product: null };
+    return { mode: "", brand: "", brands: [], productId: "", attributes: [], product: null };
   }
 
   function persist(next) {
@@ -171,16 +173,22 @@ export function mountProfileOnboarding(deps = {}) {
         <button type="button" class="choice-card" id="profile-organic" aria-pressed="${organic ? "true" : "false"}">Organic if the price is close</button>
         <p class="profile-label">Different for an aisle</p>${aisles}`;
     }
-    if (step.kind === "place") {
+    if (step.kind === "zip") {
       const zip = escapeText(deps.getZip?.() || "");
-      const selected = new Set(draft.shopStores || []);
-      const open = !draft.shopStores?.length;
-      const nearby = storesForZip(deps.getZip?.() || "");
-      const stores = storeBoxes(nearby.stores, open, selected);
       return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
+        <button type="button" class="ghost" id="profile-use-location">Use my location</button>`;
+    }
+    if (step.kind === "stores") {
+      const nearby = storesForZip(deps.getZip?.() || "");
+      if (nearby.source !== "nearby") {
+        return `<p class="muted">Enter a ZIP first. Stores within about 25 miles show up on the next step.</p>`;
+      }
+      const selected = new Set(draft.shopStores || []);
+      const open = !draft.shopStores?.length;
+      return `<p class="profile-label">Deselect any you don't want to include.</p>
         <p id="profile-store-note" class="muted">${escapeText(nearby.note)}</p>
-        <fieldset class="store-picker"><legend>Stores to shop</legend><div id="profile-store-list">${stores}</div></fieldset>`;
+        <fieldset class="store-picker"><legend>Stores near you</legend><div id="profile-store-list">${storeBoxes(nearby.stores, open, selected)}</div></fieldset>`;
     }
     if (step.kind === "receipts") {
       if (receiptPhase === "learned") {
@@ -302,34 +310,45 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function bindPlaceInput() {
-    const zipInput = $("profile-zip");
-    if (!zipInput || zipInput.dataset.bound === "1") return;
-    zipInput.dataset.bound = "1";
-    zipInput.addEventListener("input", () => {
-      const host = $("profile-store-list");
-      const note = $("profile-store-note");
-      const nearby = storesForZip(zipInput.value);
-      if (note) note.textContent = nearby.note;
-      if (!host) return;
-      const selected = new Set(draft.shopStores || []);
-      const open = !draft.shopStores?.length;
-      host.innerHTML = storeBoxes(nearby.stores, open, selected);
-    });
+    const location = $("profile-use-location");
+    if (location && location.dataset.bound !== "1") {
+      location.dataset.bound = "1";
+      location.addEventListener("click", () => {
+        void (async () => {
+          if (!deps.locateZip) {
+            deps.toast?.("Type a ZIP. Location isn't available here.");
+            return;
+          }
+          location.disabled = true;
+          try {
+            const zip = await deps.locateZip();
+            const zipInput = $("profile-zip");
+            if (zip && zipInput) zipInput.value = zip;
+            deps.setZip?.(zip);
+          } catch (error) {
+            deps.toast?.(error instanceof Error ? error.message : "Couldn't use location. Type a ZIP.");
+          } finally {
+            location.disabled = false;
+          }
+        })();
+      });
+    }
   }
 
   function brandChoices(row) {
     const known = knownBrandNames(row?.family).map((name) => displayBrand(name)).filter(Boolean);
-    const detected = row?.mode === "brand" ? displayBrand(row.brand) : "";
+    const shelfNames = nameBrandsFor(brandShelves[row?.family] || [], row?.family).map((item) => item.brand);
+    const detected = row?.mode === "brand" || row?.mode === "cheapestPicks" ? (row.brands || []).concat(row.brand || []) : [];
     const names = [];
     const seen = new Set();
-    for (const name of [detected, ...known]) {
+    for (const name of [...detected, ...known, ...shelfNames].map((item) => displayBrand(item)).filter(Boolean)) {
       if (!name || isStoreBrand(name) || isProduceFamily(row?.family)) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       names.push(name);
     }
-    return names.slice(0, 8);
+    return names.slice(0, 24);
   }
 
   function receiptReady() {
@@ -391,9 +410,10 @@ export function mountProfileOnboarding(deps = {}) {
     if (stepId === "receipts" && receiptPhase !== "learned") paintReceiptFiles();
   }
 
-  function readPlace() {
+  function readZip() {
     const zipInput = $("profile-zip");
-    const error = zipAdvanceError(zipInput?.value || "");
+    const raw = String(zipInput?.value || "").trim();
+    const error = !raw ? "Enter a 5-digit ZIP." : zipAdvanceError(raw);
     const zipError = $("profile-zip-error");
     if (error) {
       if (zipError) {
@@ -404,15 +424,45 @@ export function mountProfileOnboarding(deps = {}) {
       return null;
     }
     if (zipError) zipError.hidden = true;
-    const zip = normalizeZipInput(zipInput?.value || "");
-    if (zip) deps.setZip?.(zip);
+    const zip = normalizeZipInput(raw);
+    if (!/^\d{5}/.test(zip)) {
+      if (zipError) {
+        zipError.hidden = false;
+        zipError.textContent = "Enter a 5-digit ZIP.";
+      }
+      return null;
+    }
+    deps.setZip?.(zip);
+    return zip;
+  }
+
+  function readPlace() {
     const boxes = [...document.querySelectorAll("[data-place-store]")];
     const picked = boxes.map((box) => (box.checked ? box.getAttribute("data-place-store") : "")).filter(Boolean);
-    if (boxes.length && !picked.length) {
+    if (!boxes.length) {
+      deps.toast?.("No stores near that ZIP. Go back and try another.");
+      return null;
+    }
+    if (!picked.length) {
       deps.toast?.("Pick at least one store.");
       return null;
     }
     return { stores: picked.length === boxes.length ? [] : picked };
+  }
+
+  async function loadBrandShelf(family) {
+    if (!family || brandShelves[family] || !deps.loadStaple) return;
+    let tiles = [];
+    try {
+      tiles = await deps.loadStaple(categorySearch(family) || family);
+    } catch {
+      tiles = [];
+    }
+    brandShelves[family] = tiles || [];
+    if (editingFamily === family && stepId === "receipts") {
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = stageHtml(stepById("receipts"));
+    }
   }
 
   async function loadProducts() {
@@ -492,7 +542,8 @@ export function mountProfileOnboarding(deps = {}) {
       {
         family: current.id,
         mode: chosen,
-        brand: chosen === "brand" ? categoryDraft.brand || "" : "",
+        brand: chosen === "brand" || chosen === "cheapestPicks" ? categoryDraft.brand || "" : "",
+        brands: chosen === "cheapestPicks" ? categoryDraft.brands || (categoryDraft.brand ? [categoryDraft.brand] : []) : [],
         productId: chosen === "brand" ? categoryDraft.productId || "" : "",
         size: categoryDraft.product?.sizeLabel || "",
         attributes: categoryDraft.attributes || [],
@@ -650,7 +701,10 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (stepId === "diets") rememberDietNotes();
-    if (stepId === "place" && !skipped) {
+    if (stepId === "zip" && !skipped) {
+      if (!readZip()) return;
+    }
+    if ((stepId === "stores" || stepId === "place") && !skipped) {
       const place = readPlace();
       if (!place) return;
       draft.shopStores = place.stores;
@@ -701,7 +755,7 @@ export function mountProfileOnboarding(deps = {}) {
         for (let index = categoryIndex + 1; index < categories.length; index += 1) {
           if (neverIds.has(categories[index].id)) continue;
           const existing = draft.categoryPreferences?.[categories[index].id];
-          if (existing?.mode === "brand" || existing?.mode === "storeBrand" || existing?.mode === "cheapest" || existing?.mode === "never") continue;
+          if (existing?.mode === "brand" || existing?.mode === "storeBrand" || existing?.mode === "cheapest" || existing?.mode === "cheapestPicks" || existing?.mode === "never") continue;
           draft = setCategoryPreference(draft, { family: categories[index].id, mode: "skip", brand: "", productId: "", size: "", attributes: [] }, at);
         }
       } else if (nextDetailIndex(categoryIndex + 1) >= 0) {
@@ -869,15 +923,34 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (target.dataset.learnedChange) {
       editingFamily = editingFamily === target.dataset.learnedChange ? "" : target.dataset.learnedChange;
+      const family = editingFamily;
       render();
       document.querySelector(".learned-picker")?.scrollIntoView({ block: "nearest" });
+      if (family) void loadBrandShelf(family);
+      return;
+    }
+    if (target.dataset.learnedToggle === "brand") {
+      const family = target.dataset.learnedFamily || "";
+      const brand = target.dataset.learnedBrand || "";
+      learnedRows = learnedRows.map((row) => {
+        if (row.family !== family) return row;
+        const current = row.brands?.length ? row.brands.slice() : row.mode === "brand" && row.brand ? [row.brand] : [];
+        const nextBrands = current.some((item) => item.toLowerCase() === brand.toLowerCase())
+          ? current.filter((item) => item.toLowerCase() !== brand.toLowerCase())
+          : [...current, brand].slice(0, 12);
+        return { ...row, brands: nextBrands, brand: nextBrands[0] || "", mode: nextBrands.length ? "cheapestPicks" : row.mode };
+      });
+      render();
       return;
     }
     if (target.dataset.learnedMode) {
+      const family = target.dataset.learnedFamily || "";
+      const row = learnedRows.find((item) => item.family === family);
       const next = applyLearnedChoice(learnedRows, {
-        family: target.dataset.learnedFamily || "",
+        family,
         mode: target.dataset.learnedMode,
-        brand: target.dataset.learnedBrand || "",
+        brand: target.dataset.learnedBrand || row?.brand || "",
+        brands: target.dataset.learnedMode === "cheapestPicks" ? row?.brands || (row?.brand ? [row.brand] : []) : undefined,
       });
       if (next === learnedRows) return;
       learnedRows = next;
@@ -940,11 +1013,17 @@ export function mountProfileOnboarding(deps = {}) {
         brand: target.dataset.buyBrand,
         name: target.dataset.buyBrand,
       };
+      const current = categoryDraft.brands?.length ? categoryDraft.brands.slice() : categoryDraft.brand ? [categoryDraft.brand] : [];
+      const brand = target.dataset.buyBrand;
+      const brands = current.some((item) => item.toLowerCase() === brand.toLowerCase())
+        ? current.filter((item) => item.toLowerCase() !== brand.toLowerCase())
+        : [...current, brand].slice(0, 12);
       categoryDraft = {
         ...categoryDraft,
-        mode: "brand",
+        mode: brands.length ? "cheapestPicks" : categoryDraft.mode,
         touched: true,
-        brand: target.dataset.buyBrand,
+        brand: brands[0] || "",
+        brands,
         productId: product.id || "",
         product,
       };

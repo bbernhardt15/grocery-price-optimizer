@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 import { PLAN_TIMEOUT_MS, fetchWithTimeout, planTimedOut } from "../../public/shopper/planLoad.js";
 
 describe("plan request timeout", () => {
-  it("caps a plan request at 8 seconds", () => {
-    assert.equal(PLAN_TIMEOUT_MS, 8000);
+  it("caps a plan request long enough for a few stores", () => {
+    assert.equal(PLAN_TIMEOUT_MS, 22000);
   });
 
   it("aborts a fetch that never returns", async () => {

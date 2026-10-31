@@ -5,6 +5,8 @@ import { after, afterEach, before, describe, it } from "node:test";
 import app from "../app";
 import {
   KROGER_SHOPPER_COOKIE,
+  authorizeLocationIsSafe,
+  krogerCartSessions,
   readKrogerOAuthConfig,
   sealShopperToken,
   signCartState,
@@ -190,9 +192,14 @@ describe("Kroger cart handoff routes", () => {
     const authorize = new URL(body.authorizeUrl);
     const state = authorize.searchParams.get("state");
     assert.ok(state);
+    assert.ok(state.startsWith("s1."));
+    assert.ok(body.authorizeUrl.length < 1800);
+    assert.equal(authorizeLocationIsSafe(body.authorizeUrl), true);
+    assert.match(body.navigateUrl, /^\/api\/kroger\/oauth\/authorize\?state=/);
     const config = readKrogerOAuthConfig();
     assert.ok(config);
-    const pending = verifyCartState(config, state);
+    assert.equal(verifyCartState(config, state), null);
+    const pending = krogerCartSessions.peekPending(state);
     assert.ok(pending);
     assert.equal(pending.items[0].upc, "0001111041700");
     assert.equal(pending.items[0].quantity, 2);
@@ -213,17 +220,20 @@ describe("Kroger cart handoff routes", () => {
     assert.match(String(response.headers["content-type"] ?? ""), /application\/json/);
     const body = JSON.parse(response.body) as {
       authorizeUrl: string;
+      navigateUrl: string;
       status: string;
       itemCount: number;
     };
     assert.equal(body.status, "needs_shopper_login");
     assert.equal(body.itemCount, 1);
     assert.match(body.authorizeUrl, /connect\/oauth2\/authorize/);
+    assert.ok(body.authorizeUrl.length < 1800);
     const state = new URL(body.authorizeUrl).searchParams.get("state");
     assert.ok(state);
     const config = readKrogerOAuthConfig();
     assert.ok(config);
-    const pending = verifyCartState(config, state);
+    assert.equal(verifyCartState(config, state), null);
+    const pending = krogerCartSessions.peekPending(state);
     assert.equal(pending?.items[0]?.upc, "0001111041700");
     assert.equal(pending?.locationId, "01400441");
 
@@ -257,7 +267,40 @@ describe("Kroger cart handoff routes", () => {
     const location = String(response.headers.location ?? "");
     assert.match(location, /^https:\/\/api\.kroger\.com\/v1\/connect\/oauth2\/authorize\?/);
     assert.match(location, /response_type=code/);
+    assert.ok(location.length < 1800);
+    assert.doesNotMatch(String(response.headers["content-type"] ?? ""), /application\/json/);
     assert.doesNotMatch(response.body, /authorizeUrl/);
+  });
+
+  it("gives a browser navigation a short 302 to Kroger, and a failure stays in the app", async () => {
+    enableOAuth();
+    const start = await rawRequest(`${origin}/api/kroger/cart/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ items: [{ upc: "1111041700", quantity: 1, name: "Milk" }] }),
+    });
+    const issued = JSON.parse(start.body) as { navigateUrl: string; authorizeUrl: string };
+    const nav = await rawRequest(`${origin}${issued.navigateUrl}`, {
+      headers: { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+    });
+    assert.equal(nav.status, 302);
+    const location = String(nav.headers.location ?? "");
+    assert.match(location, /^https:\/\/api\.kroger\.com\/v1\/connect\/oauth2\/authorize\?/);
+    assert.ok(location.length < 1800);
+    assert.equal(location, issued.authorizeUrl);
+    assert.doesNotMatch(String(nav.headers["content-type"] ?? ""), /application\/json/);
+    assert.doesNotMatch(nav.body, /invalid response was received/i);
+    assert.doesNotMatch(nav.body, /"authorizeUrl"/);
+
+    const failed = await rawRequest(`${origin}/api/kroger/oauth/authorize?state=nope`, {
+      headers: { Accept: "text/html" },
+    });
+    assert.equal(failed.status, 302);
+    const failedUrl = new URL(String(failed.headers.location ?? ""), origin);
+    assert.equal(failedUrl.searchParams.get("kroger"), "error");
+    assert.match(failedUrl.searchParams.get("message") || "", /Try again|Start again/i);
+    assert.doesNotMatch(String(failed.headers["content-type"] ?? ""), /application\/json/);
+    assert.doesNotMatch(failed.body, /\{"message"/);
   });
 
   it("does not claim a cart fill when the OAuth callback has no pending items", async () => {
@@ -339,14 +382,18 @@ describe("Kroger cart handoff routes", () => {
     );
     assert.equal(response.status, 200);
     const html = await response.text();
-    assert.match(html, /Added to your Kroger cart/);
+    assert.match(html, /Your cart is ready/);
+    assert.match(html, /Finish checkout in the Kroger app or site/);
+    assert.match(html, /Back to Grocery Gitter/);
     assert.match(html, /accepted 2 items/i);
+    assert.doesNotMatch(html, /location\.replace/);
     assert.match(html, /kroger\.com\/cart/);
-    const back = appReturn(html);
-    assert.equal(back.kind, "added");
-    assert.equal(back.step, "shop");
-    assert.match(back.message, /accepted 2 items/i);
-    assert.match(back.message, /kroger\.com/i);
+    const ready = html.match(/href="(\/[^"]*kroger=added[^"]*)"/);
+    assert.ok(ready, "success page links back into the app");
+    const readyUrl = new URL(ready[1].replaceAll("&amp;", "&"), "https://grocery.example");
+    assert.equal(readyUrl.searchParams.get("kroger"), "added");
+    assert.equal(readyUrl.searchParams.get("step"), "shop");
+    assert.match(readyUrl.searchParams.get("message") || "", /cart is ready/i);
     assert.equal(calls.length, 2);
     assert.match(calls[0].body, /grant_type=authorization_code/);
     assert.doesNotMatch(calls[0].body, /client_credentials/);
@@ -488,7 +535,8 @@ describe("Kroger cart handoff routes", () => {
     assert.ok(state);
     const config = readKrogerOAuthConfig();
     assert.ok(config);
-    const pending = verifyCartState(config, state);
+    assert.equal(verifyCartState(config, state), null);
+    const pending = krogerCartSessions.peekPending(state);
     assert.ok(pending);
     assert.equal(pending.purpose, "connect");
     assert.equal(pending.items.length, 0);

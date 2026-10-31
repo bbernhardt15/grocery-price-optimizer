@@ -41,7 +41,8 @@ export function applyLearnedReceipts(profile, learned, at = Date.now()) {
       {
         family: row.family,
         mode: row.mode,
-        brand: row.mode === "brand" ? row.brand || "" : "",
+        brand: row.mode === "brand" || row.mode === "cheapestPicks" ? row.brand || "" : "",
+        brands: row.mode === "cheapestPicks" ? row.brands || (row.brand ? [row.brand] : []) : [],
         productId: "",
         size: row.size || "",
         attributes: [],

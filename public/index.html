@@ -127,7 +127,6 @@
           </button>
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="drawer-profile" type="button" class="ghost">Edit my taste profile</button>
-          <button id="drawer-buy" type="button" class="ghost">Edit what I buy</button>
           <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
           <section class="drawer-help" aria-labelledby="help-title">
             <h2 id="help-title">Help</h2>
@@ -462,6 +461,16 @@
         </p>
         <p id="paywall-error" class="status" role="alert" hidden></p>
       </div>
+    </dialog>
+    <dialog id="cart-ready" class="sheet" aria-labelledby="cart-ready-title">
+      <form class="sheet-body" id="cart-ready-form">
+        <h2 id="cart-ready-title">Your cart is ready</h2>
+        <p id="cart-ready-body">Finish checkout in the store app or site.</p>
+        <div class="onboard-actions">
+          <button type="button" class="ghost" id="cart-ready-retry" hidden>Retry</button>
+          <button type="submit" class="primary" id="cart-ready-back">Back to Grocery Gitter</button>
+        </div>
+      </form>
     </dialog>
     <dialog id="account-ask" class="sheet" aria-labelledby="account-ask-title">
       <form id="account-ask-form" class="sheet-body">

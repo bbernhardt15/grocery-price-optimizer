@@ -3,7 +3,8 @@
  * share, or speech. Matching stays on our catalog. Tiles do not show prices.
  */
 
-import { createSilenceWatch } from "./speechListen.js";
+import { dedupeReviewItems } from "./importDedupe.js";
+import { createSilenceWatch, preferServerSpeech, recorderMime } from "./speechListen.js";
 
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
 
@@ -57,6 +58,7 @@ export function mountImport(deps) {
   let review = null;
   let recording = null;
   let stopTimer = 0;
+  let clockTimer = 0;
 
   const dialog = document.createElement("dialog");
   dialog.id = "import-dialog";
@@ -97,11 +99,15 @@ export function mountImport(deps) {
         <input id="import-file-input" type="file" accept="image/*,audio/*,.txt,.csv,text/plain,text/csv" hidden />
       </div>
       <div id="import-listen" hidden>
-        <div class="import-listening">
-          <p><span class="import-pulse" aria-hidden="true"></span><span id="import-listen-label">Listening… a pause adds the list.</span></p>
+        <div class="import-listening" data-state="recording">
+          <p><span class="import-pulse" aria-hidden="true"></span><span id="import-listen-label">Listening… tap Stop when you're done.</span></p>
+          <p id="import-listen-clock" aria-live="polite">0:00</p>
           <p id="import-live" aria-live="polite"></p>
         </div>
-        <button type="button" class="primary" id="import-stop">Stop</button>
+        <div class="import-tools">
+          <button type="button" class="primary" id="import-stop">Stop</button>
+          <button type="button" class="ghost" id="import-again">Try again</button>
+        </div>
       </div>
       <div id="import-transcript" hidden>
         <label for="import-heard">We heard</label>
@@ -284,6 +290,17 @@ export function mountImport(deps) {
     button.hidden = progress ? !/^1 of /.test(progress.textContent || "") : false;
   }
 
+  function prepareReview(body) {
+    if (!body || !Array.isArray(body.items)) return body;
+    const items = dedupeReviewItems(body.items);
+    return {
+      ...body,
+      items,
+      total: items.length,
+      found: items.filter((item) => item.status !== "missing").length,
+    };
+  }
+
   function acceptedCount() {
     return (review?.items || []).filter((item) => item.accepted && item.selectedId).length;
   }
@@ -303,14 +320,18 @@ export function mountImport(deps) {
     title.textContent = idea.namedPeople ? `${idea.title} for ${idea.people}` : idea.title;
   }
 
+  function dietNote() {
+    return deps.offerDiets?.() ? `<p class="diet-note"><button type="button" class="text-btn" data-add-diets>Add allergies or diets</button></p>` : "";
+  }
+
   function reviewLead() {
     const idea = review?.idea;
-    if (!idea) return `<p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>`;
+    if (!idea) return `${dietNote()}<p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>`;
     const noun = review.items.length === 1 ? "item" : "items";
     const count = idea.namedPeople
       ? `${review.items.length} ${noun} for ${idea.people} people`
       : `${review.items.length} ${noun}`;
-    return `<p class="import-idea-lead">${escapeHtml(idea.blurb)}</p><p class="import-count" aria-live="polite">${escapeHtml(count)}</p>`;
+    return `${dietNote()}<p class="import-idea-lead">${escapeHtml(idea.blurb)}</p><p class="import-count" aria-live="polite">${escapeHtml(count)}</p>`;
   }
 
   function renderReview() {
@@ -338,7 +359,16 @@ export function mountImport(deps) {
             <div class="import-tools">
               <button type="button" class="ghost" data-search="${escapeHtml(item.key)}">Search for it</button>
               <button type="button" class="text-btn" data-skip="${escapeHtml(item.key)}">Skip</button>
+              <button type="button" class="text-btn" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(item.raw || item.name || "item")}">×</button>
             </div>
+            ${
+              item.searchOpen
+                ? `<div class="import-search">
+                    <label>Search the catalog<input data-search-query="${escapeHtml(item.key)}" value="${escapeHtml(item.searchQuery || item.raw || item.name || "")}" /></label>
+                    <button type="button" class="ghost" data-search-go="${escapeHtml(item.key)}">Search</button>
+                  </div>`
+                : ""
+            }
             ${hits ? `<div class="import-tools">${hits}</div>` : ""}
           </li>`;
         }
@@ -386,6 +416,7 @@ export function mountImport(deps) {
           ${sizes}
           <div class="import-entry-row">
             <label class="import-check"><input type="checkbox" data-accept="${escapeHtml(item.key)}" ${item.accepted ? "checked" : ""} /> Add</label>
+            <button type="button" class="text-btn" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(title)}">×</button>
             <div class="import-stepper">
               <button type="button" data-qty="${escapeHtml(item.key)}" data-delta="-1" aria-label="Decrease ${escapeHtml(title)}">−</button>
               <output>${item.quantity}</output>
@@ -416,7 +447,7 @@ export function mountImport(deps) {
     }
     setStatus("Matching what you already buy…");
     try {
-      review = await post("/api/import/text", { text: trimmed });
+      review = prepareReview(await post("/api/import/text", { text: trimmed }));
       setStatus("");
       renderReview();
     } catch (error) {
@@ -455,9 +486,9 @@ export function mountImport(deps) {
         const imageBase64 = await blobToBase64(blob);
         const part = await post("/api/import/photo", { imageBase64, mimeType: blob.type || "image/jpeg" });
         if (!merged) merged = part;
-        else if (Array.isArray(part.items)) merged = { ...merged, items: [...(merged.items || []), ...part.items], total: (merged.total || 0) + (part.total || part.items.length) };
+        else if (Array.isArray(part.items)) merged = prepareReview({ ...merged, items: [...(merged.items || []), ...part.items] });
       }
-      review = merged;
+      review = prepareReview(merged);
       setStatus("");
       renderReview();
     } catch (error) {
@@ -557,6 +588,7 @@ export function mountImport(deps) {
       }
     }
 
+    const serverFirst = preferServerSpeech(navigator);
     let recognizer = null;
     let heard = "";
     const silence = createSilenceWatch({
@@ -564,41 +596,50 @@ export function mountImport(deps) {
         void stopRecording(false);
       },
     });
-    const web = webRecognizer();
-    if (web) {
-      recognizer = web;
-      recognizer.continuous = true;
-      recognizer.interimResults = true;
-      recognizer.lang = "en-US";
-      recognizer.onresult = (event) => {
-        heard = "";
-        for (let i = 0; i < event.results.length; i += 1) heard += `${event.results[i][0]?.transcript || ""} `;
-        heard = heard.replace(/\s+/g, " ").trim();
-        const live = $("import-live");
-        if (live) live.textContent = heard;
-        if (heard) silence.heard();
-      };
-      try {
-        recognizer.start();
-      } catch {
-        recognizer = null;
+    const live = $("import-live");
+    if (live) live.textContent = "";
+    if (!serverFirst) {
+      const web = webRecognizer();
+      if (web) {
+        recognizer = web;
+        recognizer.continuous = true;
+        recognizer.interimResults = true;
+        recognizer.lang = "en-US";
+        recognizer.onresult = (event) => {
+          let next = "";
+          for (let i = 0; i < event.results.length; i += 1) {
+            if (!event.results[i].isFinal) continue;
+            next += `${event.results[i][0]?.transcript || ""} `;
+          }
+          next = next.replace(/\s+/g, " ").trim();
+          if (!next) return;
+          heard = next;
+          if (live && !serverFirst) live.textContent = heard;
+          silence.heard();
+        };
+        try {
+          recognizer.start();
+        } catch {
+          recognizer = null;
+        }
       }
     }
 
     let recorder = null;
-    if (status.speech && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
+    const canRecord = navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+    if ((status.speech || serverFirst) && canRecord) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+        const mime = recorderMime((type) => MediaRecorder.isTypeSupported(type));
         const mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
         const chunks = [];
         mediaRecorder.ondataavailable = (event) => {
           if (event.data?.size) chunks.push(event.data);
         };
-        mediaRecorder.start();
-        recorder = { mediaRecorder, chunks, stream, mime: mediaRecorder.mimeType || mime || "audio/webm" };
+        mediaRecorder.start(250);
+        recorder = { mediaRecorder, chunks, stream, mime: mediaRecorder.mimeType || mime || "audio/mp4" };
       } catch (error) {
-        if (!recognizer) {
+        if (!recognizer || serverFirst) {
           const denied = error && (error.name === "NotAllowedError" || error.name === "SecurityError");
           setStatus(
             denied
@@ -611,6 +652,11 @@ export function mountImport(deps) {
       }
     }
 
+    if (serverFirst && !recorder) {
+      setStatus("Voice import isn't switched on yet. Type or paste your list instead.", "error");
+      show("home");
+      return;
+    }
     if (!recognizer && !recorder) {
       setStatus("Voice import isn't switched on yet. Type or paste your list instead.", "error");
       show("home");
@@ -618,12 +664,26 @@ export function mountImport(deps) {
     }
 
     const started = Date.now();
+    const paintClock = () => {
+      const clock = $("import-listen-clock");
+      if (!clock) return;
+      const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+      clock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    };
+    window.clearInterval(clockTimer);
+    clockTimer = window.setInterval(paintClock, 250);
+    paintClock();
     const session = {
       seconds: 0,
       async stop(cancel) {
         silence.stop();
         window.clearTimeout(stopTimer);
-        recognizer?.stop?.();
+        window.clearInterval(clockTimer);
+        try {
+          recognizer?.stop?.();
+        } catch {
+          /* already stopped */
+        }
         if (recorder) {
           const blob = await new Promise((resolve) => {
             let settled = false;
@@ -643,12 +703,23 @@ export function mountImport(deps) {
           });
           recorder.stream.getTracks().forEach((track) => track.stop());
           session.seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
-          if (!cancel && status.speech && blob.size > 800) {
+          if (!cancel && blob.size > 0) {
+            if (!status.speech) {
+              setStatus("Voice import isn't switched on yet. Type or paste your list instead.", "error");
+              show("home");
+              return;
+            }
             await runAudioBlob(blob, session.seconds);
             return;
           }
         }
-        if (!cancel) await deliverSpoken(heard);
+        if (cancel) return;
+        if (!serverFirst && heard.trim()) {
+          await deliverSpoken(heard);
+          return;
+        }
+        setStatus("We didn't catch that. Try again.", "error");
+        show("listen");
       },
     };
     recording = session;
@@ -662,6 +733,7 @@ export function mountImport(deps) {
     const current = recording;
     recording = null;
     window.clearTimeout(stopTimer);
+    window.clearInterval(clockTimer);
     if (current) await current.stop(cancel);
   }
 
@@ -675,6 +747,11 @@ export function mountImport(deps) {
   });
   $("import-mic")?.addEventListener("click", () => void startRecording());
   $("import-stop")?.addEventListener("click", () => void stopRecording(false));
+  $("import-again")?.addEventListener("click", async () => {
+    await stopRecording(true);
+    setStatus("");
+    void startRecording();
+  });
   $("import-heard-go")?.addEventListener("click", () => void runText($("import-heard").value));
   $("import-photo")?.addEventListener("click", () => $("import-photo-input").click());
   $("import-file")?.addEventListener("click", () => $("import-file-input").click());
@@ -694,7 +771,7 @@ export function mountImport(deps) {
   $("import-link-go")?.addEventListener("click", async () => {
     setStatus("Reading that link…");
     try {
-      review = await post("/api/import/link", { url: $("import-link").value });
+      review = prepareReview(await post("/api/import/link", { url: $("import-link").value }));
       setStatus("");
       renderReview();
     } catch (error) {
@@ -710,7 +787,7 @@ export function mountImport(deps) {
     try {
       const constraints = deps.askConstraints ? deps.askConstraints() : null;
       const goal = $("import-goal").value;
-      review = await post("/api/import/ask", constraints ? { goal, constraints } : { goal });
+      review = prepareReview(await post("/api/import/ask", constraints ? { goal, constraints } : { goal }));
       setStatus("");
       renderReview();
     } catch (error) {
@@ -727,10 +804,16 @@ export function mountImport(deps) {
       target.dataset.choice ||
       target.dataset.size ||
       target.dataset.search ||
+      target.dataset.searchGo ||
       target.dataset.skip ||
+      target.dataset.remove ||
       target.dataset.pickSearch ||
       target.dataset.change;
     const item = review.items.find((row) => row.key === key);
+    if (target.hasAttribute("data-add-diets")) {
+      deps.onAddDiets?.();
+      return;
+    }
     if (target.id === "import-back") {
       show("home");
       return;
@@ -772,15 +855,21 @@ export function mountImport(deps) {
       renderReview();
       return;
     }
-    if (target.dataset.skip) {
-      item.accepted = false;
-      item.status = "missing";
-      item.choices = [];
-      renderReview();
+    if (target.dataset.skip || target.dataset.remove) {
+      dropItem(item);
       return;
     }
     if (target.dataset.search) {
-      void searchItem(item);
+      item.searchOpen = true;
+      item.searchQuery = item.searchQuery || item.raw || item.name || "";
+      renderReview();
+      reviewHost.querySelector(`[data-search-query="${CSS.escape(item.key)}"]`)?.focus();
+      return;
+    }
+    if (target.dataset.searchGo) {
+      const field = reviewHost.querySelector(`[data-search-query="${CSS.escape(item.key)}"]`);
+      item.searchQuery = field instanceof HTMLInputElement ? field.value : item.searchQuery;
+      void searchItem(item, item.searchQuery);
       return;
     }
     if (target.dataset.pickSearch) {
@@ -803,10 +892,25 @@ export function mountImport(deps) {
     }
   });
 
-  async function searchItem(item) {
+  function dropItem(item) {
+    review.items = (review.items || []).filter((row) => row.key !== item.key);
+    review.total = review.items.length;
+    review.found = review.items.filter((row) => row.status !== "missing").length;
+    if (!review.items.length) setStatus("Nothing left to add.", "error");
+    renderReview();
+  }
+
+  async function searchItem(item, query) {
+    const q = String(query || item.searchQuery || item.raw || item.name || "").trim();
+    if (!q) {
+      setStatus("Type what to search for.", "error");
+      return;
+    }
+    item.searchQuery = q;
+    item.searchOpen = true;
     setStatus("Searching the shelf…");
     try {
-      const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(item.name)}`));
+      const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`));
       const body = await response.json();
       item.searchHits = (body.suggestions || []).slice(0, 3).map((hit) => ({
         id: hit.id,

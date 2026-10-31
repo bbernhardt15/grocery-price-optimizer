@@ -242,7 +242,10 @@ export function parseProfile(raw) {
   if (sourceCategories && typeof sourceCategories === "object" && !Array.isArray(sourceCategories)) {
     for (const [key, entry] of Object.entries(sourceCategories).slice(0, 64)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-      const mode = ["brand", "storeBrand", "cheapest", "skip", "never"].includes(entry.mode) ? entry.mode : "";
+      const mode = ["brand", "storeBrand", "cheapest", "cheapestPicks", "skip", "never"].includes(entry.mode) ? entry.mode : "";
+      const brands = Array.isArray(entry.brands)
+        ? entry.brands.map((item) => clean(item, 80)).filter(Boolean).slice(0, 12)
+        : [];
       const family = clean(entry.family || key, 40).toLowerCase();
       if (!mode || !/^[a-z0-9-]{2,40}$/.test(family)) continue;
       const productId = clean(entry.productId || entry.catalogId, 80);
@@ -251,7 +254,8 @@ export function parseProfile(raw) {
       categoryPreferences[family] = {
         family,
         mode,
-        brand: clean(entry.brand, 80),
+        brand: clean(entry.brand, 80) || brands[0] || "",
+        brands,
         productId: /^[A-Za-z0-9:_-]{1,80}$/.test(productId) ? productId : "",
         size: clean(entry.size || entry.sizeLabel, 80),
         attributes: Array.isArray(entry.attributes)

@@ -32,7 +32,14 @@ export type ResolvedCatalog = {
   products: CatalogProduct[];
   pricingError?: string;
   pricingByStore: StorePricingReport[];
+  /** True when the budget ran out and some store lookups were not started. */
+  partial?: boolean;
+  pendingStores?: string[];
 };
+
+/** A small list should finish. A slow store must not hold the rest forever. */
+const PRICE_BUDGET_MS = 18_000;
+const PRICE_POOL = 6;
 
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
 
@@ -223,7 +230,10 @@ export async function resolveCatalogProducts(
   groceryList: string[],
   stores: string[] = [],
   locationId?: string,
-  zipCode?: string
+  zipCode?: string,
+  hooks?: {
+    onStore?: (info: { storeName: string; ms: number; pendingStores: string[]; products: CatalogProduct[] }) => void;
+  }
 ): Promise<ResolvedCatalog> {
   const lines = parseGroceryList(groceryList);
   const minUpdatedAt = new Date(Date.now() - PRICE_CACHE_MAX_AGE_MS);
@@ -278,8 +288,16 @@ export async function resolveCatalogProducts(
     }
   };
 
+  const storeMs = new Map<string, number>();
+  const storeLeft = new Map<string, number>();
+  for (const storeName of competing) storeLeft.set(storeName, lines.length);
+  const jobs: Array<() => Promise<void>> = [];
   for (const line of lines) {
     for (const storeName of competing) {
+      jobs.push(async () => {
+      const started = Date.now();
+      let source = "miss";
+      try {
       const acc = accFor(storeName);
       const krogerId = krogerLocationId(storeName, locationId);
       const dedicated = dedicatedProviderForStore(storeName);
@@ -297,7 +315,8 @@ export async function resolveCatalogProducts(
             } else {
               acc.cachedHits += 1;
             }
-            continue;
+            source = seeded ? "seed" : "cached_live";
+            return;
           }
         }
       }
@@ -311,7 +330,8 @@ export async function resolveCatalogProducts(
       if (liveCached.length > 0) {
         add(liveCached, line.name, "cached_live");
         acc.cachedHits += 1;
-        continue;
+        source = "cached_live";
+        return;
       }
 
       let dedicatedError: string | undefined;
@@ -331,6 +351,7 @@ export async function resolveCatalogProducts(
             add(saved, line.name, "live");
             acc.liveHits += 1;
             acc.fetchedAt = new Date();
+            source = "live";
             if (ingestConfig().dbFirst && (storeName.trim().toLowerCase() === "walmart" || storeName.trim().toLowerCase() === "kroger")) {
               const records = live
                 .map((product) => rawFromCatalogProduct(product, "live"))
@@ -339,7 +360,7 @@ export async function resolveCatalogProducts(
                 console.warn(`Catalog write-back failed: ${error instanceof Error ? error.message : String(error)}`);
               });
             }
-            continue;
+            return;
           }
         } catch (error) {
           dedicatedError = errorMessage(error);
@@ -365,7 +386,8 @@ export async function resolveCatalogProducts(
           add(weeklyCached, line.name, "weekly_ad");
           acc.cachedWeeklyAdHits += 1;
           acc.configured = true;
-          continue;
+          source = "weekly_ad";
+          return;
         }
 
         acc.configured = true;
@@ -383,7 +405,8 @@ export async function resolveCatalogProducts(
             add(saved, line.name, "weekly_ad");
             acc.weeklyAdHits += 1;
             acc.fetchedAt = new Date();
-            continue;
+            source = "weekly_ad";
+            return;
           }
         } catch (error) {
           const message = errorMessage(error);
@@ -415,7 +438,7 @@ export async function resolveCatalogProducts(
         krogerId
       );
       if (fallback.length === 0) {
-        continue;
+        return;
       }
 
       const liveFallback = fallback.filter(
@@ -432,14 +455,57 @@ export async function resolveCatalogProducts(
       if (liveFallback.length > 0) {
         add(liveFallback, line.name, "cached_live");
         acc.cachedHits += 1;
+        source = "cached_live";
       } else if (weeklyFallback.length > 0) {
         add(weeklyFallback, line.name, "weekly_ad");
         acc.cachedWeeklyAdHits += 1;
+        source = "weekly_ad";
       } else if (seedFallback.length > 0 && allowsDemoFallback(storeName)) {
         add(seedFallback, line.name, "seed");
         acc.seedHits += 1;
+        source = "seed";
       }
+      } finally {
+        const elapsed = Date.now() - started;
+        storeMs.set(storeName, (storeMs.get(storeName) || 0) + elapsed);
+        const left = Math.max(0, (storeLeft.get(storeName) || 1) - 1);
+        storeLeft.set(storeName, left);
+        console.info(`price ${storeName} "${line.name}" ${elapsed}ms ${source}`);
+        if (left === 0) {
+          const still = [...storeLeft.entries()].filter(([, count]) => count > 0).map(([name]) => name);
+          console.info(`price store ${storeName} ${storeMs.get(storeName) || elapsed}ms`);
+          hooks?.onStore?.({
+            storeName,
+            ms: storeMs.get(storeName) || elapsed,
+            pendingStores: still,
+            products: products.slice(),
+          });
+        }
+      }
+      });
     }
+  }
+
+  const deadline = Date.now() + PRICE_BUDGET_MS;
+  let cursor = 0;
+  const pendingStores: string[] = [];
+  async function priceWorker(): Promise<void> {
+    while (cursor < jobs.length) {
+      if (Date.now() >= deadline) return;
+      const job = jobs[cursor];
+      cursor += 1;
+      await job();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(PRICE_POOL, Math.max(jobs.length, 1)) }, () => priceWorker()));
+  if (cursor < jobs.length) {
+    const skipped = new Set<string>();
+    for (let index = cursor; index < jobs.length; index += 1) {
+      const storeName = competing[index % competing.length];
+      if (storeName) skipped.add(storeName);
+    }
+    pendingStores.push(...skipped);
+    console.info(`price partial pending ${pendingStores.join(", ") || "stores"}`);
   }
 
   const pricingByStore: StorePricingReport[] = competing.map((storeName) => {
@@ -456,5 +522,6 @@ export async function resolveCatalogProducts(
     products,
     pricingError: pricingWarningFromReports(pricingByStore),
     pricingByStore,
+    ...(pendingStores.length ? { partial: true, pendingStores } : {}),
   };
 }

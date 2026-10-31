@@ -59,7 +59,7 @@ type FamilyModule = {
     familyId: string,
     mode: string,
     storeName: string,
-    preference?: { brand?: string }
+    preference?: { brand?: string; brands?: string[] }
   ) => StapleProduct | null;
   PREFERENCE_CATEGORIES: Array<{ id: string; label: string; search: string }>;
 };

@@ -3,9 +3,12 @@ import { requestAuth } from "../auth/middleware";
 import { Account } from "../auth/models";
 import {
   addItemsToKrogerCart,
+  authorizeLocationIsSafe,
   buildKrogerAuthorizeUrl,
   exchangeAuthorizationCode,
+  issueShortCartState,
   krogerCartSessions,
+  verifyShortCartState,
   readCartModality,
   readKrogerOAuthConfig,
   clearShopperCookieHeader,
@@ -13,7 +16,6 @@ import {
   revokeSealedShopperCookie,
   sealShopperToken,
   shopperTokenForRequest,
-  signCartState,
   toCartLines,
   verifyCartState,
   KROGER_SHOPPER_COOKIE,
@@ -28,9 +30,9 @@ const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
 const KROGER_CART_PAGE = "https://www.kroger.com/cart";
 
-function htmlPage(title: string, body: string, returnPath = "/"): string {
+function htmlPage(title: string, body: string, returnPath = "/", navigate = true): string {
   const redirect =
-    returnPath === "/"
+    !navigate || returnPath === "/"
       ? ""
       : `<script>location.replace(${JSON.stringify(returnPath).replace(/</g, "\\u003c")});</script>`;
   return `<!DOCTYPE html>
@@ -43,6 +45,7 @@ function htmlPage(title: string, body: string, returnPath = "/"): string {
     <style>
       body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 40rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; color: #171717; }
       a { color: #047857; }
+      a.ready-back { display: inline-block; margin-top: 0.5rem; background: #047857; color: #fff; text-decoration: none; font-weight: 700; padding: 0.85rem 1.1rem; border-radius: 999px; }
       .status { padding: 0.85rem 1rem; border-radius: 10px; background: #ecfdf5; }
       .error { background: #fef3f2; color: #b42318; }
       ul { padding-left: 1.2rem; }
@@ -239,11 +242,32 @@ function pendingFromState(
     krogerCartSessions.takePending(state);
     return { items: signed.items, locationId: signed.locationId, purpose: signed.purpose };
   }
+  if (!verifyShortCartState(config, state)) {
+    return undefined;
+  }
   const memory = krogerCartSessions.takePending(state);
   if (memory) {
     return { items: memory.items, locationId: memory.locationId, purpose: memory.purpose };
   }
   return undefined;
+}
+
+function savePendingCart(
+  config: KrogerOAuthConfig,
+  cart: { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect" }
+): { state: string; authorizeUrl: string } | null {
+  const state = issueShortCartState(config);
+  krogerCartSessions.savePending(state, cart);
+  const authorizeUrl = buildKrogerAuthorizeUrl(config, state);
+  if (!authorizeLocationIsSafe(authorizeUrl)) {
+    krogerCartSessions.takePending(state);
+    return null;
+  }
+  return { state, authorizeUrl };
+}
+
+function navigatePath(state: string): string {
+  return `/api/kroger/oauth/authorize?state=${encodeURIComponent(state)}`;
 }
 
 router.get("/kroger/logout", async (req, res) => {
@@ -302,13 +326,49 @@ router.post("/kroger/connect", async (req, res) => {
     return;
   }
 
-  const state = signCartState(config, { items: [], purpose: "connect" });
-  krogerCartSessions.savePending(state, { items: [], purpose: "connect" });
+  const issued = savePendingCart(config, { items: [], purpose: "connect" });
+  if (!issued) {
+    res.status(502).json({
+      error: "Kroger couldn't open. Nothing was added to your cart. Try again.",
+      oauthConfigured: true,
+    });
+    return;
+  }
   res.json({
-    authorizeUrl: buildKrogerAuthorizeUrl(config, state),
+    authorizeUrl: issued.authorizeUrl,
+    navigateUrl: navigatePath(issued.state),
     status: "needs_shopper_login",
     oauthConfigured: true,
   });
+});
+
+/**
+ * Browser navigation only. Always a 302 (or a 302 back into the app).
+ * Never JSON: Safari would download that as authorize.json.
+ */
+router.get("/kroger/oauth/authorize", (req, res) => {
+  const config = readKrogerOAuthConfig();
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  const fail = (message: string) => {
+    res.set("Cache-Control", "no-store");
+    res.redirect(302, shopperReturnPath("error", message, "plan"));
+  };
+  if (!config) {
+    fail("Kroger cart sign-in is not set up. Nothing was added to your cart.");
+    return;
+  }
+  const known = verifyShortCartState(config, state) || Boolean(verifyCartState(config, state));
+  if (!state || !known || !krogerCartSessions.peekPending(state)) {
+    fail("That Kroger cart session expired. Start again from Send to Kroger cart.");
+    return;
+  }
+  const authorizeUrl = buildKrogerAuthorizeUrl(config, state);
+  if (!authorizeLocationIsSafe(authorizeUrl)) {
+    fail("Kroger couldn't open. Nothing was added to your cart. Try again.");
+    return;
+  }
+  res.set("Cache-Control", "no-store");
+  res.redirect(302, authorizeUrl);
 });
 
 router.post("/kroger/cart/start", async (req: Request, res: Response) => {
@@ -379,29 +439,36 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     // 401/403: shopper token missing cart scopes or expired — fall through to login.
   }
 
-  const state = signCartState(config, {
+  const issued = savePendingCart(config, {
     items: lines,
     locationId: parsed.locationId,
   });
-  krogerCartSessions.savePending(state, {
-    items: lines,
-    locationId: parsed.locationId,
-  });
+  if (!issued) {
+    const message = "Kroger couldn't open. Nothing was added to your cart. Try again.";
+    if (wantsJson(req)) {
+      res.status(502).json({ error: message, oauthConfigured: true, searchLinks: searchLinkItems(lines) });
+      return;
+    }
+    res.set("Cache-Control", "no-store");
+    res.redirect(302, shopperReturnPath("error", message, "plan"));
+    return;
+  }
 
-  const authorizeUrl = buildKrogerAuthorizeUrl(config, state);
   if (wantsJson(req)) {
     res.json({
-      authorizeUrl,
+      authorizeUrl: issued.authorizeUrl,
+      navigateUrl: navigatePath(issued.state),
       status: "needs_shopper_login",
       itemCount: lines.length,
       searchLinks: searchLinkItems(lines),
       detail:
-        "Redirect the shopper to authorizeUrl. Kroger must show a login/consent screen; Grocery Gitter will only call Cart API after that callback succeeds with HTTP 2xx.",
+        "Send the browser to navigateUrl. That route returns a short 302 to Kroger. Grocery Gitter calls the Cart API only after the callback succeeds with HTTP 2xx.",
     });
     return;
   }
 
-  res.redirect(302, authorizeUrl);
+  res.set("Cache-Control", "no-store");
+  res.redirect(302, issued.authorizeUrl);
 });
 
 router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
@@ -537,16 +604,20 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
   }
 
   const addedLabel = `${result.added} item${result.added === 1 ? "" : "s"}`;
+  const back = shopperReturnPath(
+    "added",
+    `Your cart is ready. Finish checkout in the Kroger app or site.`,
+    "shop"
+  );
   res.send(
     htmlPage(
-      "Added to your Kroger cart",
-      `<p class="status">Kroger accepted ${addedLabel} via the Cart API. Finish pickup/delivery on Kroger while logged into the <strong>same</strong> shopper account.</p>
-       <p><a href="${KROGER_CART_PAGE}" rel="noopener" target="_blank">Open Kroger cart</a></p>`,
-      shopperReturnPath(
-        "added",
-        `Kroger accepted ${addedLabel}. Finish pickup or delivery on kroger.com while logged into the same account.`,
-        "shop"
-      )
+      "Your cart is ready",
+      `<p class="status">Your cart is ready. Finish checkout in the Kroger app or site.</p>
+       <p>Kroger accepted ${addedLabel}. Finish checkout while logged into the same shopper account.</p>
+       <p><a class="ready-back" href="${escapeHtml(back)}">Back to ${PRODUCT_NAME}</a></p>
+       <p><a href="${KROGER_CART_PAGE}" rel="noopener">Open Kroger cart</a></p>`,
+      back,
+      false
     )
   );
 });

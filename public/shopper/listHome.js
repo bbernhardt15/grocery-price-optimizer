@@ -45,7 +45,6 @@ import {
   listsBrowserHtml,
   listsEntryHtml,
   myListCardHtml,
-  nudgeHtml,
   pickerHtml,
   pickerResultsHtml,
   slotMatchHtml,
@@ -118,12 +117,8 @@ export function createListHome(deps) {
     if (!root) return;
     const preview = rankedLists().slice(0, 3);
     if (!preview.length) preview.push(...previewLists(new Date(), 3));
-    const showNudge = !book.nudged && Object.keys(book.favorites).length === 0;
     const hint = preview.map((list) => list.title).join(" · ");
-    root.innerHTML = `
-      ${showNudge ? nudgeHtml(deps.escapeHtml) : ""}
-      ${listsEntryHtml(hint, deps.escapeHtml)}
-    `;
+    root.innerHTML = listsEntryHtml(hint, deps.escapeHtml);
   }
 
   function openDialog() {
@@ -189,23 +184,16 @@ export function createListHome(deps) {
       confirmDelete: view.confirmDelete,
       finder: view.finder || "",
       escapeHtml: deps.escapeHtml,
+      dietNote: Boolean(deps.shouldOfferDiets?.()),
     });
   }
 
   function openList(listId) {
     const model = listModel(listId, book);
     if (!model) return;
-    const show = () => {
-      view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "" };
-      paintSheet();
-      openDialog();
-    };
-    const recipe = !model.mine && model.id !== "weekly" && model.id !== "baby";
-    if (recipe && typeof deps.beforeRecipe === "function") {
-      deps.beforeRecipe(show);
-      return;
-    }
-    show();
+    view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "" };
+    paintSheet();
+    openDialog();
   }
 
   function setParty(next) {
@@ -437,6 +425,10 @@ export function createListHome(deps) {
       const dialog = document.getElementById("list-sheet");
       if (!dialog?.open) deps.toast("Couldn't open Lists.");
       else deps.haptic();
+      return true;
+    }
+    if (target.closest("[data-add-diets]")) {
+      deps.onAddDiets?.();
       return true;
     }
     if (target.closest("[data-lists-all]") && view?.kind === "browser") {

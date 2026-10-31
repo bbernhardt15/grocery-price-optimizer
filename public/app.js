@@ -125,7 +125,7 @@ import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { cachedTrip, doneMessage, shopProgress, shopSections, swapChoices } from "./shopper/inStore.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
-import { fetchWithTimeout, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
+import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 
 const $ = (id) => document.getElementById(id);
@@ -515,10 +515,9 @@ function takeWalmartReturn() {
 
 function showWalmartReturn() {
   if (!takeWalmartReturn()) return;
-  showReturnBanner = true;
+  showReturnBanner = false;
   if (flowStep !== "shop") showStep("shop");
-  else renderShop();
-  toast("Back in Grocery Gitter: mark what you bought.", 4200);
+  openCartReady("Walmart");
 }
 
 function noteAppHidden() {
@@ -712,6 +711,33 @@ function krogerBannerHtml() {
   </section>`;
 }
 
+let krogerRetry = null;
+
+function openCartReady(storeName, { error = "", retry = null } = {}) {
+  const dialog = $("cart-ready");
+  const title = $("cart-ready-title");
+  const body = $("cart-ready-body");
+  const again = $("cart-ready-retry");
+  const store = storeName || "store";
+  if (title) title.textContent = error ? `Couldn't send to ${store}` : "Your cart is ready";
+  if (body) {
+    body.textContent = error
+      ? friendlyCartError(error)
+      : `Your cart is ready. Finish checkout in the ${store} app or site.`;
+  }
+  if (again) again.hidden = !retry;
+  krogerRetry = retry;
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+function friendlyCartError(message) {
+  const text = String(message || "").trim();
+  if (!text || /invalid response|upstream|authorize\.json|^\{/.test(text)) {
+    return "Kroger didn't open. Nothing was added to your cart.";
+  }
+  return text;
+}
+
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
   landedFromKroger = true;
@@ -723,6 +749,21 @@ function applyKrogerReturn(parsed) {
   releasePageForTaps();
   if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
   if (parsed.step) showStep(parsed.step);
+  if (parsed.kind === "added") {
+    openCartReady("Kroger");
+    return;
+  }
+  if (parsed.kind === "error") {
+    openCartReady("Kroger", {
+      error: parsed.message,
+      retry: () => {
+        const button = document.querySelector("[data-kroger], [data-kroger-send], #kroger-send");
+        const store = button?.getAttribute?.("data-kroger") || "Kroger";
+        if (button) void startKroger(store, button);
+      },
+    });
+    return;
+  }
   toast(parsed.message, 6500);
 }
 
@@ -1267,6 +1308,7 @@ function addProduct(product, quantity = 1, options = {}) {
     entry.preferenceFamily = options.preferenceFamily;
   }
   if (options.preferenceMode) entry.preferenceMode = options.preferenceMode;
+  if (options.preferenceBrands?.length) entry.preferenceBrands = options.preferenceBrands.slice(0, 12);
   const family = entry.preferenceFamily || familyFromQuery(`${product.familyName || ""} ${product.name || ""}`);
   if (family) entry.preferenceFamily = family;
   if (options.learn !== false && family && !options.skipLearn) {
@@ -2639,7 +2681,7 @@ function paintLocalPreview(note) {
       <header><h3>Your list</h3><p class="muted">Prices coming</p></header>
       <ul class="item-list">${rows}</ul>
       <p class="muted" id="plan-status-line">${escapeHtml(note || "Checking store prices…")}</p>
-      <button type="button" class="ghost" id="plan-retry" hidden>Try again</button>
+      <button type="button" class="ghost" id="plan-retry" hidden>Retry</button>
     </section>
   `;
 }
@@ -2655,7 +2697,7 @@ function ensurePlanRetry(message) {
     retry.id = "plan-retry";
     retry.type = "button";
     retry.className = "ghost";
-    retry.textContent = "Try again";
+    retry.textContent = "Retry";
     tripEl.append(retry);
   }
   if (retry) retry.hidden = false;
@@ -2666,6 +2708,39 @@ function paintPlanNow() {
   if (lastOptimize) paintTrip();
   else if (list.size) paintLocalPreview("Checking store prices…");
   else if (tripEl) tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
+}
+
+async function readPlanBody(response, onStatus) {
+  const type = response.headers.get("content-type") || "";
+  if (!type.includes("ndjson") || !response.body?.getReader) {
+    return response.json().catch(() => ({}));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalBody = null;
+  const take = (line) => {
+    if (!line.trim()) return;
+    let event = null;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (event.type === "status") onStatus?.(event);
+    if (event.type === "done" && event.result) finalBody = event.result;
+    if (event.type === "error") finalBody = { error: event.error };
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) take(line);
+  }
+  take(buffer);
+  return finalBody || {};
 }
 
 async function planTrip({ stay = false, trigger = null } = {}) {
@@ -2715,6 +2790,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     upc: entry.product.upc,
     ...(entry.preferenceMode ? { preferenceMode: entry.preferenceMode } : {}),
     ...(entry.preferenceFamily ? { family: entry.preferenceFamily } : {}),
+    ...(entry.preferenceBrands?.length ? { brands: entry.preferenceBrands } : {}),
   }));
   if (planAbort) planAbort.abort();
   const controller = new AbortController();
@@ -2741,15 +2817,23 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       apiUrl("/api/optimize-list"),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/x-ndjson, application/json" },
         body: JSON.stringify({ items, zipCode: zip, stores: selectedStoreNames(), allowSubstitutes: allowSubsEl.checked }),
         signal: controller.signal,
       },
       PLAN_TIMEOUT_MS
     );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || `Trip plan failed (${response.status})`);
+    const body = await readPlanBody(response, (status) => {
+      const waiting = status.pendingStores?.length ? ` Still checking ${status.pendingStores.join(", ")}.` : "";
+      const line = $("plan-status-line");
+      if (line) line.textContent = `Checked ${status.storeName || "a store"}.${waiting}`;
+    });
+    if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
+    if (body.partial) {
+      ensurePlanRetry(PLAN_PARTIAL_NOTE);
+      toast(PLAN_PARTIAL_NOTE, 4200);
+    }
     rememberListAsUsuals();
     openList(false);
     void instacartTask.then(() => {
@@ -2768,7 +2852,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     const timedOut = planTimedOut(error);
     const kind = timedOut ? null : networkKind(error, navigator.onLine);
     const message = timedOut
-      ? "Prices are taking too long. Showing what we have."
+      ? PLAN_PARTIAL_NOTE
       : kind
         ? `${emptyState(kind).title}. ${emptyState(kind).body}`
         : error instanceof Error
@@ -2781,7 +2865,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       paintLocalPreview(message);
     }
     ensurePlanRetry(message);
-    toast(timedOut ? "Prices are taking too long. Try again." : message);
+    toast(timedOut ? PLAN_PARTIAL_NOTE : message);
   } finally {
     if (planAbort === controller) {
       planning = false;
@@ -2853,22 +2937,38 @@ async function startKroger(storeName, button) {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items: store.handoff?.items ?? store.items, locationId: store.items?.[0]?.locationId }),
     });
-    const body = await response.json().catch(() => ({}));
+    const raw = await response.text();
+    let body = {};
+    try {
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      body = {};
+    }
     if (response.status === 402) openPaywall();
-    if (!response.ok) throw new Error(body.error || "Kroger cart did not start.");
-    if (body.authorizeUrl) {
+    if (!response.ok || body.message) {
+      throw new Error(friendlyCartError(body.error || body.message || "Kroger cart did not start."));
+    }
+    const hop = body.navigateUrl || body.authorizeUrl;
+    if (hop) {
       if (isNative()) {
         await armKrogerBrowserWatch();
-        await openExternal(body.authorizeUrl);
+        await openExternal(body.authorizeUrl || hop);
         return;
       }
-      window.location.assign(body.authorizeUrl);
+      window.location.assign(hop.startsWith("/") ? new URL(hop, window.location.origin).href : hop);
       return;
     }
-    if (body.status === "added" || body.krogerCartUrl) rememberKrogerConnected();
-    toast(body.status === "added" ? "Kroger accepted the cart." : "Kroger cart updated.");
+    if (body.status === "added" || body.krogerCartUrl) {
+      rememberKrogerConnected();
+      openCartReady("Kroger");
+      return;
+    }
+    toast("Kroger cart updated.");
   } catch (error) {
-    toast(error instanceof Error ? error.message : "Kroger cart failed.");
+    openCartReady("Kroger", {
+      error: error instanceof Error ? error.message : "Kroger cart did not start.",
+      retry: () => void startKroger(storeName, button),
+    });
   } finally {
     button.disabled = false;
     setBusy(button, false);
@@ -3708,6 +3808,10 @@ document.addEventListener("click", (event) => {
         })
         .finally(() => setBusy(walmartCart, false));
     });
+    return;
+  }
+  if (target.closest("[data-add-diets]")) {
+    profileUi?.openDietPrompt?.();
     return;
   }
   if (target.closest("#plan-retry")) {
@@ -5302,7 +5406,8 @@ function lists() {
       onChange: () => scheduleAccountSync(),
       mediaUrl,
       profile: () => getUserProfile(localStorage),
-      beforeRecipe: (open) => askDietsThen(open),
+      shouldOfferDiets: () => Boolean(profileUi?.shouldAskDiets?.()),
+      onAddDiets: () => profileUi?.openDietPrompt?.(),
       slotBlocked: (slot) => slotIsExcluded(getUserProfile(localStorage), slot),
       guideSlot: (input) => {
         const profile = getUserProfile(localStorage);
@@ -5483,7 +5588,10 @@ function preferenceReview(rows, note) {
     })
     .join("");
   host.hidden = false;
-  host.innerHTML = `<h2>${escapeHtml(note)}</h2><ul>${lines}</ul><button type="button" class="primary" id="preference-plan">Review the split</button>`;
+  const diets = profileUi?.shouldAskDiets?.()
+    ? `<p class="diet-note"><button type="button" class="text-btn" data-add-diets>Add allergies or diets</button></p>`
+    : "";
+  host.innerHTML = `${diets}<h2>${escapeHtml(note)}</h2><ul>${lines}</ul><button type="button" class="primary" id="preference-plan">Review the split</button>`;
   host.querySelector("#preference-plan").onclick = () => {
     void planTrip();
   };
@@ -5500,9 +5608,7 @@ function askDietsThen(next) {
 async function addMealFromPreferences(text) {
   const meal = mealPlan(text);
   if (!meal?.items?.length) return;
-  askDietsThen(() => {
-    void addFromPreferences(meal.items.map((item) => item.raw).join(", "));
-  });
+  await addFromPreferences(meal.items.map((item) => item.raw).join(", "));
 }
 
 async function addFromPreferences(text, options = {}) {
@@ -5524,6 +5630,7 @@ async function addFromPreferences(text, options = {}) {
     addProduct(product, 1, {
       preference: { family: row.family, status: row.status, swapped: row.swapped || null },
       preferenceMode: row.mode,
+      preferenceBrands: row.mode === "cheapestPicks" ? row.brands || getUserProfile(localStorage).categoryPreferences?.[row.family]?.brands || [] : undefined,
       source: "add",
       skipAsk: true,
       quiet: true,
@@ -5716,7 +5823,12 @@ function paintStorePicker() {
   const nearby = nearbyStoreChoice();
   const place = zipPlaceLabel(normalizeZip(zipEl?.value || ""));
   const note = $("store-picker-note");
-  if (note) note.textContent = place && nearby.source === "nearby" ? `Near ${place}. ${nearby.note}` : nearby.note;
+  if (nearby.source !== "nearby") {
+    if (note) note.textContent = "Enter a ZIP to see stores within about 25 miles.";
+    host.innerHTML = "";
+    return;
+  }
+  if (note) note.textContent = place ? `Near ${place}. ${nearby.note}` : nearby.note;
   host.innerHTML = nearby.stores
     .map((name) => {
       const on = selected.has(name);
@@ -5739,6 +5851,26 @@ function saveStorePicker() {
   saveUserProfile(localStorage, { ...profile, shopStores });
 }
 
+async function zipFromLocation() {
+  const coords = await Promise.race([
+    readDeviceCoords(),
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(Object.assign(new Error("Location timed out. Type a ZIP."), { code: 3 })), 8000);
+    }),
+  ]);
+  const response = await fetchWithTimeout(
+    fetch,
+    apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`),
+    {},
+    8000
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !/^\d{5}/.test(String(body.zip || ""))) {
+    throw new Error("Couldn't read a ZIP from this location. Type one and try again.");
+  }
+  return body.zip;
+}
+
 async function findNearbyStores() {
   openDrawer({ focus: "zip" });
   const button = $("find-stores");
@@ -5758,29 +5890,12 @@ async function findNearbyStores() {
   }
   showZipStatus("Looking up this location…");
   try {
-    const coords = await Promise.race([
-      readDeviceCoords(),
-      new Promise((_, reject) => {
-        window.setTimeout(() => reject(Object.assign(new Error("Location timed out"), { code: 3 })), 8000);
-      }),
-    ]);
-    const response = await fetchWithTimeout(
-      fetch,
-      apiUrl(`/api/geo/zip?lat=${encodeURIComponent(coords.lat)}&lng=${encodeURIComponent(coords.lng)}`),
-      {},
-      8000
-    );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !/^\d{5}/.test(String(body.zip || ""))) {
-      showZipStatus("Couldn't read a ZIP from this location. Type one and try again.", "error");
-      toast("Couldn't read a ZIP from this location. Type it instead.");
-      return;
-    }
-    applyZip(body.zip);
-    const place = zipPlaceLabel(body.zip);
-    showZipStatus(place ? `Using ${place}.` : `Using ZIP ${body.zip}.`);
+    const zip = await zipFromLocation();
+    applyZip(zip);
+    const place = zipPlaceLabel(zip);
+    showZipStatus(place ? `Using ${place}.` : `Using ZIP ${String(zip).slice(0, 5)}.`);
     paintStorePicker();
-    toast(`Nearby stores for ${place || body.zip}.`);
+    toast(`Nearby stores for ${place || zip}.`);
     haptic();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
@@ -6201,6 +6316,7 @@ profileUi = mountProfileOnboarding({
   },
   getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
   setZip: (zip) => applyZip(zip, { reload: false }),
+  locateZip: () => zipFromLocation(),
   readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;
     try {
@@ -6263,10 +6379,21 @@ alwaysPrompt = mountAlwaysPrompt({
 myProducts = mountMyProducts({
   storage: localStorage,
   onEditProfile: () => profileUi?.openEditor(),
+  onReview: () => profileUi?.openFavorites?.(),
   onEditCategory: (family) => profileUi?.openCategory?.(family),
   onChange: () => scheduleAccountSync(),
 });
 
+$("cart-ready-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  $("cart-ready")?.close();
+});
+$("cart-ready-retry")?.addEventListener("click", () => {
+  $("cart-ready")?.close();
+  const retry = krogerRetry;
+  krogerRetry = null;
+  if (typeof retry === "function") retry();
+});
 $("drawer-profile")?.addEventListener("click", () => {
   closeDrawer();
   profileUi?.openEditor();
@@ -6287,6 +6414,8 @@ importer = mountImport({
       hint.textContent = "Smart parsing is off; basic matching used. A product like milk, or a list like bread, milk, eggs.";
     }
   },
+  offerDiets: () => Boolean(profileUi?.shouldAskDiets?.()),
+  onAddDiets: () => profileUi?.openDietPrompt?.(),
   async onSpoken(text) {
     const items = parseNeedItems(text);
     if (!items.some((item) => item.family) && !isPreferenceList(text)) return false;

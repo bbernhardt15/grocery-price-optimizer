@@ -101,7 +101,7 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), true);
     assert.deepEqual(
       profileSteps().map((step) => step.id),
-      ["place", "receipts"]
+      ["zip", "stores", "receipts"]
     );
     assert.equal(profileSteps().some((step) => step.id === "products"), false);
     assert.equal(SKIP_LABEL, "Skip for now");
@@ -369,7 +369,8 @@ describe("profile screens", () => {
     assert.match(html, /id="profile-onboard"/);
     assert.match(html, /id="profile-skip"/);
     assert.match(html, />Skip for now</);
-    assert.match(html, /id="drawer-buy"/);
+    assert.match(html, /My products/);
+    assert.match(html, /id="cart-ready"/);
     assert.match(html, /id="profile-back"/);
     assert.match(html, /id="drawer-profile"/);
     assert.match(html, /id="drawer-products"/);
