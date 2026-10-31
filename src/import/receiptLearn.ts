@@ -6,7 +6,7 @@
  * is kept. Raw receipt text is not stored here.
  */
 
-import { upcForStorage } from "../catalog/normalize";
+import { upcForStorage, upcKey } from "../catalog/normalize";
 import { classifyProduct, familyFromQuery, familyLabel } from "../catalog/stapleFamilies";
 import { parseModelJson, validateAiItems } from "./aiSchema";
 
@@ -444,7 +444,7 @@ export function parseReceiptText(text: string): ReceiptLine[] {
   }
   commitParts();
   flush();
-  return items.map(finish).filter((line): line is ReceiptLine => Boolean(line)).slice(0, 80);
+  return items.map(finish).filter((line): line is ReceiptLine => Boolean(line)).slice(0, 160);
 }
 
 function abbreviated(name: string): boolean {
@@ -464,16 +464,40 @@ export function looksLikePaperReceipt(lines: Array<Pick<ReceiptLine, "name" | "u
   return short / lines.length >= 0.5;
 }
 
-function majority(values: string[]): string {
-  const counts = new Map<string, { display: string; count: number }>();
-  for (const value of values) {
-    const key = fold(value);
-    if (!key) continue;
-    const row = counts.get(key) || { display: value, count: 0 };
-    row.count += 1;
-    counts.set(key, row);
+/** Same item repeated inside one receipt (overlapping slices) counts once. */
+export function dedupeReceiptLines(lines: ReceiptLine[]): ReceiptLine[] {
+  const seen = new Set<string>();
+  const kept: ReceiptLine[] = [];
+  for (const line of lines) {
+    const id = line.upc ? `upc:${line.upc}` : `${fold(line.brand)}|${fold(line.name)}|${fold(line.size)}`;
+    const key = `${line.receipt || 1}|${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(line);
   }
-  return [...counts.values()].sort((a, b) => b.count - a.count)[0]?.display || "";
+  return kept;
+}
+
+/**
+ * Brand that shows up on the most receipts, then on the most lines.
+ * One noisy receipt does not beat a brand that repeats across orders.
+ */
+function frequentBrand(lines: ReceiptLine[]): string {
+  const stats = new Map<string, { display: string; receipts: number; lines: number }>();
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const key = fold(line.brand);
+    if (!key) continue;
+    const row = stats.get(key) || { display: line.brand, receipts: 0, lines: 0 };
+    row.lines += 1;
+    const token = `${line.receipt || 1}|${key}`;
+    if (!seen.has(token)) {
+      seen.add(token);
+      row.receipts += 1;
+    }
+    stats.set(key, row);
+  }
+  return [...stats.values()].sort((a, b) => b.receipts - a.receipts || b.lines - a.lines || a.display.localeCompare(b.display))[0]?.display || "";
 }
 
 export function inferReceiptPreferences(lines: ReceiptLine[]): LearnedPreference[] {
@@ -497,13 +521,13 @@ export function inferReceiptPreferences(lines: ReceiptLine[]): LearnedPreference
     let upc = rows[0]?.upc || "";
     if (store.length && store.length >= named.length && store.length * 2 >= rows.length) {
       mode = "storeBrand";
-      brand = majority(store.map((line) => line.brand));
+      brand = frequentBrand(store);
       productName = store[0]?.name || productName;
       size = store[0]?.size || size;
       upc = store.find((line) => line.upc)?.upc || upc;
     } else if (named.length && named.length * 2 >= rows.length) {
       mode = "brand";
-      brand = majority(named.map((line) => line.brand));
+      brand = frequentBrand(named);
       const pick = named.find((line) => fold(line.brand) === fold(brand)) || named[0];
       productName = pick?.name || productName;
       size = pick?.size || size;
@@ -533,7 +557,7 @@ export function inferReceiptPreferences(lines: ReceiptLine[]): LearnedPreference
 }
 
 export function analyzeReceipt(text: string): ReceiptAnalysis {
-  const lines = parseReceiptText(text);
+  const lines = dedupeReceiptLines(parseReceiptText(text));
   const paper = looksLikePaperReceipt(lines);
   return {
     lines,
@@ -602,11 +626,68 @@ export function receiptFromVision(raw: string): ReceiptAnalysis | null {
 }
 
 /** Re-learn after the shopper removes a line. Prices are cleared. */
+export type CatalogBrandHit = {
+  upc?: string;
+  brand?: string;
+  name?: string;
+  storeBrand?: boolean;
+};
+
+/**
+ * When a line has a UPC that is already in the catalog, use that brand.
+ * The model is not asked to guess a brand from a barcode.
+ */
+export function applyCatalogBrands(lines: ReceiptLine[], products: CatalogBrandHit[]): ReceiptLine[] {
+  const byUpc = new Map<string, CatalogBrandHit>();
+  for (const product of products || []) {
+    const key = upcKey(product?.upc);
+    if (!key || byUpc.has(key)) continue;
+    if (!clean(product.brand || "") && !clean(product.name || "")) continue;
+    byUpc.set(key, product);
+  }
+  if (!byUpc.size) return lines;
+  let changed = false;
+  const next = lines.map((line) => {
+    const key = upcKey(line.upc);
+    const match = key ? byUpc.get(key) : undefined;
+    if (!match) return line;
+    const brand = clean(match.brand || "") || line.brand;
+    const store = Boolean(match.storeBrand) || isReceiptStoreBrand(brand);
+    const named = clean(match.name || "") || line.name;
+    const category = categoryFor(named, brand) || (line.family ? { id: line.family, label: line.label } : null);
+    const updated: ReceiptLine = {
+      ...line,
+      brand,
+      storeBrand: store,
+      family: category?.id || line.family,
+      label: category?.label || line.label,
+    };
+    if (updated.brand !== line.brand || updated.storeBrand !== line.storeBrand || updated.family !== line.family || updated.label !== line.label) {
+      changed = true;
+    }
+    return updated;
+  });
+  return changed ? next : lines;
+}
+
+export function relearnReceipt(lines: ReceiptLine[]): ReceiptAnalysis {
+  const kept = dedupeReceiptLines(lines);
+  const paper = looksLikePaperReceipt(kept);
+  return {
+    lines: kept,
+    learned: inferReceiptPreferences(kept),
+    paper,
+    paperNote: paper ? PAPER_RECEIPT_NOTE : "",
+  };
+}
+
 export function learnReceiptLines(input: unknown[]): ReceiptAnalysis {
-  const lines = (Array.isArray(input) ? input : [])
-    .slice(0, 80)
-    .map((row, index) => asLine(row, index))
-    .filter((line): line is ReceiptLine => Boolean(line));
+  const lines = dedupeReceiptLines(
+    (Array.isArray(input) ? input : [])
+      .slice(0, 160)
+      .map((row, index) => asLine(row, index))
+      .filter((line): line is ReceiptLine => Boolean(line))
+  );
   const paper = looksLikePaperReceipt(lines);
   return {
     lines,

@@ -61,7 +61,7 @@ import {
 import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
 import { selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
-import { fileToBase64, readReceiptBatch } from "./shopper/receiptImport.js";
+import { fileToBase64, readNdjsonResponse, readReceiptBatch } from "./shopper/receiptImport.js";
 import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
 import {
   applyTripEdits,
@@ -6125,7 +6125,7 @@ function finishProfile(profile) {
   scheduleAccountSync();
 }
 
-async function postImport(path, body) {
+async function postImport(path, body, onProgress) {
   const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
@@ -6134,6 +6134,10 @@ async function postImport(path, body) {
     },
     body: JSON.stringify(body),
   });
+  const type = response.headers.get("content-type") || "";
+  if (type.includes("ndjson")) {
+    return readNdjsonResponse(response, onProgress);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok && !payload?.receipt && !payload?.lines) {
     throw new Error(payload?.error || "We couldn't read that.");
@@ -6146,7 +6150,7 @@ profileUi = mountProfileOnboarding({
   toast,
   getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
   setZip: (zip) => applyZip(zip, { reload: false }),
-  readReceipts: async ({ text, files } = {}) => {
+  readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;
     try {
       const status = await fetch(apiUrl("/api/import/status"));
@@ -6157,8 +6161,9 @@ profileUi = mountProfileOnboarding({
     return readReceiptBatch(
       {
         photo,
+        onProgress,
         postPhoto: async (file) => postImport("/api/import/photo", { imageBase64: await fileToBase64(file), mimeType: file.type || "image/jpeg" }),
-        postPdf: async (file) => postImport("/api/import/pdf", { pdfBase64: await fileToBase64(file) }),
+        postPdf: async (file) => postImport("/api/import/pdf", { pdfBase64: await fileToBase64(file), progress: true }, onProgress),
         postText: async (value) => postImport("/api/import/receipt", { text: value }),
         postLines: async (lines) => postImport("/api/import/receipt", { lines }),
       },

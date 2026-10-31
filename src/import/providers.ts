@@ -34,10 +34,13 @@ const ASK_SYSTEM = [
 const VISION_SYSTEM = [
   PARSE_SYSTEM,
   "The note is a photo of a handwritten list, a receipt, or a store order.",
-  "When a UPC or barcode is printed, put the digits in upc.",
-  'Also include "text": a plain transcript of the grocery lines, one per line, keeping quantity lines, coupon lines, and UPC: lines.',
+  "When a UPC or barcode number is printed, copy those digits into upc. Do not guess a brand from a barcode.",
+  "Leave brand empty unless the package name prints one.",
+  'Also include "text": a plain transcript of the grocery lines, keeping each title, the quantity x price line, coupon lines, and UPC: lines.',
   "Do not transcribe addresses, card numbers, loyalty numbers, or order numbers.",
 ].join(" ");
+
+const FAST_VISION_FALLBACK = "gpt-4o-mini";
 
 export class ModelError extends Error {
   readonly status: number | null;
@@ -143,17 +146,16 @@ export async function aiAsk(goal: string, env: NodeJS.ProcessEnv = process.env, 
   return complete(config, config.aiProvider, ASK_SYSTEM, user);
 }
 
-export async function aiReadImage(
-  imageBase64: string,
-  mimeType: string,
-  env: NodeJS.ProcessEnv = process.env
-): Promise<string> {
-  const config = importConfig(env);
-  if (!config.visionProvider) throw new ModelError("unconfigured");
+function modelMissing(error: unknown): boolean {
+  if (!(error instanceof ModelError)) return false;
+  return /model_not_found|does not exist or you do not have access|invalid model/i.test(error.upstream);
+}
+
+async function readImage(config: ImportConfig, imageBase64: string, mimeType: string, detail: "low" | "high"): Promise<string> {
   if (config.visionProvider === "openai") {
     return complete(config, "openai", VISION_SYSTEM, [
-      { type: "text", text: "Read the groceries in this photo." },
-      { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+      { type: "text", text: "Read the groceries in this photo. Copy UPC lines. Do not invent brands." },
+      { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}`, detail } },
     ]);
   }
   return complete(config, "anthropic", VISION_SYSTEM, [
@@ -161,8 +163,29 @@ export async function aiReadImage(
       type: "image",
       source: { type: "base64", media_type: mimeType, data: imageBase64 },
     },
-    { type: "text", text: "Read the groceries in this photo." },
+    { type: "text", text: "Read the groceries in this photo. Copy UPC lines. Do not invent brands." },
   ]);
+}
+
+export async function aiReadImage(
+  imageBase64: string,
+  mimeType: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { detail?: "low" | "high" }
+): Promise<string> {
+  const config = importConfig(env);
+  if (!config.visionProvider) throw new ModelError("unconfigured");
+  const detail = options?.detail === "high" ? "high" : "low";
+  try {
+    return await readImage(config, imageBase64, mimeType, detail);
+  } catch (error) {
+    const explicit = Boolean((env.IMPORT_VISION_MODEL || "").trim());
+    if (config.visionProvider === "openai" && !explicit && config.visionModel !== FAST_VISION_FALLBACK && modelMissing(error)) {
+      console.info("receipt vision model fallback gpt-4o-mini");
+      return readImage({ ...config, visionModel: FAST_VISION_FALLBACK }, imageBase64, mimeType, detail);
+    }
+    throw error;
+  }
 }
 
 function multipart(file: { filename: string; mimeType: string; data: Buffer }): { body: Buffer; contentType: string } {

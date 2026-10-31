@@ -10,9 +10,11 @@ import { constraintNote } from "../import/constraints";
 import { readSharedLink } from "../import/linkFetch";
 import { matchImportItems, type ImportMatchResult } from "../import/matchImport";
 import { IMPORT_MESSAGES, KROGER_HISTORY_REASON } from "../import/messages";
+import { visionDetail } from "../import/imageDetail";
+import { mapPool } from "../import/pool";
 import { rasterizePdf } from "../import/pdfRaster";
 import { extractPdfText } from "../import/pdfText";
-import { analyzeReceipt, learnReceiptLines, receiptFromVision, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
+import { analyzeReceipt, applyCatalogBrands, learnReceiptLines, receiptFromVision, relearnReceipt, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
 import { aiAsk, aiParseText, aiReadImage, ModelError, probeVision, transcribeAudio } from "../import/providers";
 import { setImportRuntime } from "../import/runtime";
@@ -36,6 +38,7 @@ const AUDIO_TYPES = new Set([
 ]);
 
 const MAX_TEXT = 50_000;
+const VISION_CONCURRENCY = 4;
 const MAX_IMAGE = 4_000_000;
 const MAX_AUDIO = 8_000_000;
 const MAX_PDF = 8_000_000;
@@ -94,6 +97,22 @@ function linesToItems(lines: ReceiptLine[]): ParsedImportItem[] {
     ...(line.size ? { size: line.size } : {}),
     ...(line.upc ? { upc: line.upc } : {}),
   }));
+}
+
+async function withCatalogBrands(analysis: ReceiptAnalysis): Promise<ReceiptAnalysis> {
+  const upcs = analysis.lines.map((line) => line.upc).filter(Boolean);
+  if (!upcs.length) return analysis;
+  const started = Date.now();
+  const products = await loadKnownProducts({ upcs });
+  const lines = applyCatalogBrands(analysis.lines, products);
+  const matchMs = Date.now() - started;
+  if (lines === analysis.lines) {
+    console.info(`receipt stage=match ms=${matchMs} upc=${upcs.length} branded=0`);
+    return analysis;
+  }
+  const next = relearnReceipt(lines);
+  console.info(`receipt stage=match ms=${matchMs} upc=${upcs.length} branded=${next.lines.filter((line) => line.brand).length}`);
+  return next;
 }
 
 function mergeReceipts(parts: ReceiptAnalysis[]): ReceiptAnalysis | null {
@@ -296,14 +315,19 @@ router.post("/import/photo", async (req, res) => {
     res.status(429).json({ error: IMPORT_MESSAGES.daily });
     return;
   }
+  const started = Date.now();
   try {
-    const extracted = await aiReadImage(image.toString("base64"), mimeType);
-    const visionReceipt = receiptFromVision(extracted);
+    const detail = visionDetail(image);
+    const extracted = await aiReadImage(image.toString("base64"), mimeType, process.env, { detail });
+    console.info(`receipt stage=photo detail=${detail} ms=${Date.now() - started} bytes=${image.length}`);
+    let visionReceipt = receiptFromVision(extracted);
+    if (visionReceipt?.lines.some((line) => line.upc)) visionReceipt = await withCatalogBrands(visionReceipt);
     const modeled = itemsFromModel(extracted);
     const withUpc = Boolean(visionReceipt?.lines.some((line) => line.upc));
     const items = withUpc && visionReceipt ? linesToItems(visionReceipt.lines) : modeled ?? parseImportText(extracted);
     const match = await review(items);
-    const receipt = (withUpc ? visionReceipt : null) ?? visionReceipt ?? receiptFor(extracted);
+    let receipt = (withUpc ? visionReceipt : null) ?? visionReceipt ?? receiptFor(extracted);
+    if (receipt?.lines.some((line) => line.upc) && receipt !== visionReceipt) receipt = await withCatalogBrands(receipt);
     if (!match.items.length && !receipt?.lines.length) {
       res.status(422).json({ error: IMPORT_MESSAGES.visionUnreadable, code: "unreadable" });
       return;
@@ -441,43 +465,115 @@ router.post("/import/pdf", async (req, res) => {
     res.status(400).json({ error: IMPORT_MESSAGES.tooBig });
     return;
   }
+  const stream = req.body?.progress === true;
+  let streaming = false;
+  const emit = (event: Record<string, unknown>) => {
+    if (!stream) return;
+    if (!streaming) {
+      streaming = true;
+      res.status(200);
+      res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("cache-control", "no-cache, no-transform");
+      res.setHeader("x-accel-buffering", "no");
+    }
+    res.write(`${JSON.stringify(event)}\n`);
+  };
+  const finish = (analysis: ReceiptAnalysis) => {
+    if (streaming) {
+      emit({ type: "result", analysis });
+      res.end();
+      return;
+    }
+    res.json(analysis);
+  };
+  const fail = (status: number, error: string, code: string) => {
+    if (streaming) {
+      emit({ type: "error", error, code });
+      res.end();
+      return;
+    }
+    res.status(status).json({ error, ...(code ? { code } : {}) });
+  };
+
+  const started = Date.now();
+  emit({ type: "progress", stage: "preparing", message: "Preparing…", ratio: 0.08 });
+  const textStarted = Date.now();
   const text = extractPdfText(pdf).slice(0, MAX_TEXT);
+  const textMs = Date.now() - textStarted;
   const fromText = text ? analyzeReceipt(text) : null;
   if (fromText?.lines.length) {
-    res.json(fromText);
+    emit({ type: "progress", stage: "matching", message: "Matching brands…", ratio: 0.72 });
+    const analysis = await withCatalogBrands(fromText);
+    console.info(
+      `receipt stage=pdf-text ms=${textMs} lines=${analysis.lines.length} upc=${analysis.lines.filter((line) => line.upc).length} vision=0 total=${Date.now() - started}`
+    );
+    finish(analysis);
     return;
   }
+
+  const rasterStarted = Date.now();
   const slices = await rasterizePdf(pdf);
+  const rasterMs = Date.now() - rasterStarted;
   if (!slices.length) {
-    res.status(422).json({ error: IMPORT_MESSAGES.pdfNoRaster, code: "no_raster" });
+    console.info(`receipt stage=pdf-raster ms=${rasterMs} slices=0 total=${Date.now() - started}`);
+    fail(422, IMPORT_MESSAGES.pdfNoRaster, "no_raster");
     return;
   }
   const config = importConfig();
   if (!config.photo) {
-    res.status(503).json({ error: IMPORT_MESSAGES.pdfNeedsVision, code: "unconfigured" });
+    fail(503, IMPORT_MESSAGES.pdfNeedsVision, "unconfigured");
     return;
   }
   const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
   if (!budget.ok) {
-    res.status(429).json({ error: IMPORT_MESSAGES.daily });
+    fail(429, IMPORT_MESSAGES.daily, "");
     return;
   }
   try {
-    const parts: ReceiptAnalysis[] = [];
-    for (const slice of slices) {
-      const raw = await aiReadImage(slice.jpeg.toString("base64"), "image/jpeg");
+    let finished = 0;
+    let detailHigh = 0;
+    let detailLow = 0;
+    const visionStarted = Date.now();
+    const reportPart = () => {
+      const part = Math.min(slices.length, finished + 1);
+      emit({
+        type: "progress",
+        stage: "reading",
+        message: `Reading part ${part} of ${slices.length}…`,
+        index: part,
+        total: slices.length,
+        ratio: 0.15 + (0.6 * finished) / slices.length,
+      });
+    };
+    reportPart();
+    const parts = await mapPool(slices, VISION_CONCURRENCY, async (slice) => {
+      const detail = visionDetail(slice.jpeg);
+      if (detail === "high") detailHigh += 1;
+      else detailLow += 1;
+      const raw = await aiReadImage(slice.jpeg.toString("base64"), "image/jpeg", process.env, { detail });
+      finished += 1;
+      reportPart();
       const receipt = receiptFromVision(raw);
-      if (receipt?.lines.length) parts.push(receipt);
-    }
-    const analysis = mergeReceipts(parts);
-    if (!analysis?.lines.length) {
-      res.status(422).json({ error: IMPORT_MESSAGES.visionUnreadable, code: "unreadable" });
+      return receipt?.lines.length ? receipt : null;
+    });
+    const visionMs = Date.now() - visionStarted;
+    const merged = mergeReceipts(parts.filter((part): part is ReceiptAnalysis => Boolean(part)));
+    if (!merged?.lines.length) {
+      console.info(
+        `receipt stage=pdf-vision ms=${visionMs} rasterMs=${rasterMs} slices=${slices.length} concurrency=${VISION_CONCURRENCY} detailHigh=${detailHigh} detailLow=${detailLow} lines=0 total=${Date.now() - started}`
+      );
+      fail(422, IMPORT_MESSAGES.visionUnreadable, "unreadable");
       return;
     }
-    res.json(analysis);
+    emit({ type: "progress", stage: "matching", message: "Matching brands…", ratio: 0.9 });
+    const analysis = await withCatalogBrands(merged);
+    console.info(
+      `receipt stage=pdf-vision ms=${visionMs} rasterMs=${rasterMs} textMs=${textMs} slices=${slices.length} concurrency=${VISION_CONCURRENCY} detailHigh=${detailHigh} detailLow=${detailLow} lines=${analysis.lines.length} upc=${analysis.lines.filter((line) => line.upc).length} model=${config.visionModel} total=${Date.now() - started}`
+    );
+    finish(analysis);
   } catch (error) {
     const mapped = visionHttp(error);
-    res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    fail(mapped.status, mapped.error, mapped.code);
   }
 });
 

@@ -4,6 +4,7 @@ import { gtinCheckDigit, upcForStorage } from "../catalog/normalize";
 import { extractPdfText } from "./pdfText";
 import {
   analyzeReceipt,
+  applyCatalogBrands,
   inferReceiptPreferences,
   isReceiptStoreBrand,
   PAPER_RECEIPT_NOTE,
@@ -299,5 +300,33 @@ trailer << /Root 1 0 R >>
     assert.equal(analysis.lines[0]?.family, "eggs");
     assert.equal(analysis.lines[0]?.storeBrand, true);
     assert.equal(analysis.lines[0]?.upc, krogerCode(7));
+  });
+
+  it("prefers the brand that shows up on more receipts and a catalog UPC over a blank name", () => {
+    const line = (brand: string, receipt: number): ReceiptLine => ({
+      name: "Laundry Detergent",
+      brand,
+      size: "",
+      quantity: 1,
+      upc: "",
+      price: null,
+      receipt,
+      raw: brand,
+      storeBrand: false,
+      family: "laundry-detergent",
+      label: "Laundry detergent",
+    });
+    const learned = inferReceiptPreferences([line("Gain", 1), line("Gain", 1), line("Tide", 2), line("Tide", 3)]);
+    assert.equal(learned[0]?.brand, "Tide");
+    const parsed = parseReceiptText("Laundry Detergent\n1.0 x $11.99\nUPC: 0003620021933");
+    assert.ok(parsed[0]?.upc);
+    assert.equal(parsed[0]?.brand, "");
+    const branded = applyCatalogBrands(parsed, [
+      { upc: parsed[0]?.upc, brand: "Tide", name: "Tide Liquid Laundry Detergent", storeBrand: false },
+    ]);
+    assert.equal(branded[0]?.brand, "Tide");
+    assert.equal(branded[0]?.family, "laundry-detergent");
+    assert.equal(branded[0]?.storeBrand, false);
+    assert.equal(applyCatalogBrands(parsed, [{ upc: "0000000000000", brand: "Other", name: "Other" }]), parsed);
   });
 });

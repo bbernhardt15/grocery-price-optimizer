@@ -1208,16 +1208,51 @@ dialog.profile-onboard .sheet-body {
 #profile-title:focus { outline: none; }
 #profile-hint { margin: 0; color: var(--muted); }
 #profile-stage { display: flex; flex-direction: column; gap: 12px; padding-bottom: 88px; }
+dialog.profile-onboard[data-step="receipts"] #profile-stage,
+dialog.profile-onboard[data-step="learned"] #profile-stage { padding-bottom: 8px; }
+dialog.profile-onboard[data-step="receipts"] .profile-actions,
+dialog.profile-onboard[data-step="learned"] .profile-actions { position: static; }
+.receipt-upload { display: flex; flex-direction: column; gap: 16px; }
+.receipt-upload > * { margin: 0; }
 .receipt-upload textarea,
 .profile-field textarea { width: 100%; min-height: 96px; }
-.store-hints { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 6px; }
+.where-find { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 0 12px; }
+.where-find > summary { cursor: pointer; font-weight: 750; min-height: 44px; display: flex; align-items: center; }
+.store-finds { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
+#profile-receipt-pick { width: 100%; min-height: 48px; }
+.brand-picks { margin-bottom: 4px; }
+.store-find { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 0 12px; }
+.store-find summary { cursor: pointer; font-weight: 750; min-height: 44px; display: flex; align-items: center; }
+.store-find p { margin: 0 0 10px; color: var(--muted); }
+.receipt-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.receipt-files:empty { display: none; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  min-height: 36px; padding: 4px 8px 4px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font-weight: 650;
+}
+.file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.read-progress { display: flex; flex-direction: column; gap: 8px; }
+.read-progress[hidden] { display: none; }
+.read-progress-row { display: flex; align-items: center; gap: 10px; }
+.read-progress .status { margin: 0; }
+.spinner {
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+.read-progress[data-state="error"] .spinner,
+.read-progress[data-state="error"] progress { display: none; }
+.read-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
 .receipt-privacy { color: var(--muted); }
 .paper-note { margin: 0; padding: 10px 12px; border-radius: 14px; background: var(--sale-soft); }
-.learned-row { align-items: center; }
+.learned-row { align-items: center; flex-wrap: wrap; }
+.learned-row > div:first-child { flex: 1; min-width: 140px; }
 .learned-actions { display: flex; gap: 8px; }
+.learned-picker { flex: 1 0 100%; display: flex; flex-direction: column; gap: 8px; }
+.learned-picker .choice-card { min-height: 48px; }
 .learned-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .learned-lines li { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.learned-editor { display: flex; flex-direction: column; gap: 8px; }
 .profile-actions { position: sticky; bottom: 0; background: var(--bg); padding: 8px 0 4px; }
 .profile-actions .primary { width: 100%; min-height: 52px; font-size: 1.05rem; }
 .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
