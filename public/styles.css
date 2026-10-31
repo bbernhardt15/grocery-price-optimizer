@@ -856,6 +856,34 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; color: var(--sale);
 }
 
+@media (max-width: 899px) {
+  input,
+  select,
+  textarea,
+  .search .ask-field input,
+  .zip input,
+  .filters input,
+  .filters select,
+  .sort select,
+  .delete-box input,
+  .account-box input,
+  .share-box input,
+  .coupon-form input,
+  .coupon-form select,
+  .move select,
+  .profile-field input,
+  .profile-field textarea,
+  .receipt-upload textarea,
+  .list-rename input,
+  .slot-finder input,
+  #pick-query,
+  #onboard-zip,
+  #profile-zip,
+  #profile-receipt-paste,
+  #profile-diet-other {
+    font-size: 16px;
+  }
+}
 @media (max-width: 719px) {
   .brand-title { display: none; }
   .ask-import-label {
@@ -864,10 +892,10 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   }
   .ask-import { width: 44px; padding: 0; }
   .ask-import::before { content: "＋"; font-size: 1.25rem; line-height: 1; }
-  .search .ask-field input { padding-right: 92px; font-size: 0.95rem; }
+  .search .ask-field input { padding-right: 92px; font-size: 16px; }
 }
 @media (max-width: 400px) {
-  .search .ask-field input { padding-right: 88px; font-size: 0.86rem; }
+  .search .ask-field input { padding-right: 88px; font-size: 16px; }
 }
 @media (max-width: 1099px) {
   .brand-kicker, #list-toggle { display: none; }

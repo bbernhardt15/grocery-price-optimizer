@@ -3,7 +3,7 @@ import { demoBrowseProducts, demoRecords } from "./demoCatalog";
 import { catalogCoverage, type CoverageFlags } from "./coverage";
 import { facetsFor, filterProducts, paginateProducts, sortProducts } from "./browse";
 import { familyFromQuery, preferRealImages, productMatchesFamily, rankFamilyScore } from "./stapleFamilies";
-import { groupOffersByUpc } from "./normalize";
+import { groupOffersByUpc, krogerLookupCodes, upcForStorage, walmartLookupCodes } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
 import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, type BrowseTile } from "./family";
@@ -29,7 +29,7 @@ import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
 import { ingestConfig } from "../ingest/config";
 import { noteCatalogDemand } from "../ingest/demand";
-import { readStoredById, readStoredRecords } from "../ingest/readStore";
+import { readRecordsByUpc, readStoredById, readStoredRecords } from "../ingest/readStore";
 import { upsertCatalogRecords } from "../ingest/upsert";
 
 const GAP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
@@ -428,10 +428,29 @@ async function loadScope(
   return { products, warnings, cached: false, fromDatabase: false };
 }
 
-export async function loadKnownProducts(hints?: { queries?: string[] }): Promise<BrowseProduct[]> {
+function upcNeedles(upcs: string[]): string[] {
+  const codes = new Set<string>();
+  for (const upc of upcs) {
+    const stored = upcForStorage(upc);
+    if (stored) codes.add(stored);
+    const digits = upc.replace(/\D/g, "");
+    if (digits) codes.add(digits);
+    for (const code of krogerLookupCodes(upc)) codes.add(code);
+    for (const code of walmartLookupCodes(upc)) codes.add(code);
+  }
+  return [...codes];
+}
+
+export async function loadKnownProducts(hints?: { queries?: string[]; upcs?: string[] }): Promise<BrowseProduct[]> {
   const byId = new Map<string, BrowseProduct>();
   for (const product of demoBrowseProducts()) {
     byId.set(product.id, product);
+  }
+  if (hints?.upcs?.length && mongoose.connection.readyState === 1) {
+    const stored = await readRecordsByUpc(upcNeedles(hints.upcs));
+    for (const product of groupOffersByUpc(stored)) {
+      byId.set(product.id, product);
+    }
   }
   if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
     const queries = (hints?.queries ?? []).map((query) => query.trim()).filter((query) => query.length > 1);

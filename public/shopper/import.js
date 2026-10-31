@@ -436,20 +436,6 @@ export function mountImport(deps) {
     });
   }
 
-  async function prepareImage(file) {
-    if (!file.type.startsWith("image/")) return file;
-    const bitmap = await createImageBitmap(file).catch(() => null);
-    if (!bitmap) return file;
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
-    bitmap.close?.();
-    return blob || file;
-  }
-
   async function runPhoto(file) {
     if (!status.photo) {
       setStatus("Photo import isn't switched on yet. Paste the text instead.", "error");
@@ -458,13 +444,20 @@ export function mountImport(deps) {
     }
     setStatus("Reading the photo…");
     try {
-      const prepared = await prepareImage(file);
-      if (prepared.size > 4_000_000) {
-        setStatus("That file is too large. Try a smaller screenshot or paste the text.", "error");
-        return;
+      const { imageBlobs } = await import("./receiptImages.js");
+      const prepared = await imageBlobs(file);
+      let merged = null;
+      for (const blob of prepared) {
+        if (blob.size > 4_000_000) {
+          setStatus("That file is too large. Try a smaller screenshot or paste the text.", "error");
+          return;
+        }
+        const imageBase64 = await blobToBase64(blob);
+        const part = await post("/api/import/photo", { imageBase64, mimeType: blob.type || "image/jpeg" });
+        if (!merged) merged = part;
+        else if (Array.isArray(part.items)) merged = { ...merged, items: [...(merged.items || []), ...part.items], total: (merged.total || 0) + (part.total || part.items.length) };
       }
-      const imageBase64 = await blobToBase64(prepared);
-      review = await post("/api/import/photo", { imageBase64, mimeType: prepared.type || "image/jpeg" });
+      review = merged;
       setStatus("");
       renderReview();
     } catch (error) {

@@ -4,6 +4,7 @@
  */
 
 import { groupBrowseFamilies, type BrowseTile } from "../catalog/family";
+import { upcKey } from "../catalog/normalize";
 import { familyFromQuery, productMatchesFamily } from "../catalog/stapleFamilies";
 import type { BrowseProduct } from "../catalog/types";
 import { parsePackageSize } from "../packageSize";
@@ -98,8 +99,14 @@ function sizeDistance(wantedText: string | undefined, product: BrowseProduct): n
   return Math.min(1, Math.abs(Math.log(ratio)) / Math.log(4));
 }
 
+function sameUpc(left: string | undefined, right: string | undefined): boolean {
+  const a = upcKey(left);
+  const b = upcKey(right);
+  return Boolean(a && b && a === b);
+}
+
 function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
-  if (item.upc && variant.upc && item.upc === variant.upc) return 3;
+  if (sameUpc(item.upc, variant.upc)) return 3;
   const query = stems([item.name, item.brand].filter(Boolean).join(" "));
   if (!query.length) return 0;
   const hayTokens = stems(`${variant.name} ${variant.brand}`);
@@ -165,6 +172,28 @@ function withSelection(tile: BrowseTile, variantId: string): BrowseTile {
 export function matchImportItems(items: ParsedImportItem[], products: BrowseProduct[]): ImportMatchResult {
   const families = groupBrowseFamilies(products);
   const review: ImportReviewItem[] = items.slice(0, 80).map((item, index) => {
+    const direct = item.upc
+      ? families
+          .map((tile) => ({ tile, variant: tile.variants.find((variant) => sameUpc(item.upc, variant.upc)) }))
+          .find((row) => row.variant)
+      : undefined;
+    if (direct?.variant) {
+      const choice = { score: 3, product: withSelection(direct.tile, direct.variant.id) };
+      return {
+        key: `item-${index + 1}`,
+        raw: item.raw,
+        name: item.name,
+        quantity: item.quantity,
+        ...(direct.variant.brand || item.brand ? { brand: direct.variant.brand || item.brand } : {}),
+        ...(item.size ? { size: item.size } : {}),
+        upc: item.upc,
+        ...(item.notes ? { notes: item.notes } : {}),
+        status: "matched" as const,
+        accepted: true,
+        selectedId: choice.product.id,
+        choices: [choice],
+      };
+    }
     const family = familyFromQuery(item.name);
     const ranked = families
       .map((tile) => {

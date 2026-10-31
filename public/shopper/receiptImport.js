@@ -4,6 +4,7 @@
  * discards them.
  */
 
+import { imageBlobs } from "./receiptImages.js";
 import { PHOTO_OFF_RECEIPT } from "./receiptCopy.js";
 
 async function readBlob(file) {
@@ -48,13 +49,16 @@ export async function readReceiptBatch(deps, input) {
     const type = String(file.type || "");
     const name = String(file.name || "");
     try {
-      if (type.startsWith("image/")) {
+      if (type.startsWith("image/") || /\.hei[cf]$/i.test(name)) {
         if (!deps.photo) {
           photoOff = true;
           continue;
         }
-        const payload = await deps.postPhoto(file);
-        lines.push(...linesFrom(payload, receiptNumber));
+        const blobs = await imageBlobs(file);
+        for (const blob of blobs) {
+          const payload = await deps.postPhoto(blob.type ? blob : file);
+          lines.push(...linesFrom(payload, receiptNumber));
+        }
         continue;
       }
       if (type === "application/pdf" || /\.pdf$/i.test(name)) {

@@ -1,5 +1,6 @@
 /**
- * A short guide: ZIP, allergies, diets, then optional receipts.
+ * A short guide: ZIP and stores, then optional receipts.
+ * Allergies and diets are asked the first time a meal idea opens.
  * Skip for now leaves the rest of the guide. Category questions wait until an item is added.
  * Closing the guide saves the step so the next visit resumes.
  */
@@ -17,6 +18,15 @@ const FLOW = [
     kind: "place",
   },
   {
+    id: "receipts",
+    title: "Upload past receipts or order screenshots",
+    hint: "Optional, about a minute. This is the fastest way to learn the brands you already buy.",
+    kind: "receipts",
+  },
+];
+
+const DIET_FLOW = [
+  {
     id: "allergies",
     title: "Any allergies?",
     hint: "These are never included. We match the words on the product. Still read the label.",
@@ -24,12 +34,6 @@ const FLOW = [
     options: "allergies",
   },
   { id: "diets", title: "Any diets?", hint: "A diet beats a saved product. A receipt never overrides this.", kind: "multi", options: "diets" },
-  {
-    id: "receipts",
-    title: "Upload past receipts or order screenshots",
-    hint: "Optional, about a minute. This is the fastest way to learn the brands you already buy.",
-    kind: "receipts",
-  },
 ];
 
 const EXTRA = [
@@ -42,7 +46,7 @@ const EXTRA = [
   },
 ];
 
-const STEP_DEFS = [...FLOW, ...EXTRA];
+const STEP_DEFS = [...FLOW, ...DIET_FLOW, ...EXTRA];
 
 const LABELS = {
   "save-money": "Save money",
@@ -135,9 +139,28 @@ function decorate(steps) {
   }));
 }
 
-/** Questions asked up front. Category-by-category picks stay in Edit what I buy. */
+/** Questions asked up front. Allergies and diets wait until a meal idea. */
 export function profileSteps() {
   return decorate(FLOW);
+}
+
+/** Asked the first time meal ideas or a recipe list is opened. */
+export function dietSteps() {
+  return decorate(DIET_FLOW);
+}
+
+export function shouldAskDietPrompt(profile) {
+  const parsed = parseProfile(profile);
+  if (parsed.dietPrompt === "asked" || parsed.dietPrompt === "skipped") return false;
+  if ((parsed.allergies || []).length || (parsed.diets || []).length || (parsed.dietNotes || []).length) return false;
+  return true;
+}
+
+export function markDietPrompt(profile, value, at = Date.now()) {
+  const next = parseProfile(profile);
+  next.dietPrompt = value === "skipped" ? "skipped" : "asked";
+  next.updatedAt = at;
+  return next;
 }
 
 export function stepById(id) {
@@ -161,8 +184,11 @@ export function prevStepId(id) {
 export function progressLabel(id) {
   const steps = profileSteps();
   const index = steps.findIndex((step) => step.id === id);
-  if (index < 0) return "";
-  return `${index + 1} of ${steps.length}`;
+  if (index >= 0) return `${index + 1} of ${steps.length}`;
+  const diets = dietSteps();
+  const dietIndex = diets.findIndex((step) => step.id === id);
+  if (dietIndex >= 0) return `${dietIndex + 1} of ${diets.length}`;
+  return "";
 }
 
 export function primaryLabel(id) {
@@ -261,7 +287,10 @@ export function completeProfile(profile, at = Date.now()) {
 export function resumeStep(profile) {
   const parsed = parseProfile(profile || emptyProfile());
   if (parsed.onboarding.status === "done" || parsed.onboarding.status === "skipped") return "summary";
-  return stepById(parsed.onboarding.step).id;
+  const steps = profileSteps();
+  if (steps.some((step) => step.id === parsed.onboarding.step)) return parsed.onboarding.step;
+  if (parsed.onboarding.step === "allergies" || parsed.onboarding.step === "diets" || parsed.shopStores?.length) return "receipts";
+  return steps[0]?.id || "place";
 }
 
 function joinLabels(ids) {

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { requestAuth } from "../auth/middleware";
 import { loadKnownProducts } from "../catalog/service";
@@ -9,10 +10,11 @@ import { constraintNote } from "../import/constraints";
 import { readSharedLink } from "../import/linkFetch";
 import { matchImportItems, type ImportMatchResult } from "../import/matchImport";
 import { IMPORT_MESSAGES, KROGER_HISTORY_REASON } from "../import/messages";
+import { rasterizePdf } from "../import/pdfRaster";
 import { extractPdfText } from "../import/pdfText";
-import { analyzeReceipt, learnReceiptLines } from "../import/receiptLearn";
+import { analyzeReceipt, learnReceiptLines, receiptFromVision, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
-import { aiAsk, aiParseText, aiReadImage, ModelError, transcribeAudio } from "../import/providers";
+import { aiAsk, aiParseText, aiReadImage, ModelError, probeVision, transcribeAudio } from "../import/providers";
 import { setImportRuntime } from "../import/runtime";
 
 const router = Router();
@@ -63,8 +65,70 @@ function tooFast(res: Response): void {
 }
 
 async function review(items: ParsedImportItem[]): Promise<ImportMatchResult> {
-  const products = await loadKnownProducts({ queries: items.map((item) => item.name).slice(0, 24) });
+  const upcs = items.map((item) => item.upc || "").filter(Boolean);
+  const products = await loadKnownProducts({
+    queries: items.map((item) => item.name).slice(0, 24),
+    ...(upcs.length ? { upcs } : {}),
+  });
   return matchImportItems(items, products);
+}
+
+function visionHttp(error: unknown): { status: number; error: string; code: string } {
+  const failure = error instanceof ModelError ? error.failure : "upstream";
+  const upstream = error instanceof ModelError ? error.upstream : "";
+  const http = error instanceof ModelError ? error.status : null;
+  console.error(`Import photo failed (code=${failure} status=${http ?? "none"} upstream=${upstream || "none"})`);
+  if (failure === "unauthorized") return { status: 502, error: IMPORT_MESSAGES.visionUnauthorized, code: "unauthorized" };
+  if (failure === "too_large") return { status: 413, error: IMPORT_MESSAGES.visionTooLarge, code: "too_large" };
+  if (failure === "timeout") return { status: 504, error: IMPORT_MESSAGES.visionTimeout, code: "timeout" };
+  if (failure === "unreadable" || failure === "empty") return { status: 422, error: IMPORT_MESSAGES.visionUnreadable, code: "unreadable" };
+  return { status: 502, error: IMPORT_MESSAGES.visionUpstream, code: "upstream" };
+}
+
+function linesToItems(lines: ReceiptLine[]): ParsedImportItem[] {
+  return lines.map((line) => ({
+    raw: line.raw || line.name,
+    name: line.name,
+    quantity: line.quantity,
+    ...(line.brand ? { brand: line.brand } : {}),
+    ...(line.size ? { size: line.size } : {}),
+    ...(line.upc ? { upc: line.upc } : {}),
+  }));
+}
+
+function mergeReceipts(parts: ReceiptAnalysis[]): ReceiptAnalysis | null {
+  const lines: ReceiptLine[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    for (const line of part.lines) {
+      const key = line.upc ? `upc:${line.upc}` : `${line.brand}|${line.name}|${line.size}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(line);
+    }
+  }
+  if (!lines.length) return null;
+  return learnReceiptLines(lines);
+}
+
+function visionAdminOk(req: Request, res: Response): boolean {
+  const expected = [process.env.GG_ADMIN_TOKEN, process.env.ADMIN_TOKEN].map((value) => value?.trim() || "").filter(Boolean);
+  if (!expected.length) {
+    res.status(503).json({ error: "Set GG_ADMIN_TOKEN to check the vision key." });
+    return false;
+  }
+  const header = req.header("authorization") ?? req.header("x-admin-token") ?? "";
+  const presented = header.replace(/^Bearer\s+/i, "").trim();
+  const ok = expected.some((token) => {
+    const left = Buffer.from(presented);
+    const right = Buffer.from(token);
+    return left.length === right.length && timingSafeEqual(left, right);
+  });
+  if (!ok) {
+    res.status(401).json({ error: "Admin token required." });
+    return false;
+  }
+  return true;
 }
 
 function itemsFromModel(text: string): ParsedImportItem[] | null {
@@ -155,6 +219,12 @@ router.get("/health", (_req, res) => {
   });
 });
 
+router.get("/admin/vision", async (req, res) => {
+  if (!visionAdminOk(req, res)) return;
+  const probe = await probeVision();
+  res.status(probe.configured ? 200 : 503).json(probe);
+});
+
 router.get("/import/status", (_req, res) => {
   const config = importConfig();
   res.json({
@@ -218,7 +288,7 @@ router.post("/import/photo", async (req, res) => {
   }
   const image = decodeBase64(req.body?.imageBase64, MAX_IMAGE);
   if (!image) {
-    res.status(400).json({ error: IMPORT_MESSAGES.tooBig });
+    res.status(400).json({ error: IMPORT_MESSAGES.tooBig, code: "too_large" });
     return;
   }
   const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
@@ -228,24 +298,30 @@ router.post("/import/photo", async (req, res) => {
   }
   try {
     const extracted = await aiReadImage(image.toString("base64"), mimeType);
-    const items = itemsFromModel(extracted) ?? parseImportText(extracted);
+    const visionReceipt = receiptFromVision(extracted);
+    const modeled = itemsFromModel(extracted);
+    const withUpc = Boolean(visionReceipt?.lines.some((line) => line.upc));
+    const items = withUpc && visionReceipt ? linesToItems(visionReceipt.lines) : modeled ?? parseImportText(extracted);
     const match = await review(items);
-    const receipt = receiptFor(extracted);
-    if (!match.items.length) {
-      res.status(422).json({ error: IMPORT_MESSAGES.empty, ...(receipt ? { receipt } : {}) });
+    const receipt = (withUpc ? visionReceipt : null) ?? visionReceipt ?? receiptFor(extracted);
+    if (!match.items.length && !receipt?.lines.length) {
+      res.status(422).json({ error: IMPORT_MESSAGES.visionUnreadable, code: "unreadable" });
+      return;
+    }
+    if (!match.items.length && receipt?.lines.length) {
+      res.json(receipt);
       return;
     }
     res.json({
       ...match,
-      parser: itemsFromModel(extracted) ? "ai" : "rules",
+      parser: modeled && !withUpc ? "ai" : withUpc ? "rules" : "rules",
       aiFallback: false,
       paused: false,
-      ...(receipt ? { receipt } : {}),
+      ...(receipt?.lines.length ? { receipt } : {}),
     });
   } catch (error) {
-    const status = error instanceof ModelError ? error.message : "failed";
-    console.error(`Import photo failed (${status})`);
-    res.status(502).json({ error: IMPORT_MESSAGES.generic });
+    const mapped = visionHttp(error);
+    res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
   }
 });
 
@@ -366,16 +442,43 @@ router.post("/import/pdf", async (req, res) => {
     return;
   }
   const text = extractPdfText(pdf).slice(0, MAX_TEXT);
-  if (!text) {
-    res.status(422).json({ error: IMPORT_MESSAGES.pdfNoText });
+  const fromText = text ? analyzeReceipt(text) : null;
+  if (fromText?.lines.length) {
+    res.json(fromText);
     return;
   }
-  const analysis = analyzeReceipt(text);
-  if (!analysis.lines.length) {
-    res.status(422).json({ error: IMPORT_MESSAGES.empty, paper: analysis.paper, paperNote: analysis.paperNote });
+  const slices = await rasterizePdf(pdf);
+  if (!slices.length) {
+    res.status(422).json({ error: IMPORT_MESSAGES.pdfNoRaster, code: "no_raster" });
     return;
   }
-  res.json(analysis);
+  const config = importConfig();
+  if (!config.photo) {
+    res.status(503).json({ error: IMPORT_MESSAGES.pdfNeedsVision, code: "unconfigured" });
+    return;
+  }
+  const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
+  if (!budget.ok) {
+    res.status(429).json({ error: IMPORT_MESSAGES.daily });
+    return;
+  }
+  try {
+    const parts: ReceiptAnalysis[] = [];
+    for (const slice of slices) {
+      const raw = await aiReadImage(slice.jpeg.toString("base64"), "image/jpeg");
+      const receipt = receiptFromVision(raw);
+      if (receipt?.lines.length) parts.push(receipt);
+    }
+    const analysis = mergeReceipts(parts);
+    if (!analysis?.lines.length) {
+      res.status(422).json({ error: IMPORT_MESSAGES.visionUnreadable, code: "unreadable" });
+      return;
+    }
+    res.json(analysis);
+  } catch (error) {
+    const mapped = visionHttp(error);
+    res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
 });
 
 export default router;

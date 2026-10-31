@@ -14,9 +14,11 @@ import {
 } from "../../public/shopper/profile.js";
 import {
   answerStep,
+  markDietPrompt,
   primaryLabel,
   profileSteps,
   resumeStep,
+  shouldAskDietPrompt,
   SKIP_LABEL,
   skipForNow,
   skipStep,
@@ -84,13 +86,13 @@ describe("taste profile storage", () => {
   it("resumes after a skip and does not nag a finished older welcome", () => {
     const store = memory();
     let profile = answerStep(emptyProfile(), "place", { stores: ["Kroger", "Walmart"] }, 20);
-    profile = skipStep(profile, "allergies", 30);
     assert.equal(profile.onboarding.status, "in_progress");
-    assert.equal(profile.onboarding.step, "diets");
+    assert.equal(profile.onboarding.step, "receipts");
     assert.deepEqual(profile.shopStores, ["Kroger", "Walmart"]);
     assert.deepEqual(profile.allergies, []);
     saveUserProfile(store, profile, 30);
-    assert.equal(resumeStep(getUserProfile(store)), "diets");
+    assert.equal(resumeStep(getUserProfile(store)), "receipts");
+    assert.equal(resumeStep(parseProfile({ onboarding: { status: "in_progress", step: "allergies", updatedAt: 1 }, shopStores: ["Kroger"] })), "receipts");
     assert.equal(shouldPromptProfile(store), true);
 
     const legacy = memory({ [ONBOARDING_KEY]: "1" });
@@ -99,7 +101,7 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), true);
     assert.deepEqual(
       profileSteps().map((step) => step.id),
-      ["place", "allergies", "diets", "receipts"]
+      ["place", "receipts"]
     );
     assert.equal(profileSteps().some((step) => step.id === "products"), false);
     assert.equal(SKIP_LABEL, "Skip for now");
@@ -108,6 +110,12 @@ describe("taste profile storage", () => {
     assert.deepEqual(bailed.shopStores, ["Kroger", "Walmart"]);
     saveUserProfile(store, bailed, 40);
     assert.equal(shouldPromptProfile(store), false);
+    assert.equal(shouldAskDietPrompt(emptyProfile()), true);
+    assert.equal(shouldAskDietPrompt(profileWith({ allergies: ["peanut"] })), false);
+    const dismissed = markDietPrompt(emptyProfile(), "skipped", 5);
+    assert.equal(dismissed.dietPrompt, "skipped");
+    assert.deepEqual(dismissed.allergies, []);
+    assert.equal(shouldAskDietPrompt(dismissed), false);
     assert.equal(primaryLabel("summary"), "Start shopping");
     assert.equal(summarySections(profile).some((section) => section.step === "allergies"), true);
   });

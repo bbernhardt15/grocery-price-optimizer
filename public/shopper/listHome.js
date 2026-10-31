@@ -195,9 +195,17 @@ export function createListHome(deps) {
   function openList(listId) {
     const model = listModel(listId, book);
     if (!model) return;
-    view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "" };
-    paintSheet();
-    openDialog();
+    const show = () => {
+      view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "" };
+      paintSheet();
+      openDialog();
+    };
+    const recipe = !model.mine && model.id !== "weekly" && model.id !== "baby";
+    if (recipe && typeof deps.beforeRecipe === "function") {
+      deps.beforeRecipe(show);
+      return;
+    }
+    show();
   }
 
   function setParty(next) {

@@ -18,7 +18,14 @@ export const IMPORT_MESSAGES = {
   generic: "Something went wrong reading that. Paste the list instead.",
   goalMissing: "Say what you want, like taco night for 6.",
   textMissing: "Paste a list first.",
-  pdfNoText: "That PDF doesn't have readable text. Screenshot the order from the store app, or paste the text.",
+  pdfNeedsVision: "That PDF is a picture, and photo reading isn't switched on. Paste the order text instead.",
+  pdfNoRaster: "That PDF is a picture. Paste the order text, or send a screenshot.",
+  visionUnauthorized: "Photo reading was refused. The vision key on the server is invalid and needs to be replaced. Paste the order text instead.",
+  visionTooLarge: "That image is too large to read. Try a shorter screenshot, or paste the text.",
+  visionTimeout: "Reading that photo took too long. Try again, or paste the text.",
+  visionUnreadable: "We couldn't read the groceries in that photo. Try a clearer screenshot, or paste the text.",
+  visionUpstream: "Photo reading didn't answer. Paste the order text instead.",
+  heic: "That photo format didn't open. Take a screenshot, or paste the text.",
   urlMissing: "Paste the link to the shared list.",
 } as const;
 

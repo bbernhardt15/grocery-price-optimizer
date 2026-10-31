@@ -30,6 +30,7 @@ export type TasteProfile = {
   cuisines: Record<string, "like" | "dislike">;
   allergies: string[];
   diets: string[];
+  dietPrompt?: "" | "asked" | "skipped";
   always: string[];
   never: string[];
   mustHaves: string[];
@@ -137,6 +138,8 @@ export function parseTasteProfile(value: unknown): TasteProfile | { error: strin
   }
   copy.version = 1;
   copy.updatedAt = stamp(row.updatedAt);
+  const dietPrompt = clean(row.dietPrompt, 20);
+  copy.dietPrompt = dietPrompt === "asked" || dietPrompt === "skipped" ? dietPrompt : "";
   copy.productPreferences = prefs;
   copy.categoryPreferences = categories;
   return copy;
