@@ -1,6 +1,6 @@
 /**
  * Full-screen guide. One question, big tap targets, progress dots, Back,
- * and Skip this one. Closing it keeps the step for the next visit.
+ * and Skip for now. Closing it keeps the step for the next visit.
  */
 
 import { getUserProfile, saveUserProfile, shouldPromptProfile } from "./profile.js";
@@ -15,6 +15,7 @@ import {
   profileSteps,
   progressLabel,
   resumeStep,
+  skipForNow,
   skipStep,
   stepById,
   summarySections,
@@ -23,6 +24,10 @@ import { learnPreference, forgetPreference } from "./productPreference.js";
 import { applyCheapestDefaults, asksNameBrand, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
 import { isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
+import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
+import { applyLearnedReceipts } from "./receiptApply.js";
+import { learnedEditorHtml, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { planningStoreNames } from "./tripPlan.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -57,6 +62,19 @@ export function mountProfileOnboarding(deps = {}) {
   let phase = "gate";
   /** @type {Set<string>} */
   let neverIds = new Set();
+  let receiptPhase = "upload";
+  /** @type {object[]} */
+  let learnedRows = [];
+  /** @type {object[]} */
+  let receiptLines = [];
+  let paperReceipt = false;
+  let paperNote = "";
+  let receiptWarning = "";
+  /** @type {File[]} */
+  let pendingFiles = [];
+  let editingFamily = "";
+  let lazyFamily = "";
+  let resumeStatus = "";
 
   function blankCategory() {
     return { mode: "", brand: "", productId: "", attributes: [], product: null };
@@ -145,6 +163,28 @@ export function mountProfileOnboarding(deps = {}) {
         <button type="button" class="choice-card" id="profile-organic" aria-pressed="${organic ? "true" : "false"}">Organic if the price is close</button>
         <p class="profile-label">Different for an aisle</p>${aisles}`;
     }
+    if (step.kind === "place") {
+      const zip = escapeText(deps.getZip?.() || "");
+      const selected = new Set(draft.shopStores || []);
+      const open = !draft.shopStores?.length;
+      const stores = planningStoreNames()
+        .map((name) => {
+          const on = open || selected.has(name);
+          return `<label class="check-row"><input type="checkbox" data-place-store="${escapeText(name)}" ${on ? "checked" : ""} /> ${escapeText(name)}</label>`;
+        })
+        .join("");
+      return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
+        <p id="profile-zip-error" class="status" role="alert" hidden></p>
+        <fieldset class="store-picker"><legend>Stores to shop</legend>${stores}</fieldset>`;
+    }
+    if (step.kind === "receipts") {
+      if (receiptPhase === "learned") {
+        const editor = editingFamily ? learnedEditorHtml(learnedRows.find((row) => row.family === editingFamily)) : "";
+        const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
+        return `${warning}${learnedSummaryHtml(learnedRows, { paper: paperReceipt, paperNote, lines: receiptLines })}${editor}`;
+      }
+      return receiptUploadHtml();
+    }
     if (step.kind === "products") {
       const categories = preferenceCategories();
       if (phase === "gate") return categoryGateHtml({ categories, declined: [...neverIds] });
@@ -153,13 +193,14 @@ export function mountProfileOnboarding(deps = {}) {
       const mode = categoryDraft.mode || (!categoryDraft.touched ? saved.mode : "") || "";
       const brand = categoryDraft.brand || (!categoryDraft.touched ? saved.brand : "") || "";
       const attributes = categoryDraft.attributes?.length ? categoryDraft.attributes : !categoryDraft.touched ? saved.attributes || [] : categoryDraft.attributes || [];
+      const lazy = Boolean(lazyFamily);
       const ready = loadedFor === current?.id;
       const brands = ready ? nameBrandsFor(shelf, current?.id || "") : [];
       const askBrand = ready && asksNameBrand(shelf, current?.id || "");
       return `${ready ? "" : `<p class="muted">Looking on the shelf…</p>`}${categoryDetailHtml({
         category: current,
-        index: categoryIndex,
-        total: categories.length,
+        index: lazy ? 0 : categoryIndex,
+        total: lazy ? 1 : categories.length,
         mode,
         brand,
         attributes,
@@ -168,6 +209,7 @@ export function mountProfileOnboarding(deps = {}) {
         askBrand,
         produce: isProduceFamily(current?.id),
         pending: !ready,
+        compact: lazy,
       })}`;
     }
     const sections = summarySections(draft)
@@ -218,15 +260,56 @@ export function mountProfileOnboarding(deps = {}) {
     const next = $("profile-next");
     const skip = $("profile-skip");
     const stage = $("profile-stage");
-    if (title) title.textContent = step.title;
-    if (hint) hint.textContent = step.hint;
+    const learned = step.id === "receipts" && receiptPhase === "learned";
+    if (title) title.textContent = learned ? "Here's what we learned" : step.title;
+    if (hint) hint.textContent = learned ? "Grouped by what you buy. Allergies and diets stay in charge." : step.hint;
     if (progress) progress.textContent = progressLabel(step.id);
-    if (back) back.hidden = step.index === 0 && !returnTo;
-    if (next) next.textContent = returnTo ? "Save" : primaryLabel(step.id);
-    if (skip) skip.textContent = SKIP_LABEL;
+    if (back) back.hidden = step.index === 0 && !returnTo && receiptPhase !== "learned";
+    if (next) next.textContent = returnTo ? "Save" : learned ? "Confirm" : primaryLabel(step.id);
+    if (skip) {
+      skip.textContent = SKIP_LABEL;
+      skip.disabled = false;
+    }
     if (stage) stage.innerHTML = stageHtml(step);
+    bindReceiptInput();
     dots();
     if (step.kind === "products") void loadProducts();
+  }
+
+  function bindReceiptInput() {
+    const input = $("profile-receipt-input");
+    if (!input || input.dataset.bound === "1") return;
+    input.dataset.bound = "1";
+    input.addEventListener("change", () => {
+      pendingFiles = [...(input.files || [])];
+      const label = $("profile-receipt-files");
+      if (label) label.textContent = pendingFiles.map((file) => file.name).filter(Boolean).join(", ");
+      input.value = "";
+    });
+  }
+
+  function readPlace() {
+    const zipInput = $("profile-zip");
+    const error = zipAdvanceError(zipInput?.value || "");
+    const zipError = $("profile-zip-error");
+    if (error) {
+      if (zipError) {
+        zipError.hidden = false;
+        zipError.textContent = error;
+      }
+      zipInput?.focus();
+      return null;
+    }
+    if (zipError) zipError.hidden = true;
+    const zip = normalizeZipInput(zipInput?.value || "");
+    if (zip) deps.setZip?.(zip);
+    const boxes = [...document.querySelectorAll("[data-place-store]")];
+    const picked = boxes.map((box) => (box.checked ? box.getAttribute("data-place-store") : "")).filter(Boolean);
+    if (boxes.length && !picked.length) {
+      deps.toast?.("Pick at least one store.");
+      return null;
+    }
+    return { stores: picked.length === boxes.length ? [] : picked };
   }
 
   async function loadProducts() {
@@ -310,6 +393,8 @@ export function mountProfileOnboarding(deps = {}) {
         productId: chosen === "brand" ? categoryDraft.productId || "" : "",
         size: categoryDraft.product?.sizeLabel || "",
         attributes: categoryDraft.attributes || [],
+        source: "manual",
+        label: current.label || "",
       },
       at
     );
@@ -356,9 +441,111 @@ export function mountProfileOnboarding(deps = {}) {
     return draft;
   }
 
-  function advance(skipped, skipRest) {
+  function finish(at) {
+    draft = persist(completeProfile(draft, at));
+    if (dialog.open) dialog.close();
+    deps.onDone?.(draft);
+  }
+
+  function closeLazy() {
+    const family = lazyFamily;
+    lazyFamily = "";
+    if ((resumeStatus === "done" || resumeStatus === "skipped") && draft.onboarding.status !== resumeStatus) {
+      draft = { ...draft, onboarding: { ...draft.onboarding, status: resumeStatus } };
+    }
+    draft = persist(draft);
+    if (family && dialog.open) dialog.close();
+  }
+
+  async function runReceipts(text, files) {
+    const status = $("profile-receipt-status");
+    if (status) status.textContent = "Reading the order…";
+    const next = $("profile-next");
+    if (next) next.disabled = true;
+    try {
+      const result = await deps.readReceipts?.({ text, files });
+      pendingFiles = [];
+      if (!result || result.error || !result.lines?.length) {
+        if (status) status.textContent = result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.";
+        return;
+      }
+      learnedRows = result.learned || [];
+      receiptLines = result.lines || [];
+      paperReceipt = Boolean(result.paper);
+      paperNote = result.paperNote || "";
+      receiptWarning = result.photoMessage || "";
+      receiptPhase = "learned";
+      editingFamily = "";
+      render();
+      focusTitle();
+    } catch (error) {
+      if (status) status.textContent = error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.";
+    } finally {
+      if (next) next.disabled = false;
+    }
+  }
+
+  async function refreshLines() {
+    if (!deps.readLines) return;
+    const result = await deps.readLines(receiptLines);
+    if (!result) return;
+    learnedRows = result.learned || [];
+    receiptLines = result.lines || receiptLines;
+    paperReceipt = Boolean(result.paper);
+    paperNote = result.paperNote || "";
+    render();
+  }
+
+  function rememberBrandEdit() {
+    const input = document.querySelector("[data-learned-brand]");
+    const family = input?.getAttribute("data-learned-brand") || editingFamily;
+    const brand = String(input?.value || "").trim();
+    if (!family || !brand) return;
+    learnedRows = learnedRows.map((row) => (row.family === family ? { ...row, mode: "brand", brand } : row));
+  }
+
+  async function advance(skipped, skipRest) {
     const at = Date.now();
+    if (lazyFamily && stepId === "products") {
+      saveCategory(skipped ? "skip" : categoryDraft.mode || "skip", at);
+      closeLazy();
+      return;
+    }
     if (stepId === "diets") rememberDietNotes();
+    if (stepId === "place" && !skipped) {
+      const place = readPlace();
+      if (!place) return;
+      draft.shopStores = place.stores;
+    }
+    if (stepId === "receipts") {
+      if (receiptPhase === "learned") {
+        rememberBrandEdit();
+        if (!skipped) {
+          const applied = applyLearnedReceipts(draft, learnedRows, at);
+          draft = applied.profile;
+        }
+        if (returnTo) {
+          returnTo = "";
+          receiptPhase = "upload";
+          stepId = "summary";
+          persist(draft);
+          render();
+          focusTitle();
+          return;
+        }
+        finish(at);
+        return;
+      }
+      const text = $("profile-receipt-paste")?.value || "";
+      if ((pendingFiles.length || String(text).trim()) && deps.readReceipts) {
+        await runReceipts(text, pendingFiles);
+        return;
+      }
+      if (!returnTo) {
+        finish(at);
+        return;
+      }
+    }
     if (stepId === "products" && !returnTo) {
       const categories = preferenceCategories();
       if (phase === "gate") {
@@ -436,6 +623,16 @@ export function mountProfileOnboarding(deps = {}) {
     }
     stepId = stepById(id || resumeStep(draft)).id;
     returnTo = "";
+    resumeStatus = draft.onboarding.status;
+    receiptPhase = "upload";
+    learnedRows = [];
+    receiptLines = [];
+    paperReceipt = false;
+    paperNote = "";
+    receiptWarning = "";
+    pendingFiles = [];
+    editingFamily = "";
+    lazyFamily = "";
     categoryIndex = 0;
     categoryDraft = blankCategory();
     shelf = [];
@@ -449,11 +646,29 @@ export function mountProfileOnboarding(deps = {}) {
 
   $("profile-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    advance(false);
+    void advance(false);
   });
-  $("profile-skip")?.addEventListener("click", () => advance(true));
+  $("profile-skip")?.addEventListener("click", () => {
+    if (lazyFamily) {
+      void advance(true);
+      return;
+    }
+    if (draft.onboarding.status === "done") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    draft = persist(skipForNow(draft));
+    if (dialog.open) dialog.close();
+    deps.onDone?.(draft);
+  });
   $("profile-back")?.addEventListener("click", () => {
-    if (stepId === "products" && categoryIndex > 0 && !returnTo) {
+    if (stepId === "receipts" && receiptPhase === "learned" && !returnTo) {
+      receiptPhase = "upload";
+      render();
+      focusTitle();
+      return;
+    }
+    if (stepId === "products" && categoryIndex > 0 && !returnTo && !lazyFamily) {
       showCategory(categoryIndex - 1);
       focusTitle();
       return;
@@ -479,6 +694,36 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.id === "profile-receipt-pick") {
+      $("profile-receipt-input")?.click();
+      return;
+    }
+    if (target.dataset.learnedRemove) {
+      learnedRows = learnedRows.filter((row) => row.family !== target.dataset.learnedRemove);
+      if (editingFamily === target.dataset.learnedRemove) editingFamily = "";
+      render();
+      return;
+    }
+    if (target.dataset.learnedChange) {
+      editingFamily = editingFamily === target.dataset.learnedChange ? "" : target.dataset.learnedChange;
+      render();
+      return;
+    }
+    if (target.dataset.learnedMode && target.dataset.learnedFamily) {
+      const mode = target.dataset.learnedMode;
+      learnedRows = learnedRows.map((row) =>
+        row.family === target.dataset.learnedFamily ? { ...row, mode, brand: mode === "brand" ? row.brand : "" } : row
+      );
+      editingFamily = "";
+      render();
+      return;
+    }
+    if (target.dataset.lineRemove != null && target.dataset.lineRemove !== "") {
+      const index = Number(target.dataset.lineRemove);
+      receiptLines = receiptLines.filter((_, lineIndex) => lineIndex !== index);
+      void refreshLines();
+      return;
+    }
     if (target.dataset.edit) {
       returnTo = "summary";
       stepId = target.dataset.edit;
@@ -628,7 +873,11 @@ export function mountProfileOnboarding(deps = {}) {
   });
 
   dialog.addEventListener("close", () => {
-    if (draft.onboarding.status === "done") return;
+    if (lazyFamily) {
+      lazyFamily = "";
+      return;
+    }
+    if (draft.onboarding.status === "done" || draft.onboarding.status === "skipped") return;
     draft = persist({ ...draft, onboarding: { status: "in_progress", step: stepId, updatedAt: Date.now() } });
   });
 
@@ -641,8 +890,15 @@ export function mountProfileOnboarding(deps = {}) {
     },
     openCategory(familyId) {
       openAt("products");
+      lazyFamily = familyId || "";
       const index = preferenceCategories().findIndex((category) => category.id === familyId);
       if (index >= 0) showCategory(index);
+    },
+    askCategory(familyId) {
+      const profile = getUserProfile(storage);
+      const mode = profile.categoryPreferences?.[familyId]?.mode;
+      if (mode && mode !== "skip") return;
+      this.openCategory(familyId);
     },
     openFavorites() {
       openAt("products");

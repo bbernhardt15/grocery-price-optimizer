@@ -28,7 +28,7 @@ const READY_CHICKEN = /\b(?:fried|breaded|nugget|nuggets|popcorn|crispy|battered
 const HOUSE = {
   walmart: ["great value", "marketside", "equate", "parent's choice"],
   kroger: ["kroger", "simple truth", "private selection"],
-  target: ["good & gather", "up & up", "favorite day"],
+  target: ["good & gather", "market pantry", "up & up", "favorite day"],
   aldi: [
     "friendly farms",
     "kirkwood",

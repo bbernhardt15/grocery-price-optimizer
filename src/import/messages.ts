@@ -18,6 +18,7 @@ export const IMPORT_MESSAGES = {
   generic: "Something went wrong reading that. Paste the list instead.",
   goalMissing: "Say what you want, like taco night for 6.",
   textMissing: "Paste a list first.",
+  pdfNoText: "That PDF doesn't have readable text. Screenshot the order from the store app, or paste the text.",
   urlMissing: "Paste the link to the shared list.",
 } as const;
 

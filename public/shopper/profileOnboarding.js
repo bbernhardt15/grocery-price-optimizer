@@ -1,15 +1,21 @@
 /**
- * One question per screen. Skip this one is on every step.
+ * A short guide: ZIP, allergies, diets, then optional receipts.
+ * Skip for now leaves the rest of the guide. Category questions wait until an item is added.
  * Closing the guide saves the step so the next visit resumes.
  */
 
 import { emptyProfile, parseProfile, PROFILE_OPTIONS } from "./profile.js";
 import { familyLabel } from "./productPreference.js";
 
-export const SKIP_LABEL = "Skip this one";
+export const SKIP_LABEL = "Skip for now";
 
-const STEP_DEFS = [
-  { id: "household", title: "How many people?", hint: "Used only to scale quantities. A guess is fine.", kind: "household" },
+const FLOW = [
+  {
+    id: "place",
+    title: "Where do you shop?",
+    hint: "A ZIP picks nearby stores. Leave a store unchecked to keep it out of the plan.",
+    kind: "place",
+  },
   {
     id: "allergies",
     title: "Any allergies?",
@@ -17,22 +23,26 @@ const STEP_DEFS = [
     kind: "multi",
     options: "allergies",
   },
-  { id: "diets", title: "Any diets?", hint: "A diet beats a saved product.", kind: "multi", options: "diets" },
+  { id: "diets", title: "Any diets?", hint: "A diet beats a saved product. A receipt never overrides this.", kind: "multi", options: "diets" },
   {
-    id: "stops",
-    title: "How many stores is worth it?",
-    hint: "Fewer stores is more convenient. More stores can cost less. You can switch this on the plan.",
-    kind: "single",
-    options: "stops",
+    id: "receipts",
+    title: "Upload past receipts or order screenshots",
+    hint: "Optional, about a minute. This is the fastest way to learn the brands you already buy.",
+    kind: "receipts",
   },
+];
+
+const EXTRA = [
+  { id: "summary", title: "Here's what we'll shop for", hint: "Edit anything that looks off, then start shopping.", kind: "summary" },
   {
     id: "products",
     title: "What do you buy?",
-    hint: "Mark what you never buy, then a short question for the rest. Name brand only when the shelf has real brands.",
+    hint: "Optional. Mark what you never buy, or answer one category when you add it.",
     kind: "products",
   },
-  { id: "summary", title: "Here's what we'll shop for", hint: "Edit anything that looks off, then start shopping.", kind: "summary" },
 ];
+
+const STEP_DEFS = [...FLOW, ...EXTRA];
 
 const LABELS = {
   "save-money": "Save money",
@@ -117,16 +127,21 @@ export function optionLabel(id) {
   return LABELS[id] || id;
 }
 
-export function profileSteps() {
-  return STEP_DEFS.map((step, index) => ({
+function decorate(steps) {
+  return steps.map((step, index) => ({
     ...step,
     index,
     choices: step.options ? (PROFILE_OPTIONS[step.options] || []).map((id) => ({ id, label: optionLabel(id) })) : [],
   }));
 }
 
+/** Questions asked up front. Category-by-category picks stay in Edit what I buy. */
+export function profileSteps() {
+  return decorate(FLOW);
+}
+
 export function stepById(id) {
-  return profileSteps().find((step) => step.id === id) || profileSteps()[0];
+  return decorate(STEP_DEFS).find((step) => step.id === id) || profileSteps()[0];
 }
 
 export function nextStepId(id) {
@@ -145,7 +160,8 @@ export function prevStepId(id) {
 
 export function progressLabel(id) {
   const steps = profileSteps();
-  const index = Math.max(0, steps.findIndex((step) => step.id === id));
+  const index = steps.findIndex((step) => step.id === id);
+  if (index < 0) return "";
   return `${index + 1} of ${steps.length}`;
 }
 
@@ -178,6 +194,9 @@ export function answerStep(profile, stepId, answer, at = Date.now()) {
       kids: answer?.kids ?? null,
       picky: answer?.picky ?? null,
     };
+  }
+  if (stepId === "place" && answer && typeof answer === "object") {
+    next.shopStores = Array.isArray(answer.stores) ? answer.stores : next.shopStores;
   }
   if (stepId === "loves") next.loves = answer || [];
   if (stepId === "avoids") next.avoids = answer || [];
@@ -222,6 +241,14 @@ export function skipStep(profile, stepId, at = Date.now()) {
 
 export function goBack(profile, stepId, at = Date.now()) {
   return withStep(profile, prevStepId(stepId), at);
+}
+
+/** Leave the rest of the guide. Answers already given stay. */
+export function skipForNow(profile, at = Date.now()) {
+  const next = parseProfile(profile);
+  next.onboarding = { status: "skipped", step: next.onboarding.step || "place", updatedAt: at };
+  next.updatedAt = at;
+  return next;
 }
 
 export function completeProfile(profile, at = Date.now()) {
@@ -282,14 +309,12 @@ function styleLine(style) {
 export function summarySections(profile) {
   const parsed = parseProfile(profile);
   const products = Object.values(parsed.productPreferences || {});
-  const stops = parsed.style?.stops;
-  const stopLabel = stops === "1" ? "1 store" : stops === "more" ? "As many as it takes" : stops ? `${stops} stores` : "Not set yet";
+  const stores = (parsed.shopStores || []).join(", ");
   return [
-    { id: "household", step: "household", label: "People", value: parsed.household?.size ? (parsed.household.size >= 5 ? "5 or more" : String(parsed.household.size)) : "Not set yet" },
+    { id: "place", step: "place", label: "Stores", value: stores || "Not set yet" },
     { id: "allergies", step: "allergies", label: "Allergies", value: joinLabels(parsed.allergies) },
     { id: "diets", step: "diets", label: "Diets", value: [joinLabels(parsed.diets), (parsed.dietNotes || []).join(", ")].filter((part) => part && part !== "Not set yet").join(" · ") || "Not set yet" },
-    { id: "stops", step: "stops", label: "Stores", value: stopLabel },
-    { id: "products", step: "products", label: "What you buy", value: preferenceLine(parsed, products) },
+    { id: "receipts", step: "receipts", label: "From your receipts", value: preferenceLine(parsed, products) },
   ];
 }
 
@@ -300,9 +325,11 @@ function preferenceLine(profile, products) {
     return rows
       .slice(0, 8)
       .map((row) => {
-        const name = familyName(row.family);
+        const name = row.label || familyName(row.family) || row.family;
         const how = modes[row.mode] || row.mode;
-        return row.brand ? `${name}: ${how}, ${row.brand}` : `${name}: ${how}`;
+        if (row.mode === "brand" && row.brand) return `${name}: ${row.brand}`;
+        if (row.mode === "storeBrand") return `${name}: Store brand`;
+        return `${name}: ${how}`;
       })
       .join(", ");
   }
