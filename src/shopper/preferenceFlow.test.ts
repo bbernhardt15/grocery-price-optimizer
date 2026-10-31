@@ -256,6 +256,21 @@ describe("spoken lists and favorites", () => {
     assert.equal(closestProduct(slotById("flour"), { name: "All-Purpose Flour" }, [decoy]), null);
   });
 
+  it("picks the cheapest product among the brands the shopper selected", () => {
+    const kraft = product("kraft", "Cheddar Cheese", "Kraft", { departmentId: "dairy-eggs", subcategory: "Cheese", price: 4.5 });
+    const sargento = product("sargento", "Cheddar Cheese", "Sargento", { departmentId: "dairy-eggs", subcategory: "Cheese", price: 3.25 });
+    const store = product("store", "Cheddar Cheese", "Kroger", { departmentId: "dairy-eggs", subcategory: "Cheese", price: 2, storeBrand: true });
+    const profile = setCategoryPreference(emptyProfile(), {
+      family: "cheese",
+      mode: "cheapestPicks",
+      brands: ["Kraft", "Sargento"],
+    });
+    const resolved = resolveCategoryPreference({ profile, family: "cheese", products: [kraft, sargento, store] });
+    assert.equal(resolved.mode, "cheapestPicks");
+    assert.equal(resolved.product.id, "sargento");
+    assert.equal(profile.categoryPreferences.cheese.brands.includes("Kraft"), true);
+  });
+
   it("keeps cheapest defaults off categories they never buy", () => {
     const skipped = setCategoryPreference(emptyProfile(), { family: "steak", mode: "never" });
     const next = applyCheapestDefaults(skipped, 5);

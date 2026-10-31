@@ -143,7 +143,7 @@ const DEFS = [
     attr("soft", "Soft", /\bsoft\b/i),
   ]),
   house("paper-towels", "Paper towels", "paper towels", 7, ["household"], ["Paper"], ["paper towel", "paper towels"], ["select", "a", "size", "mega", "double", "sheets"], [/\b(?:toilet|bath tissue|napkin)\b/i], /paper towels?/i, ["bounty", "brawny", "viva", "sparkle"], { dim: "count", ideal: 6, min: 1, max: 12 }, []),
-  food("cheese", "Cheese", "cheddar cheese", 8, ["dairy-eggs", "deli"], ["Cheese"], ["cheese", "cheddar", "mozzarella", "swiss", "provolone", "colby", "parmesan", "gouda", "jack"], ["shredded", "sliced", "block", "mild", "sharp", "extra", "medium", "natural", "mexican", "blend", "fancy", "white", "yellow", "aged", "snack", "stick", "sticks", "string"], [SOUP, CANDY, PET, /\b(?:cracker|crackers|puff|puffs|curl|curls|ball|balls|doodle|doodles|sauce|whiz|its|mac)\b/i], /\bcheeses?\b|\bcheddar\b/i, ["kraft", "sargento", "tillamook", "cabot", "crystal farms"], { dim: "weight", ideal: 8, min: 5, max: 16 }, [
+  food("cheese", "Cheese", "cheddar cheese", 8, ["dairy-eggs", "deli"], ["Cheese"], ["cheese", "cheddar", "mozzarella", "swiss", "provolone", "colby", "parmesan", "gouda", "jack"], ["shredded", "sliced", "block", "mild", "sharp", "extra", "medium", "natural", "mexican", "blend", "fancy", "white", "yellow", "aged", "snack", "stick", "sticks", "string"], [SOUP, CANDY, PET, /\b(?:cracker|crackers|puff|puffs|curl|curls|ball|balls|doodle|doodles|sauce|whiz|its|mac)\b/i], /\bcheeses?\b|\bcheddar\b/i, ["kraft", "sargento", "tillamook", "cabot", "crystal farms", "horizon", "belgioioso", "galbani", "philadelphia", "boar's head", "cracker barrel", "lucerne"], { dim: "weight", ideal: 8, min: 5, max: 16 }, [
     attr("shredded", "Shredded", /\bshredded\b/i),
     attr("cheddar", "Cheddar", /\bcheddar\b/i),
     attr("sliced", "Sliced", /\bsliced\b/i),
@@ -219,7 +219,12 @@ const DEFS = [
   house("laundry-detergent", "Laundry detergent", "laundry detergent", 26, ["household"], ["Laundry"], ["laundry detergent", "detergent"], ["liquid", "pods", "powder", "free", "clear", "sensitive", "original"], [/\bdish\b/i, PET], /laundry detergent|\bdetergent\b/i, ["tide", "gain", "persil", "all", "arm & hammer"], { dim: "volume", ideal: 92, min: 46, max: 150 }, []),
   house("dish-soap", "Dish soap", "dish soap", 27, ["household"], ["Cleaning"], ["dish soap", "dishwashing liquid"], ["original", "ultra", "free", "clear"], [/\blaundry\b/i, PET], /dish soap|dishwashing/i, ["dawn", "mrs. meyer's", "mrs meyers", "palmolive", "ajax", "seventh generation"], { dim: "volume", ideal: 18, min: 12, max: 32 }, []),
   food("chili", "Chili", "chili", 28, ["pantry"], ["Canned"], ["chili"], ["beans", "with", "beef", "turkey", "no", "canned", "hot", "mild"], [/\b(?:powder|dog|seasoning|flakes|candy|cheese)\b/i, PET, CANDY], /\bchili\b/i, ["hormel", "stagg", "wolf brand", "dennison's"], { dim: "weight", ideal: 15, min: 10, max: 19 }, []),
-  food("chips", "Chips", "potato chips", 29, ["snacks"], ["Chips"], ["chips", "chip"], ["potato", "classic", "original", "wavy", "kettle", "barbecue", "bbq", "sour", "cream"], [/\bchocolate\s+chips\b/i, CANDY, PET], /\bchips\b/i, ["lay's", "ruffles", "kettle brand"], { dim: "weight", ideal: 8, min: 5, max: 13 }, []),
+  food("chips", "Chips", "potato chips", 29, ["snacks"], ["Chips"], ["chips", "chip"], ["potato", "classic", "original", "wavy", "kettle", "barbecue", "bbq", "sour", "cream"], [/\bchocolate\s+chips\b/i, CANDY, PET], /\bchips\b/i, ["lay's", "ruffles", "kettle brand", "pringles", "doritos", "tostitos", "cape cod", "miss vickie's", "utz", "wise", "popchips"], { dim: "weight", ideal: 8, min: 5, max: 13 }, []),
+  food("bbq-sauce", "BBQ sauce", "bbq sauce", 30, ["pantry"], ["Condiments"], ["bbq sauce", "barbecue sauce", "barbeque sauce"], ["original", "honey", "sweet", "spicy", "smoky", "kansas", "carolina"], [CANDY, PET, /\b(?:chips|rub|seasoning)\b/i], /\b(?:bbq|barbecue|barbeque)\s+sauces?\b/i, ["sweet baby ray's", "kraft", "stubb's", "famous dave's", "kinders", "cattlemen's", "jack daniel's", "open pit", "bull's-eye"], { dim: "weight", ideal: 18, min: 12, max: 40 }, []),
+  food("chicken-nuggets", "Chicken nuggets", "chicken nuggets", 31, ["frozen"], ["Frozen Chicken"], ["chicken nuggets", "chicken nugget", "chicken tenders"], ["breaded", "frozen", "dinosaurs", "original", "family"], [PET, SOUP, CANDY], /\bchicken\s+(?:nuggets?|tenders?)\b/i, ["tyson", "perdue", "pilgrim's", "just bare", "bell & evans", "banquet", "applegate", "fast fixin'"], { dim: "weight", ideal: 24, min: 12, max: 48 }, []),
+  food("cookies", "Cookies", "chocolate chip cookies", 32, ["snacks", "bakery"], ["Cookies"], ["cookies", "cookie"], ["chocolate", "chip", "sandwich", "original", "family", "fudge"], [CANDY, /\b(?:dough|butter|ice cream|cereal)\b/i], /\bcookies?\b/i, ["oreo", "chips ahoy!", "keebler", "pepperidge farm", "girl scouts", "famous amos", "nutter butter", "mother's", "walkers"], { dim: "weight", ideal: 13, min: 8, max: 20 }, []),
+  food("ice-cream", "Ice cream", "ice cream", 33, ["frozen"], ["Ice Cream"], ["ice cream"], ["vanilla", "chocolate", "strawberry", "neapolitan", "mint"], [CANDY, /\b(?:cone|sandwich|bar|bars|novelties)\b/i], /\bice\s+cream\b/i, ["häagen-dazs", "ben & jerry's", "breyers", "blue bell", "tillamook", "turkey hill", "edys", "dreyer's", "talenti", "friendly's"], { dim: "volume", ideal: 48, min: 14, max: 64 }, []),
+  house("cleaner", "Cleaner", "all purpose cleaner", 34, ["household"], ["Cleaning"], ["all-purpose cleaner", "all purpose cleaner", "multi-surface cleaner", "disinfecting cleaner"], ["original", "lemon", "fresh", "spray", "refill"], [PET, COSMETIC, /\blaundry\b/i], /\bcleaners?\b/i, ["lysol", "clorox", "mr. clean", "formula 409", "fabuloso", "method", "seventh generation", "pine-sol", "windex"], { dim: "volume", ideal: 32, min: 16, max: 64 }, []),
 ];
 
 function attr(id, label, test) {
@@ -592,15 +597,25 @@ export function pickAtStore(products, familyId, mode, storeName, preference = {}
     return offers.some((offer) => String(offer.storeName || "").trim().toLowerCase() === store);
   });
   let rows = pool;
+  const pickedBrands = (Array.isArray(preference.brands) && preference.brands.length ? preference.brands : preference.brand ? [preference.brand] : [])
+    .map((brand) => String(brand || "").trim().toLowerCase())
+    .filter(Boolean);
   if (mode === "storeBrand") {
     rows = pool.filter((product) => isHouseBrand(product, storeName));
   } else if (mode === "brand") {
     const brand = String(preference.brand || "").trim().toLowerCase();
     const branded = brand ? pool.filter((product) => String(product.brand || "").toLowerCase().includes(brand)) : [];
     rows = branded.length ? branded : pool;
+  } else if (mode === "cheapestPicks") {
+    rows = pickedBrands.length
+      ? pool.filter((product) => {
+          const have = String(product.brand || "").trim().toLowerCase();
+          return pickedBrands.some((brand) => have.includes(brand) || brand.includes(have));
+        })
+      : [];
   }
   if (!rows.length) return null;
-  if (mode === "cheapest") {
+  if (mode === "cheapest" || mode === "cheapestPicks") {
     const priced = rows
       .map((product) => {
         const offer = (product.offers || []).find((entry) => String(entry.storeName || "").trim().toLowerCase() === store);

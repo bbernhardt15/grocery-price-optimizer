@@ -239,6 +239,46 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
     };
   });
 
-  const found = review.filter((item) => item.status !== "missing").length;
-  return { total: review.length, found, items: review };
+  const unique = dedupeReview(review);
+  const found = unique.filter((item) => item.status !== "missing").length;
+  return { total: unique.length, found, items: unique };
+}
+
+function reviewIdentity(item: ImportReviewItem): { upc: string; name: string } {
+  const upcDigits = String(item.upc || item.choices[0]?.product?.upc || "").replace(/\D/g, "");
+  const upc = upcDigits.length >= 8 ? upcDigits.replace(/^0+/, "") : "";
+  const name = `${item.name || ""} ${item.raw || ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(?:oz|lb|lbs|ct|pk|pack|count|gal|gallon)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { upc, name };
+}
+
+function dedupeReview(items: ImportReviewItem[]): ImportReviewItem[] {
+  const out: ImportReviewItem[] = [];
+  const byUpc = new Map<string, number>();
+  const byName = new Map<string, number>();
+  for (const item of items) {
+    const id = reviewIdentity(item);
+    const prior = (id.upc ? byUpc.get(id.upc) : undefined) ?? (id.name ? byName.get(id.name) : undefined);
+    if (prior == null) {
+      const index = out.length;
+      out.push({ ...item, quantity: Math.max(1, Math.min(99, item.quantity || 1)) });
+      if (id.upc) byUpc.set(id.upc, index);
+      if (id.name) byName.set(id.name, index);
+      continue;
+    }
+    const keep = out[prior];
+    const rank = (row: ImportReviewItem) => (row.status === "matched" ? 2 : row.status === "ambiguous" ? 1 : 0);
+    const winner = rank(item) > rank(keep) ? item : keep;
+    out[prior] = {
+      ...winner,
+      key: keep.key,
+      quantity: Math.max(1, Math.min(99, (keep.quantity || 1) + (item.quantity || 1))),
+      upc: keep.upc || item.upc,
+    };
+  }
+  return out;
 }

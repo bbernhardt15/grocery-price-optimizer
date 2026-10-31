@@ -26,7 +26,7 @@ import {
   unitPriceAmount,
 } from "./stapleFamilies.js";
 
-const MODES = ["brand", "storeBrand", "cheapest", "skip", "never"];
+const MODES = ["brand", "storeBrand", "cheapest", "cheapestPicks", "skip", "never"];
 
 export function categoryModes() {
   return MODES.slice();
@@ -35,7 +35,8 @@ export function categoryModes() {
 export function modeLabel(mode) {
   if (mode === "brand") return "Name brand";
   if (mode === "storeBrand") return "Store brand";
-  if (mode === "cheapest") return "Cheapest";
+  if (mode === "cheapest") return "Cheapest overall";
+  if (mode === "cheapestPicks") return "Cheapest of my picks";
   if (mode === "skip") return "Skip";
   if (mode === "never") return "I don't buy this";
   return "";
@@ -54,13 +55,19 @@ export function categoryPreferenceOf(value, familyId) {
   const attributes = Array.isArray(value.attributes)
     ? value.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
     : [];
+  const brands = Array.isArray(value.brands)
+    ? value.brands.map((item) => clean(item, 80)).filter(Boolean).slice(0, 12)
+    : clean(value.brand, 80)
+      ? [clean(value.brand, 80)]
+      : [];
   const source = ["receipt", "onboarding", "add", "manual"].includes(value.source) ? value.source : "";
   const confidence = value.confidence === "high" || value.confidence === "low" ? value.confidence : "";
   const count = Math.max(0, Math.min(999, Math.floor(Number(value.count) || 0)));
   return {
     family,
     mode,
-    brand: clean(value.brand, 80),
+    brand: clean(value.brand, 80) || brands[0] || "",
+    brands,
     productId: clean(value.productId || value.catalogId, 80),
     size: clean(value.size || value.sizeLabel, 80),
     attributes,
@@ -159,6 +166,16 @@ export function resolveCategoryPreference(input) {
       : rows.filter((product) => isHouseBrand(product) || isStoreBrand(product.brand, product)).sort((a, b) => rankFamilyScore(b, family) - rankFamilyScore(a, family))[0];
     if (!pick) return { status: "ask", family, product: null, mode: "storeBrand", swapped: null, ask: true };
     return { status: "storeBrand", family, product: pick, mode: "storeBrand", swapped: null, ask: false };
+  }
+  if (pref.mode === "cheapestPicks") {
+    const wanted = pref.brands?.length ? pref.brands : pref.brand ? [pref.brand] : [];
+    const branded = rows.filter((product) => wanted.some((brand) => brandHit(product, brand, family)));
+    const priced = branded
+      .map((product) => ({ product, unit: unitPriceAmount(product), price: priceOf(product) }))
+      .filter((row) => row.unit != null || row.price != null);
+    if (!priced.length) return { status: "ask", family, product: null, mode: "cheapestPicks", swapped: null, ask: true, brands: wanted };
+    priced.sort((a, b) => (a.unit ?? a.price) - (b.unit ?? b.price));
+    return { status: "cheapestPicks", family, product: priced[0].product, mode: "cheapestPicks", swapped: null, ask: false, brands: wanted };
   }
   if (pref.mode === "cheapest") {
     const storeName = input?.storeName || "";
@@ -323,7 +340,7 @@ export function nameBrandsFor(products, familyId) {
   }
   return [...counts.values()]
     .sort((a, b) => b.score - a.score || b.count - a.count || a.brand.localeCompare(b.brand))
-    .slice(0, 8);
+    .slice(0, 24);
 }
 
 /** Name brand is a question only when the shelf has several real brands. */
@@ -336,7 +353,7 @@ export function applyCheapestDefaults(profile, at = Date.now()) {
   let next = parseProfile(profile);
   for (const category of PREFERENCE_CATEGORIES) {
     const current = next.categoryPreferences?.[category.id];
-    if (current?.mode === "never" || current?.mode === "brand" || current?.mode === "storeBrand" || current?.mode === "cheapest") continue;
+    if (current?.mode === "never" || current?.mode === "brand" || current?.mode === "storeBrand" || current?.mode === "cheapest" || current?.mode === "cheapestPicks") continue;
     next = setCategoryPreference(next, { family: category.id, mode: "cheapest", brand: "", productId: "", size: "", attributes: [] }, at);
   }
   return next;

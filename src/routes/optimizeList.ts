@@ -68,12 +68,19 @@ function readSelections(value: unknown): BrowseSelection[] | undefined {
       brand?: unknown;
       preferenceMode?: unknown;
       family?: unknown;
+      brands?: unknown;
     };
     const brand = typeof record.brand === "string" ? record.brand.trim() : undefined;
     const catalogId = typeof record.catalogId === "string" ? record.catalogId.trim() : undefined;
     const upc = typeof record.upc === "string" ? record.upc.trim() : undefined;
     const preferenceMode = typeof record.preferenceMode === "string" ? record.preferenceMode.trim() : undefined;
     const family = typeof record.family === "string" ? record.family.trim() : undefined;
+    const brands = Array.isArray(record.brands)
+      ? record.brands
+          .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+          .map((entry) => entry.trim())
+          .slice(0, 12)
+      : undefined;
     return {
       name: item.name.trim(),
       quantity: quantityOf(item.quantity),
@@ -82,6 +89,7 @@ function readSelections(value: unknown): BrowseSelection[] | undefined {
       ...(upc ? { upc } : {}),
       ...(preferenceMode ? { preferenceMode } : {}),
       ...(family ? { family } : {}),
+      ...(brands?.length ? { brands } : {}),
     };
   });
 }
@@ -226,12 +234,26 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       catalogIds: parsed.selections?.map((item) => item.catalogId),
     });
 
-    const productsResult = await resolveCatalogProducts(
-      groceryList,
-      stores,
-      locationId,
-      zipCode
-    );
+    const stream = String(req.headers.accept || "").toLowerCase().includes("application/x-ndjson");
+    if (stream) {
+      res.status(200);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.flushHeaders?.();
+    }
+    const writeEvent = (value: unknown) => {
+      if (stream) res.write(`${JSON.stringify(value)}\n`);
+    };
+    const productsResult = await resolveCatalogProducts(groceryList, stores, locationId, zipCode, {
+      onStore: (info) => {
+        writeEvent({
+          type: "status",
+          storeName: info.storeName,
+          ms: info.ms,
+          pendingStores: info.pendingStores,
+        });
+      },
+    });
     if (parsed.selections && parsed.selections.length > 0) {
       const pool = await loadKnownProducts({
         queries: [...groceryList, ...parsed.selections.map((item) => item.name)],
@@ -254,11 +276,28 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
     if (!access.limits.cartHandoffs) groupedByStore = lockCartHandoffs(groupedByStore);
     const entitlement = entitlementPayload(access);
 
+    const payload = {
+      ...groupedByStore,
+      ...(entitlement ? { entitlement } : {}),
+      pricingByStore: productsResult.pricingByStore,
+      ...(productsResult.pricingError ? { pricingWarning: productsResult.pricingError } : {}),
+      ...(productsResult.partial
+        ? { partial: true, pendingStores: productsResult.pendingStores || [] }
+        : {}),
+      ...(zipCode ? { zipCode, locationId } : {}),
+    };
+
     if (
       groupedByStore.stores.length === 0 &&
       groupedByStore.unavailable.length > 0 &&
-      productsResult.pricingError
+      productsResult.pricingError &&
+      !productsResult.partial
     ) {
+      if (stream) {
+        writeEvent({ type: "error", error: `Live store prices are unavailable: ${productsResult.pricingError}` });
+        res.end();
+        return;
+      }
       res.status(503).json({
         error: `Live store prices are unavailable: ${productsResult.pricingError}`,
         unavailable: groupedByStore.unavailable,
@@ -269,15 +308,12 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       return;
     }
 
-    res.json({
-      ...groupedByStore,
-      ...(entitlement ? { entitlement } : {}),
-      pricingByStore: productsResult.pricingByStore,
-      ...(productsResult.pricingError
-        ? { pricingWarning: productsResult.pricingError }
-        : {}),
-      ...(zipCode ? { zipCode, locationId } : {}),
-    });
+    if (stream) {
+      writeEvent({ type: "done", result: payload });
+      res.end();
+      return;
+    }
+    res.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.startsWith("Invalid ZIP code:")) {

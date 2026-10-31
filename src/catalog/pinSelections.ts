@@ -12,9 +12,10 @@ export type BrowseSelection = {
   brand?: string;
   catalogId?: string;
   upc?: string;
-  /** brand | storeBrand | cheapest | skip. Absent keeps the pinned product. */
+  /** brand | storeBrand | cheapest | cheapestPicks | skip. Absent keeps the pinned product. */
   preferenceMode?: string;
   family?: string;
+  brands?: string[];
 };
 
 const TRIP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
@@ -109,9 +110,17 @@ export function pinnedRowsForSelections(
   const rows: CatalogProduct[] = [];
   for (const selection of selections) {
     const family = selection.family || familyFromQuery(selection.name);
-    if ((selection.preferenceMode === "cheapest" || selection.preferenceMode === "storeBrand") && family) {
+    if (
+      (selection.preferenceMode === "cheapest" ||
+        selection.preferenceMode === "storeBrand" ||
+        selection.preferenceMode === "cheapestPicks") &&
+      family
+    ) {
       for (const storeName of TRIP_STORES) {
-        const picked = pickAtStore(products, family, selection.preferenceMode, storeName, { brand: selection.brand });
+        const picked = pickAtStore(products, family, selection.preferenceMode, storeName, {
+          brand: selection.brand,
+          brands: selection.brands,
+        });
         const offer = picked?.offers?.find((entry) => entry.storeName?.toLowerCase() === storeName.toLowerCase());
         if (!picked || !offer) continue;
         rows.push(

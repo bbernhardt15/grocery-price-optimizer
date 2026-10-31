@@ -27,7 +27,7 @@ export function categoryGateHtml(input) {
       return `<button type="button" class="mini-chip gate-chip" data-gate="${escapeText(category.id)}" aria-pressed="${on ? "true" : "false"}">${escapeText(category.label)}</button>`;
     })
     .join("");
-  return `<p class="profile-label">Tap anything you never buy. Everything else gets a short question.</p>
+  return `<p class="profile-label">Tap a category you never buy. Everything else stays available.</p>
     <div class="mini-row gate-grid" role="group" aria-label="Categories you don't buy">${chips}</div>
     <button type="button" class="ghost" id="profile-use-defaults">Use defaults: cheapest for everything I skip</button>`;
 }
@@ -64,7 +64,7 @@ export function categoryDetailHtml(input) {
     .join("");
   const modes = [];
   if (askBrand) modes.push(["brand", "Name brand"]);
-  modes.push(["storeBrand", "Store brand"], ["cheapest", "Cheapest"]);
+  modes.push(["storeBrand", "Store brand"], ["cheapest", "Cheapest overall"], ["cheapestPicks", "Cheapest of my picks"]);
   const modeButtons = modes.map(([id, text]) => choiceButton(id, text, mode === id)).join("");
   const chosen =
     mode === "brand"
@@ -72,7 +72,9 @@ export function categoryDetailHtml(input) {
       : mode === "storeBrand"
         ? "Chosen: Store brand"
         : mode === "cheapest"
-          ? "Chosen: Cheapest"
+          ? "Chosen: Cheapest overall"
+          : mode === "cheapestPicks"
+            ? "Chosen: Cheapest of my picks"
           : mode === "never"
             ? `Chosen: I don't buy ${label.toLowerCase()}`
             : "Choose one. You can switch without losing the cut.";

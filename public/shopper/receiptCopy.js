@@ -36,11 +36,15 @@ function escapeText(value) {
 export function learnedChoice(row) {
   if (row?.mode === "never") return "I don't buy it";
   if (row?.mode === "storeBrand") return "Store brand";
-  if (row?.mode === "cheapest") return "Cheapest";
+  if (row?.mode === "cheapestPicks") {
+    const brands = (row.brands || []).filter(Boolean);
+    return brands.length ? `Cheapest of ${brands.join(", ")}` : "Cheapest of my picks";
+  }
+  if (row?.mode === "cheapest") return "Cheapest overall";
   return row?.brand || "Name brand";
 }
 
-const LEARNED_MODES = new Set(["brand", "storeBrand", "cheapest", "never"]);
+const LEARNED_MODES = new Set(["brand", "storeBrand", "cheapest", "cheapestPicks", "never"]);
 
 /**
  * Change one row. A click with no family, or a mode we don't know,
@@ -54,11 +58,18 @@ export function applyLearnedChoice(rows, choice) {
   const mode = String(choice?.mode || "");
   if (!family || !LEARNED_MODES.has(mode) || !list.some((row) => row?.family === family)) return list;
   const brand = String(choice?.brand || "").replace(/\s+/g, " ").trim();
+  const brands = Array.isArray(choice?.brands)
+    ? choice.brands.map((item) => String(item || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 12)
+    : brand
+      ? [brand]
+      : [];
   if (mode === "brand" && !brand) return list;
+  if (mode === "cheapestPicks" && !brands.length) return list;
   return list.map((row) => {
     if (row?.family !== family) return row;
-    if (mode === "brand") return { ...row, mode: "brand", brand };
-    return { ...row, mode, brand: "" };
+    if (mode === "brand") return { ...row, mode: "brand", brand, brands: [brand] };
+    if (mode === "cheapestPicks") return { ...row, mode, brand: brands[0] || "", brands };
+    return { ...row, mode, brand: "", brands: row.brands || [] };
   });
 }
 
@@ -92,20 +103,25 @@ export function receiptUploadHtml() {
 
 function learnedPickerHtml(row, brands) {
   const family = escapeText(row?.family || "");
-  const current = String(row?.brand || "");
+  const selected = new Set(
+    (row?.brands?.length ? row.brands : row?.mode === "brand" && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
+  );
   const nameButtons = (brands || [])
     .map((brand) => {
-      const on = row?.mode === "brand" && current.toLowerCase() === String(brand).toLowerCase();
-      return `<button type="button" class="mini-chip" data-learned-mode="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
+      const on = selected.has(String(brand).toLowerCase());
+      return `<button type="button" class="mini-chip" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
     })
     .join("");
-  const names = nameButtons ? `<p class="profile-label">Name brand</p><div class="mini-row brand-picks">${nameButtons}</div>` : "";
+  const names = nameButtons
+    ? `<p class="profile-label">Brands you buy. Pick more than one.</p><div class="mini-row brand-picks">${nameButtons}</div>`
+    : "";
   const option = (mode, label) =>
     `<button type="button" class="choice-card" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${row?.mode === mode ? "true" : "false"}">${label}</button>`;
   return `<div class="learned-picker" data-editor="${family}">
     ${names}
+    ${option("cheapestPicks", "Cheapest of my picks")}
+    ${option("cheapest", "Cheapest overall")}
     ${option("storeBrand", "Store brand")}
-    ${option("cheapest", "Cheapest")}
     ${option("never", "I don't buy it")}
   </div>`;
 }

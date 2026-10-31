@@ -71,8 +71,10 @@ type TokenResponse = {
 export function readKrogerOAuthConfig(): KrogerOAuthConfig | null {
   const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
   const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
-  const redirectUri = process.env.KROGER_REDIRECT_URI?.trim() ?? "";
-  if (!clientId || !clientSecret || !redirectUri) {
+  const redirectUri = (process.env.KROGER_REDIRECT_URI ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim();
+  if (!clientId || !clientSecret || !redirectUri || /\s/.test(redirectUri)) {
     return null;
   }
 
@@ -118,6 +120,9 @@ export function normalizeKrogerUpc(value?: string): string | undefined {
   return digits;
 }
 
+/** Railway's edge rejects a 302 when Location is oversized. Stay well under that. */
+export const MAX_AUTHORIZE_URL_CHARS = 1800;
+
 export function buildKrogerAuthorizeUrl(
   config: KrogerOAuthConfig,
   state: string
@@ -130,6 +135,54 @@ export function buildKrogerAuthorizeUrl(
     state,
   });
   return `${AUTHORIZE_ENDPOINT}?${params.toString()}`;
+}
+
+/** A browser navigation to Kroger must be a short https Location with no raw header breaks. */
+export function authorizeLocationIsSafe(url: string): boolean {
+  if (!url || url.length > MAX_AUTHORIZE_URL_CHARS || /[\r\n\0]/.test(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname === "api.kroger.com" &&
+      parsed.pathname === "/v1/connect/oauth2/authorize"
+    );
+  } catch {
+    return false;
+  }
+}
+
+const SHORT_STATE_PREFIX = "s1.";
+
+/**
+ * OAuth state that does not carry the cart. The cart stays in the session
+ * store so the authorize Location header stays small enough for Railway.
+ */
+export function issueShortCartState(config: KrogerOAuthConfig): string {
+  const id = randomBytes(16).toString("base64url");
+  const signature = createHmac("sha256", hmacKey(config.clientSecret, "kroger-oauth-short"))
+    .update(id)
+    .digest("base64url")
+    .slice(0, 22);
+  return `${SHORT_STATE_PREFIX}${id}.${signature}`;
+}
+
+export function verifyShortCartState(config: KrogerOAuthConfig, state: string): boolean {
+  if (!state.startsWith(SHORT_STATE_PREFIX)) return false;
+  const rest = state.slice(SHORT_STATE_PREFIX.length);
+  const dot = rest.lastIndexOf(".");
+  if (dot <= 0) return false;
+  const id = rest.slice(0, dot);
+  const signature = rest.slice(dot + 1);
+  if (!id || !signature) return false;
+  const expected = createHmac("sha256", hmacKey(config.clientSecret, "kroger-oauth-short"))
+    .update(id)
+    .digest("base64url")
+    .slice(0, 22);
+  const actualBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expected);
+  if (actualBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(actualBuf, expectedBuf);
 }
 
 function hmacKey(secret: string, purpose: string): Buffer {
@@ -557,6 +610,16 @@ export class KrogerCartSessionStore {
 
   savePending(state: string, cart: Omit<PendingKrogerCart, "createdAtMs">): void {
     this.pending.set(state, { ...cart, createdAtMs: this.now() });
+  }
+
+  peekPending(state: string): PendingKrogerCart | undefined {
+    const cart = this.pending.get(state);
+    if (!cart) return undefined;
+    if (this.now() - cart.createdAtMs > PENDING_TTL_MS) {
+      this.pending.delete(state);
+      return undefined;
+    }
+    return cart;
   }
 
   takePending(state: string): PendingKrogerCart | undefined {

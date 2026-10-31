@@ -67,7 +67,17 @@ export function mountMyProducts(deps = {}) {
           )
           .join("")}</ul>`
       : "";
-    body.innerHTML = `${how}<ul class="my-product-list">${rows}</ul>${blocks}`;
+    const seen = storage.getItem("gg-products-note") === "1";
+    const note = seen
+      ? ""
+      : `<div class="nudge" id="products-note">
+          <p>Review the products you buy. Tap a category you never buy.</p>
+          <div class="starter-actions">
+            <button type="button" class="primary" data-review-products>Review my products</button>
+            <button type="button" class="text-btn" data-products-later>Maybe later</button>
+          </div>
+        </div>`;
+    body.innerHTML = `${note}${how}<ul class="my-product-list">${rows}</ul>${blocks}`;
   }
 
   function open() {
@@ -85,6 +95,17 @@ export function mountMyProducts(deps = {}) {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
     if (!target) return;
     const profile = getUserProfile(storage);
+    if (target.dataset.reviewProducts != null || target.hasAttribute("data-review-products")) {
+      storage.setItem("gg-products-note", "1");
+      dialog.close();
+      deps.onReview?.();
+      return;
+    }
+    if (target.hasAttribute("data-products-later")) {
+      storage.setItem("gg-products-note", "1");
+      paint();
+      return;
+    }
     if (target.dataset.editCategory) {
       dialog.close();
       deps.onEditCategory?.(target.dataset.editCategory);

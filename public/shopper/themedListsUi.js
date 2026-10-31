@@ -91,10 +91,10 @@ export function partyHtml(people, escapeHtml) {
 
 export function nudgeHtml(escapeHtml) {
   return `<div class="nudge" id="favorites-nudge">
-    <p>Tell us what you buy and we'll use it on every list.</p>
+    <p>Review the products you buy. We'll remember them on later lists.</p>
     <div class="starter-actions">
-      <button type="button" class="primary" data-nudge-set>Edit what I buy</button>
-      <button type="button" class="text-btn" data-nudge-dismiss>Not now</button>
+      <button type="button" class="primary" data-nudge-set>Review my products</button>
+      <button type="button" class="text-btn" data-nudge-dismiss>Maybe later</button>
     </div>
   </div>`;
 }
@@ -168,7 +168,7 @@ function slotRowHtml(model, slotDef, book, people, quantities, escapeHtml) {
   </li>`;
 }
 
-export function detailHtml({ model, book, people, quantities, confirmDelete, finder, escapeHtml }) {
+export function detailHtml({ model, book, people, quantities, confirmDelete, finder, escapeHtml, dietNote = false }) {
   const rows = model.slots.map((slotDef) => slotRowHtml(model, slotDef, book, people, quantities, escapeHtml)).join("");
   const finderHtml = model.mine ? slotFinderHtml(finder, model, escapeHtml) : "";
   const rename = model.mine
@@ -197,6 +197,7 @@ export function detailHtml({ model, book, people, quantities, confirmDelete, fin
       <button type="button" class="text-btn" data-sheet-close>Close</button>
     </div>
     ${rename}
+    ${dietNote ? `<p class="diet-note"><button type="button" class="text-btn" data-add-diets>Add allergies or diets</button></p>` : ""}
     ${partyHtml(people, escapeHtml)}
     ${empty}
     <ul class="slot-list">${rows}</ul>
