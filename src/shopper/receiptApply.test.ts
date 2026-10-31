@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, it } from "node:test";
-import { analyzeReceipt } from "../import/receiptLearn";
+import { analyzeReceipt, learnReceiptLines } from "../import/receiptLearn";
 import { applyLearnedReceipts } from "../../public/shopper/receiptApply.js";
-import { DIGITAL_ASK, PAPER_WARNING, PRIVACY_NOTE, STORE_HINTS, receiptUploadHtml } from "../../public/shopper/receiptCopy.js";
-import { readReceiptBatch } from "../../public/shopper/receiptImport.js";
+import { applyLearnedChoice, learnedSummaryHtml, PAPER_WARNING, PRIVACY_NOTE, RECEIPT_HINT, STORE_HINTS, receiptUploadHtml } from "../../public/shopper/receiptCopy.js";
+import { readNdjsonResponse, readReceiptBatch } from "../../public/shopper/receiptImport.js";
 import { emptyProfile, parseProfile, saveUserProfile } from "../../public/shopper/profile.js";
 import { setCategoryPreference } from "../../public/shopper/categoryPreference.js";
 import { learnPreference } from "../../public/shopper/productPreference.js";
@@ -21,15 +21,15 @@ describe("receipt preferences", () => {
   it("tells shoppers to use a digital order and where to find it", () => {
     assert.match(PAPER_WARNING, /paper receipts/i);
     assert.match(PAPER_WARNING, /barcode/i);
-    assert.match(DIGITAL_ASK, /Kroger/);
-    assert.match(DIGITAL_ASK, /Walmart/);
-    assert.match(DIGITAL_ASK, /Target/);
-    assert.match(DIGITAL_ASK, /Instacart/);
-    assert.match(DIGITAL_ASK, /Amazon Fresh/);
-    assert.match(DIGITAL_ASK, /emailed/i);
+    assert.equal(PAPER_WARNING.split(/[.!?]/).filter((part) => part.trim()).length, 1);
+    assert.match(RECEIPT_HINT, /brands you already buy/i);
     assert.match(PRIVACY_NOTE, /don't keep the pictures/i);
     assert.match(PRIVACY_NOTE, /loyalty card/i);
     assert.match(PRIVACY_NOTE, /order number/i);
+    for (const store of ["Kroger", "Walmart", "Target", "Instacart", "Amazon"]) {
+      assert.ok(STORE_HINTS.some((row) => row.store === store || row.hint.includes(store)));
+    }
+    assert.match(STORE_HINTS.find((row) => row.store === "Email")?.hint || "", /emailed|Email|receipt/i);
     const kroger = STORE_HINTS.find((row) => row.store === "Kroger");
     assert.match(kroger?.hint || "", /Account/);
     assert.match(kroger?.hint || "", /Order History/);
@@ -37,7 +37,9 @@ describe("receipt preferences", () => {
     const html = receiptUploadHtml();
     assert.match(html, /Upload receipts/);
     assert.match(html, /multiple/);
-    assert.match(html, /Where to find it/);
+    assert.match(html, /<summary>Where do I find it\?<\/summary>/);
+    assert.match(html, /<details class="store-find"><summary>Kroger<\/summary>/);
+    assert.equal((html.match(/<details/g) || []).length, STORE_HINTS.length + 1);
     const app = fs.readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
     const ui = fs.readFileSync(new URL("../../public/shopper/profileOnboardingUi.js", import.meta.url), "utf8");
     assert.match(app, /\/api\/import\/photo/);
@@ -46,7 +48,49 @@ describe("receipt preferences", () => {
     assert.match(app, /askCategory\?\.\(/);
     assert.match(ui, /Here's what we learned/);
     assert.match(ui, /Confirm/);
+    assert.match(ui, /Read my receipts/);
+    assert.match(ui, /file-chip/);
     assert.equal(app.includes("localStorage.setItem(\"gg-receipt"), false);
+  });
+
+  it("keeps Change choices inside the row and refuses a click that would clear the list", () => {
+    const rows = [
+      { family: "laundry-detergent", label: "Laundry detergent", mode: "brand", brand: "Tide" },
+      { family: "dish-soap", label: "Dish soap", mode: "brand", brand: "Dawn" },
+    ];
+    const closed = learnedSummaryHtml(rows, {});
+    assert.equal(closed.includes("data-learned-mode"), false);
+    assert.equal(closed.includes(">Store brand<"), false);
+    assert.equal(closed.includes(">Cheapest<"), false);
+    const open = learnedSummaryHtml(rows, {
+      editingFamily: "laundry-detergent",
+      brandsByFamily: { "laundry-detergent": ["Tide", "Gain", "All"] },
+    });
+    const row = open.slice(open.indexOf('data-learned-row="laundry-detergent"'), open.indexOf('data-learned-row="dish-soap"'));
+    assert.match(row, /data-learned-mode="storeBrand"/);
+    assert.match(row, /data-learned-mode="cheapest"/);
+    assert.match(row, /data-learned-mode="never"/);
+    assert.match(row, /data-learned-brand="Tide"/);
+    assert.match(row, /aria-pressed="true"/);
+    const after = open.split("</section>").pop() || "";
+    assert.equal(after.includes("data-learned-mode"), false);
+    assert.equal(applyLearnedChoice(rows, { family: "", mode: "storeBrand" }), rows);
+    assert.equal(applyLearnedChoice(rows, { family: "missing", mode: "cheapest" }), rows);
+    assert.equal(applyLearnedChoice(rows, { mode: "brand", family: "laundry-detergent", brand: "" }), rows);
+    const changed = applyLearnedChoice(rows, { family: "laundry-detergent", mode: "storeBrand" });
+    assert.equal(changed.length, rows.length);
+    assert.equal(changed[0].mode, "storeBrand");
+    assert.equal(changed[0].brand, "");
+    assert.equal(changed[1].brand, "Dawn");
+    assert.equal(changed[1], rows[1]);
+    const named = applyLearnedChoice(rows, { family: "dish-soap", mode: "brand", brand: "Palmolive" });
+    assert.equal(named.length, 2);
+    assert.equal(named[1].brand, "Palmolive");
+    assert.equal(named[0].brand, "Tide");
+    const declined = applyLearnedChoice(rows, { family: "laundry-detergent", mode: "never" });
+    assert.equal(declined.length, 2);
+    assert.equal(declined[0].mode, "never");
+    assert.equal(declined[1].mode, "brand");
   });
 
   it("saves learned brands and lets an allergy, a lock, and a hand-picked choice win", () => {
@@ -114,5 +158,53 @@ $5.99`);
     );
     assert.equal(pasted.error, "");
     assert.equal(pasted.learned[0].mode, "storeBrand");
+  });
+
+  it("merges several files and keeps the brand that shows up on the most orders", async () => {
+    const messages: string[] = [];
+    const tide = { name: "Tide Laundry Detergent", brand: "Tide", quantity: 1, upc: "0003077201234" };
+    const gain = { name: "Gain Laundry Detergent", brand: "Gain", quantity: 1, upc: "0003077209999" };
+    const result = await readReceiptBatch(
+      {
+        photo: true,
+        onProgress: (event) => messages.push(String(event?.message || "")),
+        postPdf: async (file) => ({
+          lines: String(file.name).includes("gain") ? [gain, gain, gain] : [tide],
+        }),
+        postLines: async (lines) => learnReceiptLines(lines),
+      },
+      {
+        files: [
+          { type: "application/pdf", name: "kroger.pdf" },
+          { type: "application/pdf", name: "walmart.pdf" },
+          { type: "application/pdf", name: "gain.pdf" },
+        ],
+      }
+    );
+    assert.equal(result.error, "");
+    const detergent = result.learned.find((row) => row.family === "laundry-detergent");
+    assert.equal(detergent?.brand, "Tide");
+    assert.equal(detergent?.mode, "brand");
+    assert.ok(messages.includes("Preparing…"));
+    assert.ok(messages.some((message) => message.startsWith("Reading file ")));
+    assert.ok(messages.includes("Matching brands…"));
+  });
+
+  it("reads streamed progress without waiting for the whole order", async () => {
+    const response = new Response(
+      `${JSON.stringify({ type: "progress", message: "Reading part 2 of 5…", ratio: 0.4 })}\n${JSON.stringify({
+        type: "result",
+        analysis: { lines: [{ name: "Tide" }], learned: [] },
+      })}\n`,
+      { headers: { "content-type": "application/x-ndjson" } }
+    );
+    const messages: string[] = [];
+    const analysis = await readNdjsonResponse(response, (event) => messages.push(String(event?.message || "")));
+    assert.deepEqual(messages, ["Reading part 2 of 5…"]);
+    assert.equal(analysis.lines[0].name, "Tide");
+    await assert.rejects(
+      readNdjsonResponse(new Response(`${JSON.stringify({ type: "error", error: "nope" })}\n`), () => {}),
+      /nope/
+    );
   });
 });

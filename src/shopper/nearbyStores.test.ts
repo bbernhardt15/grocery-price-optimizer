@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { knownStoreNames } from "../../public/shopper/tripPlan.js";
-import { stateForZip, storesForZip } from "../../public/shopper/nearbyStores.js";
+import { milesBetween, stateForZip, storesForZip } from "../../public/shopper/nearbyStores.js";
 
 describe("stores near a ZIP", () => {
   it("includes Costco, Meijer, and Kroger around Cincinnati and leaves Publix out", () => {
@@ -18,6 +18,23 @@ describe("stores near a ZIP", () => {
     assert.equal(nearby.stores.includes("Publix"), false);
     assert.equal(nearby.stores.includes("H-E-B"), false);
     assert.ok(nearby.stores.length < knownStoreNames().length);
+    assert.equal(nearby.stores.includes("Giant Eagle"), false);
+    assert.match(nearby.note, /25/);
+  });
+
+  it("leaves Giant Eagle off Batavia and keeps it in Columbus and Pittsburgh", () => {
+    const batavia = storesForZip("45103");
+    assert.equal(batavia.source, "nearby");
+    assert.equal(batavia.stores.includes("Giant Eagle"), false);
+    assert.ok(batavia.stores.includes("Kroger"));
+    assert.ok(batavia.stores.includes("Meijer"));
+    assert.ok(batavia.stores.includes("Walmart"));
+    assert.ok(batavia.stores.includes("Target"));
+    assert.ok(milesBetween([39.0916, -84.1437], [39.9612, -82.9988]) > 25);
+    assert.ok(storesForZip("43215").stores.includes("Giant Eagle"));
+    assert.ok(storesForZip("15222").stores.includes("Giant Eagle"));
+    assert.equal(storesForZip("19103").stores.includes("Giant Eagle"), false);
+    assert.doesNotMatch(batavia.note, /every chain/i);
   });
 
   it("includes Publix in Miami and H-E-B in Houston", () => {

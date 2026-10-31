@@ -23,13 +23,14 @@ import {
   stepById,
   summarySections,
 } from "./profileOnboarding.js";
-import { learnPreference, forgetPreference } from "./productPreference.js";
+import { learnPreference, forgetPreference, isStoreBrand } from "./productPreference.js";
 import { applyCheapestDefaults, asksNameBrand, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
-import { isProduceFamily } from "./brandNames.js";
+import { displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
-import { learnedEditorHtml, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { applyLearnedChoice, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip } from "./nearbyStores.js";
 
 function escapeText(value) {
@@ -183,9 +184,16 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (step.kind === "receipts") {
       if (receiptPhase === "learned") {
-        const editor = editingFamily ? learnedEditorHtml(learnedRows.find((row) => row.family === editingFamily)) : "";
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
-        return `${warning}${learnedSummaryHtml(learnedRows, { paper: paperReceipt, paperNote, lines: receiptLines })}${editor}`;
+        const brandsByFamily = {};
+        for (const row of learnedRows) brandsByFamily[row.family] = brandChoices(row);
+        return `${warning}${learnedSummaryHtml(learnedRows, {
+          paper: paperReceipt,
+          paperNote,
+          lines: receiptLines,
+          editingFamily,
+          brandsByFamily,
+        })}`;
       }
       return receiptUploadHtml();
     }
@@ -265,11 +273,12 @@ export function mountProfileOnboarding(deps = {}) {
     const skip = $("profile-skip");
     const stage = $("profile-stage");
     const learned = step.id === "receipts" && receiptPhase === "learned";
+    if (dialog) dialog.dataset.step = learned ? "learned" : step.id;
     if (title) title.textContent = learned ? "Here's what we learned" : step.title;
     if (hint) hint.textContent = learned ? "Grouped by what you buy. Allergies and diets stay in charge." : step.hint;
     if (progress) progress.textContent = progressLabel(step.id);
     if (back) back.hidden = (dietMode ? stepId === "allergies" : step.index === 0) && !returnTo && receiptPhase !== "learned";
-    if (next) next.textContent = returnTo ? "Save" : learned ? "Confirm" : primaryLabel(step.id);
+    if (next) next.textContent = returnTo ? "Save" : learned ? "Confirm" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     if (skip) {
       skip.textContent = SKIP_LABEL;
       skip.disabled = false;
@@ -278,6 +287,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (stage) stage.innerHTML = stageHtml(step);
     bindPlaceInput();
     bindReceiptInput();
+    if (next && !(dietMode && step.id === "diets")) next.disabled = step.id === "receipts" && !learned ? !receiptReady() : false;
     dots();
     if (step.kind === "products") void loadProducts();
   }
@@ -307,16 +317,78 @@ export function mountProfileOnboarding(deps = {}) {
     });
   }
 
+  function brandChoices(row) {
+    const known = knownBrandNames(row?.family).map((name) => displayBrand(name)).filter(Boolean);
+    const detected = row?.mode === "brand" ? displayBrand(row.brand) : "";
+    const names = [];
+    const seen = new Set();
+    for (const name of [detected, ...known]) {
+      if (!name || isStoreBrand(name) || isProduceFamily(row?.family)) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+    return names.slice(0, 8);
+  }
+
+  function receiptReady() {
+    const text = $("profile-receipt-paste")?.value || "";
+    return pendingFiles.length > 0 || String(text).trim().length > 0;
+  }
+
+  function syncReceiptButton() {
+    const next = $("profile-next");
+    if (!next || stepId !== "receipts" || receiptPhase === "learned") return;
+    next.disabled = !receiptReady();
+  }
+
+  function paintReceiptFiles() {
+    const host = $("profile-receipt-files");
+    if (host) {
+      host.innerHTML = pendingFiles
+        .map((file, index) => {
+          const name = file.name || "Receipt";
+          return `<span class="file-chip"><span>${escapeText(name)}</span><button type="button" class="text-btn" data-file-remove="${index}" aria-label="Remove ${escapeText(name)}">×</button></span>`;
+        })
+        .join("");
+    }
+    syncReceiptButton();
+  }
+
+  function showReadProgress(message, ratio, failed) {
+    const wrap = $("profile-receipt-progress");
+    const status = $("profile-receipt-status");
+    const meter = $("profile-receipt-meter");
+    if (wrap) {
+      wrap.hidden = false;
+      wrap.dataset.state = failed ? "error" : "busy";
+      wrap.scrollIntoView({ block: "nearest" });
+    }
+    if (status) status.textContent = message || "Preparing…";
+    if (meter && Number.isFinite(ratio)) meter.value = Math.max(0, Math.min(1, ratio));
+  }
+
   function bindReceiptInput() {
     const input = $("profile-receipt-input");
-    if (!input || input.dataset.bound === "1") return;
-    input.dataset.bound = "1";
-    input.addEventListener("change", () => {
-      pendingFiles = [...(input.files || [])];
-      const label = $("profile-receipt-files");
-      if (label) label.textContent = pendingFiles.map((file) => file.name).filter(Boolean).join(", ");
-      input.value = "";
-    });
+    if (input && input.dataset.bound !== "1") {
+      input.dataset.bound = "1";
+      input.addEventListener("change", () => {
+        for (const file of input.files || []) {
+          const key = `${file.name}|${file.size}|${file.lastModified}`;
+          if (pendingFiles.some((have) => `${have.name}|${have.size}|${have.lastModified}` === key)) continue;
+          pendingFiles.push(file);
+        }
+        input.value = "";
+        paintReceiptFiles();
+      });
+    }
+    const paste = $("profile-receipt-paste");
+    if (paste && paste.dataset.bound !== "1") {
+      paste.dataset.bound = "1";
+      paste.addEventListener("input", () => syncReceiptButton());
+    }
+    if (stepId === "receipts" && receiptPhase !== "learned") paintReceiptFiles();
   }
 
   function readPlace() {
@@ -489,15 +561,18 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function runReceipts(text, files) {
-    const status = $("profile-receipt-status");
-    if (status) status.textContent = "Reading the order…";
+    showReadProgress("Preparing…", 0.08, false);
     const next = $("profile-next");
     if (next) next.disabled = true;
     try {
-      const result = await deps.readReceipts?.({ text, files });
+      const result = await deps.readReceipts?.({
+        text,
+        files,
+        onProgress: (event) => showReadProgress(event?.message || "Preparing…", Number(event?.ratio), false),
+      });
       pendingFiles = [];
       if (!result || result.error || !result.lines?.length) {
-        if (status) status.textContent = result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.";
+        showReadProgress(result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.", 0, true);
         return;
       }
       learnedRows = result.learned || [];
@@ -510,7 +585,7 @@ export function mountProfileOnboarding(deps = {}) {
       render();
       focusTitle();
     } catch (error) {
-      if (status) status.textContent = error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.";
+      showReadProgress(error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.", 0, true);
     } finally {
       if (next) next.disabled = false;
     }
@@ -528,11 +603,11 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function rememberBrandEdit() {
-    const input = document.querySelector("[data-learned-brand]");
-    const family = input?.getAttribute("data-learned-brand") || editingFamily;
+    const input = document.querySelector("input[data-learned-brand]");
+    const family = input?.getAttribute("data-learned-brand") || "";
     const brand = String(input?.value || "").trim();
     if (!family || !brand) return;
-    learnedRows = learnedRows.map((row) => (row.family === family ? { ...row, mode: "brand", brand } : row));
+    learnedRows = applyLearnedChoice(learnedRows, { family, mode: "brand", brand });
   }
 
   function closeDiet(value) {
@@ -603,10 +678,7 @@ export function mountProfileOnboarding(deps = {}) {
         await runReceipts(text, pendingFiles);
         return;
       }
-      if (!returnTo) {
-        finish(at);
-        return;
-      }
+      if (!returnTo) return;
     }
     if (stepId === "products" && !returnTo) {
       const categories = preferenceCategories();
@@ -764,7 +836,9 @@ export function mountProfileOnboarding(deps = {}) {
   });
   $("profile-stage")?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
-    if (target) event.preventDefault();
+    if (!target) return;
+    if (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedRemove || target.dataset.fileRemove) return;
+    event.preventDefault();
   });
   $("profile-stage")?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
@@ -775,22 +849,37 @@ export function mountProfileOnboarding(deps = {}) {
       $("profile-receipt-input")?.click();
       return;
     }
+    if (target.dataset.fileRemove != null && target.dataset.fileRemove !== "") {
+      const index = Number(target.dataset.fileRemove);
+      if (Number.isInteger(index) && index >= 0 && index < pendingFiles.length) {
+        pendingFiles = pendingFiles.filter((_, fileIndex) => fileIndex !== index);
+        paintReceiptFiles();
+      }
+      return;
+    }
     if (target.dataset.learnedRemove) {
-      learnedRows = learnedRows.filter((row) => row.family !== target.dataset.learnedRemove);
-      if (editingFamily === target.dataset.learnedRemove) editingFamily = "";
+      const family = target.dataset.learnedRemove;
+      const next = learnedRows.filter((row) => row.family !== family);
+      if (!family || next.length < learnedRows.length - 1) return;
+      learnedRows = next;
+      if (editingFamily === family) editingFamily = "";
       render();
       return;
     }
     if (target.dataset.learnedChange) {
       editingFamily = editingFamily === target.dataset.learnedChange ? "" : target.dataset.learnedChange;
       render();
+      document.querySelector(".learned-picker")?.scrollIntoView({ block: "nearest" });
       return;
     }
-    if (target.dataset.learnedMode && target.dataset.learnedFamily) {
-      const mode = target.dataset.learnedMode;
-      learnedRows = learnedRows.map((row) =>
-        row.family === target.dataset.learnedFamily ? { ...row, mode, brand: mode === "brand" ? row.brand : "" } : row
-      );
+    if (target.dataset.learnedMode) {
+      const next = applyLearnedChoice(learnedRows, {
+        family: target.dataset.learnedFamily || "",
+        mode: target.dataset.learnedMode,
+        brand: target.dataset.learnedBrand || "",
+      });
+      if (next === learnedRows) return;
+      learnedRows = next;
       editingFamily = "";
       render();
       return;

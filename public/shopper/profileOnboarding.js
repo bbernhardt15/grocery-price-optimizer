@@ -19,8 +19,8 @@ const FLOW = [
   },
   {
     id: "receipts",
-    title: "Upload past receipts or order screenshots",
-    hint: "Optional, about a minute. This is the fastest way to learn the brands you already buy.",
+    title: "Upload receipts",
+    hint: "We'll learn the brands you already buy.",
     kind: "receipts",
   },
 ];

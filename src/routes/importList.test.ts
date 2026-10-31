@@ -342,4 +342,38 @@ describe("import routes", () => {
     assert.ok(onBody.lines.some((line) => line.upc && /bertolli/i.test(`${line.brand} ${line.name}`)));
     assert.ok(calls.some((url) => url.includes("/chat/completions")));
   });
+
+  it("streams progress and does not call vision when the PDF already has Kroger text", async () => {
+    const body = `BT
+(Tide Liquid Laundry Detergent, 92 oz) Tj
+(1.0 x $11.99) Tj
+(UPC: 0003620021933) Tj
+ET`;
+    const pdf = Buffer.from(
+      `%PDF-1.1
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj
+4 0 obj << /Length ${body.length} >> stream
+${body}
+endstream
+endobj
+trailer << /Root 1 0 R >>
+%%EOF`,
+      "latin1"
+    );
+    const response = await post("/api/import/pdf", { pdfBase64: pdf.toString("base64"), progress: true }, "device-pdf-progress");
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") || "", /ndjson/);
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type?: string; message?: string; analysis?: { lines: Array<{ brand: string }> } });
+    assert.ok(events.some((event) => event.message === "Preparing…"));
+    assert.ok(events.some((event) => event.message === "Matching brands…"));
+    assert.equal(events.at(-1)?.type, "result");
+    assert.ok(events.at(-1)?.analysis?.lines.some((line) => /tide/i.test(line.brand)));
+    assert.equal(calls.some((url) => url.includes("/chat/completions")), false);
+  });
 });

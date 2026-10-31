@@ -68,7 +68,7 @@ export function importConfig(env: NodeJS.ProcessEnv = process.env): ImportConfig
   const aiModel =
     trim(env.IMPORT_AI_MODEL) || (aiProvider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4o-mini");
   const visionModel =
-    trim(env.IMPORT_VISION_MODEL) || (visionProvider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4o-mini");
+    trim(env.IMPORT_VISION_MODEL) || (visionProvider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4.1-mini");
 
   return {
     ai: aiProvider !== null,
