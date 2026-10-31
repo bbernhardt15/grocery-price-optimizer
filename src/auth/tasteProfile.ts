@@ -48,6 +48,10 @@ export type TasteCategoryPreference = {
   productId: string;
   size: string;
   attributes: string[];
+  source?: string;
+  confidence?: string;
+  count?: number;
+  label?: string;
   updatedAt: number;
 };
 
@@ -103,7 +107,7 @@ export function parseTasteProfile(value: unknown): TasteProfile | { error: strin
   const categories: TasteProfile["categoryPreferences"] = {};
   const categorySource = row.categoryPreferences;
   if (categorySource && typeof categorySource === "object" && !Array.isArray(categorySource)) {
-    for (const [key, entry] of Object.entries(categorySource as Record<string, unknown>).slice(0, 40)) {
+    for (const [key, entry] of Object.entries(categorySource as Record<string, unknown>).slice(0, 64)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const pref = entry as Record<string, unknown>;
       if ("price" in pref || "storeName" in pref) return { error: "tasteProfile cannot include a price or a store." };
@@ -114,6 +118,8 @@ export function parseTasteProfile(value: unknown): TasteProfile | { error: strin
       const attributes = Array.isArray(pref.attributes)
         ? pref.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
         : [];
+      const source = clean(pref.source, 20);
+      const confidence = pref.confidence === "high" || pref.confidence === "low" ? pref.confidence : "";
       categories[family] = {
         family,
         mode,
@@ -121,6 +127,10 @@ export function parseTasteProfile(value: unknown): TasteProfile | { error: strin
         productId: /^[A-Za-z0-9:_-]{1,80}$/.test(productId) ? productId : "",
         size: clean(pref.size, 80),
         attributes,
+        ...(source ? { source } : {}),
+        ...(confidence ? { confidence } : {}),
+        count: Math.max(0, Math.min(999, Math.floor(Number(pref.count) || 0))),
+        ...(clean(pref.label, 80) ? { label: clean(pref.label, 80) } : {}),
         updatedAt: stamp(pref.updatedAt),
       };
     }

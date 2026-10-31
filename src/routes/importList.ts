@@ -9,6 +9,8 @@ import { constraintNote } from "../import/constraints";
 import { readSharedLink } from "../import/linkFetch";
 import { matchImportItems, type ImportMatchResult } from "../import/matchImport";
 import { IMPORT_MESSAGES, KROGER_HISTORY_REASON } from "../import/messages";
+import { extractPdfText } from "../import/pdfText";
+import { analyzeReceipt, learnReceiptLines } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
 import { aiAsk, aiParseText, aiReadImage, ModelError, transcribeAudio } from "../import/providers";
 import { setImportRuntime } from "../import/runtime";
@@ -34,6 +36,7 @@ const AUDIO_TYPES = new Set([
 const MAX_TEXT = 50_000;
 const MAX_IMAGE = 4_000_000;
 const MAX_AUDIO = 8_000_000;
+const MAX_PDF = 8_000_000;
 
 export function resetImportForTests(): void {
   limiter.reset();
@@ -115,13 +118,22 @@ async function interpret(text: string, key: string, allowAi: boolean): Promise<R
   return { match: await review(parseImportText(text)), parser: "rules" as const, aiFallback: false, paused: false };
 }
 
+function receiptFor(text: string): ReturnType<typeof analyzeReceipt> | null {
+  try {
+    const receipt = analyzeReceipt(text);
+    return receipt.lines.length ? receipt : null;
+  } catch {
+    return null;
+  }
+}
+
 function sendMatch(
   res: Response,
   result: Awaited<ReturnType<typeof interpret>>,
   extra: Record<string, unknown> = {}
 ): void {
   if (!result.match.items.length) {
-    res.status(422).json({ error: IMPORT_MESSAGES.empty, parser: result.parser });
+    res.status(422).json({ error: IMPORT_MESSAGES.empty, parser: result.parser, ...extra });
     return;
   }
   res.json({
@@ -173,7 +185,8 @@ router.post("/import/text", async (req, res) => {
     return;
   }
   const allowAi = req.body?.preferAi !== false;
-  sendMatch(res, await interpret(text, clientKey(req, res), allowAi));
+  const receipt = receiptFor(text);
+  sendMatch(res, await interpret(text, clientKey(req, res), allowAi), receipt ? { receipt } : {});
 });
 
 router.post("/import/file", async (req, res) => {
@@ -187,7 +200,8 @@ router.post("/import/file", async (req, res) => {
     res.status(400).json({ error: IMPORT_MESSAGES.tooLong });
     return;
   }
-  sendMatch(res, await interpret(text, clientKey(req, res), req.body?.preferAi === true));
+  const receipt = receiptFor(text);
+  sendMatch(res, await interpret(text, clientKey(req, res), req.body?.preferAi === true), receipt ? { receipt } : {});
 });
 
 router.post("/import/photo", async (req, res) => {
@@ -216,11 +230,18 @@ router.post("/import/photo", async (req, res) => {
     const extracted = await aiReadImage(image.toString("base64"), mimeType);
     const items = itemsFromModel(extracted) ?? parseImportText(extracted);
     const match = await review(items);
+    const receipt = receiptFor(extracted);
     if (!match.items.length) {
-      res.status(422).json({ error: IMPORT_MESSAGES.empty });
+      res.status(422).json({ error: IMPORT_MESSAGES.empty, ...(receipt ? { receipt } : {}) });
       return;
     }
-    res.json({ ...match, parser: itemsFromModel(extracted) ? "ai" : "rules", aiFallback: false, paused: false });
+    res.json({
+      ...match,
+      parser: itemsFromModel(extracted) ? "ai" : "rules",
+      aiFallback: false,
+      paused: false,
+      ...(receipt ? { receipt } : {}),
+    });
   } catch (error) {
     const status = error instanceof ModelError ? error.message : "failed";
     console.error(`Import photo failed (${status})`);
@@ -319,6 +340,42 @@ router.post("/import/ask", async (req, res) => {
     console.error(`Import suggestions failed (${status})`);
     res.status(502).json({ error: IMPORT_MESSAGES.askFailed });
   }
+});
+
+router.post("/import/receipt", async (req, res) => {
+  if (!allowed(req, res)) return tooFast(res);
+  const text = readText(req.body?.text).slice(0, MAX_TEXT);
+  const lines = Array.isArray(req.body?.lines) ? req.body.lines : null;
+  const analysis = lines ? learnReceiptLines(lines) : text.trim() ? analyzeReceipt(text) : null;
+  if (!analysis) {
+    res.status(400).json({ error: IMPORT_MESSAGES.textMissing });
+    return;
+  }
+  if (!analysis.lines.length) {
+    res.status(422).json({ error: IMPORT_MESSAGES.empty, paper: analysis.paper, paperNote: analysis.paperNote });
+    return;
+  }
+  res.json(analysis);
+});
+
+router.post("/import/pdf", async (req, res) => {
+  if (!allowed(req, res)) return tooFast(res);
+  const pdf = decodeBase64(req.body?.pdfBase64, MAX_PDF);
+  if (!pdf) {
+    res.status(400).json({ error: IMPORT_MESSAGES.tooBig });
+    return;
+  }
+  const text = extractPdfText(pdf).slice(0, MAX_TEXT);
+  if (!text) {
+    res.status(422).json({ error: IMPORT_MESSAGES.pdfNoText });
+    return;
+  }
+  const analysis = analyzeReceipt(text);
+  if (!analysis.lines.length) {
+    res.status(422).json({ error: IMPORT_MESSAGES.empty, paper: analysis.paper, paperNote: analysis.paperNote });
+    return;
+  }
+  res.json(analysis);
 });
 
 export default router;

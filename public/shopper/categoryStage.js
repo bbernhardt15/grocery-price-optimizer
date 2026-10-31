@@ -111,6 +111,10 @@ export function categoryDetailHtml(input) {
       ${modeButtons}
     </div>
     ${brandBlock}
-    <button type="button" class="ghost" id="profile-use-defaults">Use defaults: cheapest for everything I skip</button>
-    <button type="button" class="ghost" id="profile-skip-rest">Skip rest</button>`;
+    ${
+      input?.compact
+        ? ""
+        : `<button type="button" class="ghost" id="profile-use-defaults">Use defaults: cheapest for everything I skip</button>
+    <button type="button" class="ghost" id="profile-skip-rest">Skip rest</button>`
+    }`;
 }

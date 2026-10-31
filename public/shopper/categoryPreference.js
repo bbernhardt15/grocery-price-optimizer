@@ -54,6 +54,9 @@ export function categoryPreferenceOf(value, familyId) {
   const attributes = Array.isArray(value.attributes)
     ? value.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
     : [];
+  const source = ["receipt", "onboarding", "add", "manual"].includes(value.source) ? value.source : "";
+  const confidence = value.confidence === "high" || value.confidence === "low" ? value.confidence : "";
+  const count = Math.max(0, Math.min(999, Math.floor(Number(value.count) || 0)));
   return {
     family,
     mode,
@@ -61,6 +64,10 @@ export function categoryPreferenceOf(value, familyId) {
     productId: clean(value.productId || value.catalogId, 80),
     size: clean(value.size || value.sizeLabel, 80),
     attributes,
+    source,
+    confidence,
+    count,
+    label: clean(value.label, 80),
     updatedAt: Number(value.updatedAt) || 0,
   };
 }

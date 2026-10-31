@@ -18,6 +18,7 @@ import {
   profileSteps,
   resumeStep,
   SKIP_LABEL,
+  skipForNow,
   skipStep,
   summarySections,
 } from "../../public/shopper/profileOnboarding.js";
@@ -82,11 +83,11 @@ describe("taste profile storage", () => {
 
   it("resumes after a skip and does not nag a finished older welcome", () => {
     const store = memory();
-    let profile = answerStep(emptyProfile(), "household", { size: 2, kids: null, picky: null }, 20);
+    let profile = answerStep(emptyProfile(), "place", { stores: ["Kroger", "Walmart"] }, 20);
     profile = skipStep(profile, "allergies", 30);
     assert.equal(profile.onboarding.status, "in_progress");
     assert.equal(profile.onboarding.step, "diets");
-    assert.equal(profile.household.size, 2);
+    assert.deepEqual(profile.shopStores, ["Kroger", "Walmart"]);
     assert.deepEqual(profile.allergies, []);
     saveUserProfile(store, profile, 30);
     assert.equal(resumeStep(getUserProfile(store)), "diets");
@@ -96,8 +97,17 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), false);
     saveUserProfile(legacy, profile, 30);
     assert.equal(shouldPromptProfile(legacy), true);
-    assert.equal(profileSteps().every((step) => step.id), true);
-    assert.equal(SKIP_LABEL, "Skip this one");
+    assert.deepEqual(
+      profileSteps().map((step) => step.id),
+      ["place", "allergies", "diets", "receipts"]
+    );
+    assert.equal(profileSteps().some((step) => step.id === "products"), false);
+    assert.equal(SKIP_LABEL, "Skip for now");
+    const bailed = skipForNow(profile, 40);
+    assert.equal(bailed.onboarding.status, "skipped");
+    assert.deepEqual(bailed.shopStores, ["Kroger", "Walmart"]);
+    saveUserProfile(store, bailed, 40);
+    assert.equal(shouldPromptProfile(store), false);
     assert.equal(primaryLabel("summary"), "Start shopping");
     assert.equal(summarySections(profile).some((section) => section.step === "allergies"), true);
   });
@@ -350,7 +360,8 @@ describe("profile screens", () => {
     const app = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
     assert.match(html, /id="profile-onboard"/);
     assert.match(html, /id="profile-skip"/);
-    assert.match(html, />Skip this one</);
+    assert.match(html, />Skip for now</);
+    assert.match(html, /id="drawer-buy"/);
     assert.match(html, /id="profile-back"/);
     assert.match(html, /id="drawer-profile"/);
     assert.match(html, /id="drawer-products"/);

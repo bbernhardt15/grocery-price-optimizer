@@ -45,7 +45,7 @@ function blank(now = 0) {
   return {
     version: PROFILE_VERSION,
     updatedAt: now,
-    onboarding: { status: "new", step: "household", updatedAt: now },
+    onboarding: { status: "new", step: "place", updatedAt: now },
     why: [],
     household: { size: null, kids: null, picky: null },
     loves: [],
@@ -238,12 +238,14 @@ export function parseProfile(raw) {
   const categoryPreferences = {};
   const sourceCategories = row.categoryPreferences;
   if (sourceCategories && typeof sourceCategories === "object" && !Array.isArray(sourceCategories)) {
-    for (const [key, entry] of Object.entries(sourceCategories).slice(0, 48)) {
+    for (const [key, entry] of Object.entries(sourceCategories).slice(0, 64)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const mode = ["brand", "storeBrand", "cheapest", "skip", "never"].includes(entry.mode) ? entry.mode : "";
       const family = clean(entry.family || key, 40).toLowerCase();
       if (!mode || !/^[a-z0-9-]{2,40}$/.test(family)) continue;
       const productId = clean(entry.productId || entry.catalogId, 80);
+      const source = ["receipt", "onboarding", "add", "manual"].includes(entry.source) ? entry.source : "";
+      const confidence = entry.confidence === "high" || entry.confidence === "low" ? entry.confidence : "";
       categoryPreferences[family] = {
         family,
         mode,
@@ -253,6 +255,10 @@ export function parseProfile(raw) {
         attributes: Array.isArray(entry.attributes)
           ? entry.attributes.map((item) => clean(item, 40).toLowerCase()).filter(Boolean).slice(0, 8)
           : [],
+        source,
+        confidence,
+        count: Math.max(0, Math.min(999, Math.floor(Number(entry.count) || 0))),
+        label: clean(entry.label, 80),
         updatedAt: stamp(entry.updatedAt),
       };
     }

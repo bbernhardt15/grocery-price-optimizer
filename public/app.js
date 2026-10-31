@@ -61,6 +61,7 @@ import {
 import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
 import { selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
+import { fileToBase64, readReceiptBatch } from "./shopper/receiptImport.js";
 import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
 import {
   applyTripEdits,
@@ -1279,8 +1280,11 @@ function addProduct(product, quantity = 1, options = {}) {
   }
   const added = listItemTitle(product);
   if (!options.quiet) toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
-  if (!options.quiet && !options.skipAsk && shouldAskAlways(getUserProfile(localStorage), product)) {
-    alwaysPrompt?.ask(product, familyLabel(family) || added.title);
+  if (!options.quiet && !options.skipAsk) {
+    const pref = family ? getUserProfile(localStorage).categoryPreferences?.[family] : null;
+    const chosen = Boolean(pref && pref.mode && pref.mode !== "skip");
+    if (family && !chosen) profileUi?.askCategory?.(family);
+    else if (shouldAskAlways(getUserProfile(localStorage), product)) alwaysPrompt?.ask(product, familyLabel(family) || added.title);
   }
   paintPlanBar();
   paintUsuals();
@@ -6103,9 +6107,47 @@ function finishProfile(profile) {
   scheduleAccountSync();
 }
 
+async function postImport(path, body) {
+  const response = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-device-id": localStorage.getItem("gg-device") || "gg-device",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok && !payload?.receipt && !payload?.lines) {
+    throw new Error(payload?.error || "We couldn't read that.");
+  }
+  return payload;
+}
+
 profileUi = mountProfileOnboarding({
   storage: localStorage,
   toast,
+  getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
+  setZip: (zip) => applyZip(zip, { reload: false }),
+  readReceipts: async ({ text, files } = {}) => {
+    let photo = false;
+    try {
+      const status = await fetch(apiUrl("/api/import/status"));
+      if (status.ok) photo = Boolean((await status.json()).photo);
+    } catch {
+      photo = false;
+    }
+    return readReceiptBatch(
+      {
+        photo,
+        postPhoto: async (file) => postImport("/api/import/photo", { imageBase64: await fileToBase64(file), mimeType: file.type || "image/jpeg" }),
+        postPdf: async (file) => postImport("/api/import/pdf", { pdfBase64: await fileToBase64(file) }),
+        postText: async (value) => postImport("/api/import/receipt", { text: value }),
+        postLines: async (lines) => postImport("/api/import/receipt", { lines }),
+      },
+      { text, files }
+    );
+  },
+  readLines: (lines) => postImport("/api/import/receipt", { lines }),
   loadStaple: async (search) => {
     const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`));
     const body = await response.json().catch(() => ({}));
@@ -6154,6 +6196,10 @@ myProducts = mountMyProducts({
 $("drawer-profile")?.addEventListener("click", () => {
   closeDrawer();
   profileUi?.openEditor();
+});
+$("drawer-buy")?.addEventListener("click", () => {
+  closeDrawer();
+  profileUi?.openFavorites?.();
 });
 $("drawer-products")?.addEventListener("click", () => {
   closeDrawer();

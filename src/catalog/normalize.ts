@@ -20,6 +20,7 @@ const STORE_BRANDS = new Set(
     "equate",
     "parent's choice",
     "good & gather",
+    "market pantry",
     "up & up",
     "favorite day",
     "friendly farms",

@@ -62,7 +62,7 @@ export function mountMyProducts(deps = {}) {
     const how = categories.length
       ? `<h3>How you buy</h3><ul class="my-product-list">${categories
           .map(
-            (row) => `<li class="my-product"><div><strong>${escapeText(familyLabel(row.family) || row.family)}</strong><p>${escapeText(modeLabel(row.mode))}${row.brand ? ` · ${escapeText(row.brand)}` : ""}</p></div>
+            (row) => `<li class="my-product"><div><strong>${escapeText(row.label || familyLabel(row.family) || row.family)}</strong><p>${escapeText(modeLabel(row.mode))}${row.brand ? ` · ${escapeText(row.brand)}` : ""}</p></div>
             <button type="button" class="text-btn" data-edit-category="${escapeText(row.family)}">Change</button></li>`
           )
           .join("")}</ul>`

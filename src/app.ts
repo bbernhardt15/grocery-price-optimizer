@@ -28,7 +28,9 @@ app.use(cors());
 const jsonSmall = express.json({ limit: "100kb" });
 const jsonMedia = express.json({ limit: "8mb" });
 app.use((req, res, next) => {
-  const media = req.method === "POST" && (req.path === "/api/import/photo" || req.path === "/api/import/audio");
+  const media =
+    req.method === "POST" &&
+    (req.path === "/api/import/photo" || req.path === "/api/import/audio" || req.path === "/api/import/pdf");
   return (media ? jsonMedia : jsonSmall)(req, res, next);
 });
 app.use(express.urlencoded({ extended: false }));
