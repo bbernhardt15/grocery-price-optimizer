@@ -107,6 +107,7 @@ import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js
 import { bottomChrome, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "./shopper/flow.js";
 import { nextTrapTarget, swipeClosesDrawer } from "./shopper/drawer.js";
 import { zipPlaceLabel } from "./shopper/zipPlace.js";
+import { storesForZip } from "./shopper/nearbyStores.js";
 import {
   KROGER_CART_URL,
   KROGER_CONNECTED_KEY,
@@ -1985,12 +1986,17 @@ function tripId() {
   return tripFingerprint(lastOptimize?.stores || []);
 }
 
+function nearbyStoreChoice() {
+  return storesForZip(normalizeZip(zipEl?.value || localStorage.getItem(ZIP_KEY) || ""));
+}
+
 function selectedStoreNames() {
-  const all = planningStoreNames();
+  const nearby = nearbyStoreChoice();
+  const universe = nearby.stores.length ? nearby.stores : planningStoreNames();
   const picked = getUserProfile(localStorage).shopStores;
-  if (!Array.isArray(picked) || !picked.length) return all;
-  const next = all.filter((name) => picked.includes(name));
-  return next.length ? next : all;
+  if (!Array.isArray(picked) || !picked.length) return universe;
+  const next = picked.filter((name) => universe.includes(name));
+  return next.length ? next : universe;
 }
 
 function narrowStores(stores) {
@@ -5295,6 +5301,7 @@ function lists() {
       onChange: () => scheduleAccountSync(),
       mediaUrl,
       profile: () => getUserProfile(localStorage),
+      beforeRecipe: (open) => askDietsThen(open),
       slotBlocked: (slot) => slotIsExcluded(getUserProfile(localStorage), slot),
       guideSlot: (input) => {
         const profile = getUserProfile(localStorage);
@@ -5481,10 +5488,20 @@ function preferenceReview(rows, note) {
   };
 }
 
+function askDietsThen(next) {
+  if (!profileUi?.shouldAskDiets?.()) {
+    next();
+    return;
+  }
+  profileUi.openDietPrompt(next);
+}
+
 async function addMealFromPreferences(text) {
   const meal = mealPlan(text);
   if (!meal?.items?.length) return;
-  await addFromPreferences(meal.items.map((item) => item.raw).join(", "));
+  askDietsThen(() => {
+    void addFromPreferences(meal.items.map((item) => item.raw).join(", "));
+  });
 }
 
 async function addFromPreferences(text) {
@@ -5693,10 +5710,11 @@ function paintStorePicker() {
   const host = $("store-picker-list");
   if (!host) return;
   const selected = new Set(selectedStoreNames());
+  const nearby = nearbyStoreChoice();
   const place = zipPlaceLabel(normalizeZip(zipEl?.value || ""));
   const note = $("store-picker-note");
-  if (note) note.textContent = place ? `Near ${place}. Uncheck a store to leave it out.` : "Uncheck a store to leave it out of the plan.";
-  host.innerHTML = planningStoreNames()
+  if (note) note.textContent = place && nearby.source === "nearby" ? `Near ${place}. ${nearby.note}` : nearby.note;
+  host.innerHTML = nearby.stores
     .map((name) => {
       const on = selected.has(name);
       return `<label class="check-row"><input type="checkbox" data-shop-store="${escapeHtml(name)}" ${on ? "checked" : ""} /> ${escapeHtml(name)}</label>`;
@@ -5712,7 +5730,7 @@ function saveStorePicker() {
     paintStorePicker();
     return;
   }
-  const all = planningStoreNames();
+  const all = nearbyStoreChoice().stores;
   const profile = getUserProfile(localStorage);
   const shopStores = picked.length === all.length ? [] : picked;
   saveUserProfile(localStorage, { ...profile, shopStores });

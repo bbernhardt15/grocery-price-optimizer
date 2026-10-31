@@ -54,6 +54,7 @@ function blank(now = 0) {
     allergies: [],
     diets: [],
     dietNotes: [],
+    dietPrompt: "",
     shopStores: [],
     always: [],
     never: [],
@@ -203,6 +204,7 @@ export function parseProfile(raw) {
   profile.allergies = pickIds(row.allergies, ALLERGIES);
   profile.diets = pickIds(row.diets, DIETS);
   profile.dietNotes = phrases(row.dietNotes).slice(0, 8);
+  profile.dietPrompt = row.dietPrompt === "asked" || row.dietPrompt === "skipped" ? row.dietPrompt : "";
   profile.shopStores = pickStoreNames(row.shopStores);
   profile.always = phrases(row.always);
   profile.never = phrases(row.never);

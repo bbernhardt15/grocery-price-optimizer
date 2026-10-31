@@ -208,6 +208,70 @@ VISA 4242
     assert.equal(paper.lines.some((line) => /subtotal|visa/i.test(line.name)), false);
   });
 
+  it("reads a Kroger receipt block with quantity, coupons, and a UPC", () => {
+    const text = `
+U by Kotex Tampons, Click, Compact,
+Multipack Absorbencies 30 Count, 30
+count
+1.0 x $8.24 $8.99 ea.
+Item Coupon/Sale: -$0.75
+UPC:0003600051588
+
+Bertolli® Olive Oil & Garlic Pasta Sauce,
+24 oz
+1.0 x $1.99 $2.99 ea.
+Item Coupon/Sale: -$1.00
+UPC:0003620021933
+
+Head and Shoulders Dandruff 2 in 1 Shampoo and Conditioner, Classic Clean for Daily Use, 28.2 fl oz
+1.0 x $14.99 ea.
+UPC:0003077206404
+
+Barilla Whole Grain Spaghetti Non-GMO and Kosher Pasta Made With Whole Wheat, 16 oz
+1.0 x $0.99 $1.99 ea.
+Item Coupon/Sale: -$0.40
+Item Coupon/Sale: -$0.60
+UPC:0007680800584
+
+Bloom Sparkling Energy Shirley Temple, 12 fl oz
+2.0 x $2.89 ea.
+UPC:0084259514137
+
+Order Number: 1262986136500120401
+262 W Main St
+Amelia, OH 45102 USA
+Loyalty Card (last 4): #9085
+Item Details
+48 Items
+`;
+    const lines = parseReceiptText(text);
+    const kotex = lines.find((line) => /kotex/i.test(line.name));
+    assert.ok(kotex);
+    assert.equal(kotex?.quantity, 1);
+    assert.equal(kotex?.price, 8.24);
+    assert.equal(kotex?.upc, upcForStorage("0003600051588"));
+    const sauce = lines.find((line) => /olive oil/i.test(line.name));
+    assert.equal(sauce?.brand, "Bertolli");
+    assert.equal(sauce?.family, "pasta-sauce");
+    assert.equal(sauce?.upc, upcForStorage("0003620021933"));
+    const shampoo = lines.find((line) => /shoulders/i.test(`${line.brand} ${line.name}`));
+    assert.equal(shampoo?.brand, "Head & Shoulders");
+    assert.equal(shampoo?.family, "shampoo");
+    const pasta = lines.find((line) => /spaghetti/i.test(line.name));
+    assert.equal(pasta?.brand, "Barilla");
+    assert.equal(pasta?.family, "pasta");
+    const drink = lines.find((line) => /shirley/i.test(line.name));
+    assert.equal(drink?.quantity, 2);
+    assert.equal(drink?.upc, upcForStorage("0084259514137"));
+    const blob = JSON.stringify(lines);
+    assert.equal(blob.includes("1262986136500120401"), false);
+    assert.equal(blob.includes("Main St"), false);
+    assert.equal(blob.includes("45102"), false);
+    assert.equal(blob.includes("9085"), false);
+    assert.equal(lines.some((line) => /coupon/i.test(line.name)), false);
+    assert.equal(lines.some((line) => line.name === "48 Items" || /item details/i.test(line.name)), false);
+  });
+
   it("reads item text out of a digital PDF and does not keep the bytes", () => {
     const body = `BT
 (Kroger Large Eggs Grade A, 12 Count) Tj

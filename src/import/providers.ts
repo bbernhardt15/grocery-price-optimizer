@@ -5,6 +5,11 @@
 
 import { importConfig, type ImportConfig, type ProviderName } from "./config";
 import { getFetch } from "./runtime";
+import { scrubSecret, upstreamMessage, visionFailure, type VisionFailure } from "./visionErrors";
+
+/** 1x1 JPEG. The admin check uses it so a stored key is proven with a real vision call. */
+const TINY_JPEG =
+  "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAAPwB/AP/Z";
 
 const PARSE_SYSTEM = [
   "Turn a shopper's grocery note into JSON only.",
@@ -26,36 +31,63 @@ const ASK_SYSTEM = [
   "Do not claim anything is the cheapest.",
 ].join(" ");
 
-const VISION_SYSTEM = `${PARSE_SYSTEM} The note is a photo of a handwritten list, a receipt, or a store cart. Read only the groceries.`;
+const VISION_SYSTEM = [
+  PARSE_SYSTEM,
+  "The note is a photo of a handwritten list, a receipt, or a store order.",
+  "When a UPC or barcode is printed, put the digits in upc.",
+  'Also include "text": a plain transcript of the grocery lines, one per line, keeping quantity lines, coupon lines, and UPC: lines.',
+  "Do not transcribe addresses, card numbers, loyalty numbers, or order numbers.",
+].join(" ");
 
 export class ModelError extends Error {
-  constructor(message: string) {
+  readonly status: number | null;
+  readonly upstream: string;
+  readonly failure: VisionFailure | "unconfigured" | "empty";
+
+  constructor(message: string, extra?: { status?: number | null; upstream?: string; failure?: VisionFailure | "unconfigured" | "empty" }) {
     super(message);
     this.name = "ModelError";
+    this.status = extra?.status ?? null;
+    this.upstream = extra?.upstream ?? "";
+    this.failure = extra?.failure ?? (message === "unconfigured" || message === "empty" ? message : "upstream");
   }
 }
 
 async function postJson(url: string, headers: Record<string, string>, body: unknown, timeoutMs: number): Promise<unknown> {
-  const response = await getFetch()(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.ok) throw new ModelError(`model ${response.status}`);
+  let response: Response;
+  try {
+    response = await getFetch()(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new ModelError("timeout", { failure: "timeout" });
+    }
+    const upstream = scrubSecret(error instanceof Error ? error.message : "failed");
+    throw new ModelError("upstream", { failure: "upstream", upstream });
+  }
+  if (!response.ok) {
+    const upstream = scrubSecret(upstreamMessage(await response.text().catch(() => "")));
+    const failure = visionFailure(response.status, upstream);
+    throw new ModelError(failure, { status: response.status, upstream, failure });
+  }
   return response.json();
 }
 
 function openAiText(payload: unknown): string {
   const choice = (payload as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content;
-  if (typeof choice !== "string" || !choice.trim()) throw new ModelError("model empty");
+  if (typeof choice !== "string" || !choice.trim()) throw new ModelError("empty", { failure: "empty" });
   return choice;
 }
 
 function anthropicText(payload: unknown): string {
   const blocks = (payload as { content?: Array<{ text?: string }> })?.content;
   const text = blocks?.map((block) => block.text || "").join("\n").trim();
-  if (!text) throw new ModelError("model empty");
+  if (!text) throw new ModelError("empty", { failure: "empty" });
   return text;
 }
 
@@ -73,7 +105,7 @@ async function complete(config: ImportConfig, provider: ProviderName, system: st
           { role: "user", content: user },
         ],
       },
-      20_000
+      typeof user === "string" ? 20_000 : 45_000
     );
     return openAiText(payload);
   }
@@ -90,7 +122,7 @@ async function complete(config: ImportConfig, provider: ProviderName, system: st
       system,
       messages: [{ role: "user", content: user }],
     },
-    20_000
+    typeof user === "string" ? 20_000 : 45_000
   );
   return anthropicText(payload);
 }
@@ -158,8 +190,61 @@ export async function transcribeAudio(
     body: new Uint8Array(form.body),
     signal: AbortSignal.timeout(25_000),
   });
-  if (!response.ok) throw new ModelError(`model ${response.status}`);
+  if (!response.ok) {
+    const upstream = scrubSecret(upstreamMessage(await response.text().catch(() => "")));
+    const failure = visionFailure(response.status, upstream);
+    throw new ModelError(failure, { status: response.status, upstream, failure });
+  }
   const payload = (await response.json()) as { text?: string };
-  if (!payload.text?.trim()) throw new ModelError("model empty");
+  if (!payload.text?.trim()) throw new ModelError("empty", { failure: "empty" });
   return payload.text.trim();
+}
+
+export type VisionProbe = {
+  configured: boolean;
+  valid: boolean;
+  provider: ProviderName | null;
+  status: number | null;
+  message: string;
+};
+
+/** A tiny vision call. The key is never included in the result. */
+export async function probeVision(env: NodeJS.ProcessEnv = process.env): Promise<VisionProbe> {
+  const config = importConfig(env);
+  if (!config.visionProvider) {
+    return { configured: false, valid: false, provider: null, status: null, message: "Vision is not configured." };
+  }
+  try {
+    await aiReadImage(TINY_JPEG, "image/jpeg", env);
+    return { configured: true, valid: true, provider: config.visionProvider, status: 200, message: "Vision key accepted a tiny image." };
+  } catch (error) {
+    if (error instanceof ModelError && error.failure === "unauthorized") {
+      return {
+        configured: true,
+        valid: false,
+        provider: config.visionProvider,
+        status: error.status,
+        message: "Vision key was refused. Replace it in the host's environment.",
+      };
+    }
+    if (error instanceof ModelError && (error.failure === "empty" || error.failure === "unreadable")) {
+      return {
+        configured: true,
+        valid: true,
+        provider: config.visionProvider,
+        status: error.status ?? 200,
+        message: "Vision key was accepted.",
+      };
+    }
+    const failure = error instanceof ModelError ? error.failure : "upstream";
+    const status = error instanceof ModelError ? error.status : null;
+    const detail = error instanceof ModelError ? scrubSecret(error.upstream) : "";
+    return {
+      configured: true,
+      valid: false,
+      provider: config.visionProvider,
+      status,
+      message: detail ? `Vision check failed (${failure}): ${detail}` : `Vision check failed (${failure}).`,
+    };
+  }
 }

@@ -610,6 +610,11 @@ export function consolidateStops(stores, minSavings = 2, capabilities = {}) {
 
 const CART_RANK = ["kroger", "walmart"];
 
+/** Every chain the picker can offer, including weekly-ad banners such as Costco. */
+export function knownStoreNames() {
+  return STORES.map((store) => store.name);
+}
+
 /** Chains the planner can price. Deals-only banners stay off this picker. */
 export function planningStoreNames() {
   return STORES.filter((store) => !store.dealsOnly).map((store) => store.name);

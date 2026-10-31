@@ -8,6 +8,7 @@
 
 import { upcForStorage } from "../catalog/normalize";
 import { classifyProduct, familyFromQuery, familyLabel } from "../catalog/stapleFamilies";
+import { parseModelJson, validateAiItems } from "./aiSchema";
 
 export type ReceiptLine = {
   name: string;
@@ -135,6 +136,7 @@ const GENERAL: Array<{ id: string; label: string; test: RegExp }> = [
   { id: "body-wash", label: "Body wash", test: /\bbody wash\b/i },
   { id: "shampoo", label: "Shampoo", test: /\bshampoo\b|\bhead and shoulders\b/i },
   { id: "cookies", label: "Cookies", test: /\b(oreo|sandwich cookies|cookies)\b/i },
+  { id: "pasta", label: "Pasta", test: /\b(spaghetti|fettuccine|penne|linguine|macaroni)\b/i },
   { id: "drink-mix", label: "Drink mix", test: /\bkool\s*aid\b|\bdrink mix\b/i },
   { id: "frozen-meal", label: "Frozen meal", test: /\bcafe steamers\b|\bfrozen meal\b/i },
   { id: "yogurt", label: "Yogurt", test: /\bgo\s*-?\s*gurt\b/i },
@@ -151,7 +153,11 @@ const SIZE_PHRASE =
   /(\d+(?:\.\d+)?\s*(?:fl\.?\s*oz|fluid\s+ounces?|oz|lb|lbs|pounds?|g|kg|ml|l|gal|gallons?|qt|quarts?|pt|pints?|ct|count|pk|packs?|dozen))\b|(half[\s-]?gallon|gallon|dozen|family\s+size)\b/i;
 
 const JUNK =
-  /^(?:sub\s*total|subtotal|grand\s*total|order\s*total|estimated\s*total|total|tax|tip|you\s*saved|savings|balance|amount\s+due|visa|mastercard|amex|paypal|change|thank\s+you.*|item\s+description|description|price|qty|quantity)\b/i;
+  /^(?:sub\s*total|subtotal|grand\s*total|order\s*total|estimated\s*total|total|tax|tip|you\s*saved|savings|balance|amount\s+due|visa|mastercard|amex|paypal|change|thank\s+you.*|item\s+description|item\s+details|description|price|qty|quantity|order\s+summary|order\s+type|order\s+date|order\s+number|original\s+item|item\s+coupons|full?fill?ment|sales\s+tax|sponsored|savings\s*(?:&|and)\s*rewards|\d+\s+items?)\b/i;
+
+const COUPON_LINE = /^(?:item\s+)?coupons?(?:\/sales?)?\b|^sale\s*:|^you\s+saved\b|^\*\s*\$?\d+\.\d{2}$|^\*?\s*-\$?\d+\.\d{2}$/i;
+
+const QTY_PRICE = /^(\d+(?:\.\d+)?)\s*[x×]\s*\$?(\d+\.\d{2})(?:\s+\$?\d+\.\d{2})?\s*(?:ea\.?)?$/i;
 
 const PII = [
   /\border\s*(?:number|#|no\.?)\b/i,
@@ -161,7 +167,8 @@ const PII = [
   /\b\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/,
   /@/,
   /\b\d{1,6}\s+\S+(?:\s+\S+){0,5}\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pike|hwy|highway)\b/i,
-  /^[A-Za-z .'-]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/,
+  /^[A-Za-z .'-]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?(?:\s+USA)?$/i,
+  /\blast\s*4\b/i,
   /^(?:sold to|deliver to|ship to|pickup(?:\s+location)?|pick up|order details|payment|billing)$/i,
 ];
 
@@ -347,53 +354,95 @@ function finish(draft: Draft): ReceiptLine | null {
   };
 }
 
+function qtyPrice(line: string): { quantity: number; price: number } | null {
+  const match = clean(line).match(QTY_PRICE);
+  if (!match?.[1] || !match[2]) return null;
+  const quantity = Math.min(99, Math.max(1, Math.round(Number(match[1]))));
+  const price = Number(match[2]);
+  if (!Number.isFinite(price)) return null;
+  return { quantity, price };
+}
+
 /** Digital order text, a pasted receipt, or several orders split by `--- receipt ---`. */
 export function parseReceiptText(text: string): ReceiptLine[] {
   const source = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!source.trim()) return [];
   const items: Draft[] = [];
-  let current: Draft | null = null;
-  let receipt = 1;
+  const state: { current: Draft | null; parts: string[]; receipt: number } = { current: null, parts: [], receipt: 1 };
   const flush = () => {
-    if (current?.name) items.push(current);
-    current = null;
+    if (state.current?.name) items.push(state.current);
+    state.current = null;
+  };
+  const commitParts = () => {
+    if (!state.parts.length) return;
+    const name = clean(state.parts.join(" "));
+    state.parts = [];
+    if (!name || isJunkLine(name)) return;
+    if (state.current && state.current.price == null && !state.current.upc) {
+      state.current.name = clean(`${state.current.name} ${name}`);
+      state.current.raw = clean(`${state.current.raw} ${name}`);
+      return;
+    }
+    flush();
+    state.current = { name, quantity: 1, price: null, upc: "", raw: name, receipt: state.receipt };
   };
   for (const original of source.split("\n")) {
     const line = original.trim();
-    if (!line) continue;
+    if (!line || line === "*") continue;
     if (/^---\s*receipt\s*---$/i.test(line)) {
+      commitParts();
       flush();
-      receipt += 1;
+      state.receipt += 1;
       continue;
     }
+    if (COUPON_LINE.test(line)) continue;
     const upcOnly = line.match(/^(?:upc|gtin|barcode)\s*[:#]?\s*(\d{8,14})\b/i);
-    if (upcOnly?.[1] && current) {
-      current.upc = upcOnly[1];
+    if (upcOnly?.[1]) {
+      commitParts();
+      if (state.current) state.current.upc = upcOnly[1];
       continue;
     }
-    const qtyOnly = line.match(/^(?:qty|quantity)\s*[:#]?\s*(\d{1,2})\b/i);
+    const priced = qtyPrice(line);
+    if (priced) {
+      commitParts();
+      if (state.current) {
+        state.current.quantity = priced.quantity;
+        if (state.current.price == null) state.current.price = priced.price;
+      }
+      continue;
+    }
+    const qtyOnly = line.match(/^(?:qty|quantity)\s*[:#]?\s*(\d{1,2}(?:\.\d+)?)\b/i);
     if (qtyOnly?.[1]) {
-      if (current) current.quantity = clampQty(Number(qtyOnly[1]));
+      commitParts();
+      if (state.current) state.current.quantity = Math.min(99, Math.max(1, Math.round(Number(qtyOnly[1]))));
       continue;
     }
     const amount = priceOnly(line);
-    if (amount != null && current && current.price == null) {
-      current.price = amount;
+    if (amount != null) {
+      commitParts();
+      if (state.current && state.current.price == null) state.current.price = amount;
       continue;
     }
     if (isJunkLine(line)) continue;
     const inline = takeInline(line);
     if (!inline) continue;
-    flush();
-    current = {
-      name: inline.name,
-      quantity: inline.quantity,
-      price: inline.price,
-      upc: inline.upc,
-      raw: line,
-      receipt,
-    };
+    if (inline.price != null && abbreviated(inline.name)) {
+      commitParts();
+      flush();
+      items.push({
+        name: inline.name,
+        quantity: inline.quantity,
+        price: inline.price,
+        upc: inline.upc,
+        raw: line,
+        receipt: state.receipt,
+      });
+      continue;
+    }
+    if (state.current && (state.current.upc || state.current.price != null)) flush();
+    state.parts.push(inline.name);
   }
+  commitParts();
   flush();
   return items.map(finish).filter((line): line is ReceiptLine => Boolean(line)).slice(0, 80);
 }
@@ -517,6 +566,39 @@ function asLine(value: unknown, index: number): ReceiptLine | null {
     family: category?.id || clean(String(row.family || "")).slice(0, 40),
     label: category?.label || clean(String(row.label || "")).slice(0, 80),
   };
+}
+
+function dedupeLines(lines: ReceiptLine[]): ReceiptLine[] {
+  const seen = new Set<string>();
+  const kept: ReceiptLine[] = [];
+  for (const line of lines) {
+    const key = line.upc ? `upc:${line.upc}` : `name:${fold(line.name)}|${fold(line.size)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(line);
+  }
+  return kept;
+}
+
+/** Model JSON, a transcript, or both. UPC lines from the transcript win. */
+export function receiptFromVision(raw: string): ReceiptAnalysis | null {
+  const text = String(raw || "");
+  if (!text.trim()) return null;
+  let payload: { text?: unknown } | null = null;
+  try {
+    const parsed = parseModelJson(text);
+    payload = parsed && typeof parsed === "object" ? (parsed as { text?: unknown }) : null;
+  } catch {
+    payload = null;
+  }
+  const transcript = typeof payload?.text === "string" ? payload.text : payload ? "" : text;
+  const fromText = transcript.trim() ? analyzeReceipt(transcript) : { lines: [], learned: [], paper: false, paperNote: "" };
+  const modeled = validateAiItems(payload ?? {});
+  const fromItems = modeled.ok ? learnReceiptLines(modeled.items) : null;
+  const lines = dedupeLines([...(fromText.lines.some((line) => line.upc) ? fromText.lines : []), ...(fromItems?.lines || []), ...(!fromText.lines.some((line) => line.upc) ? fromText.lines : [])]);
+  if (!lines.length) return null;
+  const paper = looksLikePaperReceipt(lines);
+  return { lines, learned: inferReceiptPreferences(lines), paper, paperNote: paper ? PAPER_RECEIPT_NOTE : "" };
 }
 
 /** Re-learn after the shopper removes a line. Prices are cleared. */

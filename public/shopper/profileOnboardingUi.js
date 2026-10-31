@@ -9,12 +9,15 @@ import {
   SKIP_LABEL,
   answerStep,
   completeProfile,
+  dietSteps,
   goBack,
+  markDietPrompt,
   optionLabel,
   primaryLabel,
   profileSteps,
   progressLabel,
   resumeStep,
+  shouldAskDietPrompt,
   skipForNow,
   skipStep,
   stepById,
@@ -27,7 +30,7 @@ import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
 import { learnedEditorHtml, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
-import { planningStoreNames } from "./tripPlan.js";
+import { storesForZip } from "./nearbyStores.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -75,6 +78,9 @@ export function mountProfileOnboarding(deps = {}) {
   let editingFamily = "";
   let lazyFamily = "";
   let resumeStatus = "";
+  let dietMode = false;
+  /** @type {(() => void) | null} */
+  let dietDone = null;
 
   function blankCategory() {
     return { mode: "", brand: "", productId: "", attributes: [], product: null };
@@ -95,8 +101,9 @@ export function mountProfileOnboarding(deps = {}) {
   function dots() {
     const host = $("profile-dots");
     if (!host) return;
-    const current = stepById(stepId).index;
-    host.innerHTML = profileSteps()
+    const list = dietMode ? dietSteps() : profileSteps();
+    const current = Math.max(0, list.findIndex((step) => step.id === stepId));
+    host.innerHTML = list
       .map((step, index) => {
         const state = index === current ? "true" : "false";
         const done = index < current ? "true" : "false";
@@ -167,15 +174,12 @@ export function mountProfileOnboarding(deps = {}) {
       const zip = escapeText(deps.getZip?.() || "");
       const selected = new Set(draft.shopStores || []);
       const open = !draft.shopStores?.length;
-      const stores = planningStoreNames()
-        .map((name) => {
-          const on = open || selected.has(name);
-          return `<label class="check-row"><input type="checkbox" data-place-store="${escapeText(name)}" ${on ? "checked" : ""} /> ${escapeText(name)}</label>`;
-        })
-        .join("");
+      const nearby = storesForZip(deps.getZip?.() || "");
+      const stores = storeBoxes(nearby.stores, open, selected);
       return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
-        <fieldset class="store-picker"><legend>Stores to shop</legend>${stores}</fieldset>`;
+        <p id="profile-store-note" class="muted">${escapeText(nearby.note)}</p>
+        <fieldset class="store-picker"><legend>Stores to shop</legend><div id="profile-store-list">${stores}</div></fieldset>`;
     }
     if (step.kind === "receipts") {
       if (receiptPhase === "learned") {
@@ -264,16 +268,43 @@ export function mountProfileOnboarding(deps = {}) {
     if (title) title.textContent = learned ? "Here's what we learned" : step.title;
     if (hint) hint.textContent = learned ? "Grouped by what you buy. Allergies and diets stay in charge." : step.hint;
     if (progress) progress.textContent = progressLabel(step.id);
-    if (back) back.hidden = step.index === 0 && !returnTo && receiptPhase !== "learned";
+    if (back) back.hidden = (dietMode ? stepId === "allergies" : step.index === 0) && !returnTo && receiptPhase !== "learned";
     if (next) next.textContent = returnTo ? "Save" : learned ? "Confirm" : primaryLabel(step.id);
     if (skip) {
       skip.textContent = SKIP_LABEL;
       skip.disabled = false;
     }
+    if (next && dietMode && step.id === "diets") next.textContent = "Save";
     if (stage) stage.innerHTML = stageHtml(step);
+    bindPlaceInput();
     bindReceiptInput();
     dots();
     if (step.kind === "products") void loadProducts();
+  }
+
+  function storeBoxes(names, open, selected) {
+    return names
+      .map((name) => {
+        const on = open || selected.has(name);
+        return `<label class="check-row"><input type="checkbox" data-place-store="${escapeText(name)}" ${on ? "checked" : ""} /> ${escapeText(name)}</label>`;
+      })
+      .join("");
+  }
+
+  function bindPlaceInput() {
+    const zipInput = $("profile-zip");
+    if (!zipInput || zipInput.dataset.bound === "1") return;
+    zipInput.dataset.bound = "1";
+    zipInput.addEventListener("input", () => {
+      const host = $("profile-store-list");
+      const note = $("profile-store-note");
+      const nearby = storesForZip(zipInput.value);
+      if (note) note.textContent = nearby.note;
+      if (!host) return;
+      const selected = new Set(draft.shopStores || []);
+      const open = !draft.shopStores?.length;
+      host.innerHTML = storeBoxes(nearby.stores, open, selected);
+    });
   }
 
   function bindReceiptInput() {
@@ -504,8 +535,39 @@ export function mountProfileOnboarding(deps = {}) {
     learnedRows = learnedRows.map((row) => (row.family === family ? { ...row, mode: "brand", brand } : row));
   }
 
+  function closeDiet(value) {
+    if (!dietMode && !dietDone) return;
+    dietMode = false;
+    if (value) draft = persist(markDietPrompt(draft, value));
+    const done = dietDone;
+    dietDone = null;
+    if (dialog.open) dialog.close();
+    done?.();
+  }
+
   async function advance(skipped, skipRest) {
     const at = Date.now();
+    if (dietMode) {
+      if (skipped) {
+        closeDiet("skipped");
+        return;
+      }
+      if (stepId === "allergies") {
+        const saved = answerStep(draft, "allergies", currentAnswer(), at);
+        draft = persist({ ...saved, onboarding: draft.onboarding });
+        stepId = "diets";
+        render();
+        focusTitle();
+        return;
+      }
+      if (stepId === "diets") {
+        rememberDietNotes();
+        const saved = answerStep(draft, "diets", currentAnswer(), at);
+        draft = { ...saved, onboarding: draft.onboarding };
+        closeDiet("asked");
+        return;
+      }
+    }
     if (lazyFamily && stepId === "products") {
       saveCategory(skipped ? "skip" : categoryDraft.mode || "skip", at);
       closeLazy();
@@ -583,6 +645,7 @@ export function mountProfileOnboarding(deps = {}) {
     const answer = skipped ? undefined : currentAnswer();
     if (returnTo && stepId !== "summary") {
       draft = skipped ? skipStep(draft, stepId, at) : answerStep(draft, stepId, answer, at);
+      if (stepId === "allergies" || stepId === "diets") draft = markDietPrompt(draft, "asked", at);
       if (!skipped && stepId === "products") draft = rememberPicks(at);
       stepId = "summary";
       returnTo = "";
@@ -649,6 +712,10 @@ export function mountProfileOnboarding(deps = {}) {
     void advance(false);
   });
   $("profile-skip")?.addEventListener("click", () => {
+    if (dietMode) {
+      closeDiet("skipped");
+      return;
+    }
     if (lazyFamily) {
       void advance(true);
       return;
@@ -662,6 +729,16 @@ export function mountProfileOnboarding(deps = {}) {
     deps.onDone?.(draft);
   });
   $("profile-back")?.addEventListener("click", () => {
+    if (dietMode && stepId === "diets") {
+      stepId = "allergies";
+      render();
+      focusTitle();
+      return;
+    }
+    if (dietMode) {
+      closeDiet("skipped");
+      return;
+    }
     if (stepId === "receipts" && receiptPhase === "learned" && !returnTo) {
       receiptPhase = "upload";
       render();
@@ -873,6 +950,14 @@ export function mountProfileOnboarding(deps = {}) {
   });
 
   dialog.addEventListener("close", () => {
+    if (dietMode) {
+      dietMode = false;
+      draft = persist(markDietPrompt(draft, "skipped"));
+      const done = dietDone;
+      dietDone = null;
+      done?.();
+      return;
+    }
     if (lazyFamily) {
       lazyFamily = "";
       return;
@@ -905,6 +990,27 @@ export function mountProfileOnboarding(deps = {}) {
     },
     shouldPrompt() {
       return shouldPromptProfile(storage);
+    },
+    shouldAskDiets() {
+      return shouldAskDietPrompt(getUserProfile(storage));
+    },
+    openDietPrompt(done) {
+      if (!shouldAskDietPrompt(getUserProfile(storage))) {
+        done?.();
+        return;
+      }
+      if (dialog.open && !dietMode) {
+        done?.();
+        return;
+      }
+      dietMode = true;
+      dietDone = typeof done === "function" ? done : null;
+      draft = getUserProfile(storage);
+      returnTo = "";
+      stepId = "allergies";
+      render();
+      if (!dialog.open) dialog.showModal();
+      focusTitle();
     },
   };
 }

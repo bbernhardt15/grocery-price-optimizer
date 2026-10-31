@@ -91,6 +91,28 @@ function recordFrom(master: CatalogMasterDoc, offer: CatalogOfferDoc): RawCatalo
   };
 }
 
+/** Catalog rows whose stored UPC is one of these codes. */
+export async function readRecordsByUpc(upcs: string[]): Promise<RawCatalogRecord[]> {
+  if (mongoose.connection.readyState !== 1) return [];
+  const codes = [...new Set(upcs.map((upc) => upc.replace(/\D/g, "")).filter((upc) => upc.length >= 8 && upc.length <= 14))].slice(0, 80);
+  if (!codes.length) return [];
+  const masters = await CatalogMaster.find({ upc: { $in: codes }, status: { $ne: "discontinued" } })
+    .limit(80)
+    .lean<CatalogMasterDoc[]>();
+  if (!masters.length) return [];
+  const offers = await CatalogOffer.find({
+    productKey: { $in: masters.map((master) => master.key) },
+    status: { $ne: "discontinued" },
+  }).lean<CatalogOfferDoc[]>();
+  const records: RawCatalogRecord[] = [];
+  for (const master of masters) {
+    for (const offer of offers) {
+      if (offer.productKey === master.key) records.push(recordFrom(master, offer));
+    }
+  }
+  return records;
+}
+
 export async function readStoredRecords(scope: {
   departmentId?: string;
   query?: string;

@@ -3,6 +3,7 @@
  * so a model cannot invent a shelf price or skip the catalog.
  */
 
+import { upcForStorage } from "../catalog/normalize";
 import type { ParsedImportItem } from "./parseImportText";
 
 const NAME = /^[\p{L}\p{N}][\p{L}\p{N}&'’.,/+% -]{0,79}$/u;
@@ -70,7 +71,7 @@ export function validateAiItems(payload: unknown): AiValidation {
     const brand = text(fields.brand, 80);
     const size = text(fields.size, 80);
     const notes = text(fields.notes, 80);
-    const upc = text(fields.upc, 14).replace(/\D/g, "");
+    const upc = upcForStorage(text(fields.upc, 20));
     items.push({
       raw: name,
       name,
@@ -78,7 +79,7 @@ export function validateAiItems(payload: unknown): AiValidation {
       ...(brand ? { brand } : {}),
       ...(size ? { size } : {}),
       ...(notes ? { notes } : {}),
-      ...(upc.length >= 12 ? { upc } : {}),
+      ...(upc ? { upc } : {}),
     });
   }
   if (!items.length) return { ok: false, reason: "empty" };

@@ -18,6 +18,7 @@ import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 import importListRouter from "./routes/importList";
+import { IMPORT_MESSAGES } from "./import/messages";
 
 initSentry();
 
@@ -200,6 +201,10 @@ const onError: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
   const status = httpErrorStatus(err);
+  if (status === 413 && req.path.startsWith("/api/import")) {
+    res.status(413).json({ error: IMPORT_MESSAGES.visionTooLarge, code: "too_large" });
+    return;
+  }
   const safe = status >= 500 ? "Something went wrong" : "Request failed";
   if (status >= 500) {
     const message = err instanceof Error ? err.message : "Unhandled error";

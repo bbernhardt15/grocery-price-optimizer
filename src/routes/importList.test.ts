@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
@@ -19,6 +20,8 @@ const envKeys = [
   "IMPORT_DAILY_LIMIT",
   "IMPORT_GLOBAL_DAILY_CAP",
   "IMPORT_RATE_LIMIT",
+  "GG_ADMIN_TOKEN",
+  "ADMIN_TOKEN",
 ] as const;
 const saved: Record<string, string | undefined> = {};
 
@@ -246,5 +249,97 @@ describe("import routes", () => {
     const limited = await post("/api/import/text", { text: "bread" }, device);
     assert.equal(limited.status, 429);
     assert.equal(((await limited.json()) as { error: string }).error, IMPORT_MESSAGES.rate);
+  });
+
+  it("says when the vision key is refused and does not log the key", async () => {
+    process.env.OPENAI_API_KEY = "sk-live-secret-value";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    setImportRuntime({
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        const header = new Headers(init?.headers);
+        assert.equal(header.get("authorization"), "Bearer sk-live-secret-value");
+        return jsonResponse({ error: { message: "Incorrect API key provided: sk-live-secret-value", code: "invalid_api_key" } }, 401);
+      },
+    });
+    const photo = await post("/api/import/photo", { imageBase64: Buffer.from("jpeg").toString("base64"), mimeType: "image/jpeg" });
+    assert.equal(photo.status, 502);
+    const body = (await photo.json()) as { error: string; code: string };
+    assert.equal(body.code, "unauthorized");
+    assert.match(body.error, /vision key/i);
+    assert.equal(logs.some((line) => line.includes("sk-live-secret-value")), false);
+    assert.equal(logs.some((line) => line.includes("status=401")), true);
+    assert.equal(logs.some((line) => line.includes("sk-redacted")), true);
+  });
+
+  it("checks the vision key for an admin without echoing it", async () => {
+    const missing = await fetch(`${origin}/api/admin/vision`);
+    assert.equal(missing.status, 503);
+    process.env.GG_ADMIN_TOKEN = "admin-secret";
+    process.env.OPENAI_API_KEY = "sk-live-secret-value";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    setImportRuntime({
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        return jsonResponse({ error: { message: "Incorrect API key provided: sk-live-secret-value", code: "invalid_api_key" } }, 401);
+      },
+    });
+    const denied = await fetch(`${origin}/api/admin/vision`, { headers: { authorization: "Bearer wrong" } });
+    assert.equal(denied.status, 401);
+    const probe = await fetch(`${origin}/api/admin/vision`, { headers: { authorization: "Bearer admin-secret" } });
+    assert.equal(probe.status, 200);
+    const probeBody = (await probe.json()) as { configured: boolean; valid: boolean; status: number; message: string };
+    assert.equal(probeBody.configured, true);
+    assert.equal(probeBody.valid, false);
+    assert.equal(probeBody.status, 401);
+    assert.equal(JSON.stringify(probeBody).includes("sk-live"), false);
+    const health = await fetch(`${origin}/api/health`);
+    const healthBody = (await health.json()) as { vision: boolean };
+    assert.equal(healthBody.vision, true);
+  });
+
+  it("sends an image-only PDF through vision instead of the no-text error", async () => {
+    const pdf = readFileSync(new URL("../import/fixtures/kroger-ios-receipt.pdf", import.meta.url));
+    const off = await post("/api/import/pdf", { pdfBase64: pdf.toString("base64") });
+    const offBody = (await off.json()) as { error: string; code?: string };
+    assert.equal(offBody.error.includes("doesn't have readable text"), false);
+    if (off.status === 422) {
+      assert.equal(offBody.code, "no_raster");
+      return;
+    }
+    assert.equal(off.status, 503);
+    assert.match(offBody.error, /photo reading isn't switched on/i);
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    setImportRuntime({
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  text: "Bertolli Olive Oil and Garlic Pasta Sauce, 24 oz\n1.0 x $1.99\nUPC:0003620021933",
+                  items: [{ name: "Bertolli Olive Oil and Garlic Pasta Sauce", quantity: 1, brand: "Bertolli", upc: "0003620021933" }],
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+    const on = await post("/api/import/pdf", { pdfBase64: pdf.toString("base64") }, "device-pdf-1");
+    assert.equal(on.status, 200);
+    const onBody = (await on.json()) as { lines: Array<{ brand: string; upc: string; name: string }> };
+    assert.ok(onBody.lines.some((line) => line.upc && /bertolli/i.test(`${line.brand} ${line.name}`)));
+    assert.ok(calls.some((url) => url.includes("/chat/completions")));
   });
 });
