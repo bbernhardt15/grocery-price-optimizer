@@ -35,7 +35,9 @@ describe("receipt preferences", () => {
     assert.match(kroger?.hint || "", /Order History/);
     assert.match(kroger?.hint || "", /PDF/);
     const html = receiptUploadHtml();
-    assert.match(html, /Upload receipts/);
+    assert.match(html, /Drop PDFs or screenshots/);
+    assert.match(html, /class="drop-zone"/);
+    assert.match(html, /paper receipts/i);
     assert.match(html, /multiple/);
     assert.match(html, /<summary>Where do I find it\?<\/summary>/);
     assert.match(html, /<details class="store-find"><summary>Kroger<\/summary>/);

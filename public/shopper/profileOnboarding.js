@@ -1,5 +1,5 @@
 /**
- * A short guide: ZIP and stores, then optional receipts.
+ * Intake: welcome, ZIP and nearby stores, then optional orders.
  * Allergies and diets are asked the first time a meal idea opens.
  * Skip for now leaves the rest of the guide. Category questions wait until an item is added.
  * Closing the guide saves the step so the next visit resumes.
@@ -10,22 +10,24 @@ import { familyLabel } from "./productPreference.js";
 
 export const SKIP_LABEL = "Skip for now";
 
+export const WELCOME_PROMISE = "Tell us what you usually buy. We'll find it for less.";
+
 const FLOW = [
   {
-    id: "zip",
-    title: "Where do you shop?",
-    hint: "Enter a ZIP. We'll look for stores within about 25 miles.",
-    kind: "zip",
+    id: "welcome",
+    title: WELCOME_PROMISE,
+    hint: "",
+    kind: "welcome",
   },
   {
-    id: "stores",
-    title: "Stores near you",
-    hint: "Deselect any you don't want to include.",
-    kind: "stores",
+    id: "place",
+    title: "Where do you shop?",
+    hint: "Enter a ZIP. Stores within about 25 miles stay checked.",
+    kind: "place",
   },
   {
     id: "receipts",
-    title: "Upload receipts",
+    title: "Teach Gitter your usual groceries",
     hint: "We'll learn the brands you already buy.",
     kind: "receipts",
   },
@@ -199,7 +201,9 @@ export function progressLabel(id) {
 
 export function primaryLabel(id) {
   if (id === "summary") return "Start shopping";
+  if (id === "welcome") return "Get started";
   if (id === "zip") return "Find stores";
+  if (id === "place") return "Continue";
   return "Next";
 }
 
@@ -296,10 +300,12 @@ export function resumeStep(profile) {
   const parsed = parseProfile(profile || emptyProfile());
   if (parsed.onboarding.status === "done" || parsed.onboarding.status === "skipped") return "summary";
   const steps = profileSteps();
-  if (steps.some((step) => step.id === parsed.onboarding.step)) return parsed.onboarding.step;
-  if (parsed.onboarding.step === "place") return parsed.shopStores?.length ? "receipts" : "zip";
-  if (parsed.onboarding.step === "allergies" || parsed.onboarding.step === "diets" || parsed.shopStores?.length) return "receipts";
-  return steps[0]?.id || "place";
+  const step = parsed.onboarding.step;
+  if (parsed.onboarding.status === "new") return steps[0]?.id || "welcome";
+  if (step === "place" || step === "zip" || step === "stores") return "place";
+  if (steps.some((row) => row.id === step)) return step;
+  if (step === "allergies" || step === "diets" || parsed.shopStores?.length) return "receipts";
+  return steps[0]?.id || "welcome";
 }
 
 function joinLabels(ids) {

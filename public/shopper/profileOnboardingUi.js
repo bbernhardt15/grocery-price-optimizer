@@ -30,6 +30,8 @@ import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
 import { applyLearnedChoice, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakePresent.js";
+import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip } from "./nearbyStores.js";
 
@@ -67,6 +69,11 @@ export function mountProfileOnboarding(deps = {}) {
   /** @type {Set<string>} */
   let neverIds = new Set();
   let receiptPhase = "upload";
+  let motion = "forward";
+  /** @type {object[]} */
+  let readCards = [];
+  /** @type {Map<number, object[]>} */
+  let fileLinesByIndex = new Map();
   /** @type {object[]} */
   let learnedRows = [];
   /** @type {object[]} */
@@ -173,24 +180,17 @@ export function mountProfileOnboarding(deps = {}) {
         <button type="button" class="choice-card" id="profile-organic" aria-pressed="${organic ? "true" : "false"}">Organic if the price is close</button>
         <p class="profile-label">Different for an aisle</p>${aisles}`;
     }
-    if (step.kind === "zip") {
+    if (step.kind === "welcome") return "";
+    if (step.kind === "place" || step.kind === "zip") {
       const zip = escapeText(deps.getZip?.() || "");
       return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
-        <button type="button" class="ghost" id="profile-use-location">Use my location</button>`;
-    }
-    if (step.kind === "stores") {
-      const nearby = storesForZip(deps.getZip?.() || "");
-      if (nearby.source !== "nearby") {
-        return `<p class="muted">Enter a ZIP first. Stores within about 25 miles show up on the next step.</p>`;
-      }
-      const selected = new Set(draft.shopStores || []);
-      const open = !draft.shopStores?.length;
-      return `<p class="profile-label">Deselect any you don't want to include.</p>
-        <p id="profile-store-note" class="muted">${escapeText(nearby.note)}</p>
-        <fieldset class="store-picker"><legend>Stores near you</legend><div id="profile-store-list">${storeBoxes(nearby.stores, open, selected)}</div></fieldset>`;
+        <button type="button" class="ghost" id="profile-use-location">Use my location</button>
+        <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
+        <div id="profile-store-list" class="store-choices"></div>`;
     }
     if (step.kind === "receipts") {
+      if (receiptPhase === "reading") return readLiveHtml(readCards);
       if (receiptPhase === "learned") {
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
         const brandsByFamily = {};
@@ -217,7 +217,7 @@ export function mountProfileOnboarding(deps = {}) {
       const ready = loadedFor === current?.id;
       const brands = ready ? nameBrandsFor(shelf, current?.id || "") : [];
       const askBrand = ready && asksNameBrand(shelf, current?.id || "");
-      return `${ready ? "" : `<p class="muted">Looking on the shelf…</p>`}${categoryDetailHtml({
+      return `${ready ? "" : `<div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`}${categoryDetailHtml({
         category: current,
         index: lazy ? 0 : categoryIndex,
         total: lazy ? 1 : categories.length,
@@ -280,14 +280,35 @@ export function mountProfileOnboarding(deps = {}) {
     const next = $("profile-next");
     const skip = $("profile-skip");
     const stage = $("profile-stage");
+    const top = document.querySelector("#profile-onboard .profile-top");
     const learned = step.id === "receipts" && receiptPhase === "learned";
-    if (dialog) dialog.dataset.step = learned ? "learned" : step.id;
-    if (title) title.textContent = learned ? "Here's what we learned" : step.title;
-    if (hint) hint.textContent = learned ? "Grouped by what you buy. Allergies and diets stay in charge." : step.hint;
-    if (progress) progress.textContent = progressLabel(step.id);
-    if (back) back.hidden = (dietMode ? stepId === "allergies" : step.index === 0) && !returnTo && receiptPhase !== "learned";
-    if (next) next.textContent = returnTo ? "Save" : learned ? "Confirm" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
+    const reading = step.id === "receipts" && receiptPhase === "reading";
+    const welcome = step.id === "welcome" && !dietMode;
+    if (dialog) {
+      dialog.dataset.step = learned ? "learned" : reading ? "reading" : step.id;
+      dialog.dataset.dir = motion;
+    }
+    if (top) top.hidden = welcome;
+    if (title) title.textContent = learned ? "Here's what we learned" : reading ? "Reading your orders" : step.title;
+    if (hint) {
+      const hintText = learned
+        ? "Grouped by what you buy. Change anything that looks off."
+        : reading
+          ? "We'll handle the math."
+          : step.hint;
+      hint.textContent = hintText;
+      hint.hidden = !hintText;
+    }
+    if (progress) progress.textContent = welcome ? "" : progressLabel(step.id);
+    if (back) back.hidden = welcome || ((dietMode ? stepId === "allergies" : step.index === 0) && !returnTo && receiptPhase === "upload");
+    const readingBusy = reading && readCards.some((card) => card.status === "reading");
+    const readingReady = reading && !readingBusy && (learnedRows.length > 0 || receiptLines.length > 0);
+    if (next) {
+      next.hidden = reading && !readingReady;
+      next.textContent = returnTo ? "Save" : learned ? "Confirm" : reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
+    }
     if (skip) {
+      skip.hidden = welcome;
       skip.textContent = SKIP_LABEL;
       skip.disabled = false;
     }
@@ -295,21 +316,49 @@ export function mountProfileOnboarding(deps = {}) {
     if (stage) stage.innerHTML = stageHtml(step);
     bindPlaceInput();
     bindReceiptInput();
-    if (next && !(dietMode && step.id === "diets")) next.disabled = step.id === "receipts" && !learned ? !receiptReady() : false;
+    if (step.kind === "place" || step.kind === "zip") paintStoreList();
+    if (next && !(dietMode && step.id === "diets")) {
+      if (reading) next.disabled = !readingReady;
+      else next.disabled = step.id === "receipts" && !learned ? !receiptReady() : false;
+    }
     dots();
+    const dotHost = $("profile-dots");
+    if (dotHost) dotHost.hidden = welcome;
     if (step.kind === "products") void loadProducts();
   }
 
-  function storeBoxes(names, open, selected) {
-    return names
-      .map((name) => {
-        const on = open || selected.has(name);
-        return `<label class="check-row"><input type="checkbox" data-place-store="${escapeText(name)}" ${on ? "checked" : ""} /> ${escapeText(name)}</label>`;
-      })
-      .join("");
+  function currentZipRaw() {
+    return String($("profile-zip")?.value || deps.getZip?.() || "").trim();
+  }
+
+  function paintStoreList() {
+    const host = $("profile-store-list");
+    const note = $("profile-store-note");
+    if (!host) return;
+    const raw = currentZipRaw();
+    const zip = normalizeZipInput(raw);
+    if (!/^\d{5}/.test(zip)) {
+      host.innerHTML = "";
+      if (note) note.textContent = "Stores within about 25 miles show up here.";
+      return;
+    }
+    const nearby = storesForZip(zip);
+    const selected = new Set(draft.shopStores || []);
+    const open = !draft.shopStores?.length;
+    host.innerHTML = storeChoiceHtml(nearby.stores, { selected, open });
+    if (note) note.textContent = nearby.note || "Stores within about 25 miles. Uncheck one to leave it out.";
   }
 
   function bindPlaceInput() {
+    const zipInput = $("profile-zip");
+    if (zipInput && zipInput.dataset.bound !== "1") {
+      zipInput.dataset.bound = "1";
+      zipInput.addEventListener("input", () => {
+        const error = $("profile-zip-error");
+        if (error) error.hidden = true;
+        paintStoreList();
+      });
+    }
     const location = $("profile-use-location");
     if (location && location.dataset.bound !== "1") {
       location.dataset.bound = "1";
@@ -322,9 +371,10 @@ export function mountProfileOnboarding(deps = {}) {
           location.disabled = true;
           try {
             const zip = await deps.locateZip();
-            const zipInput = $("profile-zip");
-            if (zip && zipInput) zipInput.value = zip;
+            const field = $("profile-zip");
+            if (zip && field) field.value = zip;
             deps.setZip?.(zip);
+            paintStoreList();
           } catch (error) {
             deps.toast?.(error instanceof Error ? error.message : "Couldn't use location. Type a ZIP.");
           } finally {
@@ -333,6 +383,12 @@ export function mountProfileOnboarding(deps = {}) {
         })();
       });
     }
+  }
+
+  function softTap() {
+    const vibrate = typeof navigator !== "undefined" && typeof navigator.vibrate === "function" ? (ms) => navigator.vibrate(ms) : undefined;
+    const haptics = typeof window !== "undefined" ? window.Capacitor?.Plugins?.Haptics : undefined;
+    void lightTap({ haptics, vibrate });
   }
 
   function brandChoices(row) {
@@ -358,7 +414,7 @@ export function mountProfileOnboarding(deps = {}) {
 
   function syncReceiptButton() {
     const next = $("profile-next");
-    if (!next || stepId !== "receipts" || receiptPhase === "learned") return;
+    if (!next || stepId !== "receipts" || receiptPhase !== "upload") return;
     next.disabled = !receiptReady();
   }
 
@@ -375,29 +431,34 @@ export function mountProfileOnboarding(deps = {}) {
     syncReceiptButton();
   }
 
-  function showReadProgress(message, ratio, failed) {
-    const wrap = $("profile-receipt-progress");
-    const status = $("profile-receipt-status");
-    const meter = $("profile-receipt-meter");
-    if (wrap) {
-      wrap.hidden = false;
-      wrap.dataset.state = failed ? "error" : "busy";
-      wrap.scrollIntoView({ block: "nearest" });
-    }
-    if (status) status.textContent = message || "Preparing…";
-    if (meter && Number.isFinite(ratio)) meter.value = Math.max(0, Math.min(1, ratio));
+  function addPendingFile(file) {
+    if (!file) return;
+    const key = `${file.name}|${file.size}|${file.lastModified}`;
+    if (pendingFiles.some((have) => `${have.name}|${have.size}|${have.lastModified}` === key)) return;
+    pendingFiles.push(file);
   }
 
   function bindReceiptInput() {
     const input = $("profile-receipt-input");
+    const drop = document.querySelector("#profile-onboard .drop-zone");
+    if (drop && drop.dataset.bound !== "1") {
+      drop.dataset.bound = "1";
+      drop.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        drop.classList.add("is-drag");
+      });
+      drop.addEventListener("dragleave", () => drop.classList.remove("is-drag"));
+      drop.addEventListener("drop", (event) => {
+        event.preventDefault();
+        drop.classList.remove("is-drag");
+        for (const file of event.dataTransfer?.files || []) addPendingFile(file);
+        paintReceiptFiles();
+      });
+    }
     if (input && input.dataset.bound !== "1") {
       input.dataset.bound = "1";
       input.addEventListener("change", () => {
-        for (const file of input.files || []) {
-          const key = `${file.name}|${file.size}|${file.lastModified}`;
-          if (pendingFiles.some((have) => `${have.name}|${have.size}|${have.lastModified}` === key)) continue;
-          pendingFiles.push(file);
-        }
+        for (const file of input.files || []) addPendingFile(file);
         input.value = "";
         paintReceiptFiles();
       });
@@ -407,7 +468,7 @@ export function mountProfileOnboarding(deps = {}) {
       paste.dataset.bound = "1";
       paste.addEventListener("input", () => syncReceiptButton());
     }
-    if (stepId === "receipts" && receiptPhase !== "learned") paintReceiptFiles();
+    if (stepId === "receipts" && receiptPhase === "upload") paintReceiptFiles();
   }
 
   function readZip() {
@@ -612,34 +673,197 @@ export function mountProfileOnboarding(deps = {}) {
     if (family) queueMicrotask(() => deps.onLazyDone?.(family));
   }
 
+  function linesWithPrices(result) {
+    const raw = (result?.files || []).flatMap((row) => row.lines || []);
+    if (raw.some((line) => Number(line?.price) > 0)) return raw;
+    return result?.lines || [];
+  }
+
+  function rememberReadResult(result) {
+    learnedRows = result?.learned || [];
+    receiptLines = linesWithPrices(result);
+    paperReceipt = Boolean(result?.paper);
+    paperNote = result?.paperNote || "";
+    receiptWarning = result?.photoMessage || "";
+    fileLinesByIndex = new Map();
+    for (const report of result?.files || []) {
+      if ((report?.lines || []).length) fileLinesByIndex.set(report.index, report.lines);
+    }
+  }
+
+  function applyReadProgress(event) {
+    if (!event || !Number.isFinite(Number(event.fileIndex))) return;
+    const card = readCards.find((row) => row.index === Number(event.fileIndex));
+    if (!card) return;
+    if (typeof event.found === "number") card.found = event.found;
+    if (Array.isArray(event.items)) {
+      const seen = new Set(card.items);
+      for (const name of event.items) {
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        card.items.push(name);
+      }
+    }
+    if (Number.isFinite(Number(event.fileRatio))) card.ratio = Math.max(0, Math.min(1, Number(event.fileRatio)));
+    if (event.status === "error") {
+      card.status = "error";
+      card.error = event.error || event.message || "Couldn't read that file.";
+      card.ratio = 1;
+    } else if (event.status === "done") {
+      card.status = "done";
+      card.ratio = 1;
+    }
+    patchReadCard(card);
+  }
+
+  function patchReadCard(card) {
+    const node = document.querySelector(`[data-read-card="${card.index}"]`);
+    if (!node || card.status === "error") {
+      const stage = $("profile-stage");
+      if (stage && receiptPhase === "reading") stage.innerHTML = readLiveHtml(readCards);
+      return;
+    }
+    node.dataset.state = card.status;
+    const title = node.querySelector("h3");
+    if (title) title.textContent = foundLabel(card.name, card.found);
+    const meter = node.querySelector("progress");
+    if (meter) meter.value = String(card.ratio);
+    const list = node.querySelector(".read-items");
+    if (list) {
+      const have = list.children.length;
+      for (const name of card.items.slice(have)) {
+        const item = document.createElement("li");
+        item.className = "read-item";
+        item.textContent = name;
+        list.appendChild(item);
+      }
+    }
+    if (card.items.length) node.querySelector(".read-skel")?.remove();
+  }
+
+  function showLearned() {
+    receiptPhase = "learned";
+    motion = "forward";
+    editingFamily = "";
+    render();
+    focusTitle();
+  }
+
+  async function retryReadFile(index) {
+    const card = readCards.find((row) => row.index === Number(index));
+    if (!card?.file || !deps.readReceipts) return;
+    card.status = "reading";
+    card.error = "";
+    card.ratio = 0.12;
+    card.items = [];
+    card.found = 0;
+    motion = "forward";
+    render();
+    try {
+      const result = await deps.readReceipts({
+        files: [card.file],
+        onProgress: (event) => applyReadProgress({ ...event, fileIndex: card.index }),
+      });
+      if (!result?.lines?.length) {
+        card.status = "error";
+        card.error = result?.error || "Couldn't read that file.";
+        card.ratio = 1;
+        render();
+        return;
+      }
+      fileLinesByIndex.set(card.index, result.lines);
+      card.status = "done";
+      card.found = result.lines.length;
+      card.ratio = 1;
+      card.items = result.lines.map((line) => line.name).filter(Boolean);
+      const merged = [...fileLinesByIndex.values()].flat();
+      const learned = deps.readLines ? await deps.readLines(merged) : result;
+      rememberReadResult({ ...result, ...(learned || {}), lines: learned?.lines || merged });
+      if (readCards.some((row) => row.status === "error")) {
+        render();
+        return;
+      }
+      showLearned();
+    } catch (error) {
+      card.status = "error";
+      card.error = error instanceof Error ? error.message : "Couldn't read that file.";
+      render();
+    }
+  }
+
   async function runReceipts(text, files) {
-    showReadProgress("Preparing…", 0.08, false);
-    const next = $("profile-next");
-    if (next) next.disabled = true;
+    const list = (files || []).slice();
+    const pasted = String(text || "").trim();
+    readCards = [];
+    fileLinesByIndex = new Map();
+    if (pasted) {
+      readCards.push({ index: -1, name: orderTitle(pasted), ratio: 0.2, found: 0, items: [], status: "reading", error: "", file: null });
+    }
+    list.forEach((file, index) => {
+      readCards.push({ index, name: file.name || "Order", ratio: 0.08, found: 0, items: [], status: "reading", error: "", file });
+    });
+    if (!readCards.length) return;
+    receiptPhase = "reading";
+    motion = "forward";
+    render();
+    focusTitle();
     try {
       const result = await deps.readReceipts?.({
         text,
-        files,
-        onProgress: (event) => showReadProgress(event?.message || "Preparing…", Number(event?.ratio), false),
+        files: list,
+        onProgress: (event) => applyReadProgress(event),
       });
       pendingFiles = [];
-      if (!result || result.error || !result.lines?.length) {
-        showReadProgress(result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.", 0, true);
+      if (!result || (result.error && !result.lines?.length)) {
+        const message = result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.";
+        if (!readCards.some((card) => card.status === "error")) {
+          for (const card of readCards) {
+            if (card.status === "reading") {
+              card.status = "error";
+              card.error = message;
+              card.ratio = 1;
+            }
+          }
+        }
+        render();
         return;
       }
-      learnedRows = result.learned || [];
-      receiptLines = result.lines || [];
-      paperReceipt = Boolean(result.paper);
-      paperNote = result.paperNote || "";
-      receiptWarning = result.photoMessage || "";
-      receiptPhase = "learned";
-      editingFamily = "";
-      render();
-      focusTitle();
+      rememberReadResult(result);
+      for (const report of result.files || []) {
+        const card = readCards.find((row) => row.index === report.index);
+        if (!card) continue;
+        if (report.error && !(report.lines || []).length) {
+          card.status = "error";
+          card.error = report.error;
+          card.ratio = 1;
+        } else if ((report.lines || []).length) {
+          card.status = "done";
+          card.found = report.lines.length;
+          card.ratio = 1;
+          card.items = report.lines.map((line) => line.name).filter(Boolean);
+        }
+      }
+      for (const card of readCards) {
+        if (card.status === "reading") {
+          card.status = "done";
+          card.ratio = 1;
+        }
+      }
+      if (readCards.some((card) => card.status === "error")) {
+        render();
+        return;
+      }
+      showLearned();
     } catch (error) {
-      showReadProgress(error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.", 0, true);
-    } finally {
-      if (next) next.disabled = false;
+      const message = error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.";
+      for (const card of readCards) {
+        if (card.status === "reading") {
+          card.status = "error";
+          card.error = message;
+          card.ratio = 1;
+        }
+      }
+      render();
     }
   }
 
@@ -701,8 +925,20 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (stepId === "diets") rememberDietNotes();
-    if (stepId === "zip" && !skipped) {
+    if ((stepId === "zip" || stepId === "place") && !skipped) {
       if (!readZip()) return;
+    }
+    if (stepId === "place" && !skipped) {
+      let boxes = document.querySelectorAll("[data-place-store]");
+      if (!boxes.length) {
+        paintStoreList();
+        boxes = document.querySelectorAll("[data-place-store]");
+        if (!boxes.length) {
+          deps.toast?.("No stores near that ZIP. Try another.");
+          return;
+        }
+        return;
+      }
     }
     if ((stepId === "stores" || stepId === "place") && !skipped) {
       const place = readPlace();
@@ -710,11 +946,16 @@ export function mountProfileOnboarding(deps = {}) {
       draft.shopStores = place.stores;
     }
     if (stepId === "receipts") {
+      if (receiptPhase === "reading") {
+        if (learnedRows.length || receiptLines.length) showLearned();
+        return;
+      }
       if (receiptPhase === "learned") {
         rememberBrandEdit();
         if (!skipped) {
           const applied = applyLearnedReceipts(draft, learnedRows, at);
           draft = applied.profile;
+          softTap();
         }
         if (returnTo) {
           returnTo = "";
@@ -791,6 +1032,7 @@ export function mountProfileOnboarding(deps = {}) {
     draft = skipped ? skipStep(draft, stepId, at) : answerStep(draft, stepId, answer, at);
     if (!skipped && stepById(stepId).kind === "products") draft = rememberPicks(at);
     stepId = draft.onboarding.step;
+    motion = "forward";
     persist(draft);
     render();
     focusTitle();
@@ -866,8 +1108,9 @@ export function mountProfileOnboarding(deps = {}) {
       closeDiet("skipped");
       return;
     }
-    if (stepId === "receipts" && receiptPhase === "learned" && !returnTo) {
+    if (stepId === "receipts" && (receiptPhase === "learned" || receiptPhase === "reading") && !returnTo) {
       receiptPhase = "upload";
+      motion = "back";
       render();
       focusTitle();
       return;
@@ -886,13 +1129,14 @@ export function mountProfileOnboarding(deps = {}) {
     }
     draft = persist(goBack(draft, stepId));
     stepId = draft.onboarding.step;
+    motion = "back";
     render();
     focusTitle();
   });
   $("profile-stage")?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
     if (!target) return;
-    if (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedRemove || target.dataset.fileRemove) return;
+    if (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedRemove || target.dataset.fileRemove || target.dataset.readRetry != null) return;
     event.preventDefault();
   });
   $("profile-stage")?.addEventListener("click", (event) => {
@@ -900,8 +1144,8 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
-    if (target.id === "profile-receipt-pick") {
-      $("profile-receipt-input")?.click();
+    if (target.dataset.readRetry != null && target.dataset.readRetry !== "") {
+      void retryReadFile(target.dataset.readRetry);
       return;
     }
     if (target.dataset.fileRemove != null && target.dataset.fileRemove !== "") {
