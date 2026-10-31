@@ -94,13 +94,19 @@ export async function readNdjsonResponse(response, onProgress) {
  * }} deps
  * @param {{ files?: File[], text?: string }} input
  */
+function lineNames(rows) {
+  return (rows || []).map((line) => String(line?.name || "").trim()).filter(Boolean);
+}
+
 export async function readReceiptBatch(deps, input) {
-  const report = (message, ratio) => {
-    if (message) deps.onProgress?.({ message, ratio });
+  const report = (message, ratio, extra) => {
+    if (message || extra) deps.onProgress?.({ message: message || "", ratio, ...(extra || {}) });
   };
   report("Preparing…", 0.08);
   const texts = [];
   const lines = [];
+  /** @type {Array<{ index: number, name: string, lines: object[], error: string }>} */
+  const filesOut = [];
   let photoOff = false;
   let receiptNumber = 0;
   let note = "";
@@ -113,39 +119,80 @@ export async function readReceiptBatch(deps, input) {
     const file = files[index];
     receiptNumber += 1;
     const type = String(file.type || "");
-    const name = String(file.name || "");
-    if (files.length > 1) report(`Reading file ${index + 1} of ${files.length}…`, 0.12 + (0.5 * index) / files.length);
+    const name = String(file.name || "Order");
+    const ratio = 0.12 + (0.5 * index) / Math.max(1, files.length);
+    if (files.length > 1) report(`Reading file ${index + 1} of ${files.length}…`, ratio, { fileIndex: index, fileName: name, status: "reading", fileRatio: 0.15, found: 0, items: [] });
     try {
       if (type.startsWith("image/") || /\.hei[cf]$/i.test(name)) {
         if (!deps.photo) {
           photoOff = true;
+          const error = PHOTO_OFF_RECEIPT;
+          filesOut.push({ index, name, lines: [], error });
+          report("", ratio, { fileIndex: index, fileName: name, status: "error", error, found: 0, items: [], fileRatio: 1 });
           continue;
         }
         const blobs = await imageBlobs(file);
-        const parts = await mapPool(blobs, 3, async (blob, blobIndex) => {
-          report(`Reading part ${blobIndex + 1} of ${blobs.length}…`, 0.15 + (0.55 * (blobIndex + 1)) / Math.max(1, blobs.length));
-          return deps.postPhoto(blob.type ? blob : file);
+        const fileLines = [];
+        await mapPool(blobs, 3, async (blob, blobIndex) => {
+          const partRatio = 0.15 + (0.55 * (blobIndex + 1)) / Math.max(1, blobs.length);
+          report(`Reading part ${blobIndex + 1} of ${blobs.length}…`, partRatio, {
+            fileIndex: index,
+            fileName: name,
+            status: "reading",
+            fileRatio: (blobIndex + 1) / Math.max(1, blobs.length),
+            found: fileLines.length,
+            items: lineNames(fileLines),
+          });
+          const payload = await deps.postPhoto(blob.type ? blob : file);
+          const got = linesFrom(payload, receiptNumber);
+          fileLines.push(...got);
+          report(`Reading part ${blobIndex + 1} of ${blobs.length}…`, partRatio, {
+            fileIndex: index,
+            fileName: name,
+            status: "reading",
+            fileRatio: (blobIndex + 1) / Math.max(1, blobs.length),
+            found: fileLines.length,
+            items: lineNames(fileLines),
+          });
+          return payload;
         });
-        for (const payload of parts) lines.push(...linesFrom(payload, receiptNumber));
+        lines.push(...fileLines);
+        filesOut.push({ index, name, lines: fileLines, error: "" });
+        report("", ratio, { fileIndex: index, fileName: name, status: "done", fileRatio: 1, found: fileLines.length, items: lineNames(fileLines) });
         continue;
       }
       if (type === "application/pdf" || /\.pdf$/i.test(name)) {
         const payload = await deps.postPdf(file);
-        lines.push(...linesFrom(payload, receiptNumber));
+        const got = linesFrom(payload, receiptNumber);
+        lines.push(...got);
+        filesOut.push({ index, name, lines: got, error: "" });
+        report("", ratio, { fileIndex: index, fileName: name, status: "done", fileRatio: 1, found: got.length, items: lineNames(got) });
         continue;
       }
       const text = await file.text();
       if (String(text || "").trim()) texts.push(String(text).trim());
+      filesOut.push({ index, name, lines: [], error: "" });
     } catch (error) {
       note = error instanceof Error ? error.message : "We couldn't read that file.";
+      filesOut.push({ index, name, lines: [], error: note });
+      report("", ratio, { fileIndex: index, fileName: name, status: "error", error: note, found: 0, items: [], fileRatio: 1 });
     }
   }
   if (texts.length && deps.postText) {
     try {
       const payload = await deps.postText(texts.join("\n\n--- receipt ---\n\n"));
-      lines.push(...linesFrom(payload, lines.length ? receiptNumber + 1 : 1));
+      const got = linesFrom(payload, lines.length ? receiptNumber + 1 : 1);
+      lines.push(...got);
+      const pasted = filesOut.find((row) => row.index === -1);
+      if (pasted) {
+        pasted.lines = got;
+      } else if (!files.length) {
+        filesOut.push({ index: -1, name: "Pasted order", lines: got, error: "" });
+      }
+      report("", 0.72, { fileIndex: files.length ? filesOut[0]?.index ?? 0 : -1, fileName: files[0]?.name || "Pasted order", status: "done", fileRatio: 1, found: got.length, items: lineNames(got) });
     } catch (error) {
       note = error instanceof Error ? error.message : note;
+      report("", 0.72, { fileIndex: files.length ? 0 : -1, fileName: files[0]?.name || "Pasted order", status: "error", error: note, found: 0, items: [], fileRatio: 1 });
     }
   }
   if (!lines.length) {
@@ -156,6 +203,7 @@ export async function readReceiptBatch(deps, input) {
       paperNote: "",
       error: photoOff && !String(input?.text || "").trim() ? PHOTO_OFF_RECEIPT : note || "We couldn't find grocery items in that. Try an online order, or paste the text.",
       photoOff,
+      files: filesOut,
     };
   }
   let analysis = { lines, learned: [], paper: false, paperNote: "" };
@@ -171,6 +219,7 @@ export async function readReceiptBatch(deps, input) {
         paperNote: "",
         error: error instanceof Error ? error.message : "We couldn't read that.",
         photoOff,
+        files: filesOut,
       };
     }
   }
@@ -182,6 +231,7 @@ export async function readReceiptBatch(deps, input) {
     error: "",
     photoOff,
     photoMessage: photoOff ? PHOTO_OFF_RECEIPT : "",
+    files: filesOut,
   };
 }
 

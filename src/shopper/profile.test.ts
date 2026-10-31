@@ -18,6 +18,7 @@ import {
   primaryLabel,
   profileSteps,
   resumeStep,
+  WELCOME_PROMISE,
   shouldAskDietPrompt,
   SKIP_LABEL,
   skipForNow,
@@ -101,7 +102,7 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), true);
     assert.deepEqual(
       profileSteps().map((step) => step.id),
-      ["zip", "stores", "receipts"]
+      ["welcome", "place", "receipts"]
     );
     assert.equal(profileSteps().some((step) => step.id === "products"), false);
     assert.equal(SKIP_LABEL, "Skip for now");
@@ -117,6 +118,9 @@ describe("taste profile storage", () => {
     assert.deepEqual(dismissed.allergies, []);
     assert.equal(shouldAskDietPrompt(dismissed), false);
     assert.equal(primaryLabel("summary"), "Start shopping");
+    assert.equal(primaryLabel("welcome"), "Get started");
+    assert.equal(WELCOME_PROMISE, "Tell us what you usually buy. We'll find it for less.");
+    assert.equal(resumeStep(emptyProfile()), "welcome");
     assert.equal(summarySections(profile).some((section) => section.step === "allergies"), true);
   });
 

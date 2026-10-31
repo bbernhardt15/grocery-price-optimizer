@@ -307,10 +307,8 @@ export function mountShelfScan(deps) {
       </div>
       <div id="shelf-home"></div>
       <div id="shelf-progress" class="read-progress" hidden>
-        <div class="read-progress-row">
-          <span class="spinner" aria-hidden="true"></span>
-          <p id="shelf-status" class="status" role="status"></p>
-        </div>
+        <div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p id="shelf-status" class="status" role="status"></p>
         <progress id="shelf-meter" max="1" value="0"></progress>
       </div>
       <div id="shelf-results" hidden></div>

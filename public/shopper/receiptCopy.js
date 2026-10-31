@@ -3,12 +3,14 @@
  * the names are shortened and the barcode is missing.
  */
 
-export const RECEIPT_TITLE = "Upload receipts";
+import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
+
+export const RECEIPT_TITLE = "Teach Gitter your usual groceries";
 
 export const RECEIPT_HINT = "We'll learn the brands you already buy.";
 
 export const PAPER_WARNING =
-  "Photos of paper receipts usually fail: the name is shortened and the barcode is missing.";
+  "Photos of paper receipts don't work well: names are abbreviated and there is no UPC or barcode.";
 
 export const PRIVACY_NOTE =
   "We read the pictures only to pick out grocery items. We don't keep the pictures after this step, and we don't save your address, loyalty card, or order number.";
@@ -79,25 +81,21 @@ export function receiptUploadHtml() {
       `<details class="store-find"><summary>${escapeText(row.store)}</summary><p>${escapeText(row.hint)}</p></details>`
   ).join("");
   return `<div class="receipt-upload">
-    <p class="paper-note">${escapeText(PAPER_WARNING)}</p>
+    <label class="drop-zone">
+      <input id="profile-receipt-input" type="file" accept="image/*,.pdf,.txt,.csv,text/plain,application/pdf" multiple />
+      <span class="drop-title">Drop PDFs or screenshots</span>
+      <span class="muted">or tap to choose a few</span>
+    </label>
+    <div id="profile-receipt-files" class="receipt-files"></div>
+    <p class="paper-note quiet">${escapeText(PAPER_WARNING)}</p>
     <details class="where-find">
       <summary>Where do I find it?</summary>
       <div class="store-finds">${hints}</div>
     </details>
     <p class="receipt-privacy">${escapeText(PRIVACY_NOTE)}</p>
-    <button type="button" class="ghost" id="profile-receipt-pick">Upload receipts</button>
-    <div id="profile-receipt-files" class="receipt-files"></div>
     <label class="profile-field">Or paste the order text
       <textarea id="profile-receipt-paste" maxlength="50000" placeholder="Paste a Kroger, Walmart, Target, Instacart, or emailed order"></textarea>
     </label>
-    <div id="profile-receipt-progress" class="read-progress" hidden>
-      <div class="read-progress-row">
-        <span class="spinner" aria-hidden="true"></span>
-        <p id="profile-receipt-status" class="status" role="status"></p>
-      </div>
-      <progress id="profile-receipt-meter" max="1" value="0"></progress>
-    </div>
-    <input id="profile-receipt-input" type="file" accept="image/*,.pdf,.txt,.csv,text/plain,application/pdf" multiple hidden />
   </div>`;
 }
 
@@ -131,14 +129,27 @@ export function learnedSummaryHtml(learned, options = {}) {
   const editing = options.editingFamily || "";
   const brandsByFamily = options.brandsByFamily || {};
   const paper = options.paper ? `<p class="paper-note" role="status">${escapeText(options.paperNote || "")}</p>` : "";
-  const cards = rows
-    .map((row) => {
-      const guess = row.confidence === "low" ? `<p class="muted">Guess from one order. You can change it.</p>` : "";
-      const picker = editing && editing === row.family ? learnedPickerHtml(row, brandsByFamily[row.family] || []) : "";
-      return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}">
+  const groups = new Map();
+  for (const row of rows) {
+    const category = learnedCategory(row).label;
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(row);
+  }
+  const cards = [...groups.entries()]
+    .map(([category, groupRows]) => {
+      const body = groupRows
+        .map((row) => {
+          const guess = row.confidence === "low" ? `<p class="confidence">Is this right?</p>` : "";
+          const choice = learnedChoice(row);
+          const mode = modeLine(row);
+          const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
+          const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
+          const picker = editing && editing === row.family ? learnedPickerHtml(row, brandsByFamily[row.family] || []) : "";
+          return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}">
         <div>
           <h3>${escapeText(row.label || row.family)}</h3>
-          <p>${escapeText(learnedChoice(row))}</p>
+          <p>${escapeText(choice)}</p>
+          ${meta}
           ${guess}
         </div>
         <div class="learned-actions">
@@ -147,6 +158,9 @@ export function learnedSummaryHtml(learned, options = {}) {
         </div>
         ${picker}
       </section>`;
+        })
+        .join("");
+      return `<section class="learned-group"><p class="learned-group-title">${escapeText(category)}</p>${body}</section>`;
     })
     .join("");
   const lines = options.paper
@@ -158,5 +172,5 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  return `<div class="learned-summary">${paper}${empty}<div class="summary-list">${cards}</div>${lines}</div>`;
+  return `<div class="learned-summary">${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines)}</div>`;
 }

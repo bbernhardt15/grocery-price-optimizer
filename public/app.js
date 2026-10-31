@@ -1368,7 +1368,10 @@ function addProduct(product, quantity = 1, options = {}) {
     scheduleAccountSync();
   }
   const added = listItemTitle(product);
-  if (!options.quiet) toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
+  if (!options.quiet) {
+    haptic();
+    toast(`Added ${added.title}${added.detail ? ` (${added.detail})` : ""}`);
+  }
   if (!options.quiet && !options.skipAsk) {
     const pref = family ? getUserProfile(localStorage).categoryPreferences?.[family] : null;
     const chosen = Boolean(pref && pref.mode && pref.mode !== "skip");
@@ -2544,12 +2547,6 @@ function paintTrip() {
     ${choiceHtml}
     <div class="store-grid">${storeHtml}</div>
     ${missing}
-    <section class="savings-card">
-      <h2>${escapeHtml(card.title)}</h2>
-      ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
-      ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
-    </section>
     ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
     ${fewerHtml}
     ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list.</p>` : ""}
@@ -2557,6 +2554,13 @@ function paintTrip() {
     ${lastOptimize?.krogerStoreNote ? `<p class="kroger-store-note">${escapeHtml(lastOptimize.krogerStoreNote)}</p>` : ""}
     ${krogerUnpricedHtml(lastOptimize?.krogerUnpriced)}
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
+    <section class="savings-card">
+      <p class="savings-kicker">We'll handle the math.</p>
+      <h2>${escapeHtml(card.title)}</h2>
+      ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
+      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
+    </section>
     ${customizeBlock(stores)}
   `;
   tripEl.querySelectorAll("[data-plan-mode]").forEach((button) => {
@@ -4004,12 +4008,14 @@ document.addEventListener("click", (event) => {
   }
   const krogerSend = target.closest("[data-kroger-send], #kroger-send, #settings-kroger-send");
   if (krogerSend instanceof HTMLButtonElement) {
+    haptic();
     void sendToKrogerCart(krogerSend);
     return;
   }
   const walmartCart = target.closest('a.handoff-btn[href*="walmart.com"]');
   if (walmartCart instanceof HTMLAnchorElement) {
     event.preventDefault();
+    haptic();
     maybeAskAccount("cart", () => {
       markWalmartHandoff();
       setBusy(walmartCart, true);
@@ -4038,6 +4044,7 @@ document.addEventListener("click", (event) => {
   }
   if (target.closest("[data-kroger]")) {
     const button = target.closest("[data-kroger]");
+    haptic();
     maybeAskAccount("cart", () => {
       void startKroger(button.getAttribute("data-kroger"), button);
     });
@@ -5720,7 +5727,6 @@ async function addOneUsual(row) {
       return;
     }
     addProduct(productsById.get(product.id) || product, row.quantity || 1);
-    haptic();
   } catch {
     toast("That usual isn't on the shelf right now.");
   }
