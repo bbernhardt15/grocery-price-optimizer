@@ -23,7 +23,7 @@ function linesFrom(payload, receiptNumber) {
   return source.map((line) => ({ ...line, receipt: receiptNumber }));
 }
 
-async function mapPool(items, limit, worker) {
+export async function mapPool(items, limit, worker) {
   if (!items.length) return [];
   const results = new Array(items.length);
   let cursor = 0;

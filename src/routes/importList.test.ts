@@ -376,4 +376,123 @@ trailer << /Root 1 0 R >>
     assert.ok(events.at(-1)?.analysis?.lines.some((line) => /tide/i.test(line.brand)));
     assert.equal(calls.some((url) => url.includes("/chat/completions")), false);
   });
+
+  it("reads a fridge photo into staple rows and does not log the picture", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    const info: string[] = [];
+    const originalInfo = console.info;
+    console.info = (...args: unknown[]) => {
+      info.push(args.map(String).join(" "));
+    };
+    setImportRuntime({
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  meals: ["omelette"],
+                  items: [
+                    { name: "milk", confidence: "high", fullness: "low" },
+                    { name: "eggs", confidence: "high", fullness: "empty" },
+                    { name: "omelette recipe", confidence: "high", fullness: "full" },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+    try {
+      const image = Buffer.from("fridge-photo-DO-NOT-LOG").toString("base64");
+      const response = await post("/api/import/shelf", { imageBase64: image, mimeType: "image/jpeg" }, "device-shelf-1");
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as { items: Array<{ family: string; fullness: string; confidence: string }> };
+      assert.deepEqual(
+        body.items.map((item) => item.family),
+        ["milk", "eggs"]
+      );
+      assert.equal(body.items[0]?.fullness, "low");
+      assert.equal(JSON.stringify(body).includes(image), false);
+      assert.equal(info.some((line) => line.includes("DO-NOT-LOG") || line.includes(image)), false);
+      assert.ok(info.some((line) => /shelf stage=photo/.test(line) && /items=2/.test(line)));
+      assert.equal(info.some((line) => /\bmilk\b/i.test(line)), false);
+    } finally {
+      console.info = originalInfo;
+    }
+  });
+
+  it("hides shelf scan without a key and names photo failures", async () => {
+    const status = await fetch(`${origin}/api/import/status`);
+    const statusBody = (await status.json()) as { shelf: boolean };
+    assert.equal(statusBody.shelf, false);
+    const off = await post("/api/import/shelf", { imageBase64: Buffer.from("x").toString("base64"), mimeType: "image/jpeg" }, "device-shelf-off");
+    assert.equal(off.status, 503);
+    assert.equal(((await off.json()) as { error: string }).error, IMPORT_MESSAGES.shelfOff);
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    const on = await fetch(`${origin}/api/import/status`);
+    assert.equal(((await on.json()) as { shelf: boolean }).shelf, true);
+
+    const cases: Array<{ name: string; status: number; code: string; error: string; respond: () => Promise<Response> }> = [
+      {
+        name: "unauthorized",
+        status: 502,
+        code: "unauthorized",
+        error: IMPORT_MESSAGES.shelfUnauthorized,
+        respond: async () => jsonResponse({ error: { message: "Incorrect API key provided" } }, 401),
+      },
+      {
+        name: "too_large",
+        status: 413,
+        code: "too_large",
+        error: IMPORT_MESSAGES.shelfTooLarge,
+        respond: async () => jsonResponse({ error: { message: "image too large" } }, 413),
+      },
+      {
+        name: "timeout",
+        status: 504,
+        code: "timeout",
+        error: IMPORT_MESSAGES.shelfTimeout,
+        respond: async () => {
+          const error = new Error("timed out");
+          error.name = "TimeoutError";
+          throw error;
+        },
+      },
+      {
+        name: "empty",
+        status: 422,
+        code: "empty",
+        error: IMPORT_MESSAGES.shelfEmpty,
+        respond: async () => jsonResponse({ choices: [{ message: { content: JSON.stringify({ items: [{ name: "blurry jar" }] }) } }] }),
+      },
+    ];
+    for (const [index, item] of cases.entries()) {
+      setImportRuntime({
+        fetchImpl: async (input, init) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          if (url.startsWith(origin)) return originalFetch(input, init);
+          return item.respond();
+        },
+      });
+      const response = await post(
+        "/api/import/shelf",
+        { imageBase64: Buffer.from(`case-${item.name}`).toString("base64"), mimeType: "image/jpeg" },
+        `device-shelf-${index}`
+      );
+      const body = (await response.json()) as { error: string; code: string };
+      assert.equal(response.status, item.status, item.name);
+      assert.equal(body.code, item.code, item.name);
+      assert.equal(body.error, item.error, item.name);
+    }
+  });
 });

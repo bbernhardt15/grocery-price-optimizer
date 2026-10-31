@@ -31,7 +31,10 @@ const jsonMedia = express.json({ limit: "8mb" });
 app.use((req, res, next) => {
   const media =
     req.method === "POST" &&
-    (req.path === "/api/import/photo" || req.path === "/api/import/audio" || req.path === "/api/import/pdf");
+    (req.path === "/api/import/photo" ||
+      req.path === "/api/import/audio" ||
+      req.path === "/api/import/pdf" ||
+      req.path === "/api/import/shelf");
   return (media ? jsonMedia : jsonSmall)(req, res, next);
 });
 app.use(express.urlencoded({ extended: false }));
@@ -202,7 +205,11 @@ const onError: ErrorRequestHandler = (err, req, res, next) => {
   }
   const status = httpErrorStatus(err);
   if (status === 413 && req.path.startsWith("/api/import")) {
-    res.status(413).json({ error: IMPORT_MESSAGES.visionTooLarge, code: "too_large" });
+    const shelf = req.path === "/api/import/shelf";
+    res.status(413).json({
+      error: shelf ? IMPORT_MESSAGES.shelfTooLarge : IMPORT_MESSAGES.visionTooLarge,
+      code: "too_large",
+    });
     return;
   }
   const safe = status >= 500 ? "Something went wrong" : "Request failed";

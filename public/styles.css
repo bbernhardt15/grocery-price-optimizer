@@ -499,6 +499,62 @@ a.text-btn:hover { background: var(--accent-soft); }
 }
 .browse-toggle[aria-expanded="true"] { border-style: solid; background: var(--surface); }
 .ask-hint { margin: 2px 0 10px; color: var(--muted); font-size: 0.95rem; }
+.shelf-entry { margin: 0 0 14px; }
+.shelf-entry .ghost { width: 100%; min-height: 48px; }
+.shelf-note, .shelf-privacy { margin: 0; color: var(--muted); }
+body:not([data-step="add"]) #shelf-entry,
+body[data-results="search"] #shelf-entry { display: none; }
+.shelf-home, .shelf-results { display: flex; flex-direction: column; gap: 12px; }
+.shelf-home > *, .shelf-results > * { margin: 0; }
+.shelf-home .primary, .shelf-home .ghost, .shelf-results .primary { width: 100%; min-height: 48px; }
+.shelf-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.shelf-row {
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: var(--surface);
+}
+.shelf-row-name { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.shelf-unsure {
+  font-size: 0.8rem; font-weight: 750; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--ink); background: var(--bg-accent); border-radius: 999px; padding: 2px 8px;
+}
+.shelf-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.shelf-choices button {
+  flex: 1 1 30%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font-weight: 700;
+}
+.shelf-choices button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.shelf-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.shelf-add label { flex: 1 1 12rem; display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.shelf-add input { width: 100%; min-height: 48px; font-size: 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); padding: 0 12px; }
+dialog.shelf-sheet {
+  width: min(560px, calc(100% - 16px));
+  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 16px);
+  margin-bottom: var(--bar-h);
+}
+dialog.shelf-sheet .sheet-body {
+  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 16px);
+  padding-bottom: 16px;
+}
+@media (max-width: 1099px) {
+  dialog.shelf-sheet {
+    position: fixed;
+    inset: calc(8px + var(--safe-top)) max(8px, var(--safe-right)) calc(var(--bar-h) + 8px) max(8px, var(--safe-left));
+    width: auto;
+    max-width: none;
+    max-height: none;
+    height: auto;
+    margin: 0;
+  }
+  dialog.shelf-sheet .sheet-body {
+    max-height: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 12px 14px 20px;
+  }
+}
+@media (max-width: 520px) {
+  .shelf-choices button { flex-basis: 100%; }
+}
 .quick-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .quick-chip, .usuals-list button {
   min-height: 44px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface);

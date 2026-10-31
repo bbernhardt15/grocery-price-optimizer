@@ -558,6 +558,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     draft = persist(draft);
     if (family && dialog.open) dialog.close();
+    if (family) queueMicrotask(() => deps.onLazyDone?.(family));
   }
 
   async function runReceipts(text, files) {
@@ -1049,6 +1050,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (lazyFamily) {
       lazyFamily = "";
+      deps.onLazyDone?.(null, { cancelled: true });
       return;
     }
     if (draft.onboarding.status === "done" || draft.onboarding.status === "skipped") return;

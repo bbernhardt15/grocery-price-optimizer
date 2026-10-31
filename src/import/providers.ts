@@ -5,6 +5,7 @@
 
 import { importConfig, type ImportConfig, type ProviderName } from "./config";
 import { getFetch } from "./runtime";
+import { shelfPrompt } from "./shelfScan";
 import { scrubSecret, upstreamMessage, visionFailure, type VisionFailure } from "./visionErrors";
 
 /** 1x1 JPEG. The admin check uses it so a stored key is proven with a real vision call. */
@@ -151,19 +152,29 @@ function modelMissing(error: unknown): boolean {
   return /model_not_found|does not exist or you do not have access|invalid model/i.test(error.upstream);
 }
 
-async function readImage(config: ImportConfig, imageBase64: string, mimeType: string, detail: "low" | "high"): Promise<string> {
+const SHELF_USER = "List the groceries you can see. Do not invent items. Do not suggest meals.";
+
+async function readImage(
+  config: ImportConfig,
+  imageBase64: string,
+  mimeType: string,
+  detail: "low" | "high",
+  prompt?: { system: string; text: string }
+): Promise<string> {
+  const system = prompt?.system || VISION_SYSTEM;
+  const text = prompt?.text || "Read the groceries in this photo. Copy UPC lines. Do not invent brands.";
   if (config.visionProvider === "openai") {
-    return complete(config, "openai", VISION_SYSTEM, [
-      { type: "text", text: "Read the groceries in this photo. Copy UPC lines. Do not invent brands." },
+    return complete(config, "openai", system, [
+      { type: "text", text },
       { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}`, detail } },
     ]);
   }
-  return complete(config, "anthropic", VISION_SYSTEM, [
+  return complete(config, "anthropic", system, [
     {
       type: "image",
       source: { type: "base64", media_type: mimeType, data: imageBase64 },
     },
-    { type: "text", text: "Read the groceries in this photo. Copy UPC lines. Do not invent brands." },
+    { type: "text", text },
   ]);
 }
 
@@ -183,6 +194,28 @@ export async function aiReadImage(
     if (config.visionProvider === "openai" && !explicit && config.visionModel !== FAST_VISION_FALLBACK && modelMissing(error)) {
       console.info("receipt vision model fallback gpt-4o-mini");
       return readImage({ ...config, visionModel: FAST_VISION_FALLBACK }, imageBase64, mimeType, detail);
+    }
+    throw error;
+  }
+}
+
+export async function aiReadShelf(
+  imageBase64: string,
+  mimeType: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { detail?: "low" | "high" }
+): Promise<string> {
+  const config = importConfig(env);
+  if (!config.visionProvider) throw new ModelError("unconfigured");
+  const detail = options?.detail === "high" ? "high" : "low";
+  const prompt = { system: shelfPrompt(), text: SHELF_USER };
+  try {
+    return await readImage(config, imageBase64, mimeType, detail, prompt);
+  } catch (error) {
+    const explicit = Boolean((env.IMPORT_VISION_MODEL || "").trim());
+    if (config.visionProvider === "openai" && !explicit && config.visionModel !== FAST_VISION_FALLBACK && modelMissing(error)) {
+      console.info("shelf vision model fallback gpt-4o-mini");
+      return readImage({ ...config, visionModel: FAST_VISION_FALLBACK }, imageBase64, mimeType, detail, prompt);
     }
     throw error;
   }

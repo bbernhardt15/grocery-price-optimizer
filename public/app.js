@@ -62,6 +62,7 @@ import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCate
 import { selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { fileToBase64, readNdjsonResponse, readReceiptBatch } from "./shopper/receiptImport.js";
+import { mountShelfScan } from "./shopper/shelfScan.js";
 import { mountAlwaysPrompt, mountMyProducts } from "./shopper/myProductsUi.js";
 import {
   applyTripEdits,
@@ -5504,7 +5505,7 @@ async function addMealFromPreferences(text) {
   });
 }
 
-async function addFromPreferences(text) {
+async function addFromPreferences(text, options = {}) {
   const profile = getUserProfile(localStorage);
   const preview = resolveNeedList({ profile, text, products: [] });
   const families = [...new Set(preview.items.map((item) => item.family).filter(Boolean))];
@@ -5534,21 +5535,23 @@ async function addFromPreferences(text) {
     ...result.skipped.map((row) => ({ ...row, product: { name: row.raw } })),
   ];
   const leftOff = result.skipped.filter((row) => row.declined).length;
-  const fromFavorites = added > 0 && result.added.every((row) => row.mode && row.mode !== "skip");
-  const note = added
+  const count = options.prompt === false ? result.added.length : added;
+  const fromFavorites = count > 0 && result.added.every((row) => row.mode && row.mode !== "skip");
+  const note = count
     ? fromFavorites
-      ? `Added ${added} ${added === 1 ? "item" : "items"} from your favorites`
-      : `Added ${added} ${added === 1 ? "item" : "items"} using your preferences`
+      ? `Added ${count} ${count === 1 ? "item" : "items"} from your favorites`
+      : `Added ${count} ${count === 1 ? "item" : "items"} using your preferences`
     : leftOff
       ? "Those are items you don't buy"
       : "Nothing on the shelf matched that list";
   if (reviewRows.length) preferenceReview(reviewRows, note);
-  if (result.ask.length) {
+  if (result.ask.length && options.prompt !== false) {
     const first = result.ask[0];
     toast(first?.raw ? `Which ${first.raw}? Pick it once and we'll remember.` : "Pick the ones you haven't set yet.");
     if (first?.family) profileUi?.openCategory?.(first.family);
   }
   if (added) openList(false);
+  return result;
 }
 
 async function addResolvedQuery(text) {
@@ -6145,9 +6148,57 @@ async function postImport(path, body, onProgress) {
   return payload;
 }
 
+let shelfFollowUp = null;
+
+function withoutFamily(text, family) {
+  return parseNeedItems(text)
+    .filter((item) => item.family !== family)
+    .map((item) => item.raw)
+    .join(", ");
+}
+
+async function addShelfItems(text) {
+  let pending = text;
+  shelfFollowUp = async (family, extra) => {
+    if (extra?.cancelled) {
+      shelfFollowUp = null;
+      return;
+    }
+    if (family) {
+      const pref = getUserProfile(localStorage).categoryPreferences?.[family];
+      if (!pref || pref.mode === "skip") pending = withoutFamily(pending, family);
+    }
+    if (!pending.trim()) {
+      shelfFollowUp = null;
+      return;
+    }
+    const result = await addFromPreferences(pending, { prompt: false });
+    let next = result?.ask?.[0]?.family || "";
+    if (family && next === family) {
+      pending = withoutFamily(pending, family);
+      if (!pending.trim()) {
+        shelfFollowUp = null;
+        return;
+      }
+      return shelfFollowUp(null);
+    }
+    if (!next) {
+      shelfFollowUp = null;
+      return;
+    }
+    const label = result.ask[0]?.raw || familyLabel(next) || next;
+    toast(`Which ${label}? Pick it once and we'll remember.`);
+    profileUi?.openCategory?.(next);
+  };
+  return shelfFollowUp(null);
+}
+
 profileUi = mountProfileOnboarding({
   storage: localStorage,
   toast,
+  onLazyDone(family, extra) {
+    void shelfFollowUp?.(family, extra);
+  },
   getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
   setZip: (zip) => applyZip(zip, { reload: false }),
   readReceipts: async ({ text, files, onProgress } = {}) => {
@@ -6266,6 +6317,18 @@ importer = mountImport({
       return { product: resolved.product, options: { quiet: true, preference: resolved, source: "import", skipAsk: true } };
     }
     return { product, options: { quiet: true, source: "import", skipAsk: true } };
+  },
+});
+
+mountShelfScan({
+  apiUrl,
+  toast,
+  addNeeds(text) {
+    if (listIsLocked()) {
+      toast("This list is view-only.");
+      return;
+    }
+    return addShelfItems(text);
   },
 });
 
