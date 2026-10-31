@@ -26,6 +26,12 @@ export const IMPORT_MESSAGES = {
   visionUnreadable: "We couldn't read the groceries in that photo. Try a clearer screenshot, or paste the text.",
   visionUpstream: "Photo reading didn't answer. Paste the order text instead.",
   heic: "That photo format didn't open. Take a screenshot, or paste the text.",
+  shelfOff: "Fridge and pantry scan needs photo reading, which isn't switched on.",
+  shelfEmpty: "We couldn't spot groceries in that photo, try a closer shot of one shelf",
+  shelfUnauthorized: "Photo reading was refused. The vision key on the server is invalid and needs to be replaced.",
+  shelfTooLarge: "That photo is too large to read. Try a closer shot of one shelf.",
+  shelfTimeout: "Reading that photo took too long. Try a closer shot of one shelf.",
+  shelfUpstream: "Photo reading didn't answer. Try that shelf again.",
   urlMissing: "Paste the link to the shared list.",
 } as const;
 

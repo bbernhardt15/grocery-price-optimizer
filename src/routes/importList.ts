@@ -16,7 +16,8 @@ import { rasterizePdf } from "../import/pdfRaster";
 import { extractPdfText } from "../import/pdfText";
 import { analyzeReceipt, applyCatalogBrands, learnReceiptLines, receiptFromVision, relearnReceipt, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
-import { aiAsk, aiParseText, aiReadImage, ModelError, probeVision, transcribeAudio } from "../import/providers";
+import { aiAsk, aiParseText, aiReadImage, aiReadShelf, ModelError, probeVision, transcribeAudio } from "../import/providers";
+import { parseShelfScan } from "../import/shelfScan";
 import { setImportRuntime } from "../import/runtime";
 
 const router = Router();
@@ -74,6 +75,17 @@ async function review(items: ParsedImportItem[]): Promise<ImportMatchResult> {
     ...(upcs.length ? { upcs } : {}),
   });
   return matchImportItems(items, products);
+}
+
+function shelfHttp(error: unknown): { status: number; error: string; code: string } {
+  const failure = error instanceof ModelError ? error.failure : "upstream";
+  const http = error instanceof ModelError ? error.status : null;
+  console.error(`Shelf photo failed (code=${failure} status=${http ?? "none"})`);
+  if (failure === "unauthorized") return { status: 502, error: IMPORT_MESSAGES.shelfUnauthorized, code: "unauthorized" };
+  if (failure === "too_large") return { status: 413, error: IMPORT_MESSAGES.shelfTooLarge, code: "too_large" };
+  if (failure === "timeout") return { status: 504, error: IMPORT_MESSAGES.shelfTimeout, code: "timeout" };
+  if (failure === "unreadable" || failure === "empty") return { status: 422, error: IMPORT_MESSAGES.shelfEmpty, code: "unreadable" };
+  return { status: 502, error: IMPORT_MESSAGES.shelfUpstream, code: "upstream" };
 }
 
 function visionHttp(error: unknown): { status: number; error: string; code: string } {
@@ -252,6 +264,7 @@ router.get("/import/status", (_req, res) => {
     link: true,
     photo: config.photo,
     vision: config.photo,
+    shelf: config.photo,
     speech: config.speech,
     ai: config.ai,
     ask: config.ask,
@@ -345,6 +358,47 @@ router.post("/import/photo", async (req, res) => {
     });
   } catch (error) {
     const mapped = visionHttp(error);
+    res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+});
+
+router.post("/import/shelf", async (req, res) => {
+  if (!allowed(req, res)) return tooFast(res);
+  const config = importConfig();
+  if (!config.photo) {
+    res.status(503).json({ error: IMPORT_MESSAGES.shelfOff, code: "unconfigured" });
+    return;
+  }
+  const mimeType = readText(req.body?.mimeType).toLowerCase() || "image/jpeg";
+  if (!IMAGE_TYPES.has(mimeType)) {
+    res.status(400).json({ error: IMPORT_MESSAGES.badImage, code: "unreadable" });
+    return;
+  }
+  const image = decodeBase64(req.body?.imageBase64, MAX_IMAGE);
+  if (!image) {
+    res.status(400).json({ error: IMPORT_MESSAGES.shelfTooLarge, code: "too_large" });
+    return;
+  }
+  const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
+  if (!budget.ok) {
+    res.status(429).json({ error: IMPORT_MESSAGES.daily, code: "daily" });
+    return;
+  }
+  const started = Date.now();
+  try {
+    const detail = visionDetail(image);
+    const extracted = await aiReadShelf(image.toString("base64"), mimeType, process.env, { detail });
+    const items = parseShelfScan(extracted);
+    console.info(
+      `shelf stage=photo detail=${detail} ms=${Date.now() - started} bytes=${image.length} items=${items.length} model=${config.visionModel}`
+    );
+    if (!items.length) {
+      res.status(422).json({ error: IMPORT_MESSAGES.shelfEmpty, code: "empty" });
+      return;
+    }
+    res.json({ items });
+  } catch (error) {
+    const mapped = shelfHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
   }
 });

@@ -14,8 +14,8 @@ describe("import entry on the phone dock", () => {
     assert.match(html, /id="app-drawer"/);
     assert.match(html, /id="refine-title">Refine</);
     assert.match(html, /id="start-here"/);
-    assert.match(html, /shopper\/import\.css\?v=profile-7/);
-    assert.match(html, /app\.js\?v=profile-7/);
+    assert.match(html, /shopper\/import\.css\?v=shelf-1/);
+    assert.match(html, /app\.js\?v=shelf-1/);
     assert.match(html, /id="ask-mic"/);
     assert.match(html, /What do you need\?/);
     assert.equal(html.includes('id="import-dialog"'), false);
@@ -41,7 +41,7 @@ describe("import entry on the phone dock", () => {
     const accept = parsed.share_target?.params?.files?.[0]?.accept || [];
     assert.ok(accept.includes("image/*"));
     assert.ok(accept.includes("audio/*"));
-    assert.match(sw, /grocery-gitter-shell-v23/);
+    assert.match(sw, /grocery-gitter-shell-v24/);
     assert.match(sw, /pathname === "\/import-share"/);
     assert.match(sw, /gg-import-share/);
   });
