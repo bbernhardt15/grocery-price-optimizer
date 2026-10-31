@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import mongoose from "mongoose";
 import { isKrogerCartOAuthConfigured } from "../krogerCartAuth";
-import { krogerService } from "../krogerService";
+import { krogerService, krogerStoreNote } from "../krogerService";
 import { optimizeGroceryList } from "../optimizeGroceryList";
 import { resolveCatalogProducts } from "../priceCache";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
@@ -221,11 +221,17 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
     const { groceryList, stores, zipCode } = parsed;
 
     let locationId: string | undefined;
+    let storeNote = "";
     const walmartStorePromise = withDeadline(lookupWalmartStore(zipCode, stores), STORE_LOOKUP_MS, undefined);
     if (zipCode) {
       void noteShopperZip(zipCode).catch(() => undefined);
-      const nearest = await withDeadline(krogerService.getClosestStoreLocation(zipCode), STORE_LOOKUP_MS, "");
-      locationId = nearest || undefined;
+      const nearest = await withDeadline(krogerService.resolveClosestStore(zipCode), STORE_LOOKUP_MS, null);
+      locationId = nearest?.locationId || undefined;
+      storeNote = krogerStoreNote(nearest);
+    }
+    const upcByName = new Map<string, string>();
+    for (const selection of parsed.selections || []) {
+      if (selection.upc) upcByName.set(selection.name.toLowerCase(), selection.upc);
     }
     await noteCatalogDemand({
       kind: "list",
@@ -253,7 +259,11 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
           pendingStores: info.pendingStores,
         });
       },
+      ...(upcByName.size ? { upcByName } : {}),
     });
+    const krogerUnpriced =
+      productsResult.pricingByStore.find((report) => report.storeName.trim().toLowerCase() === "kroger")?.unpricedItems ||
+      [];
     if (parsed.selections && parsed.selections.length > 0) {
       const pool = await loadKnownProducts({
         queries: [...groceryList, ...parsed.selections.map((item) => item.name)],
@@ -285,6 +295,8 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
         ? { partial: true, pendingStores: productsResult.pendingStores || [] }
         : {}),
       ...(zipCode ? { zipCode, locationId } : {}),
+      ...(storeNote ? { krogerStoreNote: storeNote } : {}),
+      ...(krogerUnpriced.length ? { krogerUnpriced } : {}),
     };
 
     if (

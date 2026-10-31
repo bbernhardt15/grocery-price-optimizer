@@ -1,4 +1,4 @@
-import { familyFromQuery, productMatchesFamily } from "./stapleFamilies";
+import { familyFromQuery, isNonGroceryProduct, productMatchesFamily } from "./stapleFamilies";
 import type { BrowseFilters, BrowseProduct, BrowseSort, SizeClass } from "./types";
 
 export function sizeClassOf(product: BrowseProduct): SizeClass | "unknown" {
@@ -42,7 +42,7 @@ export function filterProducts(products: BrowseProduct[], filters: BrowseFilters
   const hideGeneralMerchandise = !departmentId || departmentId === "all";
 
   return products.filter((product) => {
-    if (hideGeneralMerchandise && product.departmentId === "other") {
+    if (hideGeneralMerchandise && (product.departmentId === "other" || isNonGroceryProduct(product))) {
       return false;
     }
     if (departmentId && departmentId !== "all" && product.departmentId !== departmentId) {

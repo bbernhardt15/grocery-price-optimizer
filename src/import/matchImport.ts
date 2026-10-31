@@ -5,7 +5,7 @@
 
 import { groupBrowseFamilies, type BrowseTile } from "../catalog/family";
 import { upcKey } from "../catalog/normalize";
-import { familyFromQuery, productMatchesFamily } from "../catalog/stapleFamilies";
+import { familyFromQuery, isNonGroceryProduct, matchConfidence, offerFitsFamily, productMatchesFamily } from "../catalog/stapleFamilies";
 import type { BrowseProduct } from "../catalog/types";
 import { parsePackageSize } from "../packageSize";
 import { groceryWordTokens, stemGroceryToken } from "../productSearchQuery";
@@ -25,6 +25,8 @@ export type ImportReviewItem = {
   status: ImportStatus;
   /** Shown when the requested brand is not on the shelf. */
   shelfNote?: string;
+  /** The pick is a weak match. The review shows it and a Change control. */
+  lowConfidence?: boolean;
   accepted: boolean;
   selectedId: string | null;
   choices: Array<{ score: number; product: BrowseTile }>;
@@ -195,14 +197,21 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
       };
     }
     const family = familyFromQuery(item.name);
+    const cousins = families.flatMap((tile) => tile.variants).filter((variant) => !family || productMatchesFamily(variant, family));
+    const allowedVariant = (variant: BrowseProduct) => {
+      if (isNonGroceryProduct(variant)) return false;
+      if (family && !productMatchesFamily(variant, family)) return false;
+      if (family && !offerFitsFamily(variant, family, cousins, item.brand || "")) return false;
+      return true;
+    };
     const ranked = families
       .map((tile) => {
+        const variants = tile.variants.filter(allowedVariant);
         let best = -Infinity;
-        for (const variant of tile.variants) best = Math.max(best, scoreVariant(item, variant));
-        return { tile, score: best };
+        for (const variant of variants) best = Math.max(best, scoreVariant(item, variant));
+        return { tile: { ...tile, variants: variants.length ? variants : tile.variants }, score: best, ok: variants.length > 0 };
       })
-      .filter((row) => row.score > 0.2)
-      .filter((row) => !family || row.tile.variants.some((variant) => productMatchesFamily(variant, family)))
+      .filter((row) => row.ok && row.score > 0.2)
       .sort((a, b) => b.score - a.score);
 
     const branded = item.brand ? ranked.filter((row) => row.tile.variants.some((variant) => brandHit(item.brand, variant))) : [];
@@ -222,6 +231,10 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
       return { score: Math.round(row.score * 100) / 100, product: withSelection(row.tile, variant.id) };
     });
     const selectedId = choices[0]?.product.id ?? null;
+    const picked = choices[0]?.product;
+    const lowConfidence = Boolean(
+      family && picked && matchConfidence(picked, family, cousins, item.name) === "low"
+    );
     return {
       key: `item-${index + 1}`,
       raw: item.raw,
@@ -233,6 +246,7 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
       ...(item.notes ? { notes: item.notes } : {}),
       status,
       ...(brandMiss ? { shelfNote: `No ${item.brand} on the shelf. Pick one or skip.` } : {}),
+      ...(lowConfidence ? { lowConfidence: true } : {}),
       accepted: status !== "missing" && !brandMiss,
       selectedId,
       choices,

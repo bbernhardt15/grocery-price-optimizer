@@ -899,6 +899,20 @@ a.coupon-link:visited, a.coupon-link:hover, a.coupon-link:active { color: var(--
   }
   .print-root pre { white-space: pre-wrap; font: 16px/1.4 sans-serif; }
 }
+.match-flag {
+  display: inline-block;
+  margin: 0 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--line);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.kroger-store-note,
+.kroger-unpriced { margin: 12px 0; }
+.kroger-unpriced ul { padding-left: 1.1rem; }
+.kroger-unpriced li { margin: 6px 0; }
+
 .toast {
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;

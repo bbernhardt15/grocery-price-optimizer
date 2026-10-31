@@ -62,6 +62,14 @@ type FamilyModule = {
     preference?: { brand?: string; brands?: string[] }
   ) => StapleProduct | null;
   PREFERENCE_CATEGORIES: Array<{ id: string; label: string; search: string }>;
+  isNonGroceryProduct: (product: StapleProduct) => boolean;
+  offerFitsFamily: (product: StapleProduct, familyId: string, pool: StapleProduct[], named?: string) => boolean;
+  saneFamilyProducts: (
+    products: StapleProduct[],
+    familyId: string,
+    options?: { namedBrand?: string; query?: string }
+  ) => StapleProduct[];
+  matchConfidence: (product: StapleProduct, familyId: string, pool: StapleProduct[], query?: string) => "low" | "high";
 };
 
 function loadFamilies(): FamilyModule {
@@ -71,7 +79,7 @@ function loadFamilies(): FamilyModule {
     .replace(/^export function /gm, "function ")
     .replace(/^export const /gm, "const ")
     .replace(/^export \{[^}]*\};?\s*$/gm, "");
-  const factory = new Function(`${source}\nreturn { productMatchesFamily, classifyProduct, familyFromQuery, familyLabel, searchTermFor, selectStapleTiles, preferRealImages, isPlaceholderProduct, isHouseBrand, rankFamilyScore, reportStapleFamilies, pickAtStore, PREFERENCE_CATEGORIES };`);
+  const factory = new Function(`${source}\nreturn { productMatchesFamily, classifyProduct, familyFromQuery, familyLabel, searchTermFor, selectStapleTiles, preferRealImages, isPlaceholderProduct, isHouseBrand, rankFamilyScore, reportStapleFamilies, pickAtStore, PREFERENCE_CATEGORIES, isNonGroceryProduct, offerFitsFamily, saneFamilyProducts, matchConfidence };`);
   return factory() as FamilyModule;
 }
 
@@ -90,3 +98,7 @@ export const rankFamilyScore = api.rankFamilyScore;
 export const reportStapleFamilies = api.reportStapleFamilies;
 export const pickAtStore = api.pickAtStore;
 export const PREFERENCE_CATEGORIES = api.PREFERENCE_CATEGORIES;
+export const isNonGroceryProduct = api.isNonGroceryProduct;
+export const offerFitsFamily = api.offerFitsFamily;
+export const saneFamilyProducts = api.saneFamilyProducts;
+export const matchConfidence = api.matchConfidence;

@@ -196,7 +196,7 @@ describe("shelf scan list rules", () => {
     assert.match(html, /Fridge and pantry scan needs photo reading/);
     assert.match(app, /mountShelfScan/);
     assert.match(app, /addFromPreferences/);
-    assert.match(sw, /grocery-gitter-shell-v25/);
+    assert.match(sw, /grocery-gitter-shell-v26/);
     assert.match(client, /capture="environment"/);
     assert.match(client, /accept="image\/\*" multiple/);
     assert.match(client, /imageBlobs/);
@@ -212,6 +212,21 @@ describe("shelf scan list rules", () => {
     assert.match(results, /Out/);
     assert.match(results, /Not sure/);
     assert.match(results, /Add to my list/);
+    const found = shelfResultsHtml([
+      { family: "yogurt", label: "Yogurt", name: "Yogurt", fullness: "full", confidence: "high", choice: "enough" },
+      { family: "bread", label: "Bread", name: "Bread", fullness: "half", confidence: "high", choice: "enough" },
+    ]);
+    const input = found.match(/<input id="shelf-add"[^>]*>/)?.[0] || "";
+    assert.match(input, /value=""/);
+    assert.equal(input.includes("Yogurt"), false);
+    assert.equal(input.includes("bread"), false);
+    assert.equal(
+      neededText([
+        { family: "yogurt", label: "Yogurt", choice: "enough" },
+        { family: "bread", label: "Bread", choice: "enough" },
+      ]),
+      ""
+    );
     assert.match(results, /disabled/);
     assert.match(`${home} ${results}`, new RegExp(SHELF_PRIVACY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(`${home} ${results}`, /recipe|meal|what to cook/i);

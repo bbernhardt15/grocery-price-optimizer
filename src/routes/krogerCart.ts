@@ -16,6 +16,8 @@ import {
   revokeSealedShopperCookie,
   sealShopperToken,
   shopperTokenForRequest,
+  krogerCartSummary,
+  normalizeKrogerUpc,
   toCartLines,
   verifyCartState,
   KROGER_SHOPPER_COOKIE,
@@ -233,28 +235,57 @@ function appendShopperCookie(res: Response, config: KrogerOAuthConfig, token: Sh
 function pendingFromState(
   config: KrogerOAuthConfig,
   state: string | undefined
-): { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect" } | undefined {
+): { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect"; skipped?: string[]; requested?: number } | undefined {
   if (!state) {
     return undefined;
   }
   const signed = verifyCartState(config, state);
   if (signed) {
     krogerCartSessions.takePending(state);
-    return { items: signed.items, locationId: signed.locationId, purpose: signed.purpose };
+    return {
+      items: signed.items,
+      locationId: signed.locationId,
+      purpose: signed.purpose,
+      skipped: signed.skipped,
+      requested: signed.requested,
+    };
   }
   if (!verifyShortCartState(config, state)) {
     return undefined;
   }
   const memory = krogerCartSessions.takePending(state);
   if (memory) {
-    return { items: memory.items, locationId: memory.locationId, purpose: memory.purpose };
+    return {
+      items: memory.items,
+      locationId: memory.locationId,
+      purpose: memory.purpose,
+      skipped: memory.skipped,
+      requested: memory.requested,
+    };
   }
   return undefined;
 }
 
+function cartSummaryFor(
+  lines: KrogerCartLine[],
+  pending?: { skipped?: string[]; requested?: number }
+): { summary: string; skipped: string[] } {
+  const skipped = pending?.skipped || [];
+  const total = pending?.requested ?? lines.length + skipped.length;
+  return { summary: krogerCartSummary(lines.length, total, skipped), skipped };
+}
+
+function addedListHtml(lines: KrogerCartLine[], skipped: string[]): string {
+  const added = lines
+    .map((item) => `<li>${escapeHtml(item.name || item.upc)}</li>`)
+    .join("");
+  const missed = skipped.map((name) => `<li>${escapeHtml(name)}</li>`).join("");
+  return `${added ? `<p>Added</p><ul>${added}</ul>` : ""}${missed ? `<p>Couldn't be matched</p><ul>${missed}</ul>` : ""}`;
+}
+
 function savePendingCart(
   config: KrogerOAuthConfig,
-  cart: { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect" }
+  cart: { items: KrogerCartLine[]; locationId?: string; purpose?: "cart" | "connect"; skipped?: string[]; requested?: number }
 ): { state: string; authorizeUrl: string } | null {
   const state = issueShortCartState(config);
   krogerCartSessions.savePending(state, cart);
@@ -393,19 +424,22 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const lines = toCartLines(
-    parsed.items.map((item) => ({
-      upc: asOptionalString(item.upc),
-      productId: asOptionalString(item.productId),
-      quantity: asOptionalQuantity(item.quantity),
-      name: asOptionalString(item.name),
-    })),
-    parsed.modality
-  );
+  const requestedItems = parsed.items.map((item) => ({
+    upc: asOptionalString(item.upc),
+    productId: asOptionalString(item.productId),
+    quantity: asOptionalQuantity(item.quantity),
+    name: asOptionalString(item.name),
+  }));
+  const skipped = requestedItems
+    .filter((item) => !normalizeKrogerUpc(item.upc || item.productId))
+    .map((item) => item.name || "Item");
+  const lines = toCartLines(requestedItems, parsed.modality);
+  const requested = requestedItems.length;
   if (lines.length === 0) {
     res.status(400).json({
-      error:
-        "None of these Kroger items have a UPC/productId, so PUT /v1/cart/add cannot run. Use the Open at Kroger search links instead.",
+      error: "None of these items could be matched to a Kroger product, so nothing was sent.",
+      skipped,
+      summary: krogerCartSummary(0, requested, skipped),
       searchLinks: [],
     });
     return;
@@ -417,9 +451,15 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
     if (result.ok) {
       appendShopperCookie(res, config, existing);
       await rememberAccountKroger(res, config, existing);
+      const { summary } = cartSummaryFor(lines, { skipped, requested });
       res.json({
         status: "added",
-        added: result.added,
+        added: lines.length,
+        skipped: skipped.length,
+        total: requested,
+        summary,
+        addedItems: lines.map((item) => item.name || item.upc),
+        skippedItems: skipped,
         krogerCartUrl: KROGER_CART_PAGE,
         detail:
           "Kroger accepted the cart write. Finish pickup/delivery on kroger.com while logged into the same shopper account.",
@@ -442,6 +482,8 @@ router.post("/kroger/cart/start", async (req: Request, res: Response) => {
   const issued = savePendingCart(config, {
     items: lines,
     locationId: parsed.locationId,
+    skipped,
+    requested,
   });
   if (!issued) {
     const message = "Kroger couldn't open. Nothing was added to your cart. Try again.";
@@ -603,17 +645,13 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const addedLabel = `${result.added} item${result.added === 1 ? "" : "s"}`;
-  const back = shopperReturnPath(
-    "added",
-    `Your cart is ready. Finish checkout in the Kroger app or site.`,
-    "shop"
-  );
+  const { summary, skipped: skippedNames } = cartSummaryFor(pending.items, pending);
+  const back = shopperReturnPath("added", summary, "shop");
   res.send(
     htmlPage(
       "Your cart is ready",
-      `<p class="status">Your cart is ready. Finish checkout in the Kroger app or site.</p>
-       <p>Kroger accepted ${addedLabel}. Finish checkout while logged into the same shopper account.</p>
+      `<p class="status">${escapeHtml(summary)}. Finish checkout in the Kroger app or site.</p>
+       ${addedListHtml(pending.items, skippedNames)}
        <p><a class="ready-back" href="${escapeHtml(back)}">Back to ${PRODUCT_NAME}</a></p>
        <p><a href="${KROGER_CART_PAGE}" rel="noopener">Open Kroger cart</a></p>`,
       back,

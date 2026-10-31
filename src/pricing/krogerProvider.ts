@@ -29,10 +29,9 @@ export class KrogerPricingProvider implements StorePricingProvider {
     context: PricingContext = {}
   ): Promise<CatalogProduct[]> {
     try {
-      const products = await krogerService.searchProducts(
-        term,
-        context.locationId
-      );
+      const products = await krogerService.searchProducts(term, context.locationId, {
+        upc: context.upc,
+      });
       return products.map((product) => ({
         ...product,
         storeName: "Kroger",
@@ -47,7 +46,8 @@ export class KrogerPricingProvider implements StorePricingProvider {
             error.code === "http" ||
             error.code === "network"
             ? error.code
-            : "http"
+            : "http",
+          error.status
         );
       }
       const message = error instanceof Error ? error.message : String(error);

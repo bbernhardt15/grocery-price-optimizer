@@ -398,10 +398,13 @@ export function mountImport(deps) {
                 })
                 .join("")}</div>`
             : "";
+        const flag = item.lowConfidence ? `<p class="match-flag">Check this match</p>` : "";
         const change =
           item.choices.length > 1
             ? `<button type="button" class="text-btn import-change" data-change="${escapeHtml(item.key)}">${item.openAlts ? "Hide choices" : "Change"}</button>`
-            : "";
+            : item.status !== "missing"
+              ? `<button type="button" class="text-btn import-change" data-search="${escapeHtml(item.key)}">Change</button>`
+              : "";
         return `<li class="import-tile" data-key="${escapeHtml(item.key)}">
           <div class="import-tile-head">
             ${image ? `<img src="${escapeHtml(media(image))}" alt="" />` : ""}
@@ -409,6 +412,7 @@ export function mountImport(deps) {
               ${kicker}
               ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
               <h3>${escapeHtml(title)}</h3>
+              ${flag}
               ${item.shelfNote ? `<p class="import-note">${escapeHtml(item.shelfNote)}</p>` : ""}
             </div>
           </div>

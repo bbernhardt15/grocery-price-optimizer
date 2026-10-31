@@ -17,6 +17,8 @@ export type PricingContext = {
   zipCode?: string;
   /** Kroger Locations API store id when a ZIP was provided. */
   locationId?: string;
+  /** UPC to look up directly when the store supports it (Kroger uses the 13-digit form). */
+  upc?: string;
 };
 
 export class StorePricingError extends Error {
@@ -76,6 +78,8 @@ export type StorePricingReport = {
   error?: string;
   fetchedAt?: string;
   locationId?: string;
+  /** Item names whose live lookup failed. Not a store-wide outage. */
+  unpricedItems?: string[];
 };
 
 export type StorePricingAccumulator = {
@@ -88,6 +92,8 @@ export type StorePricingAccumulator = {
   cachedWeeklyAdHits: number;
   seedHits: number;
   errors: string[];
+  /** Per-item provider failures. Kept off the shopper toast. */
+  unpricedItems: string[];
   locationId?: string;
   fetchedAt?: Date;
   feedKind?: PricingFeedKind;

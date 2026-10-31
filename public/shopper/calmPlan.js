@@ -77,6 +77,7 @@ const OPERATOR_COPY =
 export function shopperCopy(text) {
   const value = clean(text);
   if (!value || OPERATOR_COPY.test(value)) return "";
+  if (/products request failed|locations request failed/i.test(value)) return "";
   return value;
 }
 

@@ -194,18 +194,27 @@ export async function upsertLiveProducts(
   return saved;
 }
 
+function perItemProviderFailure(error: unknown): boolean {
+  if (error instanceof StorePricingError && error.status === 400 && /products request failed/i.test(error.message)) {
+    return true;
+  }
+  return error instanceof Error && /products request failed \(400\)/i.test(error.message);
+}
+
 async function searchWithProvider(
-  provider: { searchProducts: (term: string, context?: { zipCode?: string; locationId?: string }) => Promise<CatalogProduct[]> },
+  provider: { searchProducts: (term: string, context?: { zipCode?: string; locationId?: string; upc?: string }) => Promise<CatalogProduct[]> },
   storeName: string,
   itemName: string,
   zipCode: string | undefined,
-  krogerStoreId: string | undefined
+  krogerStoreId: string | undefined,
+  upc?: string
 ): Promise<CatalogProduct[]> {
   const locationId = krogerLocationId(storeName, krogerStoreId);
   for (const term of productSearchAttempts(itemName)) {
     const rows = await provider.searchProducts(term, {
       zipCode,
       locationId,
+      ...(upc ? { upc } : {}),
     });
     if (rows.length > 0) {
       return rows.map((product) => ({
@@ -233,6 +242,7 @@ export async function resolveCatalogProducts(
   zipCode?: string,
   hooks?: {
     onStore?: (info: { storeName: string; ms: number; pendingStores: string[]; products: CatalogProduct[] }) => void;
+    upcByName?: Map<string, string>;
   }
 ): Promise<ResolvedCatalog> {
   const lines = parseGroceryList(groceryList);
@@ -344,7 +354,8 @@ export async function resolveCatalogProducts(
             storeName,
             line.name,
             zipCode,
-            locationId
+            locationId,
+            hooks?.upcByName?.get(line.name.toLowerCase())
           );
           if (live.length > 0) {
             const saved = await upsertLiveProducts(live);
@@ -364,8 +375,12 @@ export async function resolveCatalogProducts(
           }
         } catch (error) {
           dedicatedError = errorMessage(error);
+          if (perItemProviderFailure(error)) {
+            acc.unpricedItems.push(line.name);
+            dedicatedError = undefined;
+          }
           console.warn(
-            `Live ${storeName} pricing failed for "${line.name}": ${dedicatedError}`
+            `Live ${storeName} pricing failed for "${line.name}": ${errorMessage(error)}`
           );
         }
       } else if (dedicated) {

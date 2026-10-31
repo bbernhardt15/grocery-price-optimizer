@@ -59,7 +59,7 @@ import {
   shouldAskAlways,
 } from "./shopper/productPreference.js";
 import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
-import { selectStapleTiles } from "./shopper/stapleFamilies.js";
+import { matchConfidence, selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { fileToBase64, readNdjsonResponse, readReceiptBatch } from "./shopper/receiptImport.js";
 import { mountShelfScan } from "./shopper/shelfScan.js";
@@ -652,8 +652,10 @@ function krogerConnectedNow() {
 }
 
 /** Drop sign-in sheets, the drawer scrim, and scroll locks so the dock can take taps. */
-function releasePageForTaps() {
+function releasePageForTaps(keepIds) {
+  const keep = keepIds instanceof Set ? keepIds : new Set();
   document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    if (keep.has(dialog.id)) return;
     try {
       dialog.close();
     } catch {
@@ -713,7 +715,7 @@ function krogerBannerHtml() {
 
 let krogerRetry = null;
 
-function openCartReady(storeName, { error = "", retry = null } = {}) {
+function openCartReady(storeName, { error = "", retry = null, summary = "" } = {}) {
   const dialog = $("cart-ready");
   const title = $("cart-ready-title");
   const body = $("cart-ready-body");
@@ -721,18 +723,51 @@ function openCartReady(storeName, { error = "", retry = null } = {}) {
   const store = storeName || "store";
   if (title) title.textContent = error ? `Couldn't send to ${store}` : "Your cart is ready";
   if (body) {
+    const counts = /items sent|couldn't be matched/i.test(summary) ? summary : "";
     body.textContent = error
       ? friendlyCartError(error)
-      : `Your cart is ready. Finish checkout in the ${store} app or site.`;
+      : counts
+        ? `${counts}. Finish checkout in the ${store} app or site.`
+        : `Your cart is ready. Finish checkout in the ${store} app or site.`;
   }
   if (again) again.hidden = !retry;
   krogerRetry = retry;
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+function shortenForSearch(value) {
+  const text = String(value || "")
+    .split("|")[0]
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[®™©]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.split(" ").slice(0, 6).join(" ");
+}
+
+function krogerUnpricedHtml(items) {
+  const names = (items || []).map((name) => String(name || "").trim()).filter(Boolean);
+  if (!names.length) return "";
+  const rows = names
+    .map(
+      (name) =>
+        `<li><span>${escapeHtml(name)}</span> <button type="button" class="text-btn" data-kroger-sub="${escapeHtml(name)}">Choose a substitute</button></li>`
+    )
+    .join("");
+  return `<section class="kroger-unpriced"><p>A few items couldn't be priced at Kroger.</p><ul>${rows}</ul></section>`;
+}
+
+function calmPlanError(message) {
+  const text = String(message || "");
+  if (/products request failed|locations request failed/i.test(text)) {
+    return "A few items couldn't be priced at Kroger.";
+  }
+  return text;
+}
+
 function friendlyCartError(message) {
   const text = String(message || "").trim();
-  if (!text || /invalid response|upstream|authorize\.json|^\{/.test(text)) {
+  if (!text || /invalid response|upstream|authorize\.json|^\{|products request failed|locations request failed/i.test(text)) {
     return "Kroger didn't open. Nothing was added to your cart.";
   }
   return text;
@@ -750,7 +785,7 @@ function applyKrogerReturn(parsed) {
   if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
   if (parsed.step) showStep(parsed.step);
   if (parsed.kind === "added") {
-    openCartReady("Kroger");
+    openCartReady("Kroger", { summary: parsed.message });
     return;
   }
   if (parsed.kind === "error") {
@@ -1218,6 +1253,7 @@ function renderListRows() {
             <strong>${escapeHtml(heading.title)}</strong>
           </label>
           <p class="muted">${escapeHtml(heading.detail)}</p>
+          ${entry.confidence === "low" ? `<span class="match-flag">Check this match</span>` : ""}
           ${entry.preferenceFamily ? `<button type="button" class="text-btn" data-pref-change="${escapeHtml(entry.preferenceFamily)}">Change</button>` : ""}
           ${credit ? `<p class="muted attribution">${escapeHtml(credit)}</p>` : ""}
           <button type="button" class="watch-opt" data-watch-open="${escapeHtml(itemId)}" aria-expanded="${watched || targetValue ? "true" : "false"}" aria-controls="watch-${escapeHtml(itemId)}" aria-label="Price watch for ${escapeHtml(heading.title)}">${watched || targetValue ? "Hide price watch" : "Price watch"}</button>
@@ -1309,6 +1345,8 @@ function addProduct(product, quantity = 1, options = {}) {
   }
   if (options.preferenceMode) entry.preferenceMode = options.preferenceMode;
   if (options.preferenceBrands?.length) entry.preferenceBrands = options.preferenceBrands.slice(0, 12);
+  if (options.confidence === "low" || options.confidence === "high") entry.confidence = options.confidence;
+  renderListRows();
   const family = entry.preferenceFamily || familyFromQuery(`${product.familyName || ""} ${product.name || ""}`);
   if (family) entry.preferenceFamily = family;
   if (options.learn !== false && family && !options.skipLearn) {
@@ -2413,6 +2451,8 @@ function paintTrip() {
     ${fewerHtml}
     ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list.</p>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
+    ${lastOptimize?.krogerStoreNote ? `<p class="kroger-store-note">${escapeHtml(lastOptimize.krogerStoreNote)}</p>` : ""}
+    ${krogerUnpricedHtml(lastOptimize?.krogerUnpriced)}
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
     ${customizeBlock(stores)}
   `;
@@ -2856,7 +2896,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       : kind
         ? `${emptyState(kind).title}. ${emptyState(kind).body}`
         : error instanceof Error
-          ? error.message
+          ? calmPlanError(error.message)
           : "Could not plan the trip.";
     if (!lastOptimize && !list.size) {
       const state = emptyState(kind || "network");
@@ -2960,7 +3000,7 @@ async function startKroger(storeName, button) {
     }
     if (body.status === "added" || body.krogerCartUrl) {
       rememberKrogerConnected();
-      openCartReady("Kroger");
+      openCartReady("Kroger", { summary: body.summary || "" });
       return;
     }
     toast("Kroger cart updated.");
@@ -3745,6 +3785,17 @@ document.addEventListener("click", (event) => {
   const starter = target.closest("[data-starter]");
   if (starter) {
     void addStarter(starter.getAttribute("data-starter"));
+    return;
+  }
+  const krogerSub = target.closest("[data-kroger-sub]");
+  if (krogerSub) {
+    const name = shortenForSearch(krogerSub.getAttribute("data-kroger-sub") || "");
+    showStep("add");
+    if (name) {
+      searchEl.value = name;
+      searchEl.focus();
+      void loadSuggestions(name);
+    }
     return;
   }
   const prefChange = target.closest("[data-pref-change]");
@@ -5582,9 +5633,10 @@ function preferenceReview(rows, note) {
       const productName = row.product?.familyName || row.product?.name || row.raw;
       const brand = row.product?.brand && !String(productName).toLowerCase().includes(String(row.product.brand).toLowerCase()) ? row.product.brand : "";
       const name = [brand, productName].filter(Boolean).join(" ");
-      const change = row.family ? `<button type="button" class="linkish" data-pref-change="${escapeHtml(row.family)}">Change</button>` : "";
+      const change = row.family ? `<button type="button" class="text-btn" data-pref-change="${escapeHtml(row.family)}">Change</button>` : "";
       const why = row.declined ? "Left off. You don't buy this." : row.swapped ? `We swapped ${row.swapped.from} for ${row.swapped.to}` : row.mode === "cheapest" ? "Cheapest" : row.mode === "storeBrand" ? "Store brand" : row.brand || "";
-      return `<li><span>${escapeHtml(name)}</span> <span class="muted">${escapeHtml(why)}</span> ${change}</li>`;
+      const flag = row.confidence === "low" ? `<span class="match-flag">Check this match</span>` : "";
+      return `<li><span>${escapeHtml(name)}</span> ${flag} <span class="muted">${escapeHtml(why)}</span> ${change}</li>`;
     })
     .join("");
   host.hidden = false;
@@ -5627,6 +5679,7 @@ async function addFromPreferences(text, options = {}) {
   for (const row of result.added) {
     const product = productsById.get(row.product.id) || row.product;
     if (!product?.id || findListEntry(product.id)) continue;
+    const confidence = matchConfidence(product, row.family, shelf, text);
     addProduct(product, 1, {
       preference: { family: row.family, status: row.status, swapped: row.swapped || null },
       preferenceMode: row.mode,
@@ -5634,11 +5687,12 @@ async function addFromPreferences(text, options = {}) {
       source: "add",
       skipAsk: true,
       quiet: true,
+      confidence,
     });
     added += 1;
   }
   const reviewRows = [
-    ...result.added.map((row) => ({ ...row, brand: row.product?.brand })),
+    ...result.added.map((row) => ({ ...row, brand: row.product?.brand, confidence: matchConfidence(row.product, row.family, shelf, text) })),
     ...result.skipped.map((row) => ({ ...row, product: { name: row.raw } })),
   ];
   const leftOff = result.skipped.filter((row) => row.declined).length;
@@ -5674,7 +5728,19 @@ async function addResolvedQuery(text) {
     }
     if (category?.product && !category.ask) {
       const product = productsById.get(category.product.id) || category.product;
-      addProduct(product, 1, { preference: category, preferenceMode: category.mode, source: category.mode === "brand" ? "manual" : "add" });
+      const confidence = matchConfidence(product, family, shelf, text);
+      addProduct(product, 1, {
+        preference: category,
+        preferenceMode: category.mode,
+        source: category.mode === "brand" ? "manual" : "add",
+        confidence,
+        quiet: true,
+      });
+      const label = [product.brand, product.familyName || product.name].filter(Boolean).join(" ");
+      preferenceReview(
+        [{ raw: text, family, product, brand: product.brand, mode: category.mode, swapped: category.swapped, confidence }],
+        confidence === "low" ? `Check this match: ${label}` : `Added ${label}`
+      );
       return true;
     }
     const resolved = resolveProductPreference({ profile, query: text, products: shelf });
@@ -6000,7 +6066,7 @@ async function boot() {
       if (shouldPromptProfile(localStorage)) profileUi?.open();
       else welcome.maybeAutoOpen();
     }
-    else releasePageForTaps();
+    else releasePageForTaps(new Set(["cart-ready"]));
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
     if (wantsAlerts && onboard?.open) {

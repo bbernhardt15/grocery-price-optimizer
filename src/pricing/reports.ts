@@ -15,6 +15,7 @@ export function emptyAccumulator(storeName: string): StorePricingAccumulator {
     cachedWeeklyAdHits: 0,
     seedHits: 0,
     errors: [],
+    unpricedItems: [],
   };
 }
 
@@ -166,7 +167,8 @@ export function finalizeStoreReport(
   setupHint?: string
 ): StorePricingReport {
   const source = sourceOf(acc);
-  const errors = uniqueMessages(acc.errors);
+  const errors = uniqueMessages(acc.errors).filter((message) => !isPerItemProviderError(message));
+  const unpricedItems = uniqueMessages(acc.unpricedItems || []);
   const usedFallback = acc.seedHits > 0 && acc.attempted;
   const ok =
     source === "live" ||
@@ -220,7 +222,12 @@ export function finalizeStoreReport(
     ...(error ? { error } : {}),
     ...(acc.fetchedAt ? { fetchedAt: acc.fetchedAt.toISOString() } : {}),
     ...(acc.locationId ? { locationId: acc.locationId } : {}),
+    ...(unpricedItems.length ? { unpricedItems } : {}),
   };
+}
+
+function isPerItemProviderError(message: string): boolean {
+  return /products request failed \(\d+\)/i.test(message);
 }
 
 /**
@@ -233,7 +240,7 @@ export function pricingWarningFromReports(
 ): string | undefined {
   const parts: string[] = [];
   for (const report of reports) {
-    if (!report.error) {
+    if (!report.error || isPerItemProviderError(report.error)) {
       continue;
     }
     const isKroger = report.storeName.trim().toLowerCase() === "kroger";
