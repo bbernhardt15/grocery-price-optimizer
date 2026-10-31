@@ -257,7 +257,7 @@ describe("buildStoreHandoff", () => {
     }
 
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Send to Walmart cart");
+    assert.equal(handoff.action.label, "Open in Walmart cart");
     assert.equal(handoff.action.status, "ready");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
@@ -290,7 +290,7 @@ describe("buildStoreHandoff", () => {
       process.env.WALMART_PUBLISHER_ID = previous;
     }
 
-    assert.equal(handoff.action.label, "Send to Walmart cart");
+    assert.equal(handoff.action.label, "Open in Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin, "https://goto.walmart.com");
     assert.match(url.pathname, /^\/c\/impact-42\/568844\/9383$/);
@@ -372,7 +372,7 @@ describe("buildStoreHandoff", () => {
       subtotal: 2,
     });
     assert.equal(handoff.action.type, "walmart_cart");
-    assert.equal(handoff.action.label, "Send to Walmart cart");
+    assert.equal(handoff.action.label, "Open in Walmart cart");
     const url = new URL(handoff.action.url ?? "");
     assert.equal(url.origin + url.pathname, "https://www.walmart.com/sc/cart/addToCart");
     assert.equal(url.searchParams.get("items"), "554433|2");

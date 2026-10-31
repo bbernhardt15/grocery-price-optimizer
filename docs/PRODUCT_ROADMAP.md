@@ -88,7 +88,7 @@ Code: `PartnerFeedProvider` in `src/pricing/partnerFeed.ts` implements `GET {bas
 
 Configured partner banners join the default competitor list. Unconfigured banners are omitted from that extra list (Flipp-mapped Publix-like banners can still appear when you pass `stores`). Dashboard label for licensed stub hits: **Partner feed**. Licensed shelf feeds beat Flipp weekly ads for the same banner.
 
-Handoff for those banners is the link tier (a store-site search link) or a checklist, per `src/storeHandoffConfig.ts`. Aldi is **Open Aldi list** with a search link. Cart fill stays **Send to Kroger cart** (shopper OAuth) and **Send to Walmart cart** (the add-to-cart URL).
+Handoff for those banners is the link tier (a store-site search link) or a checklist, per `src/storeHandoffConfig.ts`. Aldi is **Open Aldi list** with a search link. Cart fill stays **Send to Kroger cart** (shopper OAuth) and **Open in Walmart cart** (the add-to-cart link, not an account write).
 
 ---
 

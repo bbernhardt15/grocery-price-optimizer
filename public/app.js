@@ -85,6 +85,13 @@ import {
   writeCheck,
 } from "./shopper/tripPlan.js";
 import {
+  buildStoreReadyList,
+  shareStoreList,
+  storeSearchLinkTarget,
+  storeSearchUrl,
+  usesStoreReadyList,
+} from "./shopper/storeReadyList.js";
+import {
   couponPageFor,
   couponSavingsSummary,
   couponSummaryMarkup,
@@ -2161,7 +2168,8 @@ function shopperButtonLabel(store) {
   const action = store.handoff?.action;
   if (action?.label) return action.label;
   const name = store.storeName || "the store";
-  if (action?.type === "kroger_cart" || action?.type === "walmart_cart") return `Send to ${name} cart`;
+  if (action?.type === "walmart_cart") return "Open in Walmart cart";
+  if (action?.type === "kroger_cart") return `Send to ${name} cart`;
   return `Open ${name} list`;
 }
 
@@ -2193,7 +2201,95 @@ function primaryAction(store) {
   if (action.type === "walmart_cart" && action.url) {
     return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
   }
+  if (usesStoreReadyList(store.storeName)) {
+    return `<button class="handoff-btn" type="button" data-shopping-mode="${escapeHtml(store.storeName)}">Shopping mode</button>`;
+  }
   return `<button class="handoff-btn" type="button" data-shop-list="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
+}
+
+function searchLinkTargetAttrs() {
+  const target = storeSearchLinkTarget({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+  });
+  return target ? ` target="${target}" rel="noopener noreferrer"` : "";
+}
+
+function readySearchAnchor(storeName, item, url) {
+  const href = url || storeSearchUrl(storeName, item);
+  if (!href) return "";
+  const name = displayProductName(item?.name, item?.brand) || item?.name || "item";
+  return `<a class="text-btn ready-search" href="${escapeHtml(href)}"${searchLinkTargetAttrs()}>Search<span class="sr-only"> ${escapeHtml(storeName)} for ${escapeHtml(name)}</span></a>`;
+}
+
+function readyRowsHtml(model, checks) {
+  return model.groups
+    .map((group) => {
+      const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
+      const rows = group.items
+        .map((item) => {
+          const on = item.lineId && checks[item.lineId];
+          const size = item.size && !item.name.toLowerCase().includes(item.size.toLowerCase()) ? `, ${escapeHtml(item.size)}` : "";
+          const price = item.priceLabel ? `<span class="ready-price">${escapeHtml(item.priceLabel)}</span>` : "";
+          const search = readySearchAnchor(model.storeName, item, item.searchUrl);
+          return `<li class="ready-line${on ? " is-done" : ""}" data-ready-line="${escapeHtml(item.lineId)}">
+            <label class="ready-check">
+              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId)}"${on ? " checked" : ""} />
+              <span class="ready-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span>
+            </label>
+            ${price}
+            ${search}
+          </li>`;
+        })
+        .join("");
+      return `<section class="ready-group"><h5>${escapeHtml(group.department || "Other")}${aisle}</h5><ul class="ready-lines">${rows}</ul></section>`;
+    })
+    .join("");
+}
+
+function readyActionsHtml(storeName) {
+  const store = escapeHtml(storeName);
+  return `<div class="export-row" aria-label="Store-ready list actions">
+    <button type="button" class="ghost" data-ready-action="copy" data-ready-store="${store}">Copy list</button>
+    <button type="button" class="ghost" data-ready-action="share" data-ready-store="${store}">Share</button>
+    <button type="button" class="ghost" data-ready-action="print" data-ready-store="${store}">Print</button>
+    <button type="button" class="ghost" data-ready-action="csv" data-ready-store="${store}">Download CSV</button>
+  </div>`;
+}
+
+function withListFamily(item) {
+  if (item?.familyName) return item;
+  const wanted = String(item?.query || item?.name || "").trim().toLowerCase();
+  if (!wanted) return item;
+  for (const entry of list.values()) {
+    const product = entry.product || {};
+    const names = [product.catalogName, product.name, product.familyName]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    if (names.includes(wanted) && product.familyName) return { ...item, familyName: product.familyName };
+  }
+  return item;
+}
+
+function familyReadyStore(store) {
+  return { ...store, items: (store.items || []).map((item) => withListFamily(item)) };
+}
+
+function storeReadyCardHtml(store, checks) {
+  const model = buildStoreReadyList(familyReadyStore(store));
+  const rows = readyRowsHtml(model, checks);
+  const subtotal = model.subtotalLabel
+    ? `<p class="ready-subtotal"><span>Subtotal</span><strong>${escapeHtml(model.subtotalLabel)}</strong></p>`
+    : "";
+  return `<section class="store-ready" aria-label="Store-ready list">
+    <h4>Store-ready list</h4>
+    <p class="ready-hint"><strong>${escapeHtml(model.hintTitle)}.</strong> ${escapeHtml(model.hint)}</p>
+    ${rows || "<p class='muted'>Nothing on this list.</p>"}
+    ${subtotal}
+    ${readyActionsHtml(store.storeName)}
+    <button class="handoff-btn" type="button" data-shopping-mode="${escapeHtml(store.storeName)}">Shopping mode</button>
+  </section>`;
 }
 
 function addOwnCoupon(button) {
@@ -2385,12 +2481,19 @@ function paintTrip() {
       });
       const names = (store.items || []).map((item) => reviewItemLine(item)).join(", ");
       const mark = handoffMark(store);
+      const ready = usesStoreReadyList(store.storeName);
+      const walmartNote =
+        store.handoff?.action?.type === "walmart_cart"
+          ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
+          : "";
+      const body = ready
+        ? storeReadyCardHtml(store, readChecks(localStorage, tripId()))
+        : `${names ? `<p class="review-items">${escapeHtml(names)}</p>` : ""}${walmartNote}<div class="shop-actions">${primaryAction(store)}</div>`;
       return `<article class="calm-store">
         <header><h3>${escapeHtml(store.storeName)}</h3><p class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</p>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
-        ${names ? `<p class="review-items">${escapeHtml(names)}</p>` : ""}
+        ${body}
         ${reviewSwapLines(store)}
         ${couponsHtml}
-        <div class="shop-actions">${primaryAction(store)}</div>
       </article>`;
     })
     .join("");
@@ -2523,9 +2626,71 @@ function checklistItems(storeName) {
   return stores.flatMap((store) => (store.items || []).map((item) => ({ ...item, storeName: store.storeName })));
 }
 
+function storeFromTrip(storeName) {
+  return (currentTrip()?.stores || []).find((store) => store.storeName === storeName) || null;
+}
+
+function downloadCsvFile(filename, csv) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function runReadyAction(kind, storeName) {
+  const store = storeFromTrip(storeName);
+  if (!store) return;
+  const model = buildStoreReadyList(familyReadyStore(store));
+  const title = `${store.storeName} list`;
+  if (kind === "copy") {
+    await copyText(model.text);
+    toast("List copied.");
+    return;
+  }
+  if (kind === "share") {
+    const how = await shareStoreList({ title, text: model.text }, shareEnv());
+    toast(how === "copy" ? "List copied." : "Choose who to send the list to.");
+    return;
+  }
+  if (kind === "print") {
+    printTrip(title, model.text);
+    return;
+  }
+  if (kind === "csv") {
+    downloadCsvFile(model.filename, model.csv);
+    toast("List downloaded.");
+  }
+}
+
+function openShoppingMode(storeName) {
+  const dialog = $("trip-dialog");
+  const store = storeFromTrip(storeName);
+  if (!dialog || !store) return;
+  const model = buildStoreReadyList(familyReadyStore(store));
+  const checks = readChecks(localStorage, tripId());
+  dialog.classList.add("shopping-mode");
+  dialog.innerHTML = `<div class="sheet-body shopping-sheet">
+    <div class="list-head">
+      <h2 id="trip-dialog-title">${escapeHtml(store.storeName)} shopping</h2>
+      <button type="button" class="text-btn" data-close-checklist>Close</button>
+    </div>
+    <p class="ready-hint"><strong>${escapeHtml(model.hintTitle)}.</strong> ${escapeHtml(model.hint)}</p>
+    ${readyRowsHtml(model, checks) || "<p class='muted'>Nothing on this list.</p>"}
+    ${model.subtotalLabel ? `<p class="ready-subtotal"><span>Subtotal</span><strong>${escapeHtml(model.subtotalLabel)}</strong></p>` : ""}
+    ${readyActionsHtml(store.storeName)}
+  </div>`;
+  if (!dialog.open) dialog.showModal();
+}
+
 function openChecklist(storeName) {
   const dialog = $("trip-dialog");
   if (!dialog) return;
+  dialog.classList.remove("shopping-mode");
   const instore = !storeName;
   const items = checklistItems(storeName);
   const groups = groupForAisle(items);
@@ -3849,7 +4014,23 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target.closest("[data-close-checklist]")) {
-    $("trip-dialog")?.close();
+    const dialog = $("trip-dialog");
+    dialog?.classList.remove("shopping-mode");
+    dialog?.close();
+    return;
+  }
+  if (target.closest("[data-shopping-mode]")) {
+    openShoppingMode(target.closest("[data-shopping-mode]").getAttribute("data-shopping-mode") || "");
+    return;
+  }
+  const readyAction = target.closest("[data-ready-action]");
+  if (readyAction) {
+    const kind = readyAction.getAttribute("data-ready-action") || "";
+    const storeName = readyAction.getAttribute("data-ready-store") || "";
+    void runReadyAction(kind, storeName).catch((error) => {
+      if (isShareCancel(error)) return;
+      toast(error instanceof Error ? error.message : "Could not share that list.");
+    });
     return;
   }
   if (target.closest("[data-lock-store]")) {
@@ -3920,6 +4101,9 @@ document.addEventListener("change", (event) => {
       if (box instanceof HTMLInputElement) box.checked = Boolean(checks[target.dataset.tripCheck]);
     });
     document.querySelectorAll(`[data-shop-line="${CSS.escape(target.dataset.tripCheck)}"] .shop-row`).forEach((row) => {
+      row.classList.toggle("is-done", Boolean(checks[target.dataset.tripCheck]));
+    });
+    document.querySelectorAll(`[data-ready-line="${CSS.escape(target.dataset.tripCheck)}"]`).forEach((row) => {
       row.classList.toggle("is-done", Boolean(checks[target.dataset.tripCheck]));
     });
     paintShopChrome();
@@ -5310,11 +5494,13 @@ function renderShop() {
               const notHere = choices.length
                 ? `<button type="button" class="ghost" data-not-here="${escapeHtml(item.lineId || "")}">Not here</button>`
                 : "";
+              const search = usesStoreReadyList(section.storeName) ? readySearchAnchor(section.storeName, withListFamily(item)) : "";
               return `<div class="shop-line" data-shop-line="${escapeHtml(item.lineId || "")}">
                 <label class="shop-row${on ? " is-done" : ""}">
                   <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${on ? " checked" : ""} />
                   <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(itemLabel)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
                 </label>
+                ${search}
                 ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
                 ${notHere}
                 ${swap}
