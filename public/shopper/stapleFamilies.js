@@ -24,6 +24,36 @@ const NUT_BUTTER = /\b(?:peanut|almond|cashew|sunflower|hazelnut|walnut|pecan|pi
 const BUTTER_FLAVORED = /\bbutter[-\s]?(?:flavou?red|flavou?r)\b|\b(?:flavou?red|flavou?r)\s+butter\b/i;
 const SOUP = /\b(?:soup|soups|condensed|broth|stock|bisque|chowder)\b/i;
 const READY_CHICKEN = /\b(?:fried|breaded|nugget|nuggets|popcorn|crispy|battered|rotisserie|fully\s+cooked|ready\s+to\s+eat)\b/i;
+const SUPPLY = /\b(?:detergent|soap|pods?|pacs?|tablets?|rinse aid|liquid|gel)\b/i;
+const APPLIANCE_TEXT = /\b(?:appliances?|undercounter|under-counter|glasswashers?|built-?in booster|\d{2,3}\s*-\s*\d{2,3}\s*v|\b\d{3}\s*v\b|kitchen equipment)\b/i;
+const MACHINE = /\b(?:dishwasher|washer|oven|refrigerator|freezer|range|stove|microwave)\b/i;
+
+function groceryTitle(name) {
+  return String(name || "")
+    .split("|")[0]
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[®™©℠]/g, " ");
+}
+
+function headParts(head) {
+  return String(head || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .split(/[^a-z0-9%]+/)
+    .filter((part) => part && part !== "and");
+}
+
+/** Appliances, commercial equipment, and general merchandise are not grocery. */
+export function isNonGroceryProduct(product) {
+  const dept = String(product?.departmentId || "").toLowerCase();
+  if (dept === "other") return true;
+  const text = blob(product, true);
+  if (APPLIANCE_TEXT.test(text) && !SUPPLY.test(text)) return true;
+  if (/\b(?:commercial|industrial)\b/i.test(text) && MACHINE.test(text) && !SUPPLY.test(text)) return true;
+  if (/\bdishwashers?\b/i.test(text) && !SUPPLY.test(text)) return true;
+  if (/\b(?:electronics|furniture|jewelry|automotive)\b/i.test(text) && !SUPPLY.test(text)) return true;
+  return false;
+}
 
 const HOUSE = {
   walmart: ["great value", "marketside", "equate", "parent's choice"],
@@ -57,7 +87,8 @@ function words(text) {
 function headMatches(name, heads, after) {
   const tokens = words(name);
   const phrases = heads
-    .map((head) => head.split(/\s+/))
+    .map((head) => headParts(head))
+    .filter((phrase) => phrase.length)
     .sort((a, b) => b.length - a.length || a.join(" ").localeCompare(b.join(" ")));
   for (const phrase of phrases) {
     for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
@@ -217,7 +248,7 @@ const DEFS = [
     attr("olive", "Olive", /\bolive\b/i),
   ]),
   house("laundry-detergent", "Laundry detergent", "laundry detergent", 26, ["household"], ["Laundry"], ["laundry detergent", "detergent"], ["liquid", "pods", "powder", "free", "clear", "sensitive", "original"], [/\bdish\b/i, PET], /laundry detergent|\bdetergent\b/i, ["tide", "gain", "persil", "all", "arm & hammer"], { dim: "volume", ideal: 92, min: 46, max: 150 }, []),
-  house("dish-soap", "Dish soap", "dish soap", 27, ["household"], ["Cleaning"], ["dish soap", "dishwashing liquid"], ["original", "ultra", "free", "clear"], [/\blaundry\b/i, PET], /dish soap|dishwashing/i, ["dawn", "mrs. meyer's", "mrs meyers", "palmolive", "ajax", "seventh generation"], { dim: "volume", ideal: 18, min: 12, max: 32 }, []),
+  house("dish-soap", "Dish soap", "dish soap", 27, ["household"], ["Cleaning"], ["dishwasher detergent", "dish detergent", "dishwasher soap", "dishwasher pods", "dish soap", "dishwashing liquid"], ["original", "ultra", "free", "clear", "pods", "pod", "pacs", "pac", "tablets", "tablet", "gel", "liquid"], [/\blaundry\b/i, PET, /\b(?:undercounter|glasswasher|commercial dishwasher|industrial dishwasher)\b/i], /dish soap|dishwashing|dishwasher detergent|dish detergent/i, ["dawn", "cascade", "mrs. meyer's", "mrs meyers", "palmolive", "ajax", "seventh generation", "finish"], { dim: "volume", ideal: 18, min: 12, max: 32 }, []),
   food("chili", "Chili", "chili", 28, ["pantry"], ["Canned"], ["chili"], ["beans", "with", "beef", "turkey", "no", "canned", "hot", "mild"], [/\b(?:powder|dog|seasoning|flakes|candy|cheese)\b/i, PET, CANDY], /\bchili\b/i, ["hormel", "stagg", "wolf brand", "dennison's"], { dim: "weight", ideal: 15, min: 10, max: 19 }, []),
   food("chips", "Chips", "potato chips", 29, ["snacks"], ["Chips"], ["chips", "chip"], ["potato", "classic", "original", "wavy", "kettle", "barbecue", "bbq", "sour", "cream"], [/\bchocolate\s+chips\b/i, CANDY, PET], /\bchips\b/i, ["lay's", "ruffles", "kettle brand", "pringles", "doritos", "tostitos", "cape cod", "miss vickie's", "utz", "wise", "popchips"], { dim: "weight", ideal: 8, min: 5, max: 13 }, []),
   food("bbq-sauce", "BBQ sauce", "bbq sauce", 30, ["pantry"], ["Condiments"], ["bbq sauce", "barbecue sauce", "barbeque sauce"], ["original", "honey", "sweet", "spicy", "smoky", "kansas", "carolina"], [CANDY, PET, /\b(?:chips|rub|seasoning)\b/i], /\b(?:bbq|barbecue|barbeque)\s+sauces?\b/i, ["sweet baby ray's", "kraft", "stubb's", "famous dave's", "kinders", "cattlemen's", "jack daniel's", "open pit", "bull's-eye"], { dim: "weight", ideal: 18, min: 12, max: 40 }, []),
@@ -225,6 +256,8 @@ const DEFS = [
   food("cookies", "Cookies", "chocolate chip cookies", 32, ["snacks", "bakery"], ["Cookies"], ["cookies", "cookie"], ["chocolate", "chip", "sandwich", "original", "family", "fudge"], [CANDY, /\b(?:dough|butter|ice cream|cereal)\b/i], /\bcookies?\b/i, ["oreo", "chips ahoy!", "keebler", "pepperidge farm", "girl scouts", "famous amos", "nutter butter", "mother's", "walkers"], { dim: "weight", ideal: 13, min: 8, max: 20 }, []),
   food("ice-cream", "Ice cream", "ice cream", 33, ["frozen"], ["Ice Cream"], ["ice cream"], ["vanilla", "chocolate", "strawberry", "neapolitan", "mint"], [CANDY, /\b(?:cone|sandwich|bar|bars|novelties)\b/i], /\bice\s+cream\b/i, ["häagen-dazs", "ben & jerry's", "breyers", "blue bell", "tillamook", "turkey hill", "edys", "dreyer's", "talenti", "friendly's"], { dim: "volume", ideal: 48, min: 14, max: 64 }, []),
   house("cleaner", "Cleaner", "all purpose cleaner", 34, ["household"], ["Cleaning"], ["all-purpose cleaner", "all purpose cleaner", "multi-surface cleaner", "disinfecting cleaner"], ["original", "lemon", "fresh", "spray", "refill"], [PET, COSMETIC, /\blaundry\b/i], /\bcleaners?\b/i, ["lysol", "clorox", "mr. clean", "formula 409", "fabuloso", "method", "seventh generation", "pine-sol", "windex"], { dim: "volume", ideal: 32, min: 16, max: 64 }, []),
+  food("donuts", "Donuts", "donuts", 35, ["bakery", "breakfast"], ["Donuts", "Bakery"], ["donut", "donuts", "doughnut", "doughnuts"], ["glazed", "chocolate", "yeast", "cake", "plain", "original", "powdered", "cinnamon", "assorted", "dozen", "mini"], [/\b(?:holes?|muffin|cereal|cookie)\b/i, CANDY, PET], /\bdonuts?\b|\bdoughnuts?\b/i, ["entenmann's", "hostess", "krispy kreme", "little debbie"], { dim: "count", ideal: 12, min: 6, max: 16 }, []),
+  food("mac-and-cheese", "Mac and cheese", "macaroni and cheese", 36, ["pantry"], ["Pasta & Rice", "Canned"], ["mac and cheese", "macaroni and cheese", "macaroni & cheese"], ["original", "classic", "shells", "cup", "cups", "boxed", "deluxe", "dinner"], [/\b(?:macbook|makeup|macadamia)\b/i, PET, CANDY], /mac(?:aroni)?\s*(?:and|&)\s*cheese/i, ["kraft", "velveeta", "annie's", "great value"], { dim: "count", ideal: 1, min: 1, max: 12 }, []),
 ];
 
 function attr(id, label, test) {
@@ -292,6 +325,7 @@ function escapeHead(head) {
 /** "Cilantro & White Onions" is a prepared mix, not cilantro and not onions. */
 export function isMixedStaple(name) {
   const text = String(name || "");
+  if (/\bmac(?:aroni)?\s*(?:and|&)\s*cheese\b/i.test(text)) return false;
   if (!/[&/]|\band\b|\bwith\b/i.test(text)) return false;
   const parts = text.split(/\s*(?:&|\/|\band\b|\bwith\b)\s*/i).map((part) => part.trim()).filter(Boolean);
   if (parts.length < 2) return false;
@@ -307,8 +341,9 @@ export function isMixedStaple(name) {
 export function productMatchesFamily(product, familyId) {
   const family = BY_ID.get(familyId);
   if (!family || !product) return false;
-  const nameText = [product.name, product.familyName, product.catalogName].filter(Boolean).join(" ");
+  const nameText = groceryTitle([product.name, product.familyName, product.catalogName].filter(Boolean).join(" "));
   if (!nameText.trim()) return false;
+  if (isNonGroceryProduct(product)) return false;
   if (isMixedStaple(nameText)) return false;
   const exclusionText = blob(product, true);
   if (family.humanFood && blockedFoodDepartment(product)) return false;
@@ -329,14 +364,15 @@ export function classifyProduct(product) {
 function queryIsFamily(text, family) {
   const tokens = words(text);
   const phrases = family.heads
-    .map((head) => head.split(/\s+/))
+    .map((head) => headParts(head))
+    .filter((phrase) => phrase.length)
     .sort((a, b) => b.length - a.length);
   for (const phrase of phrases) {
     for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
       if (!phrase.every((part, offset) => tokens[index + offset] === part)) continue;
       const before = tokens.slice(0, index);
       const after = tokens.slice(index + phrase.length);
-      const allowed = (token) => family.after.has(token) || family.heads.some((head) => head.split(/\s+/).includes(token));
+      const allowed = (token) => family.after.has(token) || family.heads.some((head) => headParts(head).includes(token));
       if (before.every(allowed) && after.every((token) => family.after.has(token))) return true;
     }
   }
@@ -449,6 +485,99 @@ export function unitPriceAmount(product) {
   return price / size.amount;
 }
 
+/** A single pricey hit must not set the median. These are ordinary grocery prices. */
+const FAMILY_CEILING = {
+  bananas: 4,
+  donuts: 8,
+  "mac-and-cheese": 6,
+  "dish-soap": 16,
+  "laundry-detergent": 32,
+  bread: 9,
+  milk: 8,
+  eggs: 12,
+};
+
+const FAMILY_TYPICAL = {
+  bananas: 0.8,
+  donuts: 5,
+  "mac-and-cheese": 1.5,
+  "dish-soap": 4,
+  "laundry-detergent": 13,
+  bread: 3.5,
+  milk: 3.5,
+  eggs: 4,
+};
+
+export function medianPrice(products) {
+  const prices = (products || [])
+    .map((product) => priceAmount(product))
+    .filter((price) => price != null)
+    .sort((a, b) => a - b);
+  if (!prices.length) return null;
+  const mid = Math.floor(prices.length / 2);
+  return prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+}
+
+function brandNamed(product, named) {
+  const wanted = String(named || "").trim().toLowerCase();
+  if (wanted.length < 3) return false;
+  const brand = String(product?.brand || "").trim().toLowerCase();
+  if (!brand) return false;
+  return brand.includes(wanted) || wanted.includes(brand);
+}
+
+function namedFromQuery(query, familyId) {
+  const text = String(query || "").toLowerCase();
+  const brands = BY_ID.get(familyId)?.brands || [];
+  return brands.find((brand) => text.includes(String(brand).toLowerCase())) || "";
+}
+
+/**
+ * Reject a hit that is far above the family's prices.
+ * A brand the shopper named is kept. More than 4x the median, or over the
+ * family's ceiling, is not a grocery match.
+ */
+export function offerFitsFamily(product, familyId, pool, named) {
+  if (!product || isNonGroceryProduct(product)) return false;
+  if (familyId && !productMatchesFamily(product, familyId)) return false;
+  if (brandNamed(product, named)) return true;
+  const price = priceAmount(product);
+  if (price == null) return true;
+  const ceiling = FAMILY_CEILING[familyId];
+  if (ceiling && price > ceiling) return false;
+  const cousins = (pool || []).filter((row) => !familyId || productMatchesFamily(row, familyId));
+  const observed = medianPrice(cousins.length ? cousins : [product]);
+  const typical = FAMILY_TYPICAL[familyId];
+  const reference = observed == null ? typical : typical && cousins.length < 3 ? Math.min(observed, typical) : observed;
+  if (reference && price > reference * 4) return false;
+  return true;
+}
+
+export function saneFamilyProducts(products, familyId, options = {}) {
+  const named = options.namedBrand || namedFromQuery(options.query, familyId);
+  const pool = (products || []).filter((product) => productMatchesFamily(product, familyId));
+  return pool.filter((product) => offerFitsFamily(product, familyId, pool, named));
+}
+
+/** Low when the only hit is a specialty, a bad size, or well above the family. */
+export function matchConfidence(product, familyId, pool, query) {
+  const family = BY_ID.get(familyId);
+  if (!product || !family || isNonGroceryProduct(product)) return "low";
+  const askedGluten = /\bgluten/i.test(String(query || ""));
+  if (!askedGluten && /\bgluten[\s-]*free\b/i.test(`${product.name || ""} ${product.brand || ""}`)) return "low";
+  const price = priceAmount(product);
+  const median = medianPrice(pool);
+  const named = namedFromQuery(query, familyId);
+  if (median && price && price > median * 2 && !brandNamed(product, named)) return "low";
+  const brand = String(product.brand || "").toLowerCase();
+  const known = family.brands.some((name) => brand.includes(String(name).toLowerCase()));
+  const typical = FAMILY_TYPICAL[familyId];
+  if (family.brands.length && !known && typical && price && price > typical * 1.5) return "low";
+  const size = sizeOf(product);
+  if (family.size && size && size.dim === family.size.dim && size.amount < family.size.min / 2) return "low";
+  return "high";
+}
+
 export function rankFamilyScore(product, familyId, query = "") {
   const family = BY_ID.get(familyId);
   if (!family) return 0;
@@ -464,6 +593,8 @@ export function rankFamilyScore(product, familyId, query = "") {
     score += Math.max(0, 16 - Math.abs(size.amount - family.size.ideal) / 4);
   }
   if (!isPlaceholderProduct(product)) score += 8;
+  if (!/\bgluten/i.test(String(query || "")) && /\bgluten[\s-]*free\b/i.test(name)) score -= 40;
+  if (isNonGroceryProduct(product)) score -= 200;
   const queryTokens = words(query).filter((token) => !family.heads.some((head) => head.split(/\s+/).includes(token)));
   const have = new Set(words(`${product?.name || ""} ${product?.familyName || ""}`));
   for (const token of queryTokens) if (have.has(token)) score += 12;

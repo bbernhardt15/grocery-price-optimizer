@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { clearKrogerStoreCache, rememberKrogerStore } from "./krogerLocationCache";
 import { KrogerPricingError, KrogerService } from "./krogerService";
 
 const originalFetch = globalThis.fetch;
@@ -9,6 +10,8 @@ afterEach(() => {
   delete process.env.KROGER_CLIENT_ID;
   delete process.env.KROGER_CLIENT_SECRET;
   delete process.env.KROGER_MOCK_LOCATION_ID;
+  delete process.env.KROGER_SCOPE;
+  clearKrogerStoreCache();
 });
 
 function mockFetch(handler: typeof fetch): void {
@@ -92,6 +95,50 @@ describe("KrogerService.getClosestStoreLocation", () => {
     const service = new KrogerService();
     assert.equal(await service.getClosestStoreLocationStrict("45202"), null);
     assert.equal(await service.getClosestStoreLocation("45202"), "01400441");
+  });
+
+  it("refreshes a product.compact token after a locations 403, then uses the last store for that ZIP", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    process.env.KROGER_SCOPE = "cart.basic:write";
+    await rememberKrogerStore("45103", "01400999");
+    const scopes: string[] = [];
+    let locationCalls = 0;
+    mockFetch(async (input, init) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        scopes.push(String(init?.body || ""));
+        return Response.json({ access_token: `token-${scopes.length}`, expires_in: 1800 });
+      }
+      locationCalls += 1;
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    });
+    const service = new KrogerService();
+    const resolved = await service.resolveClosestStore("45103");
+    assert.equal(resolved.locationId, "01400999");
+    assert.equal(resolved.source, "cached");
+    assert.equal(resolved.lookupFailed, true);
+    assert.equal(locationCalls, 2);
+    assert.equal(scopes.length, 2);
+    assert.match(scopes[0], /scope=product\.compact/);
+    assert.doesNotMatch(scopes[0], /cart\.basic/);
+  });
+
+  it("uses the demo store only after a 403 when that ZIP has no saved store", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    });
+    const service = new KrogerService();
+    const resolved = await service.resolveClosestStore("45103");
+    assert.equal(resolved.locationId, "01400441");
+    assert.equal(resolved.source, "demo");
+    assert.equal(resolved.lookupFailed, true);
   });
 
   it("rejects an invalid ZIP before calling the API", async () => {
@@ -214,6 +261,66 @@ describe("KrogerService.searchProducts", () => {
     assert.equal(products.length, 1);
     assert.equal(products[0].price, 5.49);
     assert.equal(products[0].locationId, "01400441");
+  });
+
+  it("looks up a Kroger UPC before a long title, and retries a 400 with a shorter term", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    const urls: string[] = [];
+    const katz =
+      "Katz Gluten Free Gingerbread Donuts |Gluten Free, Dairy Free, Nut Free, Soy Free, Kosher | (3 Pack, 10.5 Ounce Each)";
+    const machine =
+      "208-240V High-Temp Undercounter Commercial Dishwasher/Glasswasher Built-In Booster, extra";
+    mockFetch(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      if (url.includes("filter.productId=0004900004256")) {
+        return Response.json({
+          data: [
+            {
+              productId: "0004900004256",
+              upc: "0004900004256",
+              brand: "Katz",
+              description: "Gingerbread Donuts",
+              items: [{ size: "10.5 oz", price: { regular: 6.49 } }],
+            },
+          ],
+        });
+      }
+      if (url.includes("Glasswasher")) {
+        return Response.json({ error: "bad term" }, { status: 400 });
+      }
+      if (url.includes("High-Temp")) {
+        return Response.json({
+          data: [
+            {
+              productId: "0009999999990",
+              brand: "Dawn",
+              description: "Dawn Dish Soap",
+              items: [{ size: "18 oz", price: { regular: 3.29 } }],
+            },
+          ],
+        });
+      }
+      return Response.json({ error: "bad term" }, { status: 400 });
+    });
+
+    const service = new KrogerService();
+    const byUpc = await service.searchProducts(katz, "01400999", { upc: "049000042566" });
+    assert.equal(byUpc.length, 1);
+    assert.equal(byUpc[0].name, "Gingerbread Donuts");
+    assert.ok(urls.some((url) => url.includes("filter.productId=0004900004256")));
+    assert.equal(urls.some((url) => url.includes("filter.term=") && url.includes("Katz")), false);
+
+    const priced = await service.searchProducts(machine, "01400999");
+    assert.equal(priced[0]?.name, "Dawn Dish Soap");
+    const termCalls = urls.filter((url) => url.includes("filter.term="));
+    assert.equal(termCalls.length, 2);
+    assert.doesNotMatch(termCalls[0], /\|/);
+    assert.doesNotMatch(termCalls[0], /208-240/);
   });
 
   it("throws when credentials are missing instead of pretending the catalog is empty", async () => {

@@ -43,6 +43,10 @@ export type PendingKrogerCart = {
   locationId?: string;
   /** "connect" signs the shopper in without a cart write. */
   purpose?: "cart" | "connect";
+  /** Names that had no Kroger UPC and were not sent. */
+  skipped?: string[];
+  /** Items the shopper asked to send, including ones without a UPC. */
+  requested?: number;
   createdAtMs: number;
 };
 
@@ -53,7 +57,20 @@ export type SignedCartState = {
   items: KrogerCartLine[];
   locationId?: string;
   purpose?: "cart" | "connect";
+  skipped?: string[];
+  requested?: number;
 };
+
+/** "9 of 11 items sent, 2 couldn't be matched" */
+export function krogerCartSummary(sent: number, total: number, skippedNames: string[] = []): string {
+  const safeTotal = Math.max(total, sent, 0);
+  const skipped = Math.max(0, safeTotal - sent);
+  const count = `${sent} of ${safeTotal} items sent`;
+  if (!skipped) return count;
+  const noun = skipped === 1 ? "1 couldn't be matched" : `${skipped} couldn't be matched`;
+  const names = skippedNames.map((name) => name.trim()).filter(Boolean).slice(0, 3);
+  return names.length ? `${count}, ${noun}: ${names.join(", ")}` : `${count}, ${noun}`;
+}
 
 type TokenResponse = {
   access_token?: string;
@@ -211,6 +228,8 @@ export function signCartState(
     items: cart.items,
     ...(cart.locationId ? { locationId: cart.locationId } : {}),
     ...(cart.purpose === "connect" ? { purpose: "connect" as const } : {}),
+    ...(cart.skipped?.length ? { skipped: cart.skipped.slice(0, 8) } : {}),
+    ...(typeof cart.requested === "number" ? { requested: cart.requested } : {}),
   };
   const encodedBody = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${encodedBody}.${signPayload(config.clientSecret, encodedBody)}`;

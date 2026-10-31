@@ -1,5 +1,5 @@
 import { upcKey } from "./catalog/normalize";
-import { familyFromQuery, productMatchesFamily } from "./catalog/stapleFamilies";
+import { familyFromQuery, isNonGroceryProduct, offerFitsFamily, productMatchesFamily } from "./catalog/stapleFamilies";
 import { mapToDepartment } from "./catalog/departments";
 import { parsePackageSize } from "./packageSize";
 import { publishSale } from "./pricing/saleFacts";
@@ -186,6 +186,23 @@ function dedupeCandidates(products: CatalogProduct[]): CatalogProduct[] {
   return [...map.values()];
 }
 
+function stapleOf(product: CatalogProduct) {
+  return {
+    name: product.name,
+    brand: product.brand,
+    categories: product.categories,
+    price: product.price,
+  };
+}
+
+function groceryOffer(product: CatalogProduct, item: string, family: string, pool: CatalogProduct[]): boolean {
+  const staple = stapleOf(product);
+  if (isNonGroceryProduct(staple)) return false;
+  if (family && !productMatchesFamily(staple, family)) return false;
+  if (family && !offerFitsFamily(staple, family, pool.map(stapleOf), item)) return false;
+  return true;
+}
+
 function productsMatchingQuery(
   catalog: CatalogProduct[],
   item: string
@@ -209,16 +226,13 @@ function productsMatchingQuery(
       break;
     }
   }
-  if (family) {
-    matches = matches.filter((product) =>
-      productMatchesFamily({ name: product.name, brand: product.brand, categories: product.categories }, family)
-    );
-  }
+  matches = matches.filter((product) => groceryOffer(product, item, family, matches));
 
   if (matches.length === 0) {
-    matches = catalog.filter(
+    const fallback = catalog.filter(
       (product) => product.sourceQuery === item && product.offerRole !== "substitute"
     );
+    matches = fallback.filter((product) => groceryOffer(product, item, family, fallback));
   }
 
   return dedupeCandidates([...matches, ...substitutes]);

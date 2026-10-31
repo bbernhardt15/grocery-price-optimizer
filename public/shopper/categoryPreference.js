@@ -22,6 +22,7 @@ import {
   PREFERENCE_CATEGORIES,
   productMatchesFamily,
   rankFamilyScore,
+  saneFamilyProducts,
   searchTermFor,
   unitPriceAmount,
 } from "./stapleFamilies.js";
@@ -131,7 +132,8 @@ export function resolveCategoryPreference(input) {
     return { status: "excluded", family, product: null, mode: "", swapped: null, ask: false };
   }
   const pref = (profile.categoryPreferences || {})[family];
-  const pool = allowed(profile, input?.products).filter((product) => productMatchesFamily(product, family));
+  const rawPool = allowed(profile, input?.products).filter((product) => productMatchesFamily(product, family));
+  const pool = saneFamilyProducts(rawPool, family, { namedBrand: pref?.brand || "", query });
   if (pref?.mode === "never") {
     return { status: "never", family, product: null, mode: "never", swapped: null, ask: false, declined: true };
   }

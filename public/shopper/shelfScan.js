@@ -201,7 +201,7 @@ export function shelfResultsHtml(rows) {
     <ul class="shelf-rows">${cards}</ul>
     <form id="shelf-add-form" class="shelf-add">
       <label>Add something the photo missed
-        <input id="shelf-add" maxlength="80" placeholder="Yogurt, bread" autocomplete="off" enterkeyhint="done" />
+        <input id="shelf-add" name="shelf-missed" value="" maxlength="80" placeholder="" autocomplete="off" autocapitalize="off" enterkeyhint="done" />
       </label>
       <button type="submit" class="ghost" id="shelf-add-go">Add</button>
     </form>

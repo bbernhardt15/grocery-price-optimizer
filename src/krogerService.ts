@@ -1,5 +1,7 @@
 import { krogerProductIdForLookup } from "./catalog/normalize";
 import { krogerStartParam } from "./ingest/krogerTerms";
+import { readKrogerStore, rememberKrogerStore } from "./krogerLocationCache";
+import { buildKrogerSearchTerm, shorterKrogerSearchTerm } from "./krogerSearchTerm";
 import type { CatalogProduct } from "./optimizeGroceryList";
 import { krogerSale } from "./pricing/saleFacts";
 
@@ -10,6 +12,41 @@ const PRODUCTS_ENDPOINT = `${KROGER_API_BASE}/products`;
 
 /** Catalog location used when Kroger API credentials are not configured. */
 export const DEMO_KROGER_LOCATION_ID = "01400441";
+
+export type KrogerLocationSource = "live" | "cached" | "demo";
+
+export type KrogerLocationResult = {
+  locationId: string;
+  source: KrogerLocationSource;
+  zip: string;
+  /** True when a configured lookup failed and the id is a fallback. */
+  lookupFailed: boolean;
+};
+
+/**
+ * Plain line for the plan when prices are not from the ZIP's live store.
+ * Empty when the lookup succeeded or Kroger is not configured.
+ */
+export function krogerStoreNote(result: KrogerLocationResult | null | undefined): string {
+  if (!result?.lookupFailed || result.source === "live") return "";
+  if (result.source === "cached") {
+    return `Prices are from the last Kroger store we saved for ZIP ${result.zip}, not a fresh store lookup.`;
+  }
+  return `Prices are from a sample Kroger store, not the store for ZIP ${result.zip}. Kroger's store list didn't answer.`;
+}
+
+/**
+ * Locations and Products use the client-credentials product scope.
+ * A cart scope (`cart.basic:write`) on KROGER_SCOPE is for shopper login, not
+ * this token. Sending it here makes Locations answer 403.
+ */
+function productScope(): string {
+  const configured = process.env.KROGER_SCOPE?.trim() || "";
+  if (!configured || /\bcart\b|:write|profile\./i.test(configured)) {
+    return "product.compact";
+  }
+  return configured;
+}
 
 type TokenResponse = {
   access_token?: string;
@@ -240,18 +277,21 @@ function normalizeZip(zipCode: string): string {
 export class KrogerService {
   private accessToken: string | null = null;
   private tokenExpiresAtMs = 0;
+  lastLocationResult: KrogerLocationResult | null = null;
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(force = false): Promise<string> {
     const now = Date.now();
-    if (this.accessToken && now < this.tokenExpiresAtMs) {
+    if (!force && this.accessToken && now < this.tokenExpiresAtMs) {
       return this.accessToken;
     }
+    this.accessToken = null;
+    this.tokenExpiresAtMs = 0;
 
     const { clientId, clientSecret } = readCredentials();
     const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
     const body = new URLSearchParams({
       grant_type: "client_credentials",
-      scope: process.env.KROGER_SCOPE?.trim() || "product.compact",
+      scope: productScope(),
     });
 
     const response = await fetch(TOKEN_ENDPOINT, {
@@ -283,9 +323,10 @@ export class KrogerService {
   /**
    * GET /v1/locations?filter.zipCode.near={zip}&filter.limit=1
    * Throws when credentials are missing or the API rejects the ZIP.
-   * Shopper pricing catches that and uses the demo location. Ingest does not.
+   * A 401/403 drops the cached token and retries once. Shopper pricing then
+   * uses the last good store for that ZIP, and only then the demo location.
    */
-  private async lookupClosestStoreLocation(zipCode: string): Promise<string> {
+  private async lookupClosestStoreLocation(zipCode: string, attempt = 0): Promise<string> {
     const zip = normalizeZip(zipCode);
     const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
     const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
@@ -296,7 +337,7 @@ export class KrogerService {
       );
     }
 
-    const token = await this.getAccessToken();
+    const token = await this.getAccessToken(attempt > 0);
     const query = new URLSearchParams({
       "filter.zipCode.near": zip,
       "filter.limit": "1",
@@ -312,6 +353,14 @@ export class KrogerService {
     });
 
     if (!response.ok) {
+      if ((response.status === 401 || response.status === 403) && attempt === 0) {
+        console.warn(
+          `Kroger Locations API ${response.status} for ZIP ${zip} with scope ${productScope()}; refreshing the client-credentials token and retrying once`
+        );
+        this.accessToken = null;
+        this.tokenExpiresAtMs = 0;
+        return this.lookupClosestStoreLocation(zip, attempt + 1);
+      }
       throw new KrogerPricingError(
         `Kroger locations request failed (${response.status}) for ZIP ${zip}`,
         "http",
@@ -324,27 +373,63 @@ export class KrogerService {
     if (!locationId) {
       throw new Error(`No Kroger store found near ZIP ${zip}`);
     }
+    await rememberKrogerStore(zip, locationId);
     return locationId;
   }
 
   /**
-   * Closest store for shopper pricing. Falls back to the seeded demo location
-   * when credentials are missing or the official API rejects the request, so
-   * local pricing still works.
+   * Closest store for shopper pricing.
+   * Live id, then the last good id for this ZIP (kept for days), then the demo store.
    */
-  async getClosestStoreLocation(zipCode: string): Promise<string> {
+  async resolveClosestStore(zipCode: string): Promise<KrogerLocationResult> {
+    const zip = normalizeZip(zipCode);
     try {
-      return await this.lookupClosestStoreLocation(zipCode);
+      const locationId = await this.lookupClosestStoreLocation(zip);
+      const result: KrogerLocationResult = { locationId, source: "live", zip, lookupFailed: false };
+      this.lastLocationResult = result;
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/Invalid ZIP code/.test(message)) {
         throw error;
       }
-      console.warn(
-        `Kroger Locations API unavailable (${message}); using demo store ${demoLocationId()}`
-      );
-      return demoLocationId();
+      const unconfigured = error instanceof KrogerPricingError && error.code === "missing_credentials";
+      if (!unconfigured) {
+        const cached = await readKrogerStore(zip);
+        const demo = demoLocationId();
+        if (cached && cached !== demo) {
+          console.warn(
+            `Kroger Locations API unavailable (${message}); using last store ${cached} for ZIP ${zip}`
+          );
+          const result: KrogerLocationResult = { locationId: cached, source: "cached", zip, lookupFailed: true };
+          this.lastLocationResult = result;
+          return result;
+        }
+        console.warn(
+          `Kroger Locations API unavailable (${message}); using demo store ${demo} for ZIP ${zip}`
+        );
+        const result: KrogerLocationResult = { locationId: demo, source: "demo", zip, lookupFailed: true };
+        this.lastLocationResult = result;
+        return result;
+      }
+      const result: KrogerLocationResult = {
+        locationId: demoLocationId(),
+        source: "demo",
+        zip,
+        lookupFailed: false,
+      };
+      this.lastLocationResult = result;
+      return result;
     }
+  }
+
+  /**
+   * Closest store for shopper pricing. Falls back to the last known store for
+   * the ZIP, then the seeded demo location, when the official API rejects the request.
+   */
+  async getClosestStoreLocation(zipCode: string): Promise<string> {
+    const resolved = await this.resolveClosestStore(zipCode);
+    return resolved.locationId;
   }
 
   /**
@@ -429,38 +514,64 @@ export class KrogerService {
     return { products: payload.data ?? [], status: response.status };
   }
 
+  private async searchCleanTerm(query: string, storeId?: string): Promise<CatalogProduct[]> {
+    const rawPage = await this.fetchProductPayload(query, storeId);
+    const raw = rawPage.products;
+    const priced = raw
+      .map((product) => toCatalogProduct(product, storeId))
+      .filter((product): product is CatalogProduct => product !== null);
+
+    if (priced.length > 0 || !storeId || raw.length === 0) {
+      return priced;
+    }
+
+    const national = (await this.fetchProductPayload(query)).products;
+    return national
+      .map((product) => toCatalogProduct(product, storeId))
+      .filter((product): product is CatalogProduct => product !== null);
+  }
+
   /**
    * GET /v1/products?filter.term={term}&filter.locationId={id}&filter.limit=25
-   * Returns shelf prices for the nearest store when `locationId` is set.
+   * A Kroger UPC is looked up as the 13-digit product id first.
+   * The term is brand plus the core name. A 400 retries once with a shorter term.
    * If that store returns catalog rows without prices, retries without a
    * location and uses nationalPrice so ordinary items still price.
    */
   async searchProducts(
     term: string,
-    locationId?: string
+    locationId?: string,
+    lookup?: { upc?: string }
   ): Promise<CatalogProduct[]> {
-    const query = term.trim();
+    const storeId = locationId?.trim() || undefined;
+    const productId = krogerProductIdForLookup(lookup?.upc);
+    if (productId) {
+      try {
+        const byId = await this.productsById(productId, storeId);
+        if (byId.products.length > 0) {
+          return byId.products;
+        }
+      } catch (error) {
+        if (error instanceof KrogerPricingError && (error.status === 401 || error.status === 403)) {
+          throw error;
+        }
+      }
+    }
+
+    const query = buildKrogerSearchTerm(term);
     if (!query) {
       return [];
     }
 
     try {
-      const storeId = locationId?.trim() || undefined;
-      const rawPage = await this.fetchProductPayload(query, storeId);
-      const raw = rawPage.products;
-      const priced = raw
-        .map((product) => toCatalogProduct(product, storeId))
-        .filter((product): product is CatalogProduct => product !== null);
-
-      if (priced.length > 0 || !storeId || raw.length === 0) {
-        return priced;
-      }
-
-      const national = (await this.fetchProductPayload(query)).products;
-      return national
-        .map((product) => toCatalogProduct(product, storeId))
-        .filter((product): product is CatalogProduct => product !== null);
+      return await this.searchCleanTerm(query, storeId);
     } catch (error) {
+      if (error instanceof KrogerPricingError && error.status === 400) {
+        const shorter = shorterKrogerSearchTerm(term, query);
+        if (shorter) {
+          return await this.searchCleanTerm(shorter, storeId);
+        }
+      }
       if (error instanceof KrogerPricingError) {
         throw error;
       }

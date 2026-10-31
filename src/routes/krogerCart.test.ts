@@ -161,8 +161,9 @@ describe("Kroger cart handoff routes", () => {
       }),
     });
     assert.equal(response.status, 400);
-    const body = (await response.json()) as { error: string };
-    assert.match(body.error, /UPC/);
+    const body = (await response.json()) as { error: string; summary?: string };
+    assert.match(body.error, /couldn't be matched|nothing was sent/i);
+    assert.match(body.summary || "", /0 of 1 items sent, 1 couldn't be matched/);
   });
 
   it("returns a Kroger authorize URL whose state round-trips the cart payload", async () => {
@@ -385,7 +386,9 @@ describe("Kroger cart handoff routes", () => {
     assert.match(html, /Your cart is ready/);
     assert.match(html, /Finish checkout in the Kroger app or site/);
     assert.match(html, /Back to Grocery Gitter/);
-    assert.match(html, /accepted 2 items/i);
+    assert.match(html, /1 of 1 items sent/);
+    assert.match(html, /Added/);
+    assert.match(html, /Whole Milk|Milk/);
     assert.doesNotMatch(html, /location\.replace/);
     assert.match(html, /kroger\.com\/cart/);
     const ready = html.match(/href="(\/[^"]*kroger=added[^"]*)"/);
@@ -393,7 +396,7 @@ describe("Kroger cart handoff routes", () => {
     const readyUrl = new URL(ready[1].replaceAll("&amp;", "&"), "https://grocery.example");
     assert.equal(readyUrl.searchParams.get("kroger"), "added");
     assert.equal(readyUrl.searchParams.get("step"), "shop");
-    assert.match(readyUrl.searchParams.get("message") || "", /cart is ready/i);
+    assert.match(readyUrl.searchParams.get("message") || "", /1 of 1 items sent/);
     assert.equal(calls.length, 2);
     assert.match(calls[0].body, /grant_type=authorization_code/);
     assert.doesNotMatch(calls[0].body, /client_credentials/);

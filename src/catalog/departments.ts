@@ -125,7 +125,7 @@ const RULES: readonly Rule[] = [
   { test: /pet food|pet treats?/i, departmentId: "pet" },
   { test: /\b(?:dog|cat|pet|puppy|kitten|cedar|small animal)\s+bedding\b|\bcedar bedding\b/i, departmentId: "pet" },
   { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bag/i, departmentId: "household", subcategory: "Paper" },
-  { test: /dish soap|dish detergent|dishwasher|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
+  { test: /dish soap|dish detergent|dishwasher\s+(?:detergent|soap|pods?|pacs?|tablets?)|dishwashing|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
   { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
   { test: /isopropyl alcohol|rubbing alcohol|test strips?|\bteething\b|\b(?:tylenol|advil|ibuprofen|acetaminophen|aspirin)\b/i, departmentId: "personal-care", subcategory: "Health", kind: "health" },
@@ -382,7 +382,27 @@ const PET_CONSUMABLE =
  * Non-grocery general merchandise. These stay in Other and are not crawled.
  * A janitorial or food-service leaf under Industrial & Scientific is grocery.
  */
+/**
+ * A dishwasher machine is not dish soap. Detergent, soap, and pods stay grocery.
+ */
+function applianceLabel(name: string): string | null {
+  const text = name.trim();
+  if (!text) return null;
+  const supply = /\b(?:detergent|soap|pods?|pacs?|tablets?|rinse aid)\b/i.test(text);
+  if (/\b(?:undercounter|glasswasher|built-?in booster|\d{2,3}\s*-\s*\d{2,3}\s*v)\b/i.test(text) && !supply) {
+    return "appliance";
+  }
+  if (/\b(?:commercial|industrial)\b/i.test(text) && /\b(?:dishwasher|washer|oven|refrigerator|freezer|range)\b/i.test(text) && !supply) {
+    return "appliance";
+  }
+  if (/\bdishwashers?\b/i.test(text) && !supply) return "appliance";
+  if (/\b(?:appliances?|kitchen equipment)\b/i.test(text)) return "appliance";
+  return null;
+}
+
 function notGroceryLabel(categories: string[], name: string): string | null {
+  const appliance = applianceLabel(name);
+  if (appliance) return appliance;
   const segments = pathSegments(categories);
   const leaf = segments.at(-1) ?? "";
   const focus = `${leaf} ${name}`;
