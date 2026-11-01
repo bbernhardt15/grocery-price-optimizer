@@ -49,6 +49,7 @@ const DISPLAY = {
   "just bare": "Just Bare",
   "bell & evans": "Bell & Evans",
   "bell and evans": "Bell & Evans",
+  "arm and hammer": "Arm & Hammer",
   "sanderson farms": "Sanderson Farms",
   "national beef": "National Beef",
   "certified angus beef": "Certified Angus Beef",

@@ -131,6 +131,12 @@ function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
 
   score -= kindClash(query, hay);
 
+  const brandTokens = new Set(stems(item.brand || ""));
+  const flavorMiss = query.filter((token) => token.length >= 4 && !hayHas(hay, token) && !brandTokens.has(token));
+  const extra = hayTokens.filter((token) => token.length >= 4 && !query.includes(token) && !brandTokens.has(token));
+  if (hits > 0 && flavorMiss.length > 0 && extra.length > 0) score -= 0.55;
+  else if (!flavorMiss.length && query.length > 0) score += 0.15;
+
   if (item.brand) score += brandHit(item.brand, variant) ? 0.4 : -0.2;
   const wanted = item.size || (parsePackageSize(item.name) ? item.name : undefined);
   score += (1 - sizeDistance(wanted, variant)) * 0.18;
@@ -276,7 +282,10 @@ function dedupeReview(items: ImportReviewItem[]): ImportReviewItem[] {
   const byName = new Map<string, number>();
   for (const item of items) {
     const id = reviewIdentity(item);
-    const prior = (id.upc ? byUpc.get(id.upc) : undefined) ?? (id.name ? byName.get(id.name) : undefined);
+    const named = id.name ? byName.get(id.name) : undefined;
+    const coded = id.upc ? byUpc.get(id.upc) : undefined;
+    const upcName = coded == null ? "" : reviewIdentity(out[coded]).name;
+    const prior = named ?? (coded != null && (!id.name || !upcName || upcName === id.name) ? coded : undefined);
     if (prior == null) {
       const index = out.length;
       out.push({ ...item, quantity: Math.max(1, Math.min(99, item.quantity || 1)) });

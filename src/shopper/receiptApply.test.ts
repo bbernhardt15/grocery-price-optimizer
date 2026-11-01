@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { analyzeReceipt, learnReceiptLines } from "../import/receiptLearn";
 import { applyLearnedReceipts } from "../../public/shopper/receiptApply.js";
 import { applyLearnedChoice, learnedSummaryHtml, PAPER_WARNING, PRIVACY_NOTE, RECEIPT_HINT, STORE_HINTS, receiptUploadHtml } from "../../public/shopper/receiptCopy.js";
-import { readNdjsonResponse, readReceiptBatch } from "../../public/shopper/receiptImport.js";
+import { readNdjsonResponse, readReceiptBatch, resetReceiptReads } from "../../public/shopper/receiptImport.js";
 import { emptyProfile, parseProfile, saveUserProfile } from "../../public/shopper/profile.js";
 import { setCategoryPreference } from "../../public/shopper/categoryPreference.js";
 import { learnPreference } from "../../public/shopper/productPreference.js";
@@ -204,6 +204,35 @@ $5.99`);
     const analysis = await readNdjsonResponse(response, (event) => messages.push(String(event?.message || "")));
     assert.deepEqual(messages, ["Reading part 2 of 5…"]);
     assert.equal(analysis.lines[0].name, "Tide");
+
+    resetReceiptReads();
+    const file = new File([Uint8Array.from([1, 2, 3, 4])], "order.jpg", { type: "image/jpeg" });
+    let posts = 0;
+    const once = await readReceiptBatch(
+      {
+        photo: true,
+        postPhoto: async () => {
+          posts += 1;
+          return { lines: [{ name: "Milk" }] };
+        },
+      },
+      { files: [file] }
+    );
+    const twice = await readReceiptBatch(
+      {
+        photo: true,
+        postPhoto: async () => {
+          posts += 1;
+          return { lines: [{ name: "Milk" }] };
+        },
+        onProgress: (event) => messages.push(String(event?.message || "")),
+      },
+      { files: [file] }
+    );
+    assert.equal(posts, 1);
+    assert.equal(once.lines[0]?.name, "Milk");
+    assert.equal(twice.lines[0]?.name, "Milk");
+    assert.ok(messages.includes("Already read this file."));
     await assert.rejects(
       readNdjsonResponse(new Response(`${JSON.stringify({ type: "error", error: "nope" })}\n`), () => {}),
       /nope/

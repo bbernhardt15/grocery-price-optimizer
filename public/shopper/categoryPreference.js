@@ -223,6 +223,26 @@ function scanFamilies(text) {
   return hits;
 }
 
+function distributeSharedHead(parts) {
+  const out = (parts || []).map((part) => String(part || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (out.length !== 2) return out;
+  for (let i = 0; i < out.length; i += 1) {
+    const words = out[i].split(/\s+/).filter(Boolean);
+    if (words.length > 2 || familyFromQuery(out[i])) continue;
+    let head = "";
+    for (let j = i + 1; j < out.length; j += 1) {
+      const later = out[j].split(/\s+/).filter(Boolean);
+      if (later.length < 2) continue;
+      head = later[later.length - 1] || "";
+      break;
+    }
+    if (head.length < 3) continue;
+    if (words.some((word) => word.toLowerCase() === head.toLowerCase())) continue;
+    out[i] = `${out[i]} ${head}`.replace(/\s+/g, " ").trim();
+  }
+  return out;
+}
+
 export function parseNeedItems(text) {
   let cleaned = String(text || "")
     .replace(/[.?!]/g, ",")
@@ -232,7 +252,7 @@ export function parseNeedItems(text) {
     .replace(LEAD_IN, "")
     .replace(/^(?:get me|add|please get)\s+/i, "");
   if (!cleaned) return [];
-  const parts = cleaned.split(/\s*(?:,|;|\n|\band\b|\bplus\b|&)\s*/i);
+  const parts = distributeSharedHead(cleaned.split(/\s*(?:,|;|\n|\band\b|\bplus\b|&)\s*/i));
   const items = [];
   for (const part of parts) {
     const raw = part

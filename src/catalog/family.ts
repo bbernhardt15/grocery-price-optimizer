@@ -740,6 +740,45 @@ function variantOrder(a: BrowseVariant, b: BrowseVariant): number {
   );
 }
 
+function mergeOffers(left: CatalogOffer[], right: CatalogOffer[]): CatalogOffer[] {
+  const map = new Map<string, CatalogOffer>();
+  for (const offer of [...left, ...right]) {
+    const key = offer.storeName.trim().toLowerCase();
+    const prev = map.get(key);
+    if (!prev || offer.price < prev.price) map.set(key, { ...offer });
+  }
+  return [...map.values()];
+}
+
+/** Identical size labels inside one flavor become one pill. Offers are combined. */
+export function mergeEqualSizes(variants: BrowseVariant[]): BrowseVariant[] {
+  const groups = new Map<string, BrowseVariant>();
+  const order: string[] = [];
+  for (const variant of variants) {
+    const label = variant.label.trim().toLowerCase().replace(/\s+/g, " ");
+    const key = `${variant.flavorKey}|${label}`;
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { ...variant, offers: variant.offers.map((offer) => ({ ...offer })) });
+      order.push(key);
+      continue;
+    }
+    existing.offers = mergeOffers(existing.offers, variant.offers);
+    const cheaper = variant.price < existing.price;
+    if (cheaper) {
+      const offers = existing.offers;
+      Object.assign(existing, variant, { offers, flavorKey: existing.flavorKey, label: existing.label });
+    }
+    const best = existing.offers.reduce((winner, offer) => (offer.price < winner.price ? offer : winner), existing.offers[0]);
+    if (best) {
+      existing.bestOffer = best;
+      existing.price = best.price;
+      existing.storeName = best.storeName;
+    }
+  }
+  return order.map((key) => groups.get(key)!);
+}
+
 function disambiguateLabels(variants: BrowseVariant[]): BrowseVariant[] {
   const seen = new Map<string, number>();
   for (const variant of variants) {
@@ -782,7 +821,7 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
         departmentId: product.departmentId,
       })
     );
-    const labeled = disambiguateLabels(members.map(toVariant).sort(variantOrder));
+    const labeled = disambiguateLabels(mergeEqualSizes(members.map(toVariant).sort(variantOrder)));
     let variants = labeled.map((variant) => ({
       ...variant,
       imageUrls: frontImages(variant, labeled),

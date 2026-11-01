@@ -16,6 +16,10 @@ import { groupForAisle, normalizeStoreKey } from "./tripPlan.js";
 
 export const SEARCH_QUERY_MAX = 60;
 
+export function isPaddedBarcode(value) {
+  return /^\d{12,14}$/.test(String(value || "").replace(/\s+/g, ""));
+}
+
 const CART_WRITE = new Set(["kroger", "walmart"]);
 
 export function usesStoreReadyList(storeName) {
@@ -63,9 +67,9 @@ function capWords(phrase, max) {
  * @param {{ familyName?: string, query?: string, name?: string, size?: string } | null | undefined} item
  */
 export function cleanSearchQuery(item) {
-  const listing = String(item?.name || "");
-  const family = stripSearchSymbols(item?.familyName);
-  const query = stripSearchSymbols(item?.query);
+  const listing = isPaddedBarcode(item?.name) ? "" : String(item?.name || "");
+  const family = isPaddedBarcode(item?.familyName) ? "" : stripSearchSymbols(item?.familyName);
+  const query = isPaddedBarcode(item?.query) ? "" : stripSearchSymbols(item?.query);
   const name = stripSearchSymbols(listing);
   const long = isLongListingTitle(listing);
   let base = "";
@@ -84,6 +88,62 @@ export function cleanSearchQuery(item) {
     phrase = `${base} ${size}`.replace(/\s+/g, " ").trim();
   }
   return capWords(phrase, SEARCH_QUERY_MAX);
+}
+
+const STORE_HOMES = {
+  kroger: "https://www.kroger.com/",
+  walmart: "https://www.walmart.com/",
+  target: "https://www.target.com/",
+  aldi: "https://www.aldi.us/",
+  publix: "https://www.publix.com/",
+  heb: "https://www.heb.com/",
+  "h e b": "https://www.heb.com/",
+  meijer: "https://www.meijer.com/",
+  costco: "https://www.costco.com/",
+  "sams club": "https://www.samsclub.com/",
+  "whole foods": "https://www.wholefoodsmarket.com/",
+  "whole foods market": "https://www.wholefoodsmarket.com/",
+  "amazon fresh": "https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo",
+  "food lion": "https://shop.foodlion.com/",
+  safeway: "https://www.safeway.com/",
+  albertsons: "https://www.albertsons.com/",
+};
+
+/** Public store home, or "" when we do not have one. */
+export function storeHomeUrl(storeName) {
+  return STORE_HOMES[normalizeStoreKey(storeName)] || "";
+}
+
+/**
+ * A search or product URL that used a padded UPC becomes a name + size search.
+ * @param {string} url
+ * @param {{ familyName?: string, query?: string, name?: string, size?: string }} item
+ */
+export function repairStoreUrl(url, item) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return raw;
+  }
+  const host = parsed.hostname.replace(/^www\./, "");
+  const queryKeys = ["q", "query", "searchTerm", "k", "text", "keyword", "search_term"];
+  const current = queryKeys.map((key) => parsed.searchParams.get(key) || "").find(Boolean) || "";
+  const pathBarcode = parsed.pathname.match(/\/(?:ip|A-)(\d{12,14})(?:\/|$)/);
+  if (!isPaddedBarcode(current) && !pathBarcode) return raw;
+  const term = cleanSearchQuery(item);
+  if (host === "walmart.com") return `https://www.walmart.com/search?${new URLSearchParams({ q: term }).toString()}`;
+  if (host === "target.com") return `https://www.target.com/s?${new URLSearchParams({ searchTerm: term }).toString()}`;
+  if (host === "aldi.us") return `https://www.aldi.us/store/aldi/s?${new URLSearchParams({ k: term }).toString()}`;
+  let rewritten = false;
+  for (const key of queryKeys) {
+    if (!parsed.searchParams.has(key)) continue;
+    parsed.searchParams.set(key, term);
+    rewritten = true;
+  }
+  return rewritten ? parsed.toString() : raw;
 }
 
 /**
@@ -202,6 +262,7 @@ function decorateItem(storeName, item) {
   const priceBit = priceLabel ? ` — ${priceLabel}` : "";
   return {
     lineId: String(item?.lineId || ""),
+    query: String(item?.query || ""),
     quantity,
     name,
     size,

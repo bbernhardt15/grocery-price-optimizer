@@ -65,6 +65,7 @@ const DEPARTMENT_ORDER = [
 ];
 
 export const CHECKS_KEY = "gg-trip-checks";
+export const ITEM_CHECKS_KEY = "gg-item-checks";
 export const TRIP_SNAPSHOT_KEY = "gg-last-trip";
 
 export function normalizeStoreKey(storeName) {
@@ -265,10 +266,11 @@ function lineFromOffer(item, offer) {
   };
 }
 
-function numericWalmartId(item) {
+export function numericWalmartId(item) {
   if (item?.priceSource === "weekly_ad" || item?.priceSource === "seed") return "";
   const id = String(item?.productId || "").trim();
-  return /^\d+$/.test(id) ? id : "";
+  if (!/^\d+$/.test(id) || /^\d{12,14}$/.test(id)) return "";
+  return id;
 }
 
 function formatIdQty(id, quantity) {
@@ -813,6 +815,92 @@ export function writeCheck(storage, tripId, lineId, checked) {
   return row;
 }
 
+/** Stable across a replan: store plus the item name, not the trip fingerprint. */
+export function itemCheckKey(storeName, item) {
+  const store = normalizeStoreKey(storeName || item?.storeName || "");
+  const name = String(item?.query || item?.name || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!store || !name) return "";
+  return `${store}|${name}`;
+}
+
+function readItemCheckMap(storage) {
+  try {
+    const parsed = JSON.parse(storage.getItem(ITEM_CHECKS_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function readItemChecks(storage) {
+  if (!storage) return {};
+  const row = readItemCheckMap(storage);
+  const out = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value) out[key] = true;
+  }
+  return out;
+}
+
+export function writeItemCheck(storage, key, checked) {
+  if (!storage || !key) return {};
+  const all = readItemCheckMap(storage);
+  if (checked) all[key] = true;
+  else delete all[key];
+  storage.setItem(ITEM_CHECKS_KEY, JSON.stringify(all));
+  return readItemChecks(storage);
+}
+
+export function itemIsChecked(item, storeName, tripChecks, itemChecks) {
+  if (item?.lineId && tripChecks?.[item.lineId]) return true;
+  const key = itemCheckKey(storeName, item);
+  return Boolean(key && itemChecks?.[key]);
+}
+
+export function normalizedPlanName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function namesMatch(left, right) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  return left.includes(right) || right.includes(left);
+}
+
+/**
+ * Drop plan lines that are no longer on the list and recompute store totals.
+ * An empty list clears every store.
+ */
+export function pruneStoresToList(stores, entries) {
+  const rows = entries || [];
+  if (!rows.length) return [];
+  const names = rows.map((entry) => normalizedPlanName(entry.name || entry.query)).filter(Boolean);
+  const ids = new Set(rows.map((entry) => String(entry.id || entry.catalogId || entry.upc || "").trim()).filter(Boolean));
+  return (stores || [])
+    .map((store) => {
+      const items = (store.items || []).filter((item) => {
+        const id = String(item.catalogId || item.upc || item.productId || "").trim();
+        if (id && ids.has(id)) return true;
+        const name = normalizedPlanName(item.query || item.name);
+        return names.some((wanted) => namesMatch(wanted, name));
+      });
+      const subtotal = roundMoney(items.reduce((sum, item) => sum + Number(item.itemTotal ?? (Number(item.price) || 0) * (Number(item.quantity) || 1)), 0));
+      const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+      return { ...store, items, subtotal, itemCount };
+    })
+    .filter((store) => (store.items || []).length);
+}
+
 export function saveTripSnapshot(storage, payload, edits) {
   if (!storage || !payload) return;
   storage.setItem(
@@ -838,6 +926,11 @@ export function readTripSnapshot(storage) {
   } catch {
     return null;
   }
+}
+
+export function clearTripSnapshot(storage) {
+  if (!storage) return;
+  storage.removeItem(TRIP_SNAPSHOT_KEY);
 }
 
 export function shareItemId(item, index) {

@@ -559,6 +559,37 @@ describe("demo shelf grouping", () => {
     assert.ok(stats.groupedShare > 0 && stats.groupedShare < 1);
     assert.equal(stats.products, demoBrowseProducts().length);
   });
+
+  it("collapses identical Fairlife 52 fl oz pills and merges their offers", () => {
+    const milk = (id: string, size: string, store: string, price: number): BrowseProduct => ({
+      id,
+      name: "Fairlife Whole Milk",
+      brand: "Fairlife",
+      imageUrls: [],
+      departmentId: "dairy-eggs",
+      departmentName: "Dairy & Eggs",
+      sizeLabel: size,
+      storeBrand: false,
+      upc: id,
+      offers: [offer(price, store)],
+      bestOffer: offer(price, store),
+    });
+    const tiles = groupBrowseFamilies([
+      milk("a", "52 fl oz", "Walmart", 4.28),
+      milk("b", "52 fl oz", "Kroger", 4.48),
+      milk("c", "52 fl oz", "Target", 4.68),
+      milk("d", "52 fl oz", "Aldi", 3.99),
+      milk("e", "1 gal", "Walmart", 3.28),
+    ]);
+    const fairlife = tiles.find((tile) => tile.brand === "Fairlife");
+    assert.ok(fairlife);
+    const labels = (fairlife?.variants || []).map((variant) => variant.label);
+    assert.equal(labels.filter((label) => label === "52 fl oz").length, 1);
+    assert.ok(labels.some((label) => /1 gal|128 fl oz/.test(label)));
+    const bottle = fairlife?.variants.find((variant) => variant.label === "52 fl oz");
+    assert.ok((bottle?.offers.length || 0) >= 4);
+    assert.equal(bottle?.price, 3.99);
+  });
 });
 
 describe("family sample summary", () => {

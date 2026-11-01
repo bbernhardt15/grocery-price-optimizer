@@ -199,6 +199,24 @@ describe("import routes", () => {
     assert.ok(calls.some((url) => url.includes("/audio/transcriptions")));
   });
 
+  it("returns the same receipt photo from the content hash without a second vision call", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    process.env.IMPORT_DAILY_LIMIT = "1";
+    const image = Buffer.from("same-receipt-bytes").toString("base64");
+    const first = await post("/api/import/photo", { imageBase64: image, mimeType: "image/jpeg" }, "device-receipt-cache");
+    assert.equal(first.status, 200);
+    const visionCalls = calls.filter((url) => url.includes("/chat/completions")).length;
+    calls.length = 0;
+    const second = await post("/api/import/photo", { imageBase64: image, mimeType: "image/jpeg" }, "device-receipt-cache");
+    assert.equal(second.status, 200);
+    assert.equal(calls.filter((url) => url.includes("/chat/completions")).length, 0);
+    assert.equal(visionCalls >= 1, true);
+    const again = (await second.json()) as { items?: Array<{ name?: string }> };
+    assert.equal(again.items?.[0]?.name, "bananas");
+  });
+
   it("suggests a goal only when AI is configured and stops at the daily cap", async () => {
     process.env.OPENAI_API_KEY = "test-key";
     process.env.IMPORT_AI_PROVIDER = "openai";

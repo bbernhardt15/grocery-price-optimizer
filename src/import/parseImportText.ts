@@ -3,6 +3,8 @@
  * grocery lines. No prices are kept. Junk chrome is dropped.
  */
 
+import { familyFromQuery } from "../catalog/stapleFamilies";
+
 export type ParsedImportItem = {
   raw: string;
   name: string;
@@ -307,19 +309,57 @@ function parseRows(lines: string[]): Draft[] {
   return items;
 }
 
+const LEAD_IN =
+  /^(?:(?:um+|uh+|hey|hi|ok|okay|so|well|please)\s+)*(?:(?:i|we)(?:'d| would)?\s+)?(?:need|want|would like|wanna|gonna (?:get|buy)|get|buy|grab|pick up)\s+/i;
+
+function stripLead(text: string): string {
+  let value = clean(text);
+  for (let i = 0; i < 3; i += 1) {
+    const next = clean(value.replace(LEAD_IN, ""));
+    if (!next || next === value) break;
+    value = next;
+  }
+  return value;
+}
+
+/**
+ * "cinnamon and cherry pop-tarts" keeps the shared head on both sides.
+ * A part that is already its own grocery ("milk and cherry pop-tarts") stays put.
+ */
+export function distributeSharedHead(parts: string[]): string[] {
+  const out = parts.map((part) => clean(part)).filter(Boolean);
+  if (out.length !== 2) return out;
+  for (let i = 0; i < out.length; i += 1) {
+    const words = out[i].split(/\s+/).filter(Boolean);
+    if (words.length > 2 || familyFromQuery(out[i])) continue;
+    let head = "";
+    for (let j = i + 1; j < out.length; j += 1) {
+      const later = out[j].split(/\s+/).filter(Boolean);
+      if (later.length < 2) continue;
+      head = later[later.length - 1] || "";
+      break;
+    }
+    if (head.length < 3) continue;
+    if (words.some((word) => word.toLowerCase() === head.toLowerCase())) continue;
+    out[i] = clean(`${out[i]} ${head}`);
+  }
+  return out;
+}
+
 function splitProse(text: string): string[] {
-  let value = text;
+  let value = stripLead(text);
   for (const [pattern, token] of COMPOUNDS) value = value.replace(pattern, token);
-  return value
+  const parts = value
     .split(/\s*,\s*(?:and\s+)?|\s+and\s+/i)
-    .map((part) => clean(part))
+    .map((part) => stripLead(clean(part)))
     .filter(Boolean);
+  return distributeSharedHead(parts);
 }
 
 function looseLines(text: string): string[] {
   const lines = text
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => stripLead(line.trim()))
     .filter(Boolean);
   const commas = (text.match(/,/g) || []).length;
   const prose = lines.length <= 2 && (commas >= 2 || /\band\b/i.test(text));

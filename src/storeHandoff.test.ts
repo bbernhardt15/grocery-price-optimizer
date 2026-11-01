@@ -14,6 +14,7 @@ import {
   walmartSearchUrl,
   aldiSearchUrl,
   partnerSearchUrl,
+  cleanRetailQuery,
   KROGER_CART_START_PATH,
 } from "./storeHandoff";
 
@@ -94,10 +95,51 @@ describe("store handoff URLs", () => {
     );
   });
 
+  it("never searches Walmart by the padded UPC 0099997200115", () => {
+    const oreo = {
+      name: "OREO O's Cereal",
+      query: "OREO O's Cereal",
+      size: "17 oz",
+      upc: "0099997200115",
+      productId: "0099997200115",
+      priceSource: "seed" as const,
+    };
+    const url = walmartSearchUrl(oreo);
+    assert.equal(url.includes("0099997200115"), false);
+    const parsed = new URL(url);
+    assert.equal(parsed.origin + parsed.pathname, "https://www.walmart.com/search");
+    const term = parsed.searchParams.get("q") || "";
+    assert.match(term, /oreo/i);
+    assert.match(term, /17 oz/i);
+    assert.doesNotMatch(term, /\d{12,}/);
+    assert.equal(cleanRetailQuery(oreo).includes("0099997200115"), false);
+
+    const live = walmartSearchUrl({
+      name: "OREO O's Cereal",
+      size: "17 oz",
+      upc: "0099997200115",
+      productId: "10451234",
+      priceSource: "live",
+      quantity: 1,
+    });
+    assert.equal(live, "https://www.walmart.com/sc/cart/addToCart?items=10451234");
+    assert.equal(live.includes("0099997200115"), false);
+
+    const aldi = new URL(aldiSearchUrl(oreo));
+    assert.equal(aldi.href.includes("0099997200115"), false);
+    assert.match(aldi.searchParams.get("k") || "", /OREO Os Cereal 17 oz/);
+    const target = new URL(targetSearchUrl({ ...oreo, productId: "0099997200115" }));
+    assert.equal(target.href.includes("0099997200115"), false);
+    assert.match(target.searchParams.get("searchTerm") || "", /OREO Os Cereal 17 oz/);
+    const publix = partnerSearchUrl("Publix", oreo);
+    assert.equal(String(publix).includes("0099997200115"), false);
+    assert.match(new URL(publix || "https://www.publix.com/").searchParams.get("searchTerm") || "", /OREO Os Cereal/);
+  });
+
   it("uses retailer product ids for Walmart and Target when live pricing returned them", () => {
     assert.equal(
       walmartSearchUrl({ name: "Whole Milk", productId: "554433" }),
-      "https://www.walmart.com/ip/554433"
+      "https://www.walmart.com/sc/cart/addToCart?items=554433"
     );
     assert.equal(
       targetSearchUrl({ name: "Large Eggs", productId: "12345678" }),
@@ -264,7 +306,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(url.searchParams.get("items"), "554433|2,998877");
     assert.equal(url.searchParams.get("storeId"), null);
     assert.equal(url.searchParams.get("ap"), null);
-    assert.match(handoff.action.fallbackUrl ?? "", /walmart\.com\/ip\/554433/);
+    assert.match(handoff.action.fallbackUrl ?? "", /walmart\.com\/sc\/cart\/addToCart\?items=554433/);
     assert.match(handoff.action.detail ?? "", /WALMART_PUBLISHER_ID is unset/);
     assert.match(handoff.action.detail ?? "", /does not report the cart as filled/);
   });
@@ -387,7 +429,7 @@ describe("buildStoreHandoff", () => {
         productId: "1041810480",
         priceSource: "weekly_ad",
       }),
-      "https://www.target.com/s?searchTerm=Good+%26+Gather+Large+Eggs"
+      "https://www.target.com/s?searchTerm=Good+and+Gather+Large+Eggs"
     );
   });
 
@@ -501,7 +543,7 @@ describe("buildStoreHandoff", () => {
     assert.equal(publix.action.status, "ready");
     assert.equal(
       partnerSearchUrl("Publix", milk),
-      "https://www.publix.com/search?searchTerm=041415000001"
+      "https://www.publix.com/search?searchTerm=Whole%20Milk"
     );
     assert.equal(publix.action.url, partnerSearchUrl("Publix", milk));
     assert.match(publix.action.detail ?? "", /not a cart fill/i);
