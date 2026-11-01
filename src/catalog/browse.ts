@@ -57,7 +57,7 @@ export function filterProducts(products: BrowseProduct[], filters: BrowseFilters
         return false;
       }
     }
-    if (brand && product.brand.toLowerCase() !== brand) {
+    if (brand && brandFold(product.brand) !== brandFold(brand)) {
       return false;
     }
     if (filters.onSale && !product.offers.some((offer) => offer.onSale && (!store || offer.storeName.toLowerCase() === store))) {
@@ -191,13 +191,33 @@ export type BrowseFacets = {
   subcategories: string[];
 };
 
+function brandFold(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9'%. ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function preferBrand(current: string, next: string): string {
+  const currentAmp = current.includes("&");
+  const nextAmp = next.includes("&");
+  if (nextAmp && !currentAmp) return next;
+  if (currentAmp && !nextAmp) return current;
+  return current.length <= next.length ? current : next;
+}
+
 export function facetsFor(products: BrowseProduct[]): BrowseFacets {
-  const brands = new Set<string>();
+  const brands = new Map<string, string>();
   const stores = new Set<string>();
   const subcategories = new Set<string>();
   for (const product of products) {
-    if (product.brand.trim()) {
-      brands.add(product.brand.trim());
+    const brand = product.brand.trim();
+    if (brand) {
+      const key = brandFold(brand);
+      const current = brands.get(key);
+      brands.set(key, current ? preferBrand(current, brand) : brand);
     }
     if (product.subcategory) {
       subcategories.add(product.subcategory);
@@ -208,7 +228,7 @@ export function facetsFor(products: BrowseProduct[]): BrowseFacets {
   }
   const sort = (values: Set<string>) => [...values].sort((a, b) => a.localeCompare(b));
   return {
-    brands: sort(brands),
+    brands: [...brands.values()].sort((a, b) => a.localeCompare(b)),
     stores: sort(stores),
     subcategories: sort(subcategories),
   };

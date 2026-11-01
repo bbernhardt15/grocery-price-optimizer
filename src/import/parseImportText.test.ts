@@ -201,6 +201,23 @@ describe("parseImportText real lists", () => {
     assert.match(upc[0]?.name || "", /milk/i);
   });
 
+  it("keeps cinnamon and cherry pop-tarts as two items", () => {
+    const spoken = parseImportText("I need cinnamon pop-tarts and cherry pop-tarts");
+    assert.equal(spoken.length, 2);
+    assert.match(spoken[0]?.name || "", /cinnamon pop-tarts/i);
+    assert.match(spoken[1]?.name || "", /cherry pop-tarts/i);
+    assert.equal(spoken[0]?.name.toLowerCase().includes("i need"), false);
+
+    const shared = parseImportText("cinnamon and cherry pop-tarts");
+    assert.equal(shared.length, 2);
+    assert.match(shared[0]?.name || "", /cinnamon pop-tarts/i);
+    assert.match(shared[1]?.name || "", /cherry pop-tarts/i);
+
+    const milk = parseImportText("milk and cherry pop-tarts");
+    assert.match(milk[0]?.name || "", /^milk$/i);
+    assert.match(milk[1]?.name || "", /cherry pop-tarts/i);
+  });
+
   it("combines duplicates and skips same-as-last-time", () => {
     const items = parseImportText("bananas\nbananas\nsame as last time\nthe usual");
     assert.equal(items.length, 1);

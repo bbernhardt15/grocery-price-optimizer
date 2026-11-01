@@ -67,3 +67,29 @@ export function createSilenceWatch(options) {
     },
   };
 }
+
+/**
+ * Stop the recorder and every track. iOS keeps the red mic indicator until
+ * the MediaStream tracks themselves stop.
+ * @param {{ mediaRecorder?: { state?: string, stop?: () => void, stream?: { getTracks?: () => Array<{ stop?: () => void }> } }, stream?: { getTracks?: () => Array<{ stop?: () => void }> } } | null | undefined} capture
+ */
+export function releaseMicrophone(capture) {
+  const recorder = capture?.mediaRecorder;
+  const stream = capture?.stream || recorder?.stream;
+  if (recorder && recorder.state !== "inactive" && typeof recorder.stop === "function") {
+    try {
+      recorder.stop();
+    } catch {
+      /* already stopped */
+    }
+  }
+  const tracks = typeof stream?.getTracks === "function" ? stream.getTracks() : [];
+  for (const track of tracks) {
+    try {
+      track.stop?.();
+    } catch {
+      /* already stopped */
+    }
+  }
+  return tracks.length;
+}

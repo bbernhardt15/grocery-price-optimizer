@@ -34,7 +34,10 @@ export function dedupeReviewItems(items) {
     if (!item) continue;
     const upc = normUpc(item);
     const name = normName(item);
-    const priorIndex = (upc && byUpc.has(upc) ? byUpc.get(upc) : undefined) ?? (name && byName.has(name) ? byName.get(name) : undefined);
+    const named = name && byName.has(name) ? byName.get(name) : undefined;
+    const coded = upc && byUpc.has(upc) ? byUpc.get(upc) : undefined;
+    const codedName = coded == null ? "" : normName(out[coded]);
+    const priorIndex = named ?? (coded != null && (!name || !codedName || codedName === name) ? coded : undefined);
     if (priorIndex == null) {
       const copy = { ...item, quantity: Math.max(1, Math.min(99, Number(item.quantity) || 1)) };
       const index = out.length;

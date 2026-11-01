@@ -25,7 +25,7 @@ import {
 } from "./profileOnboarding.js";
 import { learnPreference, forgetPreference, isStoreBrand } from "./productPreference.js";
 import { applyCheapestDefaults, asksNameBrand, categorySearch, nameBrandsFor, preferenceCategories, setCategoryPreference } from "./categoryPreference.js";
-import { displayBrand, isProduceFamily } from "./brandNames.js";
+import { brandKey, displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
@@ -271,7 +271,7 @@ export function mountProfileOnboarding(deps = {}) {
     return null;
   }
 
-  function render() {
+  function render(options = {}) {
     const step = stepById(stepId);
     const title = $("profile-title");
     const hint = $("profile-hint");
@@ -316,7 +316,9 @@ export function mountProfileOnboarding(deps = {}) {
     if (stage) stage.innerHTML = stageHtml(step);
     bindPlaceInput();
     bindReceiptInput();
-    if (step.kind === "place" || step.kind === "zip") paintStoreList();
+    if ((step.kind === "place" || step.kind === "zip") && !options.deferStores) paintStoreList();
+    else if (options.deferStores) showStoreSkeleton();
+    if (step.kind === "welcome") warmStores();
     if (next && !(dietMode && step.id === "diets")) {
       if (reading) next.disabled = !readingReady;
       else next.disabled = step.id === "receipts" && !learned ? !receiptReady() : false;
@@ -329,6 +331,29 @@ export function mountProfileOnboarding(deps = {}) {
 
   function currentZipRaw() {
     return String($("profile-zip")?.value || deps.getZip?.() || "").trim();
+  }
+
+  let storesWarmed = "";
+  function warmStores() {
+    const zip = normalizeZipInput(currentZipRaw());
+    if (!/^\d{5}/.test(zip) || storesWarmed === zip) return;
+    storesWarmed = zip;
+    const run = () => {
+      try {
+        storesForZip(zip);
+      } catch {
+        storesWarmed = "";
+      }
+    };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 500 });
+    else setTimeout(run, 0);
+  }
+
+  function showStoreSkeleton() {
+    const host = $("profile-store-list");
+    if (host) host.innerHTML = `<div class="read-skel" aria-busy="true" aria-label="Loading stores"><span></span><span></span><span></span></div>`;
+    const note = $("profile-store-note");
+    if (note) note.textContent = "Finding stores near you…";
   }
 
   function paintStoreList() {
@@ -399,8 +424,8 @@ export function mountProfileOnboarding(deps = {}) {
     const seen = new Set();
     for (const name of [...detected, ...known, ...shelfNames].map((item) => displayBrand(item)).filter(Boolean)) {
       if (!name || isStoreBrand(name) || isProduceFamily(row?.family)) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
+      const key = brandKey(name);
+      if (!key || seen.has(key)) continue;
       seen.add(key);
       names.push(name);
     }
@@ -1031,8 +1056,21 @@ export function mountProfileOnboarding(deps = {}) {
     }
     draft = skipped ? skipStep(draft, stepId, at) : answerStep(draft, stepId, answer, at);
     if (!skipped && stepById(stepId).kind === "products") draft = rememberPicks(at);
+    const leavingWelcome = stepId === "welcome";
     stepId = draft.onboarding.step;
     motion = "forward";
+    if (leavingWelcome) {
+      render({ deferStores: true });
+      focusTitle();
+      const nextDraft = draft;
+      const paint = () => {
+        persist(nextDraft);
+        paintStoreList();
+      };
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(paint));
+      else setTimeout(paint, 0);
+      return;
+    }
     persist(draft);
     render();
     focusTitle();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { filterProducts, paginateProducts, sizeClassOf, sortProducts } from "./browse";
+import { facetsFor, filterProducts, paginateProducts, sizeClassOf, sortProducts } from "./browse";
 import type { BrowseProduct, CatalogOffer } from "./types";
 
 function offer(overrides: Partial<CatalogOffer> & Pick<CatalogOffer, "storeName" | "price">): CatalogOffer {
@@ -187,5 +187,17 @@ describe("filter and sort", () => {
     assert.equal(page.total, 5);
     assert.equal(page.nextCursor, "4");
     assert.equal(paginateProducts([1], 0, 24).nextCursor, null);
+  });
+
+  it("lists Arm & Hammer once when the feed also says Arm and Hammer", () => {
+    const hammer = (brand: string, id: string) =>
+      product({
+        id,
+        name: "Laundry Detergent",
+        brand,
+        offers: [offer({ storeName: "Walmart", price: 6 })],
+      });
+    const facets = facetsFor([hammer("Arm & Hammer", "a"), hammer("Arm and Hammer", "b"), hammer("Tide", "c")]);
+    assert.deepEqual(facets.brands, ["Arm & Hammer", "Tide"]);
   });
 });

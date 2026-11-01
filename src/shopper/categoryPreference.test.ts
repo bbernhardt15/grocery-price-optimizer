@@ -79,6 +79,15 @@ describe("category preferences", () => {
     });
     assert.equal(isPreferenceList("I need bread, milk, eggs, bacon, steak, chili, cilantro"), true);
     assert.deepEqual(parseNeedItems("bread, milk, eggs").map((item) => item.family), ["bread", "milk", "eggs"]);
+    const pastries = parseNeedItems("I need cinnamon pop-tarts and cherry pop-tarts");
+    assert.deepEqual(
+      pastries.map((item) => item.raw),
+      ["cinnamon pop-tarts", "cherry pop-tarts"]
+    );
+    assert.deepEqual(
+      parseNeedItems("cinnamon and cherry pop-tarts").map((item) => item.raw),
+      ["cinnamon pop-tarts", "cherry pop-tarts"]
+    );
     assert.equal(list.added.some((row) => row.family === "steak"), false);
     assert.ok(list.skipped.some((row) => row.family === "steak" && row.declined));
     assert.ok(list.ask.some((row) => row.family === "bread"));

@@ -71,8 +71,10 @@ import {
   moveOptionLabel,
   priceSourceLabel,
   readChecks,
+  readItemChecks,
   readTripSnapshot,
   saveTripSnapshot,
+  clearTripSnapshot,
   shareItemId,
   consolidateStops,
   fewerStorePlan,
@@ -83,10 +85,18 @@ import {
   swapSentence,
   tripFingerprint,
   writeCheck,
+  writeItemCheck,
+  itemCheckKey,
+  itemIsChecked,
+  numericWalmartId,
+  walmartCartUrl,
+  pruneStoresToList,
 } from "./shopper/tripPlan.js";
 import {
   buildStoreReadyList,
+  repairStoreUrl,
   shareStoreList,
+  storeHomeUrl,
   storeSearchLinkTarget,
   storeSearchUrl,
   usesStoreReadyList,
@@ -1202,8 +1212,11 @@ function renderEstimate() {
   savingsEl.setAttribute("aria-busy", "false");
   loadingNote.hidden = true;
   listBar.dataset.state = meter.status;
-  estimateTotalEl.textContent = money(meter.splitTotal);
-  lastBarTotal = meter.status === "empty" ? 0 : meter.splitTotal;
+  const planned = currentTrip();
+  const plannedTotal = planned?.stores?.length ? planned.total : null;
+  const shownTotal = plannedTotal == null ? meter.splitTotal : plannedTotal;
+  estimateTotalEl.textContent = money(shownTotal);
+  lastBarTotal = meter.status === "empty" && plannedTotal == null ? 0 : shownTotal;
   estimateNoteEl.textContent = copy.note;
   meterCaptionEl.textContent = copy.caption;
   barCaption.textContent = meter.status === "empty" ? "Add items to see savings" : copy.caption;
@@ -1307,6 +1320,7 @@ function setQuantity(id, quantity) {
   saveList();
   renderEstimate();
   syncCards();
+  onListChanged();
 }
 
 function addProduct(product, quantity = 1, options = {}) {
@@ -1335,6 +1349,7 @@ function addProduct(product, quantity = 1, options = {}) {
   saveList();
   renderEstimate();
   syncCards();
+  onListChanged();
   queueWrite(entry, false);
   const card = gridEl.querySelector(`[data-product-id="${CSS.escape(product.id)}"]`);
   if (card) {
@@ -1651,7 +1666,19 @@ function fillFacets(facets) {
   const brand = $("filter-brand");
   if (!brand) return;
   const current = brand.value;
-  const values = facets.brands ?? [];
+  const folded = new Map();
+  for (const value of facets.brands ?? []) {
+    const key = String(value || "")
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9'%. ]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!key) continue;
+    const prev = folded.get(key);
+    if (!prev || (String(value).includes("&") && !String(prev).includes("&"))) folded.set(key, value);
+  }
+  const values = [...folded.values()];
   brand.innerHTML = [`<option value="">All brands</option>`]
     .concat(values.map((value) => `<option ${value === current ? "selected" : ""}>${escapeHtml(value)}</option>`))
     .join("");
@@ -2104,11 +2131,59 @@ function spreadTrip() {
   return { ...consolidated, stores: narrowStores(consolidated.stores || []) };
 }
 
+function listEntries() {
+  return [...list.values()].map((entry) => ({
+    id: entry.product?.id || "",
+    upc: entry.product?.upc || "",
+    name: entry.product?.catalogName || entry.product?.familyName || entry.product?.name || "",
+    quantity: entry.quantity,
+  }));
+}
+
+function listSignature() {
+  return listEntries()
+    .map((entry) => `${entry.id}|${entry.name}|${entry.quantity}`)
+    .sort()
+    .join("\n");
+}
+
+let replanTimer = 0;
+let plannedSignature = "";
+
+function refreshPlanSurfaces() {
+  if (flowStep === "shop") renderShop();
+  else if (flowStep === "plan") paintTrip();
+  paintPlanBar();
+}
+
+function onListChanged() {
+  const sig = listSignature();
+  if (!list.size) {
+    lastOptimize = null;
+    plannedSignature = "";
+    clearTripSnapshot(localStorage);
+    window.clearTimeout(replanTimer);
+    refreshPlanSurfaces();
+    return;
+  }
+  refreshPlanSurfaces();
+  if (!lastOptimize || plannedSignature === sig || flowStep === "add") return;
+  window.clearTimeout(replanTimer);
+  replanTimer = window.setTimeout(() => {
+    if (!list.size || listSignature() === plannedSignature) return;
+    void planTrip({ stay: true });
+  }, 280);
+}
+
 function currentTrip() {
+  if (!list.size) return null;
   const spread = spreadTrip();
-  if (!spread || planLimited("multiStoreSplit") || tripEdits.planMode !== "fewer") return spread;
-  const fewer = fewerStorePlan(narrowStores(spread.stores), lastOptimize.capabilities || {});
-  return { ...spread, stores: fewer.stores, total: fewer.total };
+  if (!spread) return null;
+  const mode = !planLimited("multiStoreSplit") && tripEdits.planMode === "fewer" ? "fewer" : "spread";
+  const base = mode === "fewer" ? fewerStorePlan(narrowStores(spread.stores), lastOptimize?.capabilities || {}) : spread;
+  const stores = pruneStoresToList(base.stores || spread.stores, listEntries());
+  const total = stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0);
+  return { ...spread, ...base, stores, total: Math.round(total * 100) / 100, stale: stores.length === 0 };
 }
 
 function rememberTrip() {
@@ -2261,22 +2336,47 @@ function readySearchAnchor(storeName, item, url) {
   const href = url || storeSearchUrl(storeName, item);
   if (!href) return "";
   const name = displayProductName(item?.name, item?.brand) || item?.name || "item";
-  return `<a class="text-btn ready-search" href="${escapeHtml(href)}"${searchLinkTargetAttrs()}>Search<span class="sr-only"> ${escapeHtml(storeName)} for ${escapeHtml(name)}</span></a>`;
+  return `<a class="text-btn ready-search" href="${escapeHtml(href)}" data-external-link="${escapeHtml(href)}"${searchLinkTargetAttrs()}>Search<span class="sr-only"> ${escapeHtml(storeName)} for ${escapeHtml(name)}</span></a>`;
 }
 
-function readyRowsHtml(model, checks) {
+function checkBag() {
+  return { line: readChecks(localStorage, tripId()), item: readItemChecks(localStorage) };
+}
+
+function mergedTripChecks(stores) {
+  const bag = checkBag();
+  const merged = { ...bag.line };
+  for (const store of stores || []) {
+    for (const item of store.items || []) {
+      if (item?.lineId && itemIsChecked(item, store.storeName, bag.line, bag.item)) merged[item.lineId] = true;
+    }
+  }
+  return merged;
+}
+
+function rowOn(item, storeName, bag = checkBag()) {
+  return itemIsChecked(item, storeName, bag.line, bag.item);
+}
+
+function checkAttrs(item, storeName) {
+  const key = itemCheckKey(storeName, item);
+  return ` data-check-store="${escapeHtml(storeName || "")}" data-check-key="${escapeHtml(key)}"`;
+}
+
+function readyRowsHtml(model, checks, itemChecks = readItemChecks(localStorage)) {
+  const bag = { line: checks, item: itemChecks };
   return model.groups
     .map((group) => {
       const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
       const rows = group.items
         .map((item) => {
-          const on = item.lineId && checks[item.lineId];
+          const on = rowOn(item, model.storeName, bag);
           const size = item.size && !item.name.toLowerCase().includes(item.size.toLowerCase()) ? `, ${escapeHtml(item.size)}` : "";
           const price = item.priceLabel ? `<span class="ready-price">${escapeHtml(item.priceLabel)}</span>` : "";
           const search = readySearchAnchor(model.storeName, item, item.searchUrl);
           return `<li class="ready-line${on ? " is-done" : ""}" data-ready-line="${escapeHtml(item.lineId)}">
             <label class="ready-check">
-              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId)}"${on ? " checked" : ""} />
+              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId)}"${checkAttrs(item, model.storeName)}${on ? " checked" : ""} />
               <span class="ready-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span>
             </label>
             ${price}
@@ -2360,6 +2460,7 @@ function addOwnCoupon(button) {
 
 function renderTrip(payload) {
   lastOptimize = payload;
+  plannedSignature = listSignature();
   tripEdits = { lockedStore: null, moves: {} };
   rememberTrip();
   if (flowStep === "shop") renderShop();
@@ -2467,7 +2568,17 @@ function customizeBlock(stores) {
 
 function paintTrip() {
   const view = currentTrip();
-  if (!view) return;
+  if (!view?.stores?.length) {
+    if (!list.size) {
+      tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
+    } else if (!lastOptimize) {
+      tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted">Review the split to price this list.</p>`;
+    } else {
+      tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted" id="plan-status-line">Updating the plan…</p><div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`;
+    }
+    paintPlanBar();
+    return;
+  }
   const stores = view.stores ?? [];
   const lines = stores.flatMap((store) => store.items || []);
   const card = savingsCard(singleStoreSavings(lines));
@@ -2486,11 +2597,11 @@ function paintTrip() {
   const lineItems = (card.lines || [])
     .map((line) => `<li><span>${escapeHtml(line.label)}</span><strong>${escapeHtml(line.value)}</strong></li>`)
     .join("");
-  const spreadView = spreadTrip();
+  const spreadView = { stores: view.stores, total: view.total };
   const fewerPlan = spreadView && !planLimited("multiStoreSplit") ? fewerStorePlan(narrowStores(spreadView.stores), lastOptimize?.capabilities || {}) : null;
-  const spreadTotal = fewerPlan?.spreadTotal;
+  const spreadTotal = view.total;
   const mode = tripEdits.planMode === "fewer" ? "fewer" : "spread";
-  const spreadStops = (spreadView?.stores || []).length;
+  const spreadStops = (view.stores || []).length;
   const fewerNote = !fewerPlan
     ? ""
     : fewerPlan.delta > 0.009
@@ -2597,12 +2708,12 @@ function paintTrip() {
 function renderStore(store, checks, coupons, couponSummary, openCoupons) {
   const rows = (store.items ?? [])
     .map((item) => {
-      const checked = item.lineId && checks[item.lineId] ? " checked" : "";
+      const checked = rowOn(item, store.storeName, { line: checks, item: readItemChecks(localStorage) }) ? " checked" : "";
       const size = item.size ? ` · ${escapeHtml(item.size)}` : "";
       const priceLabel = itemPriceLabel(item, store);
       return `<li class="trip-item">
         <label class="check-line">
-          <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
+          <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, store.storeName)}${checked} />
           <span>
             <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}</span>
             <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
@@ -2659,9 +2770,12 @@ function renderStore(store, checks, coupons, couponSummary, openCoupons) {
 
 function itemUrl(item) {
   if (planLimited("cartHandoffs")) return "";
-  if (item?.url) return item.url;
-  const offer = (item?.offers || []).find((row) => row.storeName === item.storeName);
-  return offer?.url || "";
+  const itemId = numericWalmartId(item);
+  if (itemId && /walmart/i.test(String(item?.storeName || ""))) {
+    return walmartCartUrl([{ itemId, quantity: item.quantity }], "");
+  }
+  const raw = item?.url || (item?.offers || []).find((row) => row.storeName === item.storeName)?.url || "";
+  return repairStoreUrl(raw, item);
 }
 
 function checklistItems(storeName) {
@@ -2711,20 +2825,42 @@ async function runReadyAction(kind, storeName) {
   }
 }
 
+function shoppingModeLinks(store) {
+  const page = store?.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store?.storeName);
+  const coupon = page?.url
+    ? `<a class="shop-coupon-link" href="${escapeHtml(page.url)}" data-external-link="${escapeHtml(page.url)}">${escapeHtml(`Open ${page.label}`)}</a>`
+    : "";
+  const home = storeHomeUrl(store?.storeName);
+  const open = home
+    ? `<a class="shop-coupon-link" href="${escapeHtml(home)}" data-external-link="${escapeHtml(home)}">Open ${escapeHtml(store.storeName)}</a>`
+    : "";
+  if (!coupon && !open) return "";
+  return `<p class="shop-coupon-hint">${coupon}${open}</p>`;
+}
+
+function closeShoppingMode() {
+  const dialog = $("trip-dialog");
+  dialog?.classList.remove("shopping-mode");
+  if (dialog?.open) dialog.close();
+  if (flowStep === "shop") renderShop();
+  else if (flowStep === "plan") paintTrip();
+}
+
 function openShoppingMode(storeName) {
   const dialog = $("trip-dialog");
   const store = storeFromTrip(storeName);
   if (!dialog || !store) return;
   const model = buildStoreReadyList(familyReadyStore(store));
-  const checks = readChecks(localStorage, tripId());
+  const bag = checkBag();
   dialog.classList.add("shopping-mode");
   dialog.innerHTML = `<div class="sheet-body shopping-sheet">
     <div class="list-head">
       <h2 id="trip-dialog-title">${escapeHtml(store.storeName)} shopping</h2>
-      <button type="button" class="text-btn" data-close-checklist>Close</button>
+      <button type="button" class="text-btn" data-shopping-done>Done</button>
     </div>
+    ${shoppingModeLinks(store)}
     <p class="ready-hint"><strong>${escapeHtml(model.hintTitle)}.</strong> ${escapeHtml(model.hint)}</p>
-    ${readyRowsHtml(model, checks) || "<p class='muted'>Nothing on this list.</p>"}
+    ${readyRowsHtml(model, bag.line, bag.item) || "<p class='muted'>Nothing on this list.</p>"}
     ${model.subtotalLabel ? `<p class="ready-subtotal"><span>Subtotal</span><strong>${escapeHtml(model.subtotalLabel)}</strong></p>` : ""}
     ${readyActionsHtml(store.storeName)}
   </div>`;
@@ -2745,7 +2881,7 @@ function openChecklist(storeName) {
       const aisle = group.aisle ? ` · ${escapeHtml(group.aisle)}` : "";
       const rows = group.items
         .map((item) => {
-          const checked = item.lineId && checks[item.lineId] ? " checked" : "";
+          const checked = rowOn(item, item.storeName || storeName, { line: checks, item: readItemChecks(localStorage) }) ? " checked" : "";
           const size = item.size ? `, ${escapeHtml(item.size)}` : "";
           const swap = item.swapNote ? `<span class="swap-note">${escapeHtml(item.swapNote)}</span>` : "";
           const where = instore ? `<span class="muted">${escapeHtml(item.storeName)}</span>` : "";
@@ -2755,7 +2891,7 @@ function openChecklist(storeName) {
             : "";
           return `<li class="check-row-line">
             <label class="check-line">
-              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checked} />
+              <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, item.storeName || storeName)}${checked} />
               <span>${item.quantity}× ${escapeHtml(item.name)}${size}${swap}</span>
             </label>
             ${where}
@@ -2860,9 +2996,11 @@ async function exportTrip(kind, storeName) {
 }
 
 function loadCachedTrip() {
+  if (!list.size) return false;
   const saved = cachedTrip(localStorage);
   if (!saved) return false;
   lastOptimize = saved.payload;
+  plannedSignature = "";
   tripEdits = {
     lockedStore: saved.edits?.lockedStore || null,
     moves: { ...(saved.edits?.moves || {}) },
@@ -3905,10 +4043,11 @@ document.addEventListener("click", (event) => {
     chooseSuggestion(Number(suggest.getAttribute("data-suggest")));
     return;
   }
-  const couponLink = target.closest("[data-coupon-link]");
-  if (couponLink) {
+  const externalLink = target.closest("[data-external-link], [data-coupon-link]");
+  if (externalLink) {
     event.preventDefault();
-    void openExternal(couponLink.getAttribute("data-coupon-link"));
+    const url = externalLink.getAttribute("data-external-link") || externalLink.getAttribute("data-coupon-link");
+    if (url) void openExternal(url);
     return;
   }
   if (target.closest("[data-coupon-remove]")) {
@@ -4071,10 +4210,8 @@ document.addEventListener("click", (event) => {
     showStep("shop");
     return;
   }
-  if (target.closest("[data-close-checklist]")) {
-    const dialog = $("trip-dialog");
-    dialog?.classList.remove("shopping-mode");
-    dialog?.close();
+  if (target.closest("[data-close-checklist], [data-shopping-done]")) {
+    closeShoppingMode();
     return;
   }
   if (target.closest("[data-shopping-mode]")) {
@@ -4153,16 +4290,24 @@ document.addEventListener("change", (event) => {
     writeClipped(localStorage, tripId(), target.dataset.couponClipped, target.checked);
     return;
   }
-  if (target instanceof HTMLInputElement && target.dataset.tripCheck) {
-    const checks = writeCheck(localStorage, tripId(), target.dataset.tripCheck, target.checked);
-    document.querySelectorAll(`[data-trip-check="${CSS.escape(target.dataset.tripCheck)}"]`).forEach((box) => {
-      if (box instanceof HTMLInputElement) box.checked = Boolean(checks[target.dataset.tripCheck]);
+  if (target instanceof HTMLInputElement && (target.dataset.tripCheck || target.dataset.checkKey)) {
+    const on = target.checked;
+    if (target.dataset.tripCheck) writeCheck(localStorage, tripId(), target.dataset.tripCheck, on);
+    if (target.dataset.checkKey) writeItemCheck(localStorage, target.dataset.checkKey, on);
+    const key = target.dataset.checkKey || "";
+    const line = target.dataset.tripCheck || "";
+    document.querySelectorAll("[data-trip-check], [data-check-key]").forEach((box) => {
+      if (!(box instanceof HTMLInputElement)) return;
+      const sameLine = line && box.dataset.tripCheck === line;
+      const sameKey = key && box.dataset.checkKey === key;
+      if (!sameLine && !sameKey) return;
+      box.checked = on;
     });
-    document.querySelectorAll(`[data-shop-line="${CSS.escape(target.dataset.tripCheck)}"] .shop-row`).forEach((row) => {
-      row.classList.toggle("is-done", Boolean(checks[target.dataset.tripCheck]));
+    document.querySelectorAll(`[data-shop-line="${CSS.escape(line)}"] .shop-row`).forEach((row) => {
+      row.classList.toggle("is-done", on);
     });
-    document.querySelectorAll(`[data-ready-line="${CSS.escape(target.dataset.tripCheck)}"]`).forEach((row) => {
-      row.classList.toggle("is-done", Boolean(checks[target.dataset.tripCheck]));
+    document.querySelectorAll(`[data-ready-line="${CSS.escape(line)}"]`).forEach((row) => {
+      row.classList.toggle("is-done", on);
     });
     paintShopChrome();
     haptic();
@@ -5471,9 +5616,8 @@ function showStep(step) {
 function paintPlanBar() {
   const count = [...list.values()].reduce((sum, entry) => sum + entry.quantity, 0);
   const view = currentTrip();
-  const checks = readChecks(localStorage, tripId());
-  const progress = view ? shopProgress(view.stores || [], checks) : { left: count, complete: false, total: 0 };
-  const total = flowStep === "add" || !view ? lastBarTotal : view.total;
+  const progress = view ? shopProgress(view.stores || [], mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
+  const total = view?.stores?.length ? view.total : lastBarTotal;
   const copy = planBarCopy({
     step: flowStep,
     itemCount: flowStep === "shop" && progress.total ? progress.total : count,
@@ -5516,12 +5660,25 @@ function renderShop() {
     const backPrompt = showReturnBanner
       ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
       : "";
-    shop.innerHTML = `${krogerBannerHtml()}${backPrompt}${emptyStateMarkup(emptyState("shop"), escapeHtml)}`;
+    const body = !list.size
+      ? emptyStateMarkup(emptyState("shop"), escapeHtml)
+      : planning || lastOptimize
+        ? `<p class="muted">Updating the plan…</p><div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`
+        : emptyStateMarkup(
+            {
+              title: "No trip yet",
+              body: "Review the split and we'll sort this list by store.",
+              action: "Review the split",
+              actionId: "review",
+            },
+            escapeHtml
+          );
+    shop.innerHTML = `${krogerBannerHtml()}${backPrompt}${body}`;
     paintPlanBar();
     return;
   }
   const checks = readChecks(localStorage, tripId());
-  const progress = shopProgress(view.stores, checks);
+  const progress = shopProgress(view.stores, mergedTripChecks(view.stores));
   const done = doneMessage(progress);
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const html = shopSections(view.stores)
@@ -5533,7 +5690,7 @@ function renderShop() {
             .map((item) => {
               const noted = lists().annotate(item);
               const favoriteSwap = noted !== item ? plainSwap(noted) : null;
-              const on = Boolean(item.lineId && checks[item.lineId]);
+              const on = rowOn(item, section.storeName, { line: checks, item: readItemChecks(localStorage) });
               const size = item.size ? `, ${escapeHtml(item.size)}` : "";
               const itemLabel = displayProductName(item.name, item.brand) || item.name;
               const amount = Number(item.itemTotal ?? item.price);
@@ -5555,7 +5712,7 @@ function renderShop() {
               const search = usesStoreReadyList(section.storeName) ? readySearchAnchor(section.storeName, withListFamily(item)) : "";
               return `<div class="shop-line" data-shop-line="${escapeHtml(item.lineId || "")}">
                 <label class="shop-row${on ? " is-done" : ""}">
-                  <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${on ? " checked" : ""} />
+                  <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, section.storeName)}${on ? " checked" : ""} />
                   <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(itemLabel)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
                 </label>
                 ${search}
@@ -5609,7 +5766,7 @@ function paintShopChrome() {
     return;
   }
   const view = currentTrip();
-  const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : { complete: false };
+  const progress = view ? shopProgress(view.stores || [], mergedTripChecks(view.stores)) : { complete: false };
   const shop = $("shop");
   const existing = shop?.querySelector(".done-banner");
   if (progress.complete && shop && !existing) renderShop();
@@ -6176,6 +6333,11 @@ async function findNearbyStores() {
 
 function onPrimary() {
   haptic();
+  const shopping = $("trip-dialog");
+  if (shopping?.open && shopping.classList.contains("shopping-mode")) {
+    closeShoppingMode();
+    return;
+  }
   if (flowStep === "add") {
     showStep("plan");
     return;
@@ -6186,7 +6348,7 @@ function onPrimary() {
     return;
   }
   const view = currentTrip();
-  const progress = view ? shopProgress(view.stores || [], readChecks(localStorage, tripId())) : null;
+  const progress = view ? shopProgress(view.stores || [], mergedTripChecks(view.stores)) : null;
   if (progress?.complete) {
     toast("Nice. That trip is done.", 4500);
     return;
@@ -6252,6 +6414,7 @@ async function boot() {
     consumeKrogerReturn();
     paintKrogerConnected(krogerConnectedNow());
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
+    if (!landedFromKroger && shouldPromptProfile(localStorage)) profileUi?.open();
     await bootApp();
   } finally {
     if (!landedFromKroger) {
@@ -6417,7 +6580,9 @@ document.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
   if (!button) return;
   const action = button.getAttribute("data-empty-action");
-  if (action === "add-items") {
+  if (action === "review") {
+    showStep("plan");
+  } else if (action === "add-items") {
     openList(false);
     void openAlerts(false);
     showStep("add");

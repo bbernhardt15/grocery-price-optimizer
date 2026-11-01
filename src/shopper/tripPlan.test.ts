@@ -25,6 +25,12 @@ import {
   tripFingerprint,
   walmartCartUrl,
   writeCheck,
+  writeItemCheck,
+  readItemChecks,
+  itemCheckKey,
+  itemIsChecked,
+  pruneStoresToList,
+  numericWalmartId,
 } from "../../public/shopper/tripPlan.js";
 
 const milk = {
@@ -409,6 +415,41 @@ describe("in-store checklist", () => {
     assert.equal(readChecks(storage, tripId).b, true);
     writeCheck(storage, tripId, "b", false);
     assert.equal(readChecks(storage, tripId).b, undefined);
+
+    const aldiKey = itemCheckKey("Aldi", { name: "Friendly Farms Milk", query: "milk" });
+    writeItemCheck(storage, aldiKey, true);
+    assert.equal(readItemChecks(storage)[aldiKey], true);
+    assert.equal(itemIsChecked({ name: "Friendly Farms Milk", query: "milk", lineId: "gone" }, "Aldi", {}, readItemChecks(storage)), true);
+    writeItemCheck(storage, aldiKey, false);
+    assert.equal(readItemChecks(storage)[aldiKey], undefined);
+    assert.equal(numericWalmartId({ productId: "0099997200115", priceSource: "live" }), "");
+    assert.equal(numericWalmartId({ productId: "10451234", priceSource: "live" }), "10451234");
+
+    const pruned = pruneStoresToList(
+      [
+        { storeName: "Aldi", subtotal: 4.14, items: [{ name: "Milk", query: "milk", price: 2, quantity: 1, itemTotal: 2 }] },
+        { storeName: "Walmart", subtotal: 13.26, items: [{ name: "Bread", query: "bread", price: 3, quantity: 1, itemTotal: 3 }] },
+      ],
+      []
+    );
+    assert.deepEqual(pruned, []);
+    const kept = pruneStoresToList(
+      [
+        {
+          storeName: "Aldi",
+          subtotal: 9,
+          items: [
+            { name: "Milk", query: "milk", price: 2, quantity: 1, itemTotal: 2 },
+            { name: "Chips", query: "chips", price: 4, quantity: 1, itemTotal: 4 },
+          ],
+        },
+      ],
+      [{ name: "milk", id: "m" }]
+    );
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].items.length, 1);
+    assert.equal(kept[0].items[0].query, "milk");
+    assert.equal(kept[0].subtotal, 2);
 
     saveTripSnapshot(storage, { stores: [{ storeName: "Aldi", items: [milk] }] }, { lockedStore: "Aldi", moves: {} });
     const saved = readTripSnapshot(storage);

@@ -7,6 +7,39 @@
 import { imageBlobs } from "./receiptImages.js";
 import { PHOTO_OFF_RECEIPT } from "./receiptCopy.js";
 
+const receiptReads = new Map();
+
+export function resetReceiptReads() {
+  receiptReads.clear();
+}
+
+/** SHA-256 of the file bytes, or a short fallback when SubtleCrypto is missing. */
+export async function digestFile(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  if (globalThis.crypto?.subtle?.digest) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  let hash = 0;
+  for (const byte of bytes) hash = (Math.imul(hash, 33) + byte) >>> 0;
+  return `f${hash.toString(16)}-${bytes.length}`;
+}
+
+export function cachedReceiptRead(hash) {
+  return hash ? receiptReads.get(hash) || null : null;
+}
+
+export function rememberReceiptRead(hash, lines) {
+  if (!hash || !lines) return;
+  receiptReads.set(hash, lines);
+  while (receiptReads.size > 24) {
+    const oldest = receiptReads.keys().next().value;
+    if (!oldest) break;
+    receiptReads.delete(oldest);
+  }
+}
+
 async function readBlob(file) {
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -121,6 +154,20 @@ export async function readReceiptBatch(deps, input) {
     const type = String(file.type || "");
     const name = String(file.name || "Order");
     const ratio = 0.12 + (0.5 * index) / Math.max(1, files.length);
+    let fileHash = "";
+    try {
+      fileHash = await digestFile(file);
+    } catch {
+      fileHash = "";
+    }
+    const remembered = cachedReceiptRead(fileHash);
+    if (remembered) {
+      const got = remembered.map((line) => ({ ...line, receipt: receiptNumber }));
+      lines.push(...got);
+      filesOut.push({ index, name, lines: got, error: "" });
+      report("Already read this file.", 1, { fileIndex: index, fileName: name, status: "done", fileRatio: 1, found: got.length, items: lineNames(got) });
+      continue;
+    }
     if (files.length > 1) report(`Reading file ${index + 1} of ${files.length}…`, ratio, { fileIndex: index, fileName: name, status: "reading", fileRatio: 0.15, found: 0, items: [] });
     try {
       if (type.startsWith("image/") || /\.hei[cf]$/i.test(name)) {
@@ -133,7 +180,7 @@ export async function readReceiptBatch(deps, input) {
         }
         const blobs = await imageBlobs(file);
         const fileLines = [];
-        await mapPool(blobs, 3, async (blob, blobIndex) => {
+        await mapPool(blobs, 4, async (blob, blobIndex) => {
           const partRatio = 0.15 + (0.55 * (blobIndex + 1)) / Math.max(1, blobs.length);
           report(`Reading part ${blobIndex + 1} of ${blobs.length}…`, partRatio, {
             fileIndex: index,
@@ -158,6 +205,7 @@ export async function readReceiptBatch(deps, input) {
         });
         lines.push(...fileLines);
         filesOut.push({ index, name, lines: fileLines, error: "" });
+        rememberReceiptRead(fileHash, fileLines.map((line) => ({ ...line })));
         report("", ratio, { fileIndex: index, fileName: name, status: "done", fileRatio: 1, found: fileLines.length, items: lineNames(fileLines) });
         continue;
       }
@@ -166,6 +214,7 @@ export async function readReceiptBatch(deps, input) {
         const got = linesFrom(payload, receiptNumber);
         lines.push(...got);
         filesOut.push({ index, name, lines: got, error: "" });
+        rememberReceiptRead(fileHash, got.map((line) => ({ ...line })));
         report("", ratio, { fileIndex: index, fileName: name, status: "done", fileRatio: 1, found: got.length, items: lineNames(got) });
         continue;
       }

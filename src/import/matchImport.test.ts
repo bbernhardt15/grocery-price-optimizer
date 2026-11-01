@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { demoBrowseProducts } from "../catalog/demoCatalog";
+import type { BrowseProduct, CatalogOffer } from "../catalog/types";
 import { matchImportItems } from "./matchImport";
 import type { ParsedImportItem } from "./parseImportText";
 
@@ -82,5 +83,37 @@ describe("matchImportItems", () => {
     assert.equal(result.total, 3);
     assert.equal(result.found, 2);
     assert.equal(result.items[2]?.status, "missing");
+  });
+
+  it("keeps cinnamon and cherry pop-tarts as different items", () => {
+    const offer = (price: number): CatalogOffer => ({
+      storeName: "Walmart",
+      price,
+      onSale: false,
+      availability: "in_stock",
+      priceSource: "seed",
+    });
+    const pastry = (id: string, name: string): BrowseProduct => ({
+      id,
+      name,
+      brand: "Kellogg's",
+      imageUrls: [],
+      departmentId: "breakfast",
+      departmentName: "Breakfast",
+      sizeLabel: "8 ct",
+      storeBrand: false,
+      offers: [offer(3.48)],
+      bestOffer: offer(3.48),
+      upc: id,
+    });
+    const result = matchImportItems(
+      [line({ name: "cinnamon pop-tarts" }), line({ name: "cherry pop-tarts" })],
+      [pastry("cin", "Cinnamon Pop-Tarts"), pastry("che", "Cherry Pop-Tarts")]
+    );
+    assert.equal(result.total, 2);
+    assert.equal(result.found, 2);
+    assert.match(result.items[0]?.choices[0]?.product.catalogName || "", /cinnamon/i);
+    assert.match(result.items[1]?.choices[0]?.product.catalogName || "", /cherry/i);
+    assert.notEqual(result.items[0]?.selectedId, result.items[1]?.selectedId);
   });
 });

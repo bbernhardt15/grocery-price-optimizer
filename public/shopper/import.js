@@ -4,7 +4,7 @@
  */
 
 import { dedupeReviewItems } from "./importDedupe.js";
-import { createSilenceWatch, preferServerSpeech, recorderMime } from "./speechListen.js";
+import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
 
@@ -16,6 +16,26 @@ export function foundLabel(found, total) {
 export function acceptLabel(count) {
   if (count === 1) return "Add 1 item to my trip";
   return `Add ${count} items to my trip`;
+}
+
+/** Units that will actually be added. The same product is counted once. */
+export function addedUnits(rows) {
+  const seen = new Set();
+  let units = 0;
+  for (const row of rows || []) {
+    const id = String(row?.productId || row?.id || "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const quantity = Math.floor(Number(row?.quantity) || 1);
+    units += Math.max(1, Math.min(99, quantity));
+  }
+  return units;
+}
+
+export function addedLabel(count) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  if (n === 1) return "Added 1 item.";
+  return `Added ${n} items.`;
 }
 
 export function sizeName(variant) {
@@ -302,7 +322,11 @@ export function mountImport(deps) {
   }
 
   function acceptedCount() {
-    return (review?.items || []).filter((item) => item.accepted && item.selectedId).length;
+    return addedUnits(
+      (review?.items || [])
+        .filter((item) => item.accepted && item.selectedId)
+        .map((item) => ({ productId: item.selectedId, quantity: item.quantity }))
+    );
   }
 
   function choiceProduct(item) {
@@ -632,8 +656,9 @@ export function mountImport(deps) {
     let recorder = null;
     const canRecord = navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
     if ((status.speech || serverFirst) && canRecord) {
+      let stream = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mime = recorderMime((type) => MediaRecorder.isTypeSupported(type));
         const mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
         const chunks = [];
@@ -643,6 +668,7 @@ export function mountImport(deps) {
         mediaRecorder.start(250);
         recorder = { mediaRecorder, chunks, stream, mime: mediaRecorder.mimeType || mime || "audio/mp4" };
       } catch (error) {
+        releaseMicrophone({ stream });
         if (!recognizer || serverFirst) {
           const denied = error && (error.name === "NotAllowedError" || error.name === "SecurityError");
           setStatus(
@@ -697,15 +723,16 @@ export function mountImport(deps) {
               resolve(new Blob(recorder.chunks, { type: recorder.mime }));
             };
             recorder.mediaRecorder.onstop = finish;
-            window.setTimeout(finish, 1500);
             try {
-              if (recorder.mediaRecorder.state !== "inactive") recorder.mediaRecorder.stop();
-              else finish();
+              recorder.mediaRecorder.requestData?.();
             } catch {
-              finish();
+              /* no buffered chunk */
             }
+            releaseMicrophone(recorder);
+            window.setTimeout(finish, 800);
+            if (recorder.mediaRecorder.state === "inactive") finish();
           });
-          recorder.stream.getTracks().forEach((track) => track.stop());
+          releaseMicrophone(recorder);
           session.seconds = Math.max(1, Math.round((Date.now() - started) / 1000));
           if (!cancel && blob.size > 0) {
             if (!status.speech) {
@@ -742,6 +769,12 @@ export function mountImport(deps) {
   }
 
   dialog.addEventListener("close", () => {
+    void stopRecording(true);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void stopRecording(true);
+  });
+  window.addEventListener("pagehide", () => {
     void stopRecording(true);
   });
   $("import-close")?.addEventListener("click", close);
@@ -948,13 +981,19 @@ export function mountImport(deps) {
   function acceptAll() {
     const chosen = (review?.items || []).filter((item) => item.accepted && choiceProduct(item));
     if (!chosen.length) return;
-    let addedCount = 0;
+    const pending = [];
     for (const item of chosen) {
       const product = choiceProduct(item);
       const prepared = deps.prepareAdd ? deps.prepareAdd(item, product) : { product, options: { quiet: true } };
-      if (!prepared?.product) continue;
-      deps.addProduct(prepared.product, item.quantity, { quiet: true, ...(prepared.options || {}) });
-      addedCount += item.quantity;
+      if (!prepared?.product?.id) continue;
+      pending.push({ productId: prepared.product.id, quantity: item.quantity, product: prepared.product, options: prepared.options || {} });
+    }
+    const addedCount = addedUnits(pending);
+    const seen = new Set();
+    for (const row of pending) {
+      if (seen.has(row.productId)) continue;
+      seen.add(row.productId);
+      deps.addProduct(row.product, Math.max(1, Math.min(99, Math.floor(Number(row.quantity) || 1))), { quiet: true, ...row.options });
     }
     if (!addedCount) {
       toast("Those items don't fit your taste profile.");
@@ -974,7 +1013,7 @@ export function mountImport(deps) {
         })
       );
     }
-    toast(addedCount === 1 ? "Added 1 item." : `Added ${addedCount} items.`);
+    toast(addedLabel(addedCount));
     close();
     deps.showStep("plan");
   }

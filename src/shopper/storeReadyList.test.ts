@@ -12,6 +12,8 @@ import {
   storeReadyHint,
   storeSearchLinkTarget,
   storeSearchUrl,
+  storeHomeUrl,
+  repairStoreUrl,
   stripSearchSymbols,
   usesStoreReadyList,
 } from "../../public/shopper/storeReadyList.js";
@@ -280,5 +282,27 @@ describe("share falls back to copy", () => {
     );
     assert.equal(native, "capacitor");
     assert.equal(calls[3], "cap:milk");
+  });
+});
+
+describe("store search terms", () => {
+  it("does not search any store by the padded UPC 0099997200115", () => {
+    const item = { name: "0099997200115", familyName: "OREO O's Cereal", query: "OREO O's Cereal", size: "17 oz" };
+    const term = cleanSearchQuery(item);
+    assert.equal(term.includes("0099997200115"), false);
+    assert.match(term, /OREO/i);
+    assert.match(term, /17 oz/);
+    for (const store of ["Target", "Aldi", "Publix", "Meijer", "Costco", "H-E-B"]) {
+      const url = storeSearchUrl(store, item);
+      assert.equal(url.includes("0099997200115"), false, store);
+      assert.match(decodeURIComponent(url.replace(/\+/g, " ")), /OREO/i, store);
+    }
+    const broken = "https://www.walmart.com/search?q=0099997200115";
+    const fixed = repairStoreUrl(broken, item);
+    assert.equal(fixed.includes("0099997200115"), false);
+    assert.match(fixed, /walmart\.com\/search\?q=/);
+    assert.match(decodeURIComponent(fixed.replace(/\+/g, " ")), /OREO/i);
+    assert.equal(storeHomeUrl("Aldi"), "https://www.aldi.us/");
+    assert.equal(storeHomeUrl("Not A Store"), "");
   });
 });

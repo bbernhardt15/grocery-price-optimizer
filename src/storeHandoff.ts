@@ -203,8 +203,34 @@ function flyerOrSeed(item: { priceSource?: PriceSource }): boolean {
   return item.priceSource === "weekly_ad" || item.priceSource === "seed";
 }
 
+/** 12–14 digit strings are UPCs/GTINs, including zero-padded ones like 0099997200115. */
+export function isPaddedBarcode(value: string | undefined | null): boolean {
+  const compact = String(value || "").replace(/\s+/g, "");
+  return /^\d{12,14}$/.test(compact);
+}
+
+/**
+ * Name plus size for a store search. A barcode is never the query.
+ */
+export function cleanRetailQuery(item: { name?: string; query?: string; size?: string }): string {
+  let name = String(item.name || item.query || "").replace(/\s+/g, " ").trim();
+  const size = String(item.size || "").replace(/\s+/g, " ").trim();
+  if (isPaddedBarcode(name)) name = "";
+  let base = name;
+  if (size && !isPaddedBarcode(size) && !base.toLowerCase().includes(size.toLowerCase())) {
+    base = `${base} ${size}`.trim();
+  }
+  const cleaned = base
+    .replace(/['’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^A-Za-z0-9.\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.slice(0, 80) || "item";
+}
+
 function identifierOf(
-  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
+  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource"> & { size?: string }
 ): string {
   if (flyerOrSeed(item)) {
     return item.name.trim();
@@ -219,37 +245,43 @@ export function krogerSearchUrl(
   return `${KROGER_SEARCH}?${query.toString()}`;
 }
 
-export function walmartSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
-): string {
-  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
-  if (productId) {
-    return `https://www.walmart.com/ip/${encodeURIComponent(productId)}`;
+type SearchableItem = Pick<PickedItem, "productId" | "upc" | "name" | "priceSource"> & {
+  size?: string;
+  quantity?: number;
+  query?: string;
+};
+
+/** Numeric Walmart item id. A padded UPC is not one. */
+export function walmartItemId(item: SearchableItem): string {
+  if (item.priceSource === "weekly_ad" || item.priceSource === "seed") return "";
+  const id = item.productId?.trim() || "";
+  if (!/^\d+$/.test(id) || isPaddedBarcode(id)) return "";
+  return id;
+}
+
+export function walmartSearchUrl(item: SearchableItem): string {
+  const itemId = walmartItemId(item);
+  if (itemId) {
+    const linked = walmartAddToCartUrl([{ itemId, quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)) }]);
+    if (linked) return linked;
   }
-  const query = new URLSearchParams({ q: (item.upc || item.name).trim() });
+  const query = new URLSearchParams({ q: cleanRetailQuery(item) });
   return `${WALMART_SEARCH}?${query.toString()}`;
 }
 
-export function targetSearchUrl(
-  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
-): string {
-  const productId = flyerOrSeed(item) ? "" : item.productId?.trim();
-  if (productId) {
+export function targetSearchUrl(item: SearchableItem): string {
+  const productId = flyerOrSeed(item) ? "" : item.productId?.trim() || "";
+  if (productId && !isPaddedBarcode(productId)) {
     return `https://www.target.com/p/-/A-${encodeURIComponent(productId)}`;
   }
   const query = new URLSearchParams({
-    searchTerm: (item.upc || item.name).trim(),
+    searchTerm: cleanRetailQuery(item),
   });
   return `${TARGET_SEARCH}?${query.toString()}`;
 }
 
-function searchQuery(
-  item: Pick<PickedItem, "productId" | "upc" | "name" | "priceSource">
-): string {
-  if (flyerOrSeed(item)) {
-    return item.name.trim();
-  }
-  return (item.upc || item.productId || item.name).trim();
+function searchQuery(item: SearchableItem): string {
+  return cleanRetailQuery(item);
 }
 
 /** Aldi's public shop search. Indexed example: https://www.aldi.us/store/aldi/s?k=milk */
@@ -449,11 +481,8 @@ function krogerAction(
  * search handoff even if the flyer id is numeric.
  */
 function walmartCartItemId(item: HandoffItem): string | undefined {
-  if (item.priceSource === "weekly_ad" || item.priceSource === "seed") {
-    return undefined;
-  }
-  const id = item.productId?.trim() ?? "";
-  return /^\d+$/.test(id) ? id : undefined;
+  const id = walmartItemId(item);
+  return id || undefined;
 }
 
 function formatNameList(names: string[]): string {

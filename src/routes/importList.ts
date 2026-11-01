@@ -16,6 +16,7 @@ import { rasterizePdf } from "../import/pdfRaster";
 import { extractPdfText } from "../import/pdfText";
 import { analyzeReceipt, applyCatalogBrands, learnReceiptLines, receiptFromVision, relearnReceipt, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
+import { contentHash, readReceiptCache, resetReceiptCache, writeReceiptCache } from "../import/receiptCache";
 import { aiAsk, aiParseText, aiReadImage, aiReadShelf, ModelError, probeVision, transcribeAudio } from "../import/providers";
 import { parseShelfScan } from "../import/shelfScan";
 import { setImportRuntime } from "../import/runtime";
@@ -39,7 +40,7 @@ const AUDIO_TYPES = new Set([
 ]);
 
 const MAX_TEXT = 50_000;
-const VISION_CONCURRENCY = 4;
+const VISION_CONCURRENCY = 6;
 const MAX_IMAGE = 4_000_000;
 const MAX_AUDIO = 8_000_000;
 const MAX_PDF = 8_000_000;
@@ -47,6 +48,7 @@ const MAX_PDF = 8_000_000;
 export function resetImportForTests(): void {
   limiter.reset();
   importBudget.reset();
+  resetReceiptCache();
   setImportRuntime(null);
 }
 
@@ -323,6 +325,13 @@ router.post("/import/photo", async (req, res) => {
     res.status(400).json({ error: IMPORT_MESSAGES.tooBig, code: "too_large" });
     return;
   }
+  const photoKey = `photo:${contentHash(image)}`;
+  const cachedPhoto = readReceiptCache(photoKey);
+  if (cachedPhoto) {
+    console.info(`receipt stage=photo cache=hit ms=0 bytes=${image.length}`);
+    res.json(cachedPhoto);
+    return;
+  }
   const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
   if (!budget.ok) {
     res.status(429).json({ error: IMPORT_MESSAGES.daily });
@@ -346,16 +355,19 @@ router.post("/import/photo", async (req, res) => {
       return;
     }
     if (!match.items.length && receipt?.lines.length) {
+      writeReceiptCache(photoKey, receipt);
       res.json(receipt);
       return;
     }
-    res.json({
+    const body = {
       ...match,
       parser: modeled && !withUpc ? "ai" : withUpc ? "rules" : "rules",
       aiFallback: false,
       paused: false,
       ...(receipt?.lines.length ? { receipt } : {}),
-    });
+    };
+    writeReceiptCache(photoKey, body);
+    res.json(body);
   } catch (error) {
     const mapped = visionHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
@@ -549,6 +561,13 @@ router.post("/import/pdf", async (req, res) => {
     res.status(status).json({ error, ...(code ? { code } : {}) });
   };
 
+  const pdfKey = `pdf:${contentHash(pdf)}`;
+  const cachedPdf = readReceiptCache(pdfKey);
+  if (cachedPdf && typeof cachedPdf === "object") {
+    emit({ type: "progress", stage: "done", message: "Already read this file.", ratio: 1 });
+    finish(cachedPdf as Parameters<typeof finish>[0]);
+    return;
+  }
   const started = Date.now();
   emit({ type: "progress", stage: "preparing", message: "Preparing…", ratio: 0.08 });
   const textStarted = Date.now();
@@ -561,6 +580,7 @@ router.post("/import/pdf", async (req, res) => {
     console.info(
       `receipt stage=pdf-text ms=${textMs} lines=${analysis.lines.length} upc=${analysis.lines.filter((line) => line.upc).length} vision=0 total=${Date.now() - started}`
     );
+    writeReceiptCache(pdfKey, analysis);
     finish(analysis);
     return;
   }
@@ -624,6 +644,7 @@ router.post("/import/pdf", async (req, res) => {
     console.info(
       `receipt stage=pdf-vision ms=${visionMs} rasterMs=${rasterMs} textMs=${textMs} slices=${slices.length} concurrency=${VISION_CONCURRENCY} detailHigh=${detailHigh} detailLow=${detailLow} lines=${analysis.lines.length} upc=${analysis.lines.filter((line) => line.upc).length} model=${config.visionModel} total=${Date.now() - started}`
     );
+    writeReceiptCache(pdfKey, analysis);
     finish(analysis);
   } catch (error) {
     const mapped = visionHttp(error);
