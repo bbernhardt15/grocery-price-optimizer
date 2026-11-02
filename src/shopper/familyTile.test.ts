@@ -62,6 +62,26 @@ describe("family tile labels", () => {
     assert.equal(juice.title, "Gerber Juice, 4 oz");
   });
 
+  it("cleans duplicated produce titles and long gelato titles", () => {
+    assert.equal(
+      shortProductTitle({
+        name: "Fresh Bananas Fresh Bunch of Bananas -, 1 lb",
+        brand: "Fresh",
+        size: "1 lb",
+      }),
+      "Bananas, 1 lb"
+    );
+    assert.equal(
+      shortProductTitle({
+        name: "Talenti Gelato Non-GMO Black Raspberry Chocolate Chip Frozen Dessert Gluten-Free, 1 Pint 1 Count",
+        brand: "Talenti",
+        size: "1 pint",
+      }),
+      "Talenti Black Raspberry Chocolate Chip Gelato, 1 pt"
+    );
+    assert.ok(shortProductTitle({ name: "Talenti Gelato Non-GMO Black Raspberry Chocolate Chip Frozen Dessert Gluten-Free, 1 Pint 1 Count", brand: "Talenti", size: "1 pint" }).length <= 56);
+  });
+
   it("stages a quantity without leaving 1 to 99", () => {
     assert.equal(stagedQuantity(1, 1), 2);
     assert.equal(stagedQuantity(1, -1), 1);

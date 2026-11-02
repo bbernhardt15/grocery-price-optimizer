@@ -218,6 +218,20 @@ describe("parseImportText real lists", () => {
     assert.match(milk[1]?.name || "", /cherry pop-tarts/i);
   });
 
+  it("keeps a spoken list of pop-tarts, Graeter's, Kraft, and Velveeta shells", () => {
+    const spoken = parseImportText(
+      "cherry pop-tarts and cinnamon pop-tarts and black raspberry chip from Graters and let's get some Kraft macaroni and cheese and Velveeta Sheldon cheese"
+    );
+    assert.equal(spoken.length, 5);
+    assert.match(spoken[0]?.name || "", /cherry pop-tarts/i);
+    assert.match(spoken[1]?.name || "", /cinnamon pop-tarts/i);
+    assert.match(spoken[2]?.name || "", /black raspberry chip ice cream/i);
+    assert.equal(spoken[2]?.brand, "Graeter's");
+    assert.match(spoken[3]?.name || "", /kraft macaroni/i);
+    assert.match(spoken[4]?.name || "", /velveeta shells/i);
+    assert.doesNotMatch(spoken[4]?.name || "", /sheldon/i);
+  });
+
   it("combines duplicates and skips same-as-last-time", () => {
     const items = parseImportText("bananas\nbananas\nsame as last time\nthe usual");
     assert.equal(items.length, 1);

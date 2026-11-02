@@ -79,6 +79,33 @@ export function planBarCopy(input = {}) {
 }
 
 /**
+ * One label everywhere. "Estimated total" until every line has a store price,
+ * then "Total".
+ * @param {number} amount
+ * @param {boolean} complete
+ */
+export function totalPhrase(amount, complete) {
+  const figure = priceFigure(amount);
+  const label = complete ? "Total" : "Estimated total";
+  return { label, text: figure ? `${label} ${figure}` : "" };
+}
+
+/**
+ * True when the plan priced every line. A missing item keeps the estimate label.
+ * @param {Array<{ items?: object[] }> | null | undefined} stores
+ * @param {unknown[] | null | undefined} [unavailable]
+ */
+export function pricesAreIn(stores, unavailable) {
+  if ((unavailable || []).length) return false;
+  const items = (stores || []).flatMap((store) => store.items || []);
+  if (!items.length) return false;
+  return items.every((item) => {
+    const amount = Number(item?.itemTotal ?? item?.price);
+    return Number.isFinite(amount) && amount > 0;
+  });
+}
+
+/**
  * Sign-in waits until a save or a cart send. A guest who says not now
  * is not asked again during this visit.
  * @param {{ accountsEnabled?: boolean, signedIn?: boolean, intent?: string, declined?: boolean }} [input]

@@ -77,9 +77,13 @@ const ALL_HOUSE = new Set(Object.values(HOUSE).flat());
 
 function expandAliases(text) {
   return String(text || "")
+    .replace(/\bsheldon\b/gi, "shells")
+    .replace(/\bgraters\b/gi, "graeter's")
+    .replace(/\bgraeters\b/gi, "graeter's")
     .replace(/\bcaptain\s+crunch\b/gi, "capn crunch")
     .replace(/\bcap['’]n\s+crunch\b/gi, "capn crunch")
-    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts");
+    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts")
+    .replace(/\bshells\s+cheese\b/gi, "shells and cheese");
 }
 
 function words(text) {
@@ -261,10 +265,10 @@ const DEFS = [
   food("bbq-sauce", "BBQ sauce", "bbq sauce", 30, ["pantry"], ["Condiments"], ["bbq sauce", "barbecue sauce", "barbeque sauce"], ["original", "honey", "sweet", "spicy", "smoky", "kansas", "carolina"], [CANDY, PET, /\b(?:chips|rub|seasoning)\b/i], /\b(?:bbq|barbecue|barbeque)\s+sauces?\b/i, ["sweet baby ray's", "kraft", "stubb's", "famous dave's", "kinders", "cattlemen's", "jack daniel's", "open pit", "bull's-eye"], { dim: "weight", ideal: 18, min: 12, max: 40 }, []),
   food("chicken-nuggets", "Chicken nuggets", "chicken nuggets", 31, ["frozen"], ["Frozen Chicken"], ["chicken nuggets", "chicken nugget", "chicken tenders"], ["breaded", "frozen", "dinosaurs", "original", "family"], [PET, SOUP, CANDY], /\bchicken\s+(?:nuggets?|tenders?)\b/i, ["tyson", "perdue", "pilgrim's", "just bare", "bell & evans", "banquet", "applegate", "fast fixin'"], { dim: "weight", ideal: 24, min: 12, max: 48 }, []),
   food("cookies", "Cookies", "chocolate chip cookies", 32, ["snacks", "bakery"], ["Cookies"], ["cookies", "cookie"], ["chocolate", "chip", "sandwich", "original", "family", "fudge"], [CANDY, /\b(?:dough|butter|ice cream|cereal)\b/i], /\bcookies?\b/i, ["oreo", "chips ahoy!", "keebler", "pepperidge farm", "girl scouts", "famous amos", "nutter butter", "mother's", "walkers"], { dim: "weight", ideal: 13, min: 8, max: 20 }, []),
-  food("ice-cream", "Ice cream", "ice cream", 33, ["frozen"], ["Ice Cream"], ["ice cream"], ["vanilla", "chocolate", "strawberry", "neapolitan", "mint"], [CANDY, /\b(?:cone|sandwich|bar|bars|novelties)\b/i], /\bice\s+cream\b/i, ["häagen-dazs", "ben & jerry's", "breyers", "blue bell", "tillamook", "turkey hill", "edys", "dreyer's", "talenti", "friendly's"], { dim: "volume", ideal: 48, min: 14, max: 64 }, []),
+  food("ice-cream", "Ice cream", "ice cream", 33, ["frozen"], ["Ice Cream"], ["ice cream", "gelato"], ["vanilla", "chocolate", "strawberry", "neapolitan", "mint", "black", "raspberry", "chip", "berry", "fudge", "swirl", "gelato"], [CANDY, /\b(?:cone|sandwich|bar|bars|novelties)\b/i], /\bice\s+cream\b|\bgelato\b/i, ["häagen-dazs", "ben & jerry's", "breyers", "blue bell", "tillamook", "turkey hill", "edys", "dreyer's", "talenti", "friendly's", "graeter's"], { dim: "volume", ideal: 48, min: 14, max: 64 }, []),
   house("cleaner", "Cleaner", "all purpose cleaner", 34, ["household"], ["Cleaning"], ["all-purpose cleaner", "all purpose cleaner", "multi-surface cleaner", "disinfecting cleaner"], ["original", "lemon", "fresh", "spray", "refill"], [PET, COSMETIC, /\blaundry\b/i], /\bcleaners?\b/i, ["lysol", "clorox", "mr. clean", "formula 409", "fabuloso", "method", "seventh generation", "pine-sol", "windex"], { dim: "volume", ideal: 32, min: 16, max: 64 }, []),
   food("donuts", "Donuts", "donuts", 35, ["bakery", "breakfast"], ["Donuts", "Bakery"], ["donut", "donuts", "doughnut", "doughnuts"], ["glazed", "chocolate", "yeast", "cake", "plain", "original", "powdered", "cinnamon", "assorted", "dozen", "mini"], [/\b(?:holes?|muffin|cereal|cookie)\b/i, CANDY, PET], /\bdonuts?\b|\bdoughnuts?\b/i, ["entenmann's", "hostess", "krispy kreme", "little debbie"], { dim: "count", ideal: 12, min: 6, max: 16 }, []),
-  food("mac-and-cheese", "Mac and cheese", "macaroni and cheese", 36, ["pantry"], ["Pasta & Rice", "Canned"], ["mac and cheese", "macaroni and cheese", "macaroni & cheese"], ["original", "classic", "shells", "cup", "cups", "boxed", "deluxe", "dinner"], [/\b(?:macbook|makeup|macadamia)\b/i, PET, CANDY], /mac(?:aroni)?\s*(?:and|&)\s*cheese/i, ["kraft", "velveeta", "annie's", "great value"], { dim: "count", ideal: 1, min: 1, max: 12 }, []),
+  food("mac-and-cheese", "Mac and cheese", "macaroni and cheese", 36, ["pantry"], ["Pasta & Rice", "Canned"], ["mac and cheese", "macaroni and cheese", "macaroni & cheese", "shells and cheese", "shells & cheese"], ["original", "classic", "shells", "cup", "cups", "boxed", "deluxe", "dinner"], [/\b(?:macbook|makeup|macadamia|taco)\b/i, PET, CANDY], /mac(?:aroni)?\s*(?:and|&)\s*cheese|shells\s*(?:and|&)\s*cheese/i, ["kraft", "velveeta", "annie's", "great value"], { dim: "count", ideal: 1, min: 1, max: 12 }, []),
   food("cream-cheese", "Cream cheese", "cream cheese", 37, ["dairy-eggs"], ["Cream Cheese", "Cheese"], ["cream cheese"], ["original", "plain", "whipped", "spread", "tub", "regular", "strawberry", "chive"], [/\b(?:brownie|brownies|cake|cupcake|frosting|icing|cookie|muffin|cheesecake|bagel)\b/i, CANDY], /\bcream cheese\b/i, ["philadelphia", "organic valley", "kroger"], { dim: "weight", ideal: 8, min: 6, max: 16 }, []),
   food("orange-juice", "Orange juice", "orange juice", 38, ["beverages"], ["Juice"], ["orange juice", "simply orange"], ["pulp", "free", "some", "no", "calcium", "original", "with", "low", "acid", "grove", "juice"], [/\b(?:apple|grape|cranberry|pineapple|tomato|vegetable)\s+juice\b/i, /\bsoda\b/i, CANDY], /\borange juice\b|\bsimply orange\b/i, ["simply", "tropicana", "minute maid", "florida"], { dim: "volume", ideal: 52, min: 46, max: 89 }, []),
   food("protein-powder", "Protein powder", "protein powder", 39, ["pantry", "health"], ["Protein", "Supplements"], ["protein powder", "whey protein"], ["whey", "isolate", "casein", "plant", "vanilla", "chocolate", "unflavored", "gold", "standard"], [/\b(?:milk|cereal|bar|bars|shake|drink|beverage|breakfast essentials)\b/i, CANDY], /\bprotein powder\b|\bwhey protein\b/i, ["optimum nutrition", "premier protein", "orgain"], { dim: "weight", ideal: 32, min: 16, max: 80 }, []),
@@ -337,6 +341,7 @@ function escapeHead(head) {
 export function isMixedStaple(name) {
   const text = String(name || "");
   if (/\bmac(?:aroni)?\s*(?:and|&)\s*cheese\b/i.test(text)) return false;
+  if (/\bshells\s*(?:and|&)\s*cheese\b/i.test(text)) return false;
   if (!/[&/]|\band\b|\bwith\b/i.test(text)) return false;
   const parts = text.split(/\s*(?:&|\/|\band\b|\bwith\b)\s*/i).map((part) => part.trim()).filter(Boolean);
   if (parts.length < 2) return false;
@@ -372,6 +377,15 @@ export function classifyProduct(product) {
   return hits[0]?.id || "";
 }
 
+function isHeadToken(token) {
+  for (const family of FAMILIES) {
+    for (const head of family.heads) {
+      if (headParts(head).includes(token)) return true;
+    }
+  }
+  return false;
+}
+
 function queryIsFamily(text, family) {
   const tokens = words(text);
   const phrases = family.heads
@@ -382,9 +396,12 @@ function queryIsFamily(text, family) {
     for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
       if (!phrase.every((part, offset) => tokens[index + offset] === part)) continue;
       const before = tokens.slice(0, index);
-      const after = tokens.slice(index + phrase.length);
+      const afterTokens = tokens.slice(index + phrase.length);
       const allowed = (token) => family.after.has(token) || family.heads.some((head) => headParts(head).includes(token));
-      if (before.every(allowed) && after.every((token) => family.after.has(token))) return true;
+      const extra = before.filter((token) => !allowed(token));
+      // A leading brand ("Kraft", "Velveeta") can sit in front of the food.
+      // A word that is itself a grocery head ("dishwasher detergent") cannot.
+      if (extra.length <= 2 && extra.every((token) => !isHeadToken(token)) && afterTokens.every((token) => family.after.has(token))) return true;
     }
   }
   return false;

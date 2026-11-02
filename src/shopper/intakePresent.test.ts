@@ -7,7 +7,7 @@ import {
   storeChoiceHtml,
 } from "../../public/shopper/intakePresent.js";
 import { learnedSummaryHtml } from "../../public/shopper/receiptCopy.js";
-import { searchHitRows } from "../../public/shopper/import.js";
+import { catalogSearchMarkup, customCatalogProduct, orderReviewItems, searchHitRows } from "../../public/shopper/import.js";
 import { receiptStageLabel } from "../../public/shopper/receiptImport.js";
 
 describe("intake presentation", () => {
@@ -53,6 +53,43 @@ describe("intake presentation", () => {
     assert.match(hits, /Cap'n Crunch Cereal/);
     assert.match(hits, />Add</);
     assert.match(hits, /data-pick-search="item-1"/);
+    assert.match(hits, /import-search-add/);
+    const loading = catalogSearchMarkup(
+      { key: "item-1", searchOpen: true, searchQuery: "pop-tarts", searchState: "loading" },
+      (value) => String(value)
+    );
+    assert.match(loading, /Searching the catalog/);
+    assert.match(loading, /data-search-state="loading"/);
+    assert.match(loading, /enterkeyhint="search"/);
+    const empty = catalogSearchMarkup(
+      { key: "item-1", searchOpen: true, searchQuery: "dragon fruit", searchState: "empty", searchHits: [] },
+      (value) => String(value)
+    );
+    assert.match(empty, /No matches in the catalog yet/);
+    assert.match(empty, /Search stores for it/);
+    assert.match(empty, /Add as a custom item/);
+    assert.match(empty, /kroger\.com\/search/);
+    const results = catalogSearchMarkup(
+      {
+        key: "item-1",
+        searchOpen: true,
+        searchState: "results",
+        searchHits: [{ id: "capn", name: "Cap'n Crunch Cereal", sizeLabel: "12 oz" }],
+      },
+      (value) => String(value)
+    );
+    assert.match(results, /import-search-add/);
+    const custom = customCatalogProduct("pop-tarts");
+    assert.match(custom.id, /^custom:/);
+    assert.equal(custom.name, "pop-tarts");
+    const ordered = orderReviewItems([
+      { key: "a", status: "missing", choices: [] },
+      { key: "b", status: "matched", choices: [{ product: { id: "1" } }] },
+    ]);
+    assert.deepEqual(
+      ordered.map((item) => item.key),
+      ["b", "a"]
+    );
     assert.match(html, /Kroger order, 24 items found/);
     assert.match(html, /Large eggs/);
     const failed = readCardHtml({ index: 1, name: "bad.pdf", status: "error", error: "That file was empty.", ratio: 1 });

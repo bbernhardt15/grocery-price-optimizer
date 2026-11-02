@@ -1373,6 +1373,13 @@ dialog.profile-onboard[data-step="learned"] .profile-actions { position: static;
   background: var(--bg-accent); padding: 0 14px; font-weight: 700;
 }
 .brand-pick[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.brand-skel {
+  display: inline-block; width: 88px; height: 44px; border-radius: 999px;
+  background: var(--line); animation: skel-pulse 1.1s ease-in-out infinite;
+}
+.import-search-state { margin: 0; }
+.import-search-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.empty-store-note { margin: 0; }
 .rule-list { display: flex; flex-direction: column; gap: 8px; }
 .rule-choice { width: 100%; text-align: left; }
 .rule-never { align-self: flex-start; }

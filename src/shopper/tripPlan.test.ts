@@ -31,6 +31,7 @@ import {
   itemIsChecked,
   pruneStoresToList,
   numericWalmartId,
+  emptyStoreNotes,
 } from "../../public/shopper/tripPlan.js";
 
 const milk = {
@@ -433,6 +434,10 @@ describe("in-store checklist", () => {
     assert.equal(readItemChecks(storage)[aldiKey], undefined);
     assert.equal(numericWalmartId({ productId: "0099997200115", priceSource: "live" }), "");
     assert.equal(numericWalmartId({ productId: "10451234", priceSource: "live" }), "10451234");
+    assert.deepEqual(
+      emptyStoreNotes(["Kroger", "Walmart", "Target"], [{ storeName: "Kroger", items: [{ name: "Milk" }] }, { storeName: "Target", items: [] }]),
+      ["Walmart: nothing cheapest here this trip", "Target: nothing cheapest here this trip"]
+    );
 
     const pruned = pruneStoresToList(
       [

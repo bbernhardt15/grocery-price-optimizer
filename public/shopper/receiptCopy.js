@@ -99,21 +99,30 @@ export function receiptUploadHtml() {
   </div>`;
 }
 
-function learnedPickerHtml(row, brands) {
+export function brandChipMarkup(brands, options = {}) {
+  const pending = Boolean(options.pending);
+  const buttons = (brands || [])
+    .map((brand) => {
+      const on = Boolean(options.selected?.has?.(String(brand).toLowerCase()));
+      const family = escapeText(options.family || "");
+      return `<button type="button" class="brand-pick" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
+    })
+    .join("");
+  const skeletons = pending
+    ? `<span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span>`
+    : "";
+  if (!buttons && !skeletons) return "";
+  const busy = pending ? ` aria-busy="true"` : "";
+  return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands"${busy}>${buttons}${skeletons}</div></fieldset>`;
+}
+
+function learnedPickerHtml(row, brands, options = {}) {
   const family = escapeText(row?.family || "");
   const nameBrand = row?.mode === "brand" || row?.mode === "cheapestPicks";
   const selected = new Set(
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
-  const nameButtons = (brands || [])
-    .map((brand) => {
-      const on = selected.has(String(brand).toLowerCase());
-      return `<button type="button" class="brand-pick" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
-    })
-    .join("");
-  const names = nameButtons
-    ? `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands">${nameButtons}</div></fieldset>`
-    : "";
+  const names = brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "" });
   const rule = (mode, label) => {
     const on = mode === "brand" ? nameBrand : row?.mode === mode;
     return `<button type="button" class="rule-choice" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
@@ -151,7 +160,8 @@ export function learnedSummaryHtml(learned, options = {}) {
           const mode = modeLine(row);
           const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
           const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
-          const picker = editing && editing === row.family ? learnedPickerHtml(row, brandsByFamily[row.family] || []) : "";
+          const pending = Boolean(options.pendingFamilies?.[row.family]);
+          const picker = editing && editing === row.family ? learnedPickerHtml(row, brandsByFamily[row.family] || [], { pending }) : "";
           return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}">
         <div>
           <h3>${escapeText(row.label || row.family)}</h3>

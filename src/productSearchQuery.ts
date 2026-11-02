@@ -106,15 +106,27 @@ const FLAVOR_WORDS = new Set([
 ]);
 
 /**
+ * Speech-to-text swaps heard on a phone.
+ * "Sheldon" is a mis-hearing of "shells". "Graters" is Graeter's.
+ */
+export function spokenTranscriptAliases(text: string): string {
+  return String(text || "")
+    .replace(/\bsheldon\b/gi, "shells")
+    .replace(/\bgraters\b/gi, "Graeter's")
+    .replace(/\bgraeters\b/gi, "Graeter's");
+}
+
+/**
  * Common brand spellings that retailer titles abbreviate.
  * "Captain Crunch" and "Cap'n Crunch" are the same cereal.
  */
 export function expandGroceryAliases(text: string): string {
-  return String(text || "")
+  return spokenTranscriptAliases(text)
     .replace(/\bcaptain\s+crunch\b/gi, "capn crunch")
     .replace(/\bcap['’]n\s+crunch\b/gi, "capn crunch")
     .replace(/\bcapn\s+crunch\b/gi, "capn crunch")
-    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts");
+    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts")
+    .replace(/\bshells\s+cheese\b/gi, "shells and cheese");
 }
 
 export function isFlavorToken(token: string): boolean {

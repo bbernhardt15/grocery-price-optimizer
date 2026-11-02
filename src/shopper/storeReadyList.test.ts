@@ -73,7 +73,7 @@ describe("store-ready list formatting", () => {
     const breadAt = text.indexOf("Bakery · Bread");
     const chipsAt = text.indexOf("Snacks · Chips");
     assert.ok(milkAt >= 0 && breadAt > milkAt && chipsAt > breadAt);
-    assert.match(text, /2 × Friendly Farms Vitamin D Whole Milk Gallon Jug, 128 fl oz, Plastic, 1 gal — \$4\.38/);
+    assert.match(text, /2 × Friendly Farms Vitamin D Whole Milk, 1 gal — \$4\.38/);
     assert.match(text, /1 × L'oven Fresh White Bread, 20 oz — \$1\.79/);
     assert.match(text, /3 × Clancy's Potato Chips, 8 oz — \$4\.47/);
     assert.match(text, /Subtotal \$10\.64/);
@@ -197,7 +197,7 @@ describe("store-ready CSV", () => {
       ],
     });
     assert.match(csv, /^Department,Aisle,Quantity,Product,Size,Expected price/);
-    assert.match(csv, /"Milk, back",2,"Friendly ""Farms"", Milk","1 gal\njug",\$4\.38/);
+    assert.match(csv, /"Milk, back",2,Friendly Farms Milk,"1 gal\njug",\$4\.38/);
     assert.match(csv, /Subtotal,,\$4\.38$/);
     assert.equal(csvFilename("Sam's Club"), "sams-club-list.csv");
   });

@@ -630,6 +630,30 @@ export function planningStoreNames() {
 }
 
 /**
+ * Checked stores the split left empty. A zero is a real outcome, not a broken cart.
+ * @param {string[] | null | undefined} checkedNames
+ * @param {Array<{ storeName?: string, items?: unknown[], itemCount?: number }> | null | undefined} stores
+ */
+export function emptyStoreNotes(checkedNames, stores) {
+  const filled = new Set(
+    (stores || [])
+      .filter((store) => (store.items || []).length > 0 || Number(store.itemCount) > 0)
+      .map((store) => String(store.storeName || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const notes = [];
+  const seen = new Set();
+  for (const name of checkedNames || []) {
+    const clean = String(name || "").trim();
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key) || filled.has(key)) continue;
+    seen.add(key);
+    notes.push(`${clean}: nothing cheapest here this trip`);
+  }
+  return notes;
+}
+
+/**
  * Keep a trip inside the stores the shopper checked.
  * An empty allow-list means they have not narrowed it.
  */
