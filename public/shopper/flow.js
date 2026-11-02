@@ -57,21 +57,25 @@ export function planBarCopy(input = {}) {
   }
   const amount = Number(input.total);
   const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
-  let button = "Review the split";
+  const provisional = !input.hasPlan && step !== "shop";
+  let button = "Review your trip";
   let enabled = count > 0;
+  let showButton = count > 0;
   if (step === "plan") {
-    button = input.hasPlan ? "Shop" : input.planning ? "Updating…" : "Review the split";
+    button = input.hasPlan ? "Shop" : input.planning ? "Updating…" : "Review your trip";
     enabled = count > 0;
+    showButton = true;
   } else if (step === "shop") {
     button = "Done";
     // A disabled Done swallows the tap. Incomplete trips still respond.
     enabled = count > 0;
+    showButton = true;
   }
-  if (input.planning && step !== "shop" && !input.hasPlan) {
+  if (input.planning && step === "plan" && !input.hasPlan) {
     button = "Updating…";
     enabled = count > 0;
   }
-  return { step, countLabel, totalLabel, button, enabled };
+  return { step, countLabel, totalLabel, button, enabled, showButton, provisional };
 }
 
 /**

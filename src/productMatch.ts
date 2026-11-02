@@ -3,7 +3,7 @@ import {
   parsePackageSize,
   type ParsedPackageSize,
 } from "./packageSize";
-import { groceryWordTokens, stemGroceryToken } from "./productSearchQuery";
+import { groceryWordTokens, isFlavorToken, stemGroceryToken } from "./productSearchQuery";
 
 export type PricedOffer = {
   name: string;
@@ -140,6 +140,8 @@ const FORM = new Set(
     "cultured",
     "seedless",
     "pitted",
+    "spread",
+    "wedge",
   ].map((word) => stemGroceryToken(word))
 );
 
@@ -227,28 +229,48 @@ function lastPhraseIndex(haystack: string[], needle: string[]): number {
 }
 
 export function matchRole(query: string, productName: string): MatchRole {
-  const queryTokens = contentTokens(query);
+  const rawQuery = contentTokens(query);
+  const queryTokens = rawQuery.filter((token) => !isFlavorToken(token));
+  const tokens = queryTokens.length ? queryTokens : rawQuery;
   const productTokens = stripTrailingPackaging(contentTokens(productName));
-  if (queryTokens.length === 0 || !containsAll(productTokens, queryTokens)) {
+  if (tokens.length === 0 || !containsAll(productTokens, tokens)) {
     return "none";
   }
 
-  const index = lastPhraseIndex(productTokens, queryTokens);
+  const index = lastPhraseIndex(productTokens, tokens);
   if (index < 0) {
     return "modifier";
   }
 
-  const after = productTokens.slice(index + queryTokens.length);
+  const after = productTokens.slice(index + tokens.length);
   if (after.length === 0) {
     return "product";
   }
   if (after.some((token) => FLAVOR.has(token))) {
     return "modifier";
   }
-  if (after.every((token) => FORM.has(token))) {
+  if (after.every((token) => FORM.has(token) || isFlavorToken(token))) {
     return "product";
   }
   return "modifier";
+}
+
+const STRICT_HEADS = new Set(["cream cheese", "protein powder", "orange juice", "pop tart"]);
+
+/** These queries are the product itself. A flavor of something else is not a match. */
+export function requiresOwnHead(query: string): boolean {
+  const tokens = contentTokens(query);
+  if (tokens.length < 2) return false;
+  const phrase = tokens.filter((token) => !isFlavorToken(token)).join(" ");
+  return STRICT_HEADS.has(phrase);
+}
+
+/** How many requested flavors this product actually has. Higher is closer. */
+export function flavorOverlap(query: string, productName: string): number {
+  const wanted = contentTokens(query).filter((token) => isFlavorToken(token));
+  if (!wanted.length) return 0;
+  const have = new Set(contentTokens(productName));
+  return wanted.filter((token) => have.has(token)).length;
 }
 
 export function packageSizeOf(
@@ -309,6 +331,10 @@ export function compareProductOffers(
   const roleCmp = ROLE_RANK[matchRole(query, a.name)] - ROLE_RANK[matchRole(query, b.name)];
   if (roleCmp !== 0) {
     return roleCmp;
+  }
+  const flavorCmp = flavorOverlap(query, b.name) - flavorOverlap(query, a.name);
+  if (flavorCmp !== 0) {
+    return flavorCmp;
   }
 
   const requested = parsePackageSize(query);

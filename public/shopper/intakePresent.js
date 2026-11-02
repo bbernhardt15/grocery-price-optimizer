@@ -155,8 +155,10 @@ export function readCardHtml(card) {
     ? `<p class="read-error">${escapeText(card?.error || "Couldn't read that file.")}</p><button type="button" class="ghost" data-read-retry="${escapeText(card?.index)}">Retry</button>`
     : "";
   const ratio = Math.max(0, Math.min(1, Number(card?.ratio) || 0));
+  const stage = card?.message ? `<p class="read-stage">${escapeText(card.message)}</p>` : "";
   return `<article class="read-card" data-read-card="${escapeText(card?.index)}" data-state="${escapeText(status)}">
     <h3>${escapeText(foundLabel(card?.name, card?.found))}</h3>
+    ${stage}
     <progress max="1" value="${ratio}"></progress>
     ${waiting}
     <ul class="read-items">${items}</ul>

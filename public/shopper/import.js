@@ -18,6 +18,43 @@ export function acceptLabel(count) {
   return `Add ${count} items to my trip`;
 }
 
+const TITLE_WORDS = new Set(["orange", "cream", "cheese", "protein", "captain", "crunch", "cinnamon", "cherry", "pop", "tart", "tarts"]);
+
+export function reviewProductTitle(product, query) {
+  const variant = String(product?.catalogName || "").trim();
+  const family = String(product?.familyName || product?.name || "").trim();
+  const words = String(query || "")
+    .toLowerCase()
+    .replace(/\bcap['’]?n\b/g, "captain")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => TITLE_WORDS.has(word));
+  const hasWord = (name, word) => {
+    const text = name.toLowerCase();
+    if (word === "captain") return /\bcap/.test(text);
+    if (word === "tarts" || word === "tart") return text.includes("tart");
+    return text.includes(word);
+  };
+  const misses = (name) => words.some((word) => !hasWord(name, word));
+  if (variant && family && misses(family) && !misses(variant)) return variant;
+  return family || variant || "Item";
+}
+
+export function searchHitRows(itemKey, hits, escapeHtml) {
+  return (hits || [])
+    .map((hit) => {
+      const name = String(hit?.name || "Item");
+      const size = hit?.sizeLabel ? ` · ${escapeHtml(hit.sizeLabel)}` : "";
+      const key = escapeHtml(itemKey);
+      const id = escapeHtml(hit?.id || "");
+      return `<div class="import-search-row" data-pick-search="${key}" data-id="${id}" role="button" tabindex="0">
+        <span class="import-search-name">${escapeHtml(name)}${size}</span>
+        <button type="button" class="primary import-search-add" data-pick-search="${key}" data-id="${id}">Add</button>
+      </div>`;
+    })
+    .join("");
+}
+
 /** Units that will actually be added. The same product is counted once. */
 export function addedUnits(rows) {
   const seen = new Set();
@@ -366,17 +403,16 @@ export function mountImport(deps) {
       if (shaped.note) setStatus(shaped.note);
     }
     const count = acceptedCount();
-    const cards = review.items
+    const ordered = [...review.items].sort((a, b) => {
+      const missing = (row) => (row.status === "missing" || !row.choices?.length ? 0 : 1);
+      return missing(a) - missing(b);
+    });
+    const cards = ordered
       .map((item) => {
         const kicker = review.idea && item.raw ? `<p class="import-kicker">${escapeHtml(item.raw)}</p>` : "";
         if (item.status === "missing" || !item.choices?.length) {
-          const hits = (item.searchHits || [])
-            .map(
-              (hit) =>
-                `<button type="button" class="ghost import-search-hit" data-pick-search="${escapeHtml(item.key)}" data-id="${escapeHtml(hit.id)}">${escapeHtml(hit.name)}${hit.sizeLabel ? ` · ${escapeHtml(hit.sizeLabel)}` : ""}</button>`
-            )
-            .join("");
-          return `<li class="import-tile" data-key="${escapeHtml(item.key)}">
+          const hits = searchHitRows(item.key, item.searchHits, escapeHtml);
+          return `<li class="import-tile import-missing" data-key="${escapeHtml(item.key)}">
             ${kicker}
             <h3>${escapeHtml(item.raw || item.name)}</h3>
             <p class="import-note">Not on the shelf.</p>
@@ -393,11 +429,11 @@ export function mountImport(deps) {
                   </div>`
                 : ""
             }
-            ${hits ? `<div class="import-tools">${hits}</div>` : ""}
+            ${hits ? `<div class="import-hit-list">${hits}</div>` : ""}
           </li>`;
         }
         const product = choiceProduct(item);
-        const title = product?.familyName || product?.name || item.raw || item.name;
+        const title = reviewProductTitle(product, item.raw || item.name);
         const brand = product?.brand && !String(title).toLowerCase().includes(String(product.brand).toLowerCase()) ? product.brand : "";
         const image = product?.imageUrls?.[0] || "";
         const sizeButtons = (product?.variants || [])
@@ -455,9 +491,12 @@ export function mountImport(deps) {
         </li>`;
       })
       .join("");
+    const missing = review.items.filter((item) => item.status === "missing" || !item.choices?.length).length;
+    const missingNote = missing > 1 ? `<p class="import-missing-note">${missing} items need a pick. Search or skip each one.</p>` : "";
     reviewHeading();
     reviewHost.innerHTML = `
       ${reviewLead()}
+      ${missingNote}
       <ul class="import-review">${cards}</ul>
       <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save for next time on this phone.</span></label>
       <div class="import-review-actions">
@@ -780,6 +819,11 @@ export function mountImport(deps) {
   $("import-close")?.addEventListener("click", close);
   $("import-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const field = event.submitter?.closest?.(".import-search")?.querySelector("[data-search-query]") || document.activeElement;
+    if (field instanceof HTMLInputElement && field.matches("[data-search-query]")) {
+      field.closest(".import-search")?.querySelector("[data-search-go]")?.click();
+      return;
+    }
     void runText($("import-paste").value);
   });
   $("import-mic")?.addEventListener("click", () => void startRecording());
@@ -833,7 +877,7 @@ export function mountImport(deps) {
   });
 
   reviewHost.addEventListener("click", (event) => {
-    const target = event.target.closest("button");
+    const target = event.target.closest("button, [data-pick-search]");
     if (!target || !review) return;
     const key =
       target.dataset.accept ||
@@ -1015,7 +1059,6 @@ export function mountImport(deps) {
     }
     toast(addedLabel(addedCount));
     close();
-    deps.showStep("plan");
   }
 
   async function consumeShare() {

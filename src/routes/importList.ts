@@ -130,16 +130,7 @@ async function withCatalogBrands(analysis: ReceiptAnalysis): Promise<ReceiptAnal
 }
 
 function mergeReceipts(parts: ReceiptAnalysis[]): ReceiptAnalysis | null {
-  const lines: ReceiptLine[] = [];
-  const seen = new Set<string>();
-  for (const part of parts) {
-    for (const line of part.lines) {
-      const key = line.upc ? `upc:${line.upc}` : `${line.brand}|${line.name}|${line.size}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lines.push(line);
-    }
-  }
+  const lines = parts.flatMap((part) => part.lines || []);
   if (!lines.length) return null;
   return learnReceiptLines(lines);
 }
@@ -608,25 +599,27 @@ router.post("/import/pdf", async (req, res) => {
     let detailHigh = 0;
     let detailLow = 0;
     const visionStarted = Date.now();
-    const reportPart = () => {
-      const part = Math.min(slices.length, finished + 1);
+    const pageCount = new Set(slices.map((slice) => slice.page)).size || 1;
+    const reportPage = (page: number, doneCount: number) => {
       emit({
         type: "progress",
         stage: "reading",
-        message: `Reading part ${part} of ${slices.length}…`,
-        index: part,
-        total: slices.length,
-        ratio: 0.15 + (0.6 * finished) / slices.length,
+        page,
+        pages: pageCount,
+        message: `Reading page ${page} of ${pageCount}`,
+        index: page,
+        total: pageCount,
+        ratio: 0.15 + (0.6 * doneCount) / slices.length,
       });
     };
-    reportPart();
+    reportPage(slices[0]?.page || 1, 0);
     const parts = await mapPool(slices, VISION_CONCURRENCY, async (slice) => {
       const detail = visionDetail(slice.jpeg);
       if (detail === "high") detailHigh += 1;
       else detailLow += 1;
       const raw = await aiReadImage(slice.jpeg.toString("base64"), "image/jpeg", process.env, { detail });
       finished += 1;
-      reportPart();
+      reportPage(slice.page, finished);
       const receipt = receiptFromVision(raw);
       return receipt?.lines.length ? receipt : null;
     });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { matchRole } from "./productMatch";
+import { compareProductOffers, flavorOverlap, matchRole, requiresOwnHead } from "./productMatch";
 
 describe("matchRole", () => {
   it("treats honey as the product only when the name ends in honey", () => {
@@ -35,5 +35,27 @@ describe("matchRole", () => {
     assert.equal(matchRole("bread", "White Sandwich Bread"), "product");
     assert.equal(matchRole("bread", "Bread Crumbs"), "modifier");
     assert.equal(matchRole("whole milk", "Organic Whole Milk"), "product");
+  });
+
+  it("requires the head noun for cream cheese, protein powder, orange juice, and Pop-Tarts", () => {
+    assert.equal(requiresOwnHead("cream cheese"), true);
+    assert.equal(matchRole("cream cheese", "Philadelphia Original Cream Cheese"), "product");
+    assert.equal(matchRole("cream cheese", "Mini Red Velvet Brownies with Cream Cheese Frosting"), "modifier");
+    assert.equal(matchRole("protein powder", "Gold Standard Whey Protein Powder"), "product");
+    assert.equal(matchRole("protein powder", "Carnation Breakfast Essentials Milk"), "none");
+    assert.equal(matchRole("orange juice", "Simply Orange Juice"), "product");
+    assert.equal(matchRole("orange juice", "Simply Juice"), "none");
+    assert.equal(matchRole("orange juice", "Orange Juice"), "product");
+    assert.equal(matchRole("Captain Crunch cereal", "Cap'n Crunch Cereal"), "product");
+    assert.equal(matchRole("cinnamon pop-tarts", "Frosted Cherry Pop-Tarts"), "product");
+    assert.ok(flavorOverlap("cinnamon pop-tarts", "Frosted Cinnamon Pop-Tarts") > flavorOverlap("cinnamon pop-tarts", "Frosted Cherry Pop-Tarts"));
+    const offer = { price: 3, storeName: "Kroger", size: "12 oz" };
+    assert.ok(
+      compareProductOffers(
+        "cream cheese",
+        { ...offer, name: "Original Cream Cheese", price: 4 },
+        { ...offer, name: "Mini Red Velvet Brownies with Cream Cheese Frosting", price: 2 }
+      ) < 0
+    );
   });
 });

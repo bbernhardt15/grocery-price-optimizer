@@ -55,6 +55,17 @@ describe("staple families", () => {
     assert.equal(familyFromQuery("peanut butter"), "peanut-butter");
     assert.equal(familyFromQuery("chicken breast"), "chicken");
     assert.notEqual(familyFromQuery("Butterfinger"), "butter");
+    assert.equal(familyFromQuery("cream cheese"), "cream-cheese");
+    assert.equal(familyFromQuery("protein powder"), "protein-powder");
+    assert.equal(familyFromQuery("orange juice"), "orange-juice");
+    assert.equal(familyFromQuery("Captain Crunch cereal"), "cereal");
+    assert.equal(familyFromQuery("cinnamon pop-tarts"), "pop-tarts");
+    assert.equal(productMatchesFamily({ name: "Mini Red Velvet Brownies with Cream Cheese Frosting", departmentId: "snacks" }, "cream-cheese"), false);
+    assert.equal(productMatchesFamily({ name: "Original Cream Cheese", brand: "Philadelphia", departmentId: "dairy-eggs" }, "cream-cheese"), true);
+    assert.equal(productMatchesFamily({ name: "Carnation Breakfast Essentials Milk", departmentId: "beverages" }, "protein-powder"), false);
+    assert.equal(productMatchesFamily({ name: "Simply Juice", brand: "Simply", departmentId: "beverages" }, "orange-juice"), false);
+    assert.equal(productMatchesFamily({ name: "Orange Juice", brand: "Simply", departmentId: "beverages" }, "orange-juice"), true);
+    assert.equal(productMatchesFamily({ name: "Cap'n Crunch Cereal", brand: "Quaker", departmentId: "breakfast" }, "cereal"), true);
   });
 
   it("hides a WM placeholder when a real image exists and reports mismatches", () => {

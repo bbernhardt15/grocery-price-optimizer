@@ -75,8 +75,15 @@ const HOUSE = {
 
 const ALL_HOUSE = new Set(Object.values(HOUSE).flat());
 
-function words(text) {
+function expandAliases(text) {
   return String(text || "")
+    .replace(/\bcaptain\s+crunch\b/gi, "capn crunch")
+    .replace(/\bcap['’]n\s+crunch\b/gi, "capn crunch")
+    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts");
+}
+
+function words(text) {
+  return expandAliases(text)
     .toLowerCase()
     .replace(/['’]/g, "")
     .replace(/&/g, " and ")
@@ -203,7 +210,7 @@ const DEFS = [
     attr("white", "White", /\bwhite\b/i),
     attr("brown", "Brown", /\bbrown\b/i),
   ]),
-  food("cereal", "Cereal", "cereal", 14, ["breakfast"], ["Cereal"], ["cereal"], ["toasted", "oats", "whole", "grain", "family", "size"], [/\b(?:bar|bars|treat|treats|candy|marshmallow snack)\b/i, /\belf on the shelf\b/i, CANDY, PET, SOUP], /\bcereal/i, ["general mills", "kellogg's", "post", "quaker", "malt-o-meal"], { dim: "weight", ideal: 12, min: 8, max: 18 }, []),
+  food("cereal", "Cereal", "cereal", 14, ["breakfast"], ["Cereal"], ["cereal", "capn crunch"], ["toasted", "oats", "whole", "grain", "family", "size", "cereal", "original", "peanut", "butter", "berries", "crunch"], [/\b(?:bar|bars|treat|treats|candy|marshmallow snack)\b/i, /\belf on the shelf\b/i, CANDY, PET, SOUP], /\bcereal|capn crunch|captain crunch|cap'n crunch/i, ["general mills", "kellogg's", "post", "quaker", "malt-o-meal", "capn crunch"], { dim: "weight", ideal: 12, min: 8, max: 18 }, []),
   food("coffee", "Coffee", "ground coffee", 15, ["beverages", "pantry"], ["Coffee & Tea"], ["coffee"], ["ground", "grounds", "whole", "bean", "beans", "roast", "medium", "dark", "light", "breakfast", "blend", "classic", "pods", "pod", "k", "cups", "cup", "kcup"], [/\b(?:creamer|candy|cake|syrup|liqueur|ice cream)\b/i, CANDY, ALCOHOL], /\bcoffee\b/i, ["folgers", "maxwell house", "peet's", "starbucks", "dunkin'"], { dim: "weight", ideal: 16, min: 10, max: 32 }, [
     attr("ground", "Ground", /\bground\b/i),
   ]),
@@ -258,6 +265,10 @@ const DEFS = [
   house("cleaner", "Cleaner", "all purpose cleaner", 34, ["household"], ["Cleaning"], ["all-purpose cleaner", "all purpose cleaner", "multi-surface cleaner", "disinfecting cleaner"], ["original", "lemon", "fresh", "spray", "refill"], [PET, COSMETIC, /\blaundry\b/i], /\bcleaners?\b/i, ["lysol", "clorox", "mr. clean", "formula 409", "fabuloso", "method", "seventh generation", "pine-sol", "windex"], { dim: "volume", ideal: 32, min: 16, max: 64 }, []),
   food("donuts", "Donuts", "donuts", 35, ["bakery", "breakfast"], ["Donuts", "Bakery"], ["donut", "donuts", "doughnut", "doughnuts"], ["glazed", "chocolate", "yeast", "cake", "plain", "original", "powdered", "cinnamon", "assorted", "dozen", "mini"], [/\b(?:holes?|muffin|cereal|cookie)\b/i, CANDY, PET], /\bdonuts?\b|\bdoughnuts?\b/i, ["entenmann's", "hostess", "krispy kreme", "little debbie"], { dim: "count", ideal: 12, min: 6, max: 16 }, []),
   food("mac-and-cheese", "Mac and cheese", "macaroni and cheese", 36, ["pantry"], ["Pasta & Rice", "Canned"], ["mac and cheese", "macaroni and cheese", "macaroni & cheese"], ["original", "classic", "shells", "cup", "cups", "boxed", "deluxe", "dinner"], [/\b(?:macbook|makeup|macadamia)\b/i, PET, CANDY], /mac(?:aroni)?\s*(?:and|&)\s*cheese/i, ["kraft", "velveeta", "annie's", "great value"], { dim: "count", ideal: 1, min: 1, max: 12 }, []),
+  food("cream-cheese", "Cream cheese", "cream cheese", 37, ["dairy-eggs"], ["Cream Cheese", "Cheese"], ["cream cheese"], ["original", "plain", "whipped", "spread", "tub", "regular", "strawberry", "chive"], [/\b(?:brownie|brownies|cake|cupcake|frosting|icing|cookie|muffin|cheesecake|bagel)\b/i, CANDY], /\bcream cheese\b/i, ["philadelphia", "organic valley", "kroger"], { dim: "weight", ideal: 8, min: 6, max: 16 }, []),
+  food("orange-juice", "Orange juice", "orange juice", 38, ["beverages"], ["Juice"], ["orange juice", "simply orange"], ["pulp", "free", "some", "no", "calcium", "original", "with", "low", "acid", "grove", "juice"], [/\b(?:apple|grape|cranberry|pineapple|tomato|vegetable)\s+juice\b/i, /\bsoda\b/i, CANDY], /\borange juice\b|\bsimply orange\b/i, ["simply", "tropicana", "minute maid", "florida"], { dim: "volume", ideal: 52, min: 46, max: 89 }, []),
+  food("protein-powder", "Protein powder", "protein powder", 39, ["pantry", "health"], ["Protein", "Supplements"], ["protein powder", "whey protein"], ["whey", "isolate", "casein", "plant", "vanilla", "chocolate", "unflavored", "gold", "standard"], [/\b(?:milk|cereal|bar|bars|shake|drink|beverage|breakfast essentials)\b/i, CANDY], /\bprotein powder\b|\bwhey protein\b/i, ["optimum nutrition", "premier protein", "orgain"], { dim: "weight", ideal: 32, min: 16, max: 80 }, []),
+  food("pop-tarts", "Pop-Tarts", "pop tarts", 40, ["breakfast"], ["Toaster Pastries", "Breakfast"], ["pop tarts"], ["frosted", "unfrosted", "cinnamon", "cherry", "strawberry", "blueberry", "brown", "sugar", "vanilla", "fudge", "wild", "berry"], [/\b(?:cereal|oatmeal|granola|muffin)\b/i, CANDY], /\bpop tarts\b|\btoaster pastr/i, ["kellogg's", "pop tarts"], { dim: "count", ideal: 12, min: 8, max: 16 }, []),
 ];
 
 function attr(id, label, test) {

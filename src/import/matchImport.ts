@@ -8,7 +8,8 @@ import { upcKey } from "../catalog/normalize";
 import { familyFromQuery, isNonGroceryProduct, matchConfidence, offerFitsFamily, productMatchesFamily } from "../catalog/stapleFamilies";
 import type { BrowseProduct } from "../catalog/types";
 import { parsePackageSize } from "../packageSize";
-import { groceryWordTokens, stemGroceryToken } from "../productSearchQuery";
+import { matchRole, requiresOwnHead } from "../productMatch";
+import { expandGroceryAliases, groceryWordTokens, isFlavorToken, stemGroceryToken } from "../productSearchQuery";
 import type { ParsedImportItem } from "./parseImportText";
 
 export type ImportStatus = "matched" | "ambiguous" | "missing";
@@ -55,7 +56,7 @@ const CONFLICTS = [
 ];
 
 function stems(text: string): string[] {
-  return groceryWordTokens(text)
+  return groceryWordTokens(expandGroceryAliases(text))
     .map((token) => stemGroceryToken(token))
     .filter((token) => token.length > 1 && !IGNORE.has(token));
 }
@@ -113,9 +114,13 @@ function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
   if (!query.length) return 0;
   const hayTokens = stems(`${variant.name} ${variant.brand}`);
   const hay = new Set(hayTokens);
+  const required = query.filter((token) => !isFlavorToken(token));
+  const counted = required.length ? required : query;
   let hits = 0;
-  for (const token of query) if (hayHas(hay, token)) hits += 1;
-  let score = hits / query.length;
+  for (const token of counted) if (hayHas(hay, token)) hits += 1;
+  let score = hits / counted.length;
+  const flavorHits = query.filter((token) => isFlavorToken(token) && hayHas(hay, token)).length;
+  if (flavorHits) score += 0.08 * flavorHits;
 
   const queryCuts = query.filter((token) => CUTS.has(token));
   const productCuts = hayTokens.filter((token) => CUTS.has(token));
@@ -132,7 +137,7 @@ function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
   score -= kindClash(query, hay);
 
   const brandTokens = new Set(stems(item.brand || ""));
-  const flavorMiss = query.filter((token) => token.length >= 4 && !hayHas(hay, token) && !brandTokens.has(token));
+  const flavorMiss = counted.filter((token) => token.length >= 4 && !hayHas(hay, token) && !brandTokens.has(token) && !isFlavorToken(token));
   const extra = hayTokens.filter((token) => token.length >= 4 && !query.includes(token) && !brandTokens.has(token));
   if (hits > 0 && flavorMiss.length > 0 && extra.length > 0) score -= 0.55;
   else if (!flavorMiss.length && query.length > 0) score += 0.15;
@@ -140,6 +145,7 @@ function scoreVariant(item: ParsedImportItem, variant: BrowseProduct): number {
   if (item.brand) score += brandHit(item.brand, variant) ? 0.4 : -0.2;
   const wanted = item.size || (parsePackageSize(item.name) ? item.name : undefined);
   score += (1 - sizeDistance(wanted, variant)) * 0.18;
+  if (requiresOwnHead(item.name) && matchRole(item.name, `${variant.brand} ${variant.name}`) !== "product") score -= 1;
   return score;
 }
 

@@ -720,6 +720,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (!event || !Number.isFinite(Number(event.fileIndex))) return;
     const card = readCards.find((row) => row.index === Number(event.fileIndex));
     if (!card) return;
+    if (event.message) card.message = String(event.message);
     if (typeof event.found === "number") card.found = event.found;
     if (Array.isArray(event.items)) {
       const seen = new Set(card.items);
@@ -751,6 +752,15 @@ export function mountProfileOnboarding(deps = {}) {
     node.dataset.state = card.status;
     const title = node.querySelector("h3");
     if (title) title.textContent = foundLabel(card.name, card.found);
+    let stage = node.querySelector(".read-stage");
+    if (card.message) {
+      if (!stage) {
+        stage = document.createElement("p");
+        stage.className = "read-stage";
+        title?.insertAdjacentElement("afterend", stage);
+      }
+      stage.textContent = card.message;
+    }
     const meter = node.querySelector("progress");
     if (meter) meter.value = String(card.ratio);
     const list = node.querySelector(".read-items");
@@ -1228,11 +1238,14 @@ export function mountProfileOnboarding(deps = {}) {
     if (target.dataset.learnedMode) {
       const family = target.dataset.learnedFamily || "";
       const row = learnedRows.find((item) => item.family === family);
+      const picked = row?.brands?.length ? row.brands : row?.brand ? [row.brand] : [];
+      let mode = target.dataset.learnedMode;
+      if (mode === "brand" && picked.length > 1) mode = "cheapestPicks";
       const next = applyLearnedChoice(learnedRows, {
         family,
-        mode: target.dataset.learnedMode,
-        brand: target.dataset.learnedBrand || row?.brand || "",
-        brands: target.dataset.learnedMode === "cheapestPicks" ? row?.brands || (row?.brand ? [row.brand] : []) : undefined,
+        mode,
+        brand: target.dataset.learnedBrand || row?.brand || picked[0] || "",
+        brands: mode === "cheapestPicks" ? picked : mode === "brand" ? picked.slice(0, 1) : undefined,
       });
       if (next === learnedRows) return;
       learnedRows = next;

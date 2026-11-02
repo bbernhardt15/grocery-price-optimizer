@@ -101,26 +101,33 @@ export function receiptUploadHtml() {
 
 function learnedPickerHtml(row, brands) {
   const family = escapeText(row?.family || "");
+  const nameBrand = row?.mode === "brand" || row?.mode === "cheapestPicks";
   const selected = new Set(
-    (row?.brands?.length ? row.brands : row?.mode === "brand" && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
+    (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
   const nameButtons = (brands || [])
     .map((brand) => {
       const on = selected.has(String(brand).toLowerCase());
-      return `<button type="button" class="mini-chip" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
+      return `<button type="button" class="brand-pick" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
     })
     .join("");
   const names = nameButtons
-    ? `<p class="profile-label">Brands you buy. Pick more than one.</p><div class="mini-row brand-picks">${nameButtons}</div>`
+    ? `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands">${nameButtons}</div></fieldset>`
     : "";
-  const option = (mode, label) =>
-    `<button type="button" class="choice-card" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${row?.mode === mode ? "true" : "false"}">${label}</button>`;
+  const rule = (mode, label) => {
+    const on = mode === "brand" ? nameBrand : row?.mode === mode;
+    return `<button type="button" class="rule-choice" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
+  };
   return `<div class="learned-picker" data-editor="${family}">
     ${names}
-    ${option("cheapestPicks", "Cheapest of my picks")}
-    ${option("cheapest", "Cheapest overall")}
-    ${option("storeBrand", "Store brand")}
-    ${option("never", "I don't buy it")}
+    <fieldset class="rule-group"><legend>Rule</legend>
+      <div class="rule-list" role="radiogroup" aria-label="Rule">
+        ${rule("brand", "Name brand")}
+        ${rule("storeBrand", "Store brand")}
+        ${rule("cheapest", "Cheapest")}
+      </div>
+    </fieldset>
+    <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
   </div>`;
 }
 

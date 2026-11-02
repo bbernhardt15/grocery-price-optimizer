@@ -5,7 +5,7 @@ import { parsePackageSize } from "./packageSize";
 import { publishSale } from "./pricing/saleFacts";
 import type { GroceryLine } from "./parseGroceryLine";
 import { parseGroceryList } from "./parseGroceryLine";
-import { compareProductOffers, unitPriceForProduct } from "./productMatch";
+import { compareProductOffers, matchRole, requiresOwnHead, unitPriceForProduct } from "./productMatch";
 import {
   groceryWordTokens,
   matchTokenSets,
@@ -240,10 +240,15 @@ function productsMatchingQuery(
 
 function rankedMatches(line: GroceryLine, catalog: CatalogProduct[]): CatalogProduct[] {
   const matches = productsMatchingQuery(catalog, line.name);
+  // A cream cheese, orange juice, protein powder, or Pop-Tart is that food.
+  // A brownie that lists cream cheese as a flavor is not a substitute for it.
+  const pool = requiresOwnHead(line.name)
+    ? matches.filter((product) => matchRole(line.name, product.name) === "product")
+    : matches;
   // Keep each row's real name. Rewriting a substitute to the grocery line made
   // a different pack look like an exact size match and let it beat a cheaper item.
-  matches.sort((a, b) => compareProductOffers(line.name, a, b));
-  return matches;
+  pool.sort((a, b) => compareProductOffers(line.name, a, b));
+  return pool;
 }
 
 function saleFields(product: Pick<CatalogProduct, "price" | "onSale" | "regularPrice" | "saleEndsOn">) {
