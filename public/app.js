@@ -91,6 +91,7 @@ import {
   numericWalmartId,
   walmartCartUrl,
   pruneStoresToList,
+  emptyStoreNotes,
 } from "./shopper/tripPlan.js";
 import {
   buildStoreReadyList,
@@ -122,17 +123,23 @@ import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/ac
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
 import { displayProductName, listItemTitle, shortProductTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
-import { bottomChrome, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "./shopper/flow.js";
+import { bottomChrome, planBarCopy, pricesAreIn, readFlowStep, shouldAskToSignIn, stepTitle, totalPhrase } from "./shopper/flow.js";
 import { nextTrapTarget, swipeClosesDrawer } from "./shopper/drawer.js";
 import { zipPlaceLabel } from "./shopper/zipPlace.js";
 import { storesForZip } from "./shopper/nearbyStores.js";
 import {
   KROGER_CART_URL,
   KROGER_CONNECTED_KEY,
+  KROGER_LEAVE_NOTE,
+  clearKrogerTrip,
+  krogerAddedConfirmation,
   krogerBrowserShouldClose,
   krogerCallbackSucceeded,
+  krogerLoginMode,
   krogerReturnMarksConnected,
   parseKrogerReturn,
+  readKrogerTrip,
+  saveKrogerTrip,
 } from "./shopper/krogerReturn.js";
 import { matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
 import { mountImport } from "./shopper/import.js";
@@ -743,9 +750,11 @@ function openCartReady(storeName, { error = "", retry = null, summary = "" } = {
     const counts = /items sent|couldn't be matched/i.test(summary) ? summary : "";
     body.textContent = error
       ? friendlyCartError(error)
-      : counts
-        ? `${counts}. Finish checkout in the ${store} app or site.`
-        : `Your cart is ready. Finish checkout in the ${store} app or site.`;
+      : /^Added \d+ items? to your Kroger cart/.test(summary)
+        ? summary
+        : counts
+          ? `${counts}. Finish checkout in the ${store} app or site.`
+          : `Your cart is ready. Finish checkout in the ${store} app or site.`;
   }
   if (again) again.hidden = !retry;
   krogerRetry = retry;
@@ -790,6 +799,8 @@ function friendlyCartError(message) {
   return text;
 }
 
+let pendingKrogerReturn = null;
+
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
   landedFromKroger = true;
@@ -798,11 +809,37 @@ function applyKrogerReturn(parsed) {
   } catch {
     /* private browsing */
   }
-  releasePageForTaps();
+  if (!listReady) {
+    pendingKrogerReturn = parsed;
+    return;
+  }
+  finishKrogerReturn(parsed);
+}
+
+function finishKrogerReturn(parsed) {
+  const saved = readKrogerTrip(localStorage);
+  releasePageForTaps(new Set(["cart-ready"]));
   if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
-  if (parsed.step) showStep(parsed.step);
+  if (saved?.plan) {
+    lastOptimize = saved.plan;
+    tripEdits = {
+      ...tripEdits,
+      lockedStore: saved.edits?.lockedStore || null,
+      moves: { ...(saved.edits?.moves || {}) },
+      fewerStops: Boolean(saved.edits?.fewerStops),
+      ...(saved.edits?.planMode ? { planMode: saved.edits.planMode } : {}),
+    };
+  } else if (!lastOptimize) {
+    loadCachedTrip();
+  }
+  showStep(parsed.step || saved?.step || "shop");
+  const y = Number(saved?.scroll) || 0;
+  requestAnimationFrame(() => window.scrollTo(0, y));
+  clearKrogerTrip(localStorage);
   if (parsed.kind === "added") {
-    openCartReady("Kroger", { summary: parsed.message });
+    const confirmation = krogerAddedConfirmation(parsed.message, saved?.itemCount);
+    openCartReady("Kroger", { summary: confirmation });
+    toast(confirmation, 5000);
     return;
   }
   if (parsed.kind === "error") {
@@ -817,6 +854,75 @@ function applyKrogerReturn(parsed) {
     return;
   }
   toast(parsed.message, 6500);
+}
+
+function showKrogerLeaveNote(button) {
+  let line = document.getElementById("kroger-leave-note");
+  if (!line && button?.parentElement) {
+    line = document.createElement("p");
+    line.id = "kroger-leave-note";
+    line.className = "muted";
+    button.parentElement.insertBefore(line, button);
+  }
+  if (line) line.textContent = KROGER_LEAVE_NOTE;
+  toast(KROGER_LEAVE_NOTE, 6000);
+}
+
+function rememberKrogerHandoff(itemCount) {
+  rememberTrip();
+  try {
+    localStorage.setItem(STEP_KEY, "shop");
+  } catch {
+    /* private browsing */
+  }
+  saveKrogerTrip(localStorage, {
+    scroll: window.scrollY || 0,
+    itemCount,
+    plan: lastOptimize,
+    edits: tripEdits,
+    checks: readChecks(localStorage, tripId()),
+    itemChecks: readItemChecks(localStorage),
+  });
+}
+
+function watchKrogerPopup(popup) {
+  const timer = window.setInterval(() => {
+    if (!popup || popup.closed) {
+      window.clearInterval(timer);
+      return;
+    }
+    let parsed = null;
+    try {
+      parsed = parseKrogerReturn(popup.location.href);
+    } catch {
+      return;
+    }
+    if (!parsed) return;
+    window.clearInterval(timer);
+    try {
+      popup.close();
+    } catch {
+      /* popup already gone */
+    }
+    applyKrogerReturn(parsed);
+  }, 400);
+}
+
+async function openKrogerLogin(url) {
+  const mode = krogerLoginMode({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    standalone: isHomeScreenApp(navigator, (query) => window.matchMedia(query)),
+  });
+  if (mode === "popup") {
+    const popup = window.open(url, "kroger-login", "popup,width=480,height=720");
+    if (popup) {
+      watchKrogerPopup(popup);
+      return;
+    }
+  }
+  window.location.assign(url);
 }
 
 /** OAuth callback lands on /?kroger=connected|added|error&step=…&message=… */
@@ -2108,6 +2214,12 @@ function nearbyStoreChoice() {
   return storesForZip(normalizeZip(zipEl?.value || localStorage.getItem(ZIP_KEY) || ""));
 }
 
+function emptyCheckedStoreHtml(stores) {
+  const notes = emptyStoreNotes(selectedStoreNames(), stores);
+  if (!notes.length) return "";
+  return `<ul class="empty-store-notes">${notes.map((note) => `<li class="empty-store-note">${escapeHtml(note)}</li>`).join("")}</ul>`;
+}
+
 function selectedStoreNames() {
   const nearby = nearbyStoreChoice();
   const universe = nearby.stores.length ? nearby.stores : planningStoreNames();
@@ -2372,13 +2484,16 @@ function readyRowsHtml(model, checks, itemChecks = readItemChecks(localStorage))
       const rows = group.items
         .map((item) => {
           const on = rowOn(item, model.storeName, bag);
-          const size = item.size && !item.name.toLowerCase().includes(item.size.toLowerCase()) ? `, ${escapeHtml(item.size)}` : "";
           const price = item.priceLabel ? `<span class="ready-price">${escapeHtml(item.priceLabel)}</span>` : "";
           const search = readySearchAnchor(model.storeName, item, item.searchUrl);
+          const full = item.fullName && item.fullName !== item.name ? item.fullName : "";
+          const title = full
+            ? `<button type="button" class="item-title" data-full-name="${escapeHtml(full)}" data-short-name="${escapeHtml(item.name)}">${escapeHtml(item.name)}</button>`
+            : escapeHtml(item.name);
           return `<li class="ready-line${on ? " is-done" : ""}" data-ready-line="${escapeHtml(item.lineId)}">
             <label class="ready-check">
               <input type="checkbox" data-trip-check="${escapeHtml(item.lineId)}"${checkAttrs(item, model.storeName)}${on ? " checked" : ""} />
-              <span class="ready-name">${item.quantity} × ${escapeHtml(item.name)}${size}</span>
+              <span class="ready-name">${item.quantity} × ${title}</span>
             </label>
             ${price}
             ${search}
@@ -2677,6 +2792,7 @@ function paintTrip() {
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${choiceHtml}
     <div class="store-grid">${storeHtml}</div>
+    ${emptyCheckedStoreHtml(stores)}
     ${missing}
     ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
     ${fewerHtml}
@@ -2735,7 +2851,7 @@ function renderStore(store, checks, coupons, couponSummary, openCoupons) {
         <label class="check-line">
           <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, store.storeName)}${checked} />
           <span>
-            <span class="item-name">${item.quantity}× ${escapeHtml(item.name)}</span>
+            <span class="item-name">${item.quantity}× ${productTitleHtml(item)}</span>
             <span class="muted">${escapeHtml(item.brand || "")}${size}</span>
           </span>
         </label>
@@ -2902,7 +3018,6 @@ function openChecklist(storeName) {
       const rows = group.items
         .map((item) => {
           const checked = rowOn(item, item.storeName || storeName, { line: checks, item: readItemChecks(localStorage) }) ? " checked" : "";
-          const size = item.size ? `, ${escapeHtml(item.size)}` : "";
           const swap = item.swapNote ? `<span class="swap-note">${escapeHtml(item.swapNote)}</span>` : "";
           const where = instore ? `<span class="muted">${escapeHtml(item.storeName)}</span>` : "";
           const url = itemUrl(item);
@@ -2912,7 +3027,7 @@ function openChecklist(storeName) {
           return `<li class="check-row-line">
             <label class="check-line">
               <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, item.storeName || storeName)}${checked} />
-              <span>${item.quantity}× ${escapeHtml(item.name)}${size}${swap}</span>
+              <span>${item.quantity}× ${productTitleHtml(item)}${swap}</span>
             </label>
             ${where}
             <strong>${money(item.itemTotal ?? item.price)}</strong>
@@ -3149,16 +3264,18 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     return "ok";
   }
   localStorage.setItem(ZIP_KEY, zip);
-  const items = [...list.values()].map((entry) => ({
-    name: entry.product.catalogName || entry.product.name,
-    brand: entry.product.brand,
-    quantity: entry.quantity,
-    catalogId: entry.product.id,
-    upc: entry.product.upc,
-    ...(entry.preferenceMode ? { preferenceMode: entry.preferenceMode } : {}),
-    ...(entry.preferenceFamily ? { family: entry.preferenceFamily } : {}),
-    ...(entry.preferenceBrands?.length ? { brands: entry.preferenceBrands } : {}),
-  }));
+  const items = [...list.values()].map((entry) => {
+    const custom = String(entry.product?.id || "").startsWith("custom:");
+    return {
+      name: entry.product.catalogName || entry.product.name,
+      brand: entry.product.brand,
+      quantity: entry.quantity,
+      ...(custom ? {} : { catalogId: entry.product.id, upc: entry.product.upc }),
+      ...(entry.preferenceMode ? { preferenceMode: entry.preferenceMode } : {}),
+      ...(entry.preferenceFamily ? { family: entry.preferenceFamily } : {}),
+      ...(entry.preferenceBrands?.length ? { brands: entry.preferenceBrands } : {}),
+    };
+  });
   if (planAbort) planAbort.abort();
   const controller = new AbortController();
   planAbort = controller;
@@ -3320,12 +3437,16 @@ async function startKroger(storeName, button) {
     }
     const hop = body.navigateUrl || body.authorizeUrl;
     if (hop) {
+      const url = hop.startsWith("/") ? new URL(hop, window.location.origin).href : hop;
+      rememberKrogerHandoff(Number(body.itemCount) || (store.items || []).length);
+      showKrogerLeaveNote(button);
       if (isNative()) {
         await armKrogerBrowserWatch();
         await openExternal(body.authorizeUrl || hop);
         return;
       }
-      window.location.assign(hop.startsWith("/") ? new URL(hop, window.location.origin).href : hop);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await openKrogerLogin(url);
       return;
     }
     if (body.status === "added" || body.krogerCartUrl) {
@@ -5670,7 +5791,11 @@ function paintPlanBar() {
     left: progress.left,
     complete: progress.complete,
   });
-  const about = !copy.totalLabel ? "" : copy.provisional ? `Estimate ${copy.totalLabel}` : `about ${copy.totalLabel}`;
+  const priced = pricesAreIn(view?.stores, lastOptimize?.unavailable);
+  const phrase = totalPhrase(total, priced);
+  const about = phrase.text;
+  const savingsLabel = document.querySelector("#savings .savings-label");
+  if (savingsLabel) savingsLabel.textContent = phrase.label || "Estimated total";
   const countEl = $("bar-count");
   const totalEl = $("bar-total");
   const primary = $("bar-primary");
@@ -5795,6 +5920,7 @@ function renderShop() {
     ${backPrompt}
     <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
+    ${emptyCheckedStoreHtml(view.stores)}
     ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
     ${html}
@@ -6554,6 +6680,11 @@ async function bootApp() {
   const storedStep = readFlowStep(localStorage.getItem(STEP_KEY));
   if (storedStep !== "add") showStep(storedStep);
   else syncStepVisibility();
+  if (pendingKrogerReturn) {
+    const parsed = pendingKrogerReturn;
+    pendingKrogerReturn = null;
+    finishKrogerReturn(parsed);
+  }
 }
 
 document.addEventListener("visibilitychange", () => {

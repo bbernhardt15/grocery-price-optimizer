@@ -4,7 +4,7 @@ import { demoBrowseProducts } from "../catalog/demoCatalog";
 import type { BrowseProduct, CatalogOffer } from "../catalog/types";
 import { matchImportItems } from "./matchImport";
 import { reviewProductTitle } from "../../public/shopper/import.js";
-import type { ParsedImportItem } from "./parseImportText";
+import { parseImportText, type ParsedImportItem } from "./parseImportText";
 
 const products = demoBrowseProducts();
 
@@ -174,5 +174,22 @@ describe("matchImportItems", () => {
     const tart = picked("cinnamon pop-tarts");
     assert.notEqual(tart?.status, "missing");
     assert.match(tart?.choices[0]?.product.name || "", /pop-tarts/i);
+  });
+
+  it("matches the seventh phone list to Kellogg's, Graeter's, Kraft, and Velveeta", () => {
+    const spoken = parseImportText(
+      "cherry pop-tarts and cinnamon pop-tarts and black raspberry chip from Graters and let's get some Kraft macaroni and cheese and Velveeta Sheldon cheese"
+    );
+    const result = matchImportItems(spoken, products);
+    assert.equal(result.total, 5);
+    assert.equal(result.items.every((item) => item.status !== "missing" && item.choices.length > 0), true);
+    const picked = (raw: RegExp) => result.items.find((item) => raw.test(item.raw || item.name));
+    assert.match(picked(/cherry pop-tarts/i)?.choices[0]?.product.catalogName || "", /cherry pop-tarts/i);
+    assert.match(picked(/cinnamon pop-tarts/i)?.choices[0]?.product.catalogName || "", /cinnamon pop-tarts/i);
+    assert.equal(picked(/graeter/i)?.choices[0]?.product.brand, "Graeter's");
+    assert.match(picked(/graeter/i)?.choices[0]?.product.name || "", /black raspberry/i);
+    assert.equal(picked(/kraft/i)?.choices[0]?.product.brand, "Kraft");
+    assert.equal(picked(/velveeta/i)?.choices[0]?.product.brand, "Velveeta");
+    assert.match(picked(/velveeta/i)?.choices[0]?.product.name || "", /shells/i);
   });
 });

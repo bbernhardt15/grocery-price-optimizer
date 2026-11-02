@@ -4,6 +4,7 @@
  */
 
 import { familyFromQuery } from "../catalog/stapleFamilies";
+import { spokenTranscriptAliases } from "../productSearchQuery";
 
 export type ParsedImportItem = {
   raw: string;
@@ -58,7 +59,9 @@ const SIZE_PHRASE =
   /(\d+(?:\.\d+)?\s*(?:fl\.?\s*oz|fluid\s+ounces?|oz|lb|lbs|pounds?|g|kg|ml|l|gal|gallons?|qt|quarts?|pt|pints?|ct|count|pk|packs?|dozen|liters?|litres?))\b|(half[\s-]?gallon|gallon|dozen|family\s+size|party\s+size)\b/i;
 
 const COMPOUNDS: Array<[RegExp, string]> = [
+  [/macaroni and cheese/gi, "macaroni & cheese"],
   [/mac and cheese/gi, "mac & cheese"],
+  [/shells and cheese/gi, "shells & cheese"],
   [/fish and chips/gi, "fish & chips"],
   [/salt and pepper/gi, "salt & pepper"],
   [/bread and butter/gi, "bread & butter"],
@@ -267,6 +270,9 @@ function parseClause(rawLine: string): Draft | null {
     size = size || clean(commaSize[2]);
   }
   line = clean(line.replace(/^[-–—:,]+|[-–—:,]+$/g, ""));
+  const heard = pullFromStore(line, brand);
+  line = heard.name;
+  brand = heard.brand || brand;
   if (!line || isJunk(line) || !/[a-z]/i.test(line)) return null;
   return {
     raw,
@@ -310,7 +316,23 @@ function parseRows(lines: string[]): Draft[] {
 }
 
 const LEAD_IN =
-  /^(?:(?:um+|uh+|hey|hi|ok|okay|so|well|please)\s+)*(?:(?:i|we)(?:'d| would)?\s+)?(?:need|want|would like|wanna|gonna (?:get|buy)|get|buy|grab|pick up)\s+/i;
+  /^(?:(?:um+|uh+|hey|hi|ok|okay|so|well|please)\s+)*(?:(?:let'?s|lets)\s+)?(?:(?:i|we)(?:'d| would)?\s+)?(?:need|want|would like|wanna|gonna (?:get|buy)|get|buy|grab|pick up)\s+(?:some\s+)?/i;
+
+function prepareSpoken(text: string): string {
+  return spokenTranscriptAliases(text).replace(/\bshells\s+cheese\b/gi, "shells and cheese");
+}
+
+function pullFromStore(line: string, brand: string | undefined): { name: string; brand?: string } {
+  const fromStore = line.match(/^(.*?)\s+from\s+([A-Za-z0-9][A-Za-z0-9'’&.\- ]{1,40})$/i);
+  if (!fromStore?.[1] || !fromStore[2] || brand) return { name: line, ...(brand ? { brand } : {}) };
+  let next = clean(spokenTranscriptAliases(fromStore[2]));
+  let name = clean(fromStore[1]);
+  if (/^graeter'?s$/i.test(next)) {
+    next = "Graeter's";
+    if (!/\b(?:ice cream|gelato)\b/i.test(name)) name = `${name} ice cream`;
+  }
+  return { name, brand: next };
+}
 
 function stripLead(text: string): string {
   let value = clean(text);
@@ -459,7 +481,7 @@ function merge(items: ParsedImportItem[]): ParsedImportItem[] {
 }
 
 export function parseImportText(text: string): ParsedImportItem[] {
-  const cleanText = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  const cleanText = prepareSpoken(text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim());
   if (!cleanText) return [];
   const csv = tryParseCsv(cleanText);
   if (csv) return merge(csv);

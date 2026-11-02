@@ -9,7 +9,7 @@
  * it is not. A custom app scheme is not used, because it cannot fall back to the web.
  */
 
-import { displayProductName } from "./familyTile.js";
+import { displayProductName, shortProductTitle } from "./familyTile.js";
 import { isShareCancel } from "./shareList.js";
 import { formatMoney } from "./savingsMeter.js";
 import { groupForAisle, normalizeStoreKey } from "./tripPlan.js";
@@ -251,26 +251,29 @@ function exactName(item) {
 
 function decorateItem(storeName, item) {
   const quantity = quantityOf(item);
-  const name = exactName(item);
+  const full = exactName(item);
+  const display = shortProductTitle({ name: full, brand: item?.brand, size: item?.size, familyName: item?.familyName }) || full;
   const rawSize = String(item?.size || "");
   const size = rawSize.replace(/\s+/g, " ").trim();
   const csvSize = rawSize.replace(/\r\n/g, "\n").replace(/[^\S\n]+/g, " ").trim();
   const total = lineTotal(item);
   const priceLabel = total == null ? "" : formatMoney(total);
   const searchUrl = storeSearchUrl(storeName, item);
-  const sizeBit = size && !name.toLowerCase().includes(size.toLowerCase()) ? `, ${size}` : "";
   const priceBit = priceLabel ? ` — ${priceLabel}` : "";
+  const csvName = display.replace(/,\s*\d[^,]*$/, "").trim() || display;
   return {
     lineId: String(item?.lineId || ""),
     query: String(item?.query || ""),
     quantity,
-    name,
+    name: display,
+    fullName: full,
+    csvName,
     size,
     csvSize,
     priceLabel,
     searchUrl,
     searchQuery: cleanSearchQuery(item),
-    textLine: `${quantity} × ${name}${sizeBit}${priceBit}`,
+    textLine: `${quantity} × ${display}${priceBit}`,
   };
 }
 
@@ -309,7 +312,7 @@ function renderCsv(groups, subtotalLabel) {
   for (const group of groups) {
     for (const item of group.items) {
       lines.push(
-        csvRow([group.department, group.aisle, item.quantity, item.name, item.csvSize, item.priceLabel])
+        csvRow([group.department, group.aisle, item.quantity, item.csvName || item.name, item.csvSize, item.priceLabel])
       );
     }
   }

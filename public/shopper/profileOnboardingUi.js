@@ -33,7 +33,7 @@ import { applyLearnedChoice, learnedSummaryHtml, receiptUploadHtml } from "./rec
 import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakePresent.js";
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
-import { storesForZip } from "./nearbyStores.js";
+import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -184,6 +184,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (step.kind === "place" || step.kind === "zip") {
       const zip = escapeText(deps.getZip?.() || "");
       return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
+        <p id="profile-zip-hint" class="muted"${zip ? "" : " hidden"}>Not right? Edit it.</p>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
         <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
@@ -194,13 +195,18 @@ export function mountProfileOnboarding(deps = {}) {
       if (receiptPhase === "learned") {
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
         const brandsByFamily = {};
-        for (const row of learnedRows) brandsByFamily[row.family] = brandChoices(row);
+        const pendingFamilies = {};
+        for (const row of learnedRows) {
+          brandsByFamily[row.family] = brandChoices(row);
+          pendingFamilies[row.family] = !brandShelves[row.family];
+        }
         return `${warning}${learnedSummaryHtml(learnedRows, {
           paper: paperReceipt,
           paperNote,
           lines: receiptLines,
           editingFamily,
           brandsByFamily,
+          pendingFamilies,
         })}`;
       }
       return receiptUploadHtml();
@@ -381,6 +387,8 @@ export function mountProfileOnboarding(deps = {}) {
       zipInput.addEventListener("input", () => {
         const error = $("profile-zip-error");
         if (error) error.hidden = true;
+        const hint = $("profile-zip-hint");
+        if (hint) hint.hidden = !String(zipInput.value || "").trim();
         paintStoreList();
       });
     }
@@ -398,6 +406,9 @@ export function mountProfileOnboarding(deps = {}) {
             const zip = await deps.locateZip();
             const field = $("profile-zip");
             if (zip && field) field.value = zip;
+            const hint = $("profile-zip-hint");
+            if (hint) hint.hidden = !zip;
+            if (field) field.focus();
             deps.setZip?.(zip);
             paintStoreList();
           } catch (error) {
@@ -782,6 +793,7 @@ export function mountProfileOnboarding(deps = {}) {
     editingFamily = "";
     render();
     focusTitle();
+    for (const row of learnedRows) void loadBrandShelf(row.family);
   }
 
   async function retryReadFile(index) {
@@ -964,14 +976,12 @@ export function mountProfileOnboarding(deps = {}) {
       if (!readZip()) return;
     }
     if (stepId === "place" && !skipped) {
-      let boxes = document.querySelectorAll("[data-place-store]");
-      if (!boxes.length) {
-        paintStoreList();
-        boxes = document.querySelectorAll("[data-place-store]");
-        if (!boxes.length) {
-          deps.toast?.("No stores near that ZIP. Try another.");
-          return;
-        }
+      const zip = normalizeZipInput(currentZipRaw());
+      const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
+      const decision = zipContinueDecision(nearby);
+      paintStoreList();
+      if (!decision.advance) {
+        deps.toast?.("No stores near that ZIP. Try another.");
         return;
       }
     }

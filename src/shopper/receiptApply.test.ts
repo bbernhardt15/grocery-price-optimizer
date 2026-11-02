@@ -74,6 +74,20 @@ describe("receipt preferences", () => {
     assert.match(row, /data-learned-mode="never"/);
     assert.match(row, /data-learned-brand="Tide"/);
     assert.match(row, /aria-pressed="true"/);
+    const ice = learnedSummaryHtml([{ family: "ice-cream", label: "Ice cream", mode: "brand", brand: "Talenti" }], {
+      editingFamily: "ice-cream",
+      brandsByFamily: { "ice-cream": ["Talenti", "Breyers", "Häagen-Dazs"] },
+    });
+    assert.match(ice, /class="brand-pick"/);
+    assert.match(ice, /Talenti/);
+    assert.match(ice, /Breyers/);
+    const waiting = learnedSummaryHtml([{ family: "ice-cream", label: "Ice cream", mode: "brand", brand: "" }], {
+      editingFamily: "ice-cream",
+      brandsByFamily: { "ice-cream": [] },
+      pendingFamilies: { "ice-cream": true },
+    });
+    assert.match(waiting, /brand-skel/);
+    assert.match(waiting, /aria-busy="true"/);
     const after = open.split("</section>").pop() || "";
     assert.equal(after.includes("data-learned-mode"), false);
     assert.equal(applyLearnedChoice(rows, { family: "", mode: "storeBrand" }), rows);

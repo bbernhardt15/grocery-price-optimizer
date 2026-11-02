@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  KROGER_LEAVE_NOTE,
+  clearKrogerTrip,
+  krogerAddedConfirmation,
   krogerBrowserShouldClose,
   krogerCallbackSucceeded,
+  krogerLoginMode,
   krogerReturnMarksConnected,
   parseKrogerReturn,
+  readKrogerTrip,
+  saveKrogerTrip,
 } from "../../public/shopper/krogerReturn.js";
 
 describe("Kroger return", () => {
@@ -44,5 +50,38 @@ describe("Kroger return", () => {
     assert.equal(krogerReturnMarksConnected("connected"), true);
     assert.equal(krogerReturnMarksConnected("added"), true);
     assert.equal(krogerReturnMarksConnected("error"), false);
+  });
+
+  it("keeps the shop tab across a Kroger sign-in and says how many items were added", () => {
+    assert.equal(KROGER_LEAVE_NOTE, "Kroger will ask you to sign in once, then bring you right back.");
+    assert.equal(
+      krogerLoginMode({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", standalone: true }),
+      "popup"
+    );
+    assert.equal(krogerLoginMode({ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 0 }), "same-tab");
+    assert.equal(krogerAddedConfirmation("9 of 11 items sent"), "Added 9 items to your Kroger cart");
+    assert.equal(krogerAddedConfirmation("1 of 1 items sent"), "Added 1 item to your Kroger cart");
+    const storage = new Map<string, string>();
+    const bag = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+    };
+    assert.equal(
+      saveKrogerTrip(bag, { scroll: 240, itemCount: 4, plan: { stores: [{ storeName: "Kroger" }] }, checks: { a: true } }),
+      true
+    );
+    const saved = readKrogerTrip(bag);
+    assert.equal(saved?.step, "shop");
+    assert.equal(saved?.scroll, 240);
+    assert.equal(saved?.itemCount, 4);
+    assert.equal(saved?.pendingSend, true);
+    assert.equal(saved?.plan?.stores?.[0]?.storeName, "Kroger");
+    clearKrogerTrip(bag);
+    assert.equal(readKrogerTrip(bag), null);
   });
 });

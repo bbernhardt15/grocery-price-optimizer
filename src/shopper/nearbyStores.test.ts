@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { knownStoreNames } from "../../public/shopper/tripPlan.js";
-import { milesBetween, stateForZip, storesForZip } from "../../public/shopper/nearbyStores.js";
+import { milesBetween, stateForZip, storesForZip, zipContinueDecision } from "../../public/shopper/nearbyStores.js";
 
 describe("stores near a ZIP", () => {
   it("includes Costco, Meijer, and Kroger around Cincinnati and leaves Publix out", () => {
@@ -35,6 +35,12 @@ describe("stores near a ZIP", () => {
     assert.ok(storesForZip("15222").stores.includes("Giant Eagle"));
     assert.equal(storesForZip("19103").stores.includes("Giant Eagle"), false);
     assert.doesNotMatch(batavia.note, /every chain/i);
+    const started = Date.now();
+    const again = storesForZip("45103");
+    assert.ok(Date.now() - started < 50);
+    assert.equal(again.source, "nearby");
+    assert.equal(zipContinueDecision(again).advance, true);
+    assert.equal(zipContinueDecision({ stores: [] }).advance, false);
   });
 
   it("includes Publix in Miami and H-E-B in Houston", () => {

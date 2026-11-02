@@ -4,6 +4,7 @@
  */
 
 import { dedupeReviewItems } from "./importDedupe.js";
+import { shortProductTitle } from "./familyTile.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
@@ -36,8 +37,68 @@ export function reviewProductTitle(product, query) {
     return text.includes(word);
   };
   const misses = (name) => words.some((word) => !hasWord(name, word));
-  if (variant && family && misses(family) && !misses(variant)) return variant;
-  return family || variant || "Item";
+  const chosen = variant && family && misses(family) && !misses(variant) ? variant : family || variant || "Item";
+  return shortProductTitle({ name: chosen, brand: product?.brand, size: product?.sizeLabel || product?.variantLabel }) || chosen;
+}
+
+/** Found rows first, then anything that still needs a pick. */
+export function orderReviewItems(items) {
+  return [...(items || [])].sort((a, b) => {
+    const rank = (row) => (row.status === "missing" || !row.choices?.length ? 1 : 0);
+    return rank(a) - rank(b);
+  });
+}
+
+export function customCatalogProduct(query) {
+  const name = String(query || "").replace(/\s+/g, " ").trim() || "Custom item";
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item";
+  return {
+    id: `custom:${slug}`,
+    name,
+    familyName: name,
+    catalogName: name,
+    brand: "",
+    custom: true,
+    imageUrls: [],
+    variants: [],
+  };
+}
+
+export function catalogStoreSearchHref(query) {
+  const params = new URLSearchParams({ query: String(query || "").trim() || "groceries" });
+  return `https://www.kroger.com/search?${params.toString()}`;
+}
+
+/** Search field plus loading, hits, or an explicit empty state. Never a blank area. */
+export function catalogSearchMarkup(item, escape) {
+  if (!item?.searchOpen && !item?.searchState) return "";
+  const key = escape(item.key);
+  const query = escape(item.searchQuery || item.raw || item.name || "");
+  const state = item.searchState || (item.searchHits?.length ? "results" : item.searchHits ? "empty" : "idle");
+  const field = `<div class="import-search">
+      <label>Search the catalog<input type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" data-search-query="${key}" value="${query}" /></label>
+      <button type="button" class="ghost" data-search-go="${key}">Search</button>
+    </div>`;
+  if (state === "loading") {
+    return `${field}<div class="import-hit-list" data-search-state="loading" aria-busy="true"><p class="import-search-state">Searching the catalog…</p></div>`;
+  }
+  if (state === "error") {
+    return `${field}<div class="import-hit-list" data-search-state="error" role="alert"><p class="import-search-state">Search didn't load. Try again.</p></div>`;
+  }
+  if (state === "empty") {
+    const href = escape(catalogStoreSearchHref(item.searchQuery || item.raw || item.name || ""));
+    return `${field}<div class="import-hit-list" data-search-state="empty">
+      <p class="import-search-state">No matches in the catalog yet</p>
+      <div class="import-search-actions">
+        <a href="${href}" data-search-stores="${key}" rel="noopener">Search stores for it</a>
+        <button type="button" class="ghost" data-custom-add="${key}">Add as a custom item</button>
+      </div>
+    </div>`;
+  }
+  if (state === "results") {
+    return `${field}<div class="import-hit-list" data-search-state="results">${searchHitRows(item.key, item.searchHits, escape)}</div>`;
+  }
+  return field;
 }
 
 export function searchHitRows(itemKey, hits, escapeHtml) {
@@ -403,16 +464,13 @@ export function mountImport(deps) {
       if (shaped.note) setStatus(shaped.note);
     }
     const count = acceptedCount();
-    const ordered = [...review.items].sort((a, b) => {
-      const missing = (row) => (row.status === "missing" || !row.choices?.length ? 0 : 1);
-      return missing(a) - missing(b);
-    });
-    const cards = ordered
-      .map((item) => {
+    const ordered = orderReviewItems(review.items);
+    const foundCards = [];
+    const missingCards = [];
+    for (const item of ordered) {
         const kicker = review.idea && item.raw ? `<p class="import-kicker">${escapeHtml(item.raw)}</p>` : "";
         if (item.status === "missing" || !item.choices?.length) {
-          const hits = searchHitRows(item.key, item.searchHits, escapeHtml);
-          return `<li class="import-tile import-missing" data-key="${escapeHtml(item.key)}">
+          missingCards.push(`<li class="import-tile import-missing" data-key="${escapeHtml(item.key)}">
             ${kicker}
             <h3>${escapeHtml(item.raw || item.name)}</h3>
             <p class="import-note">Not on the shelf.</p>
@@ -421,16 +479,9 @@ export function mountImport(deps) {
               <button type="button" class="text-btn" data-skip="${escapeHtml(item.key)}">Skip</button>
               <button type="button" class="text-btn" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(item.raw || item.name || "item")}">×</button>
             </div>
-            ${
-              item.searchOpen
-                ? `<div class="import-search">
-                    <label>Search the catalog<input data-search-query="${escapeHtml(item.key)}" value="${escapeHtml(item.searchQuery || item.raw || item.name || "")}" /></label>
-                    <button type="button" class="ghost" data-search-go="${escapeHtml(item.key)}">Search</button>
-                  </div>`
-                : ""
-            }
-            ${hits ? `<div class="import-hit-list">${hits}</div>` : ""}
-          </li>`;
+            ${catalogSearchMarkup(item, escapeHtml)}
+          </li>`);
+          continue;
         }
         const product = choiceProduct(item);
         const title = reviewProductTitle(product, item.raw || item.name);
@@ -465,7 +516,7 @@ export function mountImport(deps) {
             : item.status !== "missing"
               ? `<button type="button" class="text-btn import-change" data-search="${escapeHtml(item.key)}">Change</button>`
               : "";
-        return `<li class="import-tile" data-key="${escapeHtml(item.key)}">
+        foundCards.push(`<li class="import-tile" data-key="${escapeHtml(item.key)}">
           <div class="import-tile-head">
             ${image ? `<img src="${escapeHtml(media(image))}" alt="" />` : ""}
             <div>
@@ -488,16 +539,18 @@ export function mountImport(deps) {
             </div>
             ${change}
           </div>
-        </li>`;
-      })
-      .join("");
-    const missing = review.items.filter((item) => item.status === "missing" || !item.choices?.length).length;
-    const missingNote = missing > 1 ? `<p class="import-missing-note">${missing} items need a pick. Search or skip each one.</p>` : "";
+        </li>`);
+    }
+    const missing = missingCards.length;
+    const missingNote = missing > 1 ? `<p class="import-missing-note">${missing} items need a pick. Search or skip each one.</p>` : missing === 1 ? `<p class="import-missing-note">1 item needs a pick. Search or skip it.</p>` : "";
+    const foundHtml = foundCards.join("");
+    const missingHtml = missingCards.join("");
     reviewHeading();
     reviewHost.innerHTML = `
       ${reviewLead()}
+      ${foundHtml ? `<ul class="import-review">${foundHtml}</ul>` : ""}
       ${missingNote}
-      <ul class="import-review">${cards}</ul>
+      ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
       <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save for next time on this phone.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
@@ -817,14 +870,57 @@ export function mountImport(deps) {
     void stopRecording(true);
   });
   $("import-close")?.addEventListener("click", close);
+  function openSearchField() {
+    if (!review || reviewHost.hidden) return null;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && active.matches("[data-search-query]") && reviewHost.contains(active)) return active;
+    const marked = reviewHost.querySelector("[data-search-query][data-active-search]");
+    if (marked instanceof HTMLInputElement) return marked;
+    const open = reviewHost.querySelector("[data-search-query]");
+    return open instanceof HTMLInputElement ? open : null;
+  }
+
+  function submitCatalogSearch(field) {
+    if (!(field instanceof HTMLInputElement) || !review) return;
+    const item = review.items.find((row) => row.key === field.getAttribute("data-search-query"));
+    if (!item) return;
+    const now = Date.now();
+    const query = field.value;
+    if (item._searchStamp && item._searchQuery === query && now - item._searchStamp < 400) return;
+    item._searchStamp = now;
+    item._searchQuery = query;
+    item.searchQuery = query;
+    void searchItem(item, query);
+  }
+
   $("import-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const field = event.submitter?.closest?.(".import-search")?.querySelector("[data-search-query]") || document.activeElement;
-    if (field instanceof HTMLInputElement && field.matches("[data-search-query]")) {
-      field.closest(".import-search")?.querySelector("[data-search-go]")?.click();
+    const field = openSearchField();
+    if (field) {
+      submitCatalogSearch(field);
       return;
     }
     void runText($("import-paste").value);
+  });
+  reviewHost.addEventListener("focusin", (event) => {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || !field.matches("[data-search-query]")) return;
+    reviewHost.querySelectorAll("[data-search-query]").forEach((input) => input.removeAttribute("data-active-search"));
+    field.setAttribute("data-active-search", "1");
+  });
+  reviewHost.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || !field.matches("[data-search-query]")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitCatalogSearch(field);
+  });
+  reviewHost.addEventListener("search", (event) => {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || !field.matches("[data-search-query]")) return;
+    event.preventDefault();
+    submitCatalogSearch(field);
   });
   $("import-mic")?.addEventListener("click", () => void startRecording());
   $("import-stop")?.addEventListener("click", () => void stopRecording(false));
@@ -886,6 +982,7 @@ export function mountImport(deps) {
       target.dataset.size ||
       target.dataset.search ||
       target.dataset.searchGo ||
+      target.dataset.customAdd ||
       target.dataset.skip ||
       target.dataset.remove ||
       target.dataset.pickSearch ||
@@ -953,6 +1050,18 @@ export function mountImport(deps) {
       void searchItem(item, item.searchQuery);
       return;
     }
+    if (target.dataset.customAdd) {
+      const product = customCatalogProduct(item.searchQuery || item.raw || item.name);
+      item.choices = [{ product, score: 1 }];
+      item.selectedId = product.id;
+      item.accepted = true;
+      item.status = "matched";
+      item.custom = true;
+      item.searchState = "";
+      review.found = review.items.filter((row) => row.status !== "missing").length;
+      renderReview();
+      return;
+    }
     if (target.dataset.pickSearch) {
       const hit = (item.searchHits || []).find((row) => row.id === target.dataset.id);
       if (hit) void pickSearch(item, hit);
@@ -983,25 +1092,37 @@ export function mountImport(deps) {
 
   async function searchItem(item, query) {
     const q = String(query || item.searchQuery || item.raw || item.name || "").trim();
+    item.searchOpen = true;
     if (!q) {
-      setStatus("Type what to search for.", "error");
+      item.searchState = "empty";
+      item.searchHits = [];
+      item.searchQuery = "";
+      renderReview();
       return;
     }
     item.searchQuery = q;
-    item.searchOpen = true;
-    setStatus("Searching the shelf…");
+    item.searchState = "loading";
+    item.searchHits = [];
+    const stamp = Date.now();
+    item._searchRun = stamp;
+    renderReview();
     try {
       const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`));
       const body = await response.json();
-      item.searchHits = (body.suggestions || []).slice(0, 3).map((hit) => ({
+      if (!response.ok) throw new Error(body.error || "search failed");
+      if (item._searchRun !== stamp) return;
+      item.searchHits = (body.suggestions || []).slice(0, 8).map((hit) => ({
         id: hit.id,
         name: hit.name,
         sizeLabel: hit.sizeLabel && !String(hit.sizeLabel).includes("$") ? hit.sizeLabel : "",
       }));
-      setStatus(item.searchHits.length ? "" : "Nothing matched. Try different words, or skip it.");
+      item.searchState = item.searchHits.length ? "results" : "empty";
       renderReview();
     } catch {
-      setStatus("Search didn't load. Try again, or skip it.", "error");
+      if (item._searchRun !== stamp) return;
+      item.searchState = "error";
+      item.searchHits = [];
+      renderReview();
     }
   }
 

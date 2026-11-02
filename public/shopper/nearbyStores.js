@@ -183,6 +183,16 @@ export function chainNearZip(name, zip) {
 }
 
 /**
+ * Continue on the ZIP screen. The lookup is the local store map, so the
+ * first tap advances as soon as that map has stores.
+ * @param {{ stores?: string[] } | null | undefined} lookup
+ */
+export function zipContinueDecision(lookup) {
+  const stores = Array.isArray(lookup?.stores) ? lookup.stores.filter(Boolean) : [];
+  return { advance: stores.length > 0, stores };
+}
+
+/**
  * @param {string | null | undefined} zip
  * @returns {{ stores: string[], source: "nearby" | "fallback", note: string, state: string }}
  */

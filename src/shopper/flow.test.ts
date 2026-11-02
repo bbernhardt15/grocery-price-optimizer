@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { FLOW_STEPS, bottomChrome, nextFlowStep, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "../../public/shopper/flow.js";
+import { FLOW_STEPS, bottomChrome, nextFlowStep, planBarCopy, pricesAreIn, readFlowStep, shouldAskToSignIn, stepTitle, totalPhrase } from "../../public/shopper/flow.js";
 
 const root = path.resolve(__dirname, "../..");
 
@@ -63,6 +63,13 @@ describe("three-step flow", () => {
     const done = planBarCopy({ step: "shop", itemCount: 4, left: 0, total: 9, complete: true });
     assert.equal(done.countLabel, "All checked");
     assert.equal(done.enabled, true);
+
+    assert.equal(totalPhrase(15.02, false).text, "Estimated total $15.02");
+    assert.equal(totalPhrase(16.35, true).text, "Total $16.35");
+    assert.equal(totalPhrase(15.02, false).label, totalPhrase(16.35, false).label);
+    assert.equal(pricesAreIn([{ items: [{ price: 1 }, { itemTotal: 2 }] }], []), true);
+    assert.equal(pricesAreIn([{ items: [{ price: 1 }] }], ["milk"]), false);
+    assert.equal(pricesAreIn([{ items: [{ price: 0 }] }]), false);
   });
 
   it("asks for an account only to save or send a cart", () => {
