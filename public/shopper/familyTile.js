@@ -53,6 +53,41 @@ export function displayProductName(name, brand) {
   return title.replace(/\s+/g, " ").trim();
 }
 
+const MARKETING = new Set("slow cooked smoked over mesquite hardwood using made from with real quality premium style recipe slow-cooked".split(" "));
+
+/**
+ * Brand, what it is, and the size. The retailer paragraph stays behind a tap.
+ * "1.5 OZ Original Beef Jerky 100% Beef Slow Cooked Smoked Over Mesquite"
+ * reads as "Jack Link's Original Beef Jerky, 1.5 oz".
+ * @param {{ name?: string, brand?: string, size?: string } | null | undefined} item
+ */
+export function shortProductTitle(item) {
+  const brand = cleanLabel(item?.brand);
+  const size = cleanLabel(item?.size);
+  let title = cleanLabel(item?.name);
+  if (!title) return "";
+  title = title.replace(/^\d+(?:\.\d+)?\s*(?:fl\.?\s*oz|oz|lb|lbs|g|ml|l|ct)\b/i, "").trim();
+  if (brand) title = title.replace(new RegExp(`^${escapeLabel(brand)}\\b`, "i"), "").trim();
+  if (size) title = title.replace(new RegExp(escapeLabel(size), "ig"), " ").replace(/\s+/g, " ").trim();
+  const kept = [];
+  const seen = new Set();
+  for (const word of title.split(/\s+/)) {
+    if (!word) continue;
+    if (/^\d+%$/.test(word)) continue;
+    const token = word.toLowerCase().replace(/[^a-z0-9%]/g, "");
+    if (kept.length >= 3 && MARKETING.has(token)) break;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    kept.push(word);
+    if (kept.length >= 5) break;
+  }
+  const product = soften(kept.join(" "));
+  const showBrand = brand && !product.toLowerCase().includes(brand.toLowerCase());
+  let text = [showBrand ? soften(brand) : "", product].filter(Boolean).join(" ");
+  if (size && !text.toLowerCase().includes(size.toLowerCase())) text = `${text}, ${size}`;
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function listItemTitle(product) {
   const raw = String(product?.familyName || product?.name || "Item").trim() || "Item";
   const title = displayProductName(raw, product?.brand) || "Item";

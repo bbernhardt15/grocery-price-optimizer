@@ -7,6 +7,8 @@ import {
   storeChoiceHtml,
 } from "../../public/shopper/intakePresent.js";
 import { learnedSummaryHtml } from "../../public/shopper/receiptCopy.js";
+import { searchHitRows } from "../../public/shopper/import.js";
+import { receiptStageLabel } from "../../public/shopper/receiptImport.js";
 
 describe("intake presentation", () => {
   it("names a live file count the way the screen reads it", () => {
@@ -35,6 +37,22 @@ describe("intake presentation", () => {
       items: ["Large eggs"],
     });
     assert.match(html, /<progress max="1" value="0.4"><\/progress>/);
+    const reading = readCardHtml({
+      index: 2,
+      name: "kroger.pdf",
+      found: 0,
+      ratio: 0.4,
+      status: "reading",
+      message: "Reading page 2 of 4",
+      items: [],
+    });
+    assert.match(reading, /Reading page 2 of 4/);
+    assert.equal(receiptStageLabel({ stage: "reading", page: 2, pages: 4 }), "Reading page 2 of 4");
+    assert.equal(receiptStageLabel({ stage: "matching" }), "Matching products…");
+    const hits = searchHitRows("item-1", [{ id: "capn", name: "Cap'n Crunch Cereal", sizeLabel: "12 oz" }], (value) => String(value));
+    assert.match(hits, /Cap'n Crunch Cereal/);
+    assert.match(hits, />Add</);
+    assert.match(hits, /data-pick-search="item-1"/);
     assert.match(html, /Kroger order, 24 items found/);
     assert.match(html, /Large eggs/);
     const failed = readCardHtml({ index: 1, name: "bad.pdf", status: "error", error: "That file was empty.", ratio: 1 });

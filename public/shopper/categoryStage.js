@@ -12,7 +12,7 @@ function escapeText(value) {
 }
 
 function choiceButton(id, label, pressed, extra = "") {
-  return `<button type="button" class="choice-card" data-choice="${escapeText(id)}" data-buy="${escapeText(id)}" aria-pressed="${pressed ? "true" : "false"}" ${extra}>${escapeText(label)}</button>`;
+  return `<button type="button" class="choice-card rule-choice" data-choice="${escapeText(id)}" data-buy="${escapeText(id)}" aria-pressed="${pressed ? "true" : "false"}" ${extra}>${escapeText(label)}</button>`;
 }
 
 /**
@@ -64,17 +64,18 @@ export function categoryDetailHtml(input) {
     .join("");
   const modes = [];
   if (askBrand) modes.push(["brand", "Name brand"]);
-  modes.push(["storeBrand", "Store brand"], ["cheapest", "Cheapest overall"], ["cheapestPicks", "Cheapest of my picks"]);
-  const modeButtons = modes.map(([id, text]) => choiceButton(id, text, mode === id)).join("");
+  modes.push(["storeBrand", "Store brand"], ["cheapest", "Cheapest"]);
+  const nameOn = mode === "brand" || mode === "cheapestPicks";
+  const modeButtons = modes.map(([id, text]) => choiceButton(id, text, id === "brand" ? nameOn : mode === id)).join("");
   const chosen =
     mode === "brand"
       ? `Chosen: Name brand${brand ? ` · ${brand}` : ""}`
       : mode === "storeBrand"
         ? "Chosen: Store brand"
         : mode === "cheapest"
-          ? "Chosen: Cheapest overall"
+          ? "Chosen: Cheapest"
           : mode === "cheapestPicks"
-            ? "Chosen: Cheapest of my picks"
+            ? "Chosen: Name brand"
           : mode === "never"
             ? `Chosen: I don't buy ${label.toLowerCase()}`
             : "Choose one. You can switch without losing the cut.";
@@ -108,7 +109,8 @@ export function categoryDetailHtml(input) {
     <h3 class="buy-question">${escapeText(question)}</h3>
     ${cuts ? `<p class="profile-label">${escapeText(cutLabel)}</p><div class="mini-row">${cuts}</div>` : ""}
     <p class="chosen-mode" role="status">${escapeText(chosen)}</p>
-    <div class="choice-stack" role="group" aria-label="How you buy this">
+    <p class="profile-label">Rule</p>
+    <div class="choice-stack rule-list" role="radiogroup" aria-label="Rule">
       ${choiceButton("never", `I don't buy ${label.toLowerCase()}`, mode === "never")}
       ${modeButtons}
     </div>

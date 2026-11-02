@@ -30,14 +30,18 @@ describe("three-step flow", () => {
     const empty = planBarCopy({ step: "add", itemCount: 0, total: 12 });
     assert.equal(empty.countLabel, "0 items");
     assert.equal(empty.totalLabel, "");
-    assert.equal(empty.button, "Review the split");
+    assert.equal(empty.button, "Review your trip");
     assert.equal(empty.enabled, false);
+    assert.equal(empty.showButton, false);
+    assert.equal(empty.provisional, true);
 
     const add = planBarCopy({ step: "add", itemCount: 3, total: 12.5 });
     assert.equal(add.countLabel, "3 items");
     assert.equal(add.totalLabel, "$12.50");
-    assert.equal(add.button, "Review the split");
+    assert.equal(add.button, "Review your trip");
     assert.equal(add.enabled, true);
+    assert.equal(add.showButton, true);
+    assert.equal(add.provisional, true);
 
     const missing = planBarCopy({ step: "add", itemCount: 2, total: Number.NaN });
     assert.equal(missing.totalLabel, "");
@@ -45,6 +49,7 @@ describe("three-step flow", () => {
     const plan = planBarCopy({ step: "plan", itemCount: 2, total: 4, hasPlan: true });
     assert.equal(plan.button, "Shop");
     assert.equal(plan.enabled, true);
+    assert.equal(plan.provisional, false);
 
     const planning = planBarCopy({ step: "plan", itemCount: 2, total: 4, hasPlan: false, planning: true });
     assert.equal(planning.enabled, true);

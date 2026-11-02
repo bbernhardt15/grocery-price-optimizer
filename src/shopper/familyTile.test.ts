@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { displayProductName, listItemTitle, stagedQuantity } from "../../public/shopper/familyTile.js";
+import { displayProductName, listItemTitle, shortProductTitle, stagedQuantity } from "../../public/shopper/familyTile.js";
 
 describe("family tile labels", () => {
   it("shows the family name and the chosen variant, not the retailer title", () => {
@@ -50,6 +50,14 @@ describe("family tile labels", () => {
     assert.equal(displayProductName("GERBER Pear juice", "GERBER"), "Gerber Pear juice");
     assert.equal(displayProductName("GERBER GERBER JUICE", "GERBER"), "Gerber Juice");
     assert.equal(displayProductName("Coca-Cola Classic 12 Pack 12 fl oz Cans", "Coca-Cola"), "Coca-Cola Classic 12 Pack 12 fl oz Cans");
+    assert.equal(
+      shortProductTitle({
+        name: "1.5 OZ Original Beef Jerky 100% Beef Slow Cooked Smoked Over Mesquite",
+        brand: "Jack Link's",
+        size: "1.5 oz",
+      }),
+      "Jack Link's Original Beef Jerky, 1.5 oz"
+    );
     const juice = listItemTitle({ name: "Gerber Gerber Juice, 4 oz", brand: "Gerber" });
     assert.equal(juice.title, "Gerber Juice, 4 oz");
   });

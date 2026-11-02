@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { gtinCheckDigit, upcForStorage } from "../catalog/normalize";
 import { extractPdfText } from "./pdfText";
 import {
   analyzeReceipt,
   applyCatalogBrands,
+  dedupeReceiptLines,
   inferReceiptPreferences,
   isReceiptStoreBrand,
   PAPER_RECEIPT_NOTE,
@@ -171,6 +173,7 @@ describe("receipt learning", () => {
     assert.equal(learned.chicken?.brand, "Perdue");
     assert.equal(learned["snack-cakes"]?.brand, "Little Debbie");
     assert.equal(learned["frozen-meal"]?.brand, "Healthy Choice");
+    assert.equal(learned["frozen-meal"]?.count, 2);
     assert.equal(learned.bananas?.mode, "cheapest");
     assert.equal(learned.cheese?.count, 2);
     const again = analyzeReceipt(`${orderText()}\n--- receipt ---\n${orderText()}`);
@@ -328,5 +331,34 @@ trailer << /Root 1 0 R >>
     assert.equal(branded[0]?.family, "laundry-detergent");
     assert.equal(branded[0]?.storeBrand, false);
     assert.equal(applyCatalogBrands(parsed, [{ upc: "0000000000000", brand: "Other", name: "Other" }]), parsed);
+  });
+
+  it("does not count one Healthy Choice meal once per overlapping receipt slice", () => {
+    const pdf = readFileSync(new URL("./fixtures/kroger-ios-receipt.pdf", import.meta.url));
+    assert.equal(extractPdfText(pdf), "");
+    const base: ReceiptLine = {
+      name: "Cafe Steamers",
+      brand: "Healthy Choice",
+      size: "10 oz",
+      quantity: 1,
+      upc: "",
+      price: 3.49,
+      receipt: 1,
+      raw: "Healthy Choice Cafe Steamers",
+      storeBrand: false,
+      family: "frozen-meal",
+      label: "Frozen meal",
+    };
+    const copies = Array.from({ length: 10 }, (_, index) => ({
+      ...base,
+      name: index % 2 ? "Healthy Choice Cafe Steamers, 10 oz" : "Cafe Steamers",
+      size: index % 3 ? "10 oz" : "10oz",
+      upc: index === 4 ? "0000000000000" : "",
+    }));
+    const learned = inferReceiptPreferences(dedupeReceiptLines(copies));
+    const row = learned.find((item) => item.family === "frozen-meal");
+    assert.equal(row?.brand, "Healthy Choice");
+    assert.equal(row?.count, 1);
+    assert.equal(row?.receipts, 1);
   });
 });

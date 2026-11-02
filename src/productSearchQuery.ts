@@ -76,7 +76,7 @@ function isSkippableToken(token: string): boolean {
  * so "gallon of milk" matches a jug titled "Whole Milk".
  */
 export function groceryWordTokens(text: string): string[] {
-  return tokenizeProductName(stripPackageSizePhrases(text)).filter(
+  return tokenizeProductName(stripPackageSizePhrases(expandGroceryAliases(text))).filter(
     (token) => !isSkippableToken(token)
   );
 }
@@ -90,6 +90,36 @@ const GENERIC_TRAILING_WORDS = new Set([
   "snack",
   "snacks",
 ]);
+
+/** Flavor and variety words. They pick a variant. They are not the product. */
+const FLAVOR_WORDS = new Set([
+  "cinnamon",
+  "cherry",
+  "strawberry",
+  "blueberry",
+  "raspberry",
+  "vanilla",
+  "frosted",
+  "unfrosted",
+  "original",
+  "grape",
+]);
+
+/**
+ * Common brand spellings that retailer titles abbreviate.
+ * "Captain Crunch" and "Cap'n Crunch" are the same cereal.
+ */
+export function expandGroceryAliases(text: string): string {
+  return String(text || "")
+    .replace(/\bcaptain\s+crunch\b/gi, "capn crunch")
+    .replace(/\bcap['’]n\s+crunch\b/gi, "capn crunch")
+    .replace(/\bcapn\s+crunch\b/gi, "capn crunch")
+    .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts");
+}
+
+export function isFlavorToken(token: string): boolean {
+  return FLAVOR_WORDS.has(stemGroceryToken(token));
+}
 
 const SERVING_SIZE_TOKEN = /^\d+(?:\.\d+)?(?:g|kg|oz|ml|l|lb|lbs|cal|kcal)$/i;
 
@@ -143,6 +173,10 @@ export function matchTokenSets(name: string): string[][] {
   if (withoutGeneric && withoutGeneric.length > 0) {
     sets.push(withoutGeneric);
   }
+  const withoutFlavor = tokens.filter((token) => !isFlavorToken(token));
+  if (withoutFlavor.length > 0 && withoutFlavor.length < tokens.length) {
+    sets.push(withoutFlavor);
+  }
   if (tokens.length > 2) {
     sets.push(tokens.slice(0, 2));
   }
@@ -176,9 +210,7 @@ export function nameContainsAllTokens(productName: string, tokens: string[]): bo
   if (tokens.length === 0) {
     return false;
   }
-  const haystack = new Set(
-    tokenizeProductName(productName).map((token) => stemGroceryToken(token))
-  );
+  const haystack = new Set(groceryWordTokens(productName).map((token) => stemGroceryToken(token)));
   return tokens.every((token) => haystack.has(stemGroceryToken(token)));
 }
 

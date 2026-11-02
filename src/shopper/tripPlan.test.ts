@@ -420,6 +420,15 @@ describe("in-store checklist", () => {
     writeItemCheck(storage, aldiKey, true);
     assert.equal(readItemChecks(storage)[aldiKey], true);
     assert.equal(itemIsChecked({ name: "Friendly Farms Milk", query: "milk", lineId: "gone" }, "Aldi", {}, readItemChecks(storage)), true);
+    assert.equal(
+      itemIsChecked({ name: "Different Long Retailer Title", query: "milk", lineId: "9:milk", storeName: "Walmart" }, "Walmart", {}, readItemChecks(storage)),
+      true
+    );
+    writeItemCheck(storage, itemCheckKey("Kroger", { query: "cinnamon pop-tarts", name: "Long Pop-Tart Title", lineId: "0:cinnamon pop-tarts" }), true);
+    assert.equal(
+      itemIsChecked({ query: "cinnamon pop-tarts", name: "Another Title", lineId: "4:cinnamon pop-tarts" }, "Target", {}, readItemChecks(storage)),
+      true
+    );
     writeItemCheck(storage, aldiKey, false);
     assert.equal(readItemChecks(storage)[aldiKey], undefined);
     assert.equal(numericWalmartId({ productId: "0099997200115", priceSource: "live" }), "");

@@ -226,7 +226,7 @@ export function moveOptionLabel(offer, currentPrice) {
 function lineFromOffer(item, offer) {
   const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
   const price = Number(offer.price);
-  const same = sameStore(offer.storeName, item.storeName);
+  const same = sameStore(offer.storeName, item.storeName) || (!cleanText(item.storeName) && !offerIsSwap(offer));
   const size = cleanText(offer.size) || (same ? cleanText(item.size) : undefined);
   const aisle = cleanText(offer.aisle) || (same ? cleanText(item.aisle) : undefined);
   const swap =
@@ -248,8 +248,15 @@ function lineFromOffer(item, offer) {
     unit: offer.unit || item.unit,
     normalizedUnit: offer.normalizedUnit || item.normalizedUnit,
     ...(size ? { size } : {}),
-    ...(cleanText(offer.productId) ? { productId: cleanText(offer.productId) } : {}),
-    ...(cleanText(offer.upc) ? { upc: cleanText(offer.upc) } : {}),
+    ...(() => {
+      const keepIds = same && !offerIsSwap(offer);
+      const productId = cleanText(offer.productId) || (keepIds ? cleanText(item.productId) : "");
+      const upc = cleanText(offer.upc) || (keepIds ? cleanText(item.upc) : "");
+      return {
+        ...(productId ? { productId } : {}),
+        ...(upc ? { upc } : {}),
+      };
+    })(),
     ...(cleanText(offer.locationId) ? { locationId: cleanText(offer.locationId) } : {}),
     ...(offer.priceSource ? { priceSource: offer.priceSource } : {}),
     ...(offer.onSale ? { onSale: true } : {}),
@@ -815,15 +822,23 @@ export function writeCheck(storage, tripId, lineId, checked) {
   return row;
 }
 
-/** Stable across a replan: store plus the item name, not the trip fingerprint. */
-export function itemCheckKey(storeName, item) {
+/**
+ * Stable across a replan, a store move, and a reload.
+ * The shopper's words (query, or the name baked into the line id) — not the
+ * store and not the long retailer title, which both change when the plan does.
+ */
+export function itemCheckKey(_storeName, item) {
+  const line = String(item?.lineId || "");
+  const lineName = line.includes(":") ? line.slice(line.indexOf(":") + 1) : "";
+  const name = normalizedPlanName(item?.query || lineName || "");
+  if (!name) return "";
+  return name;
+}
+
+/** Older sessions stored store|title. Still honored when reading. */
+export function legacyItemCheckKey(storeName, item) {
   const store = normalizeStoreKey(storeName || item?.storeName || "");
-  const name = String(item?.query || item?.name || "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const name = normalizedPlanName(item?.query || item?.name || "");
   if (!store || !name) return "";
   return `${store}|${name}`;
 }
@@ -859,7 +874,9 @@ export function writeItemCheck(storage, key, checked) {
 export function itemIsChecked(item, storeName, tripChecks, itemChecks) {
   if (item?.lineId && tripChecks?.[item.lineId]) return true;
   const key = itemCheckKey(storeName, item);
-  return Boolean(key && itemChecks?.[key]);
+  if (key && itemChecks?.[key]) return true;
+  const legacy = legacyItemCheckKey(storeName, item);
+  return Boolean(legacy && itemChecks?.[legacy]);
 }
 
 export function normalizedPlanName(value) {

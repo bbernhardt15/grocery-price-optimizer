@@ -127,6 +127,17 @@ export async function readNdjsonResponse(response, onProgress) {
  * }} deps
  * @param {{ files?: File[], text?: string }} input
  */
+export function receiptStageLabel(event) {
+  const stage = String(event?.stage || "");
+  const page = Number(event?.page);
+  const pages = Number(event?.pages);
+  if (stage === "matching") return "Matching products…";
+  if (stage === "preparing") return "Preparing the receipt…";
+  if (stage === "reading" && page > 0 && pages > 0) return `Reading page ${page} of ${pages}`;
+  const message = String(event?.message || "").trim();
+  return message || "Reading the receipt…";
+}
+
 function lineNames(rows) {
   return (rows || []).map((line) => String(line?.name || "").trim()).filter(Boolean);
 }
@@ -210,7 +221,18 @@ export async function readReceiptBatch(deps, input) {
         continue;
       }
       if (type === "application/pdf" || /\.pdf$/i.test(name)) {
-        const payload = await deps.postPdf(file);
+        const payload = await deps.postPdf(file, (event) => {
+          const message = receiptStageLabel(event);
+          report(message, Number(event?.ratio) || 0.3, {
+            fileIndex: index,
+            fileName: name,
+            status: "reading",
+            message,
+            fileRatio: Number(event?.ratio) || 0.3,
+            found: 0,
+            items: [],
+          });
+        });
         const got = linesFrom(payload, receiptNumber);
         lines.push(...got);
         filesOut.push({ index, name, lines: got, error: "" });

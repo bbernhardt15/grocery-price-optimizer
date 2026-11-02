@@ -120,7 +120,7 @@ import {
 } from "./shopper/coupons.js";
 import { pathWithoutSession, sessionFromSearch, SESSION_KEY } from "./shopper/account.js";
 import { packageChoices, paywallView, platformOf, sdkKeyFor } from "./shopper/billing.js";
-import { displayProductName, listItemTitle, stagedQuantity } from "./shopper/familyTile.js";
+import { displayProductName, listItemTitle, shortProductTitle, stagedQuantity } from "./shopper/familyTile.js";
 import { selectBestValue, unitSortLabel, valueRow } from "./shopper/bestValue.js";
 import { bottomChrome, planBarCopy, readFlowStep, shouldAskToSignIn, stepTitle } from "./shopper/flow.js";
 import { nextTrapTarget, swipeClosesDrawer } from "./shopper/drawer.js";
@@ -538,7 +538,7 @@ function showWalmartReturn() {
 }
 
 function noteAppHidden() {
-  sawAppHidden = true;
+  if (document.visibilityState === "hidden") sawAppHidden = true;
 }
 
 function noteAppVisible() {
@@ -2315,7 +2315,8 @@ function primaryAction(store) {
     return `<button class="handoff-btn" type="button" data-kroger="${escapeHtml(store.storeName)}">${escapeHtml(label)}</button>`;
   }
   if (action.type === "walmart_cart" && action.url) {
-    return `<a class="handoff-btn" href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+    const fallback = action.fallbackUrl || storeSearchUrl(store.storeName, store.items?.[0]) || "";
+    return `<button class="handoff-btn" type="button" data-walmart-cart="${escapeHtml(action.url)}" data-walmart-fallback="${escapeHtml(fallback)}">${escapeHtml(label)}</button>`;
   }
   if (usesStoreReadyList(store.storeName)) {
     return `<button class="handoff-btn" type="button" data-shopping-mode="${escapeHtml(store.storeName)}">Shopping mode</button>`;
@@ -2490,9 +2491,21 @@ function annotatePreference(item) {
   return noted;
 }
 
+function productTitleHtml(item) {
+  const full = displayProductName(item?.name, item?.brand) || cleanTitle(item?.name) || "Item";
+  const short = shortProductTitle({ name: full, brand: item?.brand, size: item?.size }) || full;
+  if (short === full) return escapeHtml(short);
+  return `<button type="button" class="item-title" data-full-name="${escapeHtml(full)}" data-short-name="${escapeHtml(short)}">${escapeHtml(short)}</button>`;
+}
+
+function cleanTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
 function reviewItemLine(item) {
   const noted = annotatePreference(lists().annotate(item));
-  const label = displayProductName(noted.name, noted.brand) || noted.name || "Item";
+  const full = displayProductName(noted.name, noted.brand) || noted.name || "Item";
+  const label = shortProductTitle({ name: full, brand: noted.brand, size: noted.size }) || full;
   const amount = Number(noted.itemTotal ?? noted.price);
   const price = Number.isFinite(amount) ? priceFigure(amount) : "";
   return `${noted.quantity} × ${label}${price ? ` · ${price}` : ""}`;
@@ -2519,7 +2532,6 @@ function calmItemRow(item) {
   const swap = plainSwap(item);
   const rawNote = calmPriceNote(item.priceSource);
   const note = rawNote === "sample price" ? "" : rawNote;
-  const size = item.size ? `, ${item.size}` : "";
   const amount = Number(item.itemTotal ?? item.price);
   const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
   const change = swap
@@ -2531,7 +2543,7 @@ function calmItemRow(item) {
     : "";
   const sale = saleBadgeMarkup(item);
   return `<li class="calm-item">
-    <p class="item-name">${item.quantity} × ${escapeHtml(item.name)}${escapeHtml(size)}${note ? ` <span class="muted">${escapeHtml(note)}</span>` : ""}</p>
+    <p class="item-name">${item.quantity} × ${productTitleHtml(item)}${note ? ` <span class="muted">${escapeHtml(note)}</span>` : ""}</p>
     <p class="item-price">${sale}<strong>${escapeHtml(price)}</strong></p>
     ${swap ? `<p class="swap-quiet">${escapeHtml(swap.text)}${change}</p>` : ""}
   </li>`;
@@ -2567,6 +2579,14 @@ function customizeBlock(stores) {
 }
 
 function paintTrip() {
+  const scrollY = window.scrollY || 0;
+  const keepPlace = () => {
+    paintPlanBar();
+    if (scrollY > 0) {
+      window.scrollTo(0, scrollY);
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    }
+  };
   const view = currentTrip();
   if (!view?.stores?.length) {
     if (!list.size) {
@@ -2576,7 +2596,7 @@ function paintTrip() {
     } else {
       tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted" id="plan-status-line">Updating the plan…</p><div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`;
     }
-    paintPlanBar();
+    keepPlace();
     return;
   }
   const stores = view.stores ?? [];
@@ -2591,7 +2611,7 @@ function paintTrip() {
   syncStepVisibility();
   if (tripStoreEmpty(lastOptimize)) {
     tripEl.innerHTML = emptyStateMarkup(emptyState("stores"), escapeHtml);
-    paintPlanBar();
+    keepPlace();
     return;
   }
   const lineItems = (card.lines || [])
@@ -2699,10 +2719,10 @@ function paintTrip() {
       allowSubsEl.checked = subs.checked;
       localStorage.setItem(SUBS_KEY, subs.checked ? "1" : "0");
       renderEstimate();
-      void planTrip();
+      void planTrip({ stay: true });
     };
   }
-  paintPlanBar();
+  keepPlace();
 }
 
 function renderStore(store, checks, coupons, couponSummary, openCoupons) {
@@ -3276,9 +3296,12 @@ async function openInstacart(button) {
 async function startKroger(storeName, button) {
   const store = currentTrip()?.stores?.find((entry) => entry.storeName === storeName);
   if (!store) return;
-  button.disabled = true;
-  setBusy(button, true);
-  try {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Connecting to Kroger…";
+    button.setAttribute("aria-busy", "true");
+    setBusy(button, true);
+    try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -3318,6 +3341,8 @@ async function startKroger(storeName, button) {
     });
   } finally {
     button.disabled = false;
+    button.removeAttribute("aria-busy");
+    if (button.isConnected && button.textContent === "Connecting to Kroger…") button.textContent = label;
     setBusy(button, false);
   }
 }
@@ -4151,14 +4176,27 @@ document.addEventListener("click", (event) => {
     void sendToKrogerCart(krogerSend);
     return;
   }
-  const walmartCart = target.closest('a.handoff-btn[href*="walmart.com"]');
-  if (walmartCart instanceof HTMLAnchorElement) {
+  const fullName = target.closest("[data-full-name]");
+  if (fullName instanceof HTMLButtonElement) {
     event.preventDefault();
+    const open = fullName.classList.toggle("is-open");
+    fullName.textContent = open ? fullName.getAttribute("data-full-name") || "" : fullName.getAttribute("data-short-name") || "";
+    return;
+  }
+  const walmartCart = target.closest("[data-walmart-cart]");
+  if (walmartCart instanceof HTMLButtonElement) {
+    event.preventDefault();
+    const scrollY = window.scrollY || 0;
+    const url = walmartCart.getAttribute("data-walmart-cart") || walmartCart.getAttribute("data-walmart-fallback") || "";
+    if (!url) {
+      toast("Couldn't open Walmart.");
+      return;
+    }
     haptic();
     maybeAskAccount("cart", () => {
       markWalmartHandoff();
       setBusy(walmartCart, true);
-      void openExternal(walmartCart.href)
+      void openExternal(url)
         .catch(() => {
           try {
             sessionStorage.removeItem(WALMART_RETURN_KEY);
@@ -4167,8 +4205,12 @@ document.addEventListener("click", (event) => {
           }
           toast("Couldn't open Walmart.");
         })
-        .finally(() => setBusy(walmartCart, false));
+        .finally(() => {
+          setBusy(walmartCart, false);
+          window.scrollTo(0, scrollY);
+        });
     });
+    window.scrollTo(0, scrollY);
     return;
   }
   if (target.closest("[data-add-diets]")) {
@@ -4182,6 +4224,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target.closest("[data-kroger]")) {
+    event.preventDefault();
     const button = target.closest("[data-kroger]");
     haptic();
     maybeAskAccount("cart", () => {
@@ -5627,7 +5670,7 @@ function paintPlanBar() {
     left: progress.left,
     complete: progress.complete,
   });
-  const about = copy.totalLabel ? `about ${copy.totalLabel}` : "";
+  const about = !copy.totalLabel ? "" : copy.provisional ? `Estimate ${copy.totalLabel}` : `about ${copy.totalLabel}`;
   const countEl = $("bar-count");
   const totalEl = $("bar-total");
   const primary = $("bar-primary");
@@ -5636,6 +5679,7 @@ function paintPlanBar() {
   if (primary) {
     primary.textContent = copy.button;
     primary.disabled = !copy.enabled;
+    primary.hidden = copy.showButton === false;
   }
   const shopCount = $("shop-count");
   const shopTotal = $("shop-total");
@@ -5691,8 +5735,6 @@ function renderShop() {
               const noted = lists().annotate(item);
               const favoriteSwap = noted !== item ? plainSwap(noted) : null;
               const on = rowOn(item, section.storeName, { line: checks, item: readItemChecks(localStorage) });
-              const size = item.size ? `, ${escapeHtml(item.size)}` : "";
-              const itemLabel = displayProductName(item.name, item.brand) || item.name;
               const amount = Number(item.itemTotal ?? item.price);
               const price = Number.isFinite(amount) ? priceFigure(amount) : "Price unavailable";
               const choices = swapChoices(item);
@@ -5713,7 +5755,7 @@ function renderShop() {
               return `<div class="shop-line" data-shop-line="${escapeHtml(item.lineId || "")}">
                 <label class="shop-row${on ? " is-done" : ""}">
                   <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, section.storeName)}${on ? " checked" : ""} />
-                  <span class="shop-copy"><span class="shop-name">${item.quantity} × ${escapeHtml(itemLabel)}${size}</span><span class="muted">${escapeHtml(price)}</span></span>
+                  <span class="shop-copy"><span class="shop-name">${item.quantity} × ${productTitleHtml(item)}</span><span class="muted">${escapeHtml(price)}</span></span>
                 </label>
                 ${search}
                 ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
@@ -6395,8 +6437,7 @@ async function sendToKrogerCart(button) {
     (store) => store?.handoff?.action?.type === "kroger_cart" || /kroger/i.test(String(store?.storeName || ""))
   );
   if (!krogerStore) {
-    toast("Add items and open your plan. Send to Kroger cart is there when the list includes Kroger.");
-    if (list.size) showStep("plan");
+    toast("Send to Kroger cart is here when the list includes Kroger.");
     return;
   }
   if (planLimited("cartHandoffs")) {
@@ -6519,8 +6560,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") noteAppHidden();
   if (document.visibilityState === "visible") noteAppVisible();
 });
-window.addEventListener("blur", noteAppHidden);
 window.addEventListener("focus", () => {
+  if (document.visibilityState === "hidden") return;
   if (sawAppHidden) showWalmartReturn();
 });
 window.addEventListener("pageshow", () => {
@@ -6753,7 +6794,11 @@ profileUi = mountProfileOnboarding({
         photo,
         onProgress,
         postPhoto: async (file) => postImport("/api/import/photo", { imageBase64: await fileToBase64(file), mimeType: file.type || "image/jpeg" }),
-        postPdf: async (file) => postImport("/api/import/pdf", { pdfBase64: await fileToBase64(file), progress: true }, onProgress),
+        postPdf: async (file, onFile) =>
+          postImport("/api/import/pdf", { pdfBase64: await fileToBase64(file), progress: true }, (event) => {
+            onFile?.(event);
+            onProgress?.(event);
+          }),
         postText: async (value) => postImport("/api/import/receipt", { text: value }),
         postLines: async (lines) => postImport("/api/import/receipt", { lines }),
       },

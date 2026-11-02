@@ -464,16 +464,43 @@ export function looksLikePaperReceipt(lines: Array<Pick<ReceiptLine, "name" | "u
   return short / lines.length >= 0.5;
 }
 
-/** Same item repeated inside one receipt (overlapping slices) counts once. */
+function nameKey(line: ReceiptLine): string {
+  return fold(`${line.brand} ${line.name}`)
+    .replace(/\b\d+(?:\.\d+)?\s*(?:fl|oz|lb|lbs|ct|pk|pack|count|ml|g)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sameReceiptLine(a: ReceiptLine, b: ReceiptLine): boolean {
+  if ((a.receipt || 1) !== (b.receipt || 1)) return false;
+  const upcA = upcKey(a.upc);
+  const upcB = upcKey(b.upc);
+  if (upcA && upcB && upcA === upcB) return true;
+  const left = nameKey(a);
+  const right = nameKey(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const sameBrand = fold(a.brand) && fold(a.brand) === fold(b.brand);
+  if (sameBrand && (left.includes(right) || right.includes(left))) return true;
+  return false;
+}
+
+/**
+ * Same item repeated inside one receipt (overlapping page slices) counts once.
+ * Quantity is the largest reported count, not the sum of the copies.
+ */
 export function dedupeReceiptLines(lines: ReceiptLine[]): ReceiptLine[] {
-  const seen = new Set<string>();
   const kept: ReceiptLine[] = [];
   for (const line of lines) {
-    const id = line.upc ? `upc:${line.upc}` : `${fold(line.brand)}|${fold(line.name)}|${fold(line.size)}`;
-    const key = `${line.receipt || 1}|${id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    kept.push(line);
+    const match = kept.find((row) => sameReceiptLine(row, line));
+    if (!match) {
+      kept.push({ ...line });
+      continue;
+    }
+    match.quantity = Math.max(match.quantity || 1, line.quantity || 1);
+    if (!match.upc && line.upc) match.upc = line.upc;
+    if (nameKey(line).length > nameKey(match).length) match.name = line.name;
+    if (!match.brand && line.brand) match.brand = line.brand;
   }
   return kept;
 }
