@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
+import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
 const router = Router();
@@ -157,6 +157,31 @@ router.post("/admin/catalog/recategorize", async (req: Request, res: Response) =
   }
   try {
     res.json(await startRecategorizeJob());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/deactivate-out-of-scope", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  try {
+    res.json(await deactivateOutOfScopeCatalog(false));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/deactivate-out-of-scope", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) {
+    return;
+  }
+  const apply = (req.body as { apply?: unknown } | undefined)?.apply === true;
+  try {
+    res.json(await deactivateOutOfScopeCatalog(apply));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });

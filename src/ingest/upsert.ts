@@ -14,6 +14,8 @@ type CatalogMasterLean = {
   walmartItemId?: string;
   krogerProductId?: string;
   mergedAt?: Date;
+  status?: string;
+  outOfScope?: boolean;
 };
 
 export function freshnessStatus(lastSeenAt: Date, now: Date, staleDays: number, discontinueDays: number): CatalogStatus {
@@ -134,6 +136,7 @@ export async function upsertCatalogRecords(
           subcategory: record.subcategory,
         })
       : fromPath;
+    const outOfScope = mapped.signal === "excluded" || mapped.departmentId === "other";
     let existing = await CatalogMaster.findOne({ key }).lean<CatalogMasterLean | null>();
     const shadowKey = localProductKey(record);
     if (shadowKey && shadowKey !== key) {
@@ -195,7 +198,8 @@ export async function upsertCatalogRecords(
           ...(krogerProductId ? { krogerProductId } : {}),
           ...(bothNow && !hadBoth && !existing?.mergedAt ? { mergedAt: seenAt } : {}),
           lastSeenAt: seenAt,
-          status: "active",
+          outOfScope,
+          status: outOfScope && (existing?.outOfScope === true || existing?.status === "discontinued") ? "discontinued" : "active",
         },
       },
       { upsert: true }
@@ -238,7 +242,9 @@ export async function upsertCatalogRecords(
           priceSource,
           lastSeenAt: seenAt,
           refreshMisses: 0,
-          status: "active",
+          outOfScope,
+          status:
+            outOfScope && (existing?.outOfScope === true || existing?.status === "discontinued") ? "discontinued" : "active",
         },
       },
       { upsert: true }

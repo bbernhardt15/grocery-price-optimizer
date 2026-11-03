@@ -29,14 +29,14 @@ function departmentClause(departmentId?: string): Record<string, unknown> {
 async function findMasters(scope: { departmentId?: string; query?: string }): Promise<CatalogMasterDoc[]> {
   const config = ingestConfig();
   const tokens = tokensOf(scope.query ?? "");
-  const status = { $ne: "discontinued" };
+  const visible = { status: { $ne: "discontinued" as const }, outOfScope: { $ne: true } };
   const department = departmentClause(scope.departmentId);
   if (tokens.length > 0) {
     try {
       const found = await CatalogMaster.find(
         {
           $text: { $search: tokens.join(" ") },
-          status,
+          ...visible,
           ...department,
         },
         { score: { $meta: "textScore" } }
@@ -56,14 +56,14 @@ async function findMasters(scope: { departmentId?: string; query?: string }): Pr
       return { $or: [{ name: pattern }, { brand: pattern }] };
     });
     return CatalogMaster.find({
-      status,
+      ...visible,
       $and: clauses,
       ...department,
     })
       .limit(config.browseScan)
       .lean<CatalogMasterDoc[]>();
   }
-  return CatalogMaster.find({ ...department, status })
+  return CatalogMaster.find({ ...department, ...visible })
     .sort(scope.departmentId && scope.departmentId !== "all" ? { name: 1 } : { lastSeenAt: -1 })
     .limit(config.browseScan)
     .lean<CatalogMasterDoc[]>();
@@ -96,13 +96,14 @@ export async function readRecordsByUpc(upcs: string[]): Promise<RawCatalogRecord
   if (mongoose.connection.readyState !== 1) return [];
   const codes = [...new Set(upcs.map((upc) => upc.replace(/\D/g, "")).filter((upc) => upc.length >= 8 && upc.length <= 14))].slice(0, 80);
   if (!codes.length) return [];
-  const masters = await CatalogMaster.find({ upc: { $in: codes }, status: { $ne: "discontinued" } })
+  const masters = await CatalogMaster.find({ upc: { $in: codes }, status: { $ne: "discontinued" }, outOfScope: { $ne: true } })
     .limit(80)
     .lean<CatalogMasterDoc[]>();
   if (!masters.length) return [];
   const offers = await CatalogOffer.find({
     productKey: { $in: masters.map((master) => master.key) },
     status: { $ne: "discontinued" },
+    outOfScope: { $ne: true },
   }).lean<CatalogOfferDoc[]>();
   const records: RawCatalogRecord[] = [];
   for (const master of masters) {
@@ -130,6 +131,7 @@ export async function readStoredRecords(scope: {
   const offers = await CatalogOffer.find({
     productKey: { $in: keys },
     status: { $ne: "discontinued" },
+    outOfScope: { $ne: true },
   }).lean<CatalogOfferDoc[]>();
   const zip = scope.zipCode?.trim().slice(0, 5) ?? "";
   const locationId = scope.locationId?.trim() ?? "";
@@ -172,11 +174,11 @@ export async function readStoredById(id: string): Promise<RawCatalogRecord[]> {
     return [];
   }
   const key = id.startsWith("upc:") ? id.slice(4) : id;
-  const master = await CatalogMaster.findOne({ key, status: { $ne: "discontinued" } }).lean<CatalogMasterDoc | null>();
+  const master = await CatalogMaster.findOne({ key, status: { $ne: "discontinued" }, outOfScope: { $ne: true } }).lean<CatalogMasterDoc | null>();
   if (!master) {
     return [];
   }
-  const offers = await CatalogOffer.find({ productKey: key, status: { $ne: "discontinued" } }).lean<CatalogOfferDoc[]>();
+  const offers = await CatalogOffer.find({ productKey: key, status: { $ne: "discontinued" }, outOfScope: { $ne: true } }).lean<CatalogOfferDoc[]>();
   return offers.map((offer) => recordFrom(master, offer));
 }
 
@@ -201,6 +203,7 @@ export async function storedLineProducts(
     productKey: { $in: matched.map((master) => master.key) },
     storeName,
     status: { $ne: "discontinued" },
+    outOfScope: { $ne: true },
     ...(storeName.toLowerCase() === "kroger" && locationId ? { locationId } : {}),
   }).lean<CatalogOfferDoc[]>();
   const byKey = new Map(matched.map((master) => [master.key, master]));

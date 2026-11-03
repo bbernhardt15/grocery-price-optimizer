@@ -215,6 +215,7 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
   return CatalogOffer.find({
     storeName,
     status: "stale",
+    outOfScope: { $ne: true },
     refreshExcluded: { $ne: true },
     ...(keys ? { productKey: { $in: keys.slice(0, 500) } } : {}),
     $or: [
@@ -448,6 +449,7 @@ export async function refreshQueueSize(now = new Date()): Promise<{ walmart: num
   const cutoff = new Date(now.getTime() - REFRESH_RETRY_MS);
   const waiting = {
     status: "stale" as const,
+    outOfScope: { $ne: true },
     refreshExcluded: { $ne: true },
     $or: [
       { refreshAttemptAt: { $exists: false } },

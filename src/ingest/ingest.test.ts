@@ -2695,7 +2695,7 @@ describe("catalog ingestion", () => {
       status: "running",
       checkpoint: {
         phase: "categories",
-        taxonomyVersion: 8,
+        taxonomyVersion: 9,
         categories: [{ id: "auto-clean", name: "Automotive Cleaners", path: "Auto & Tires/Automotive Cleaners", departmentId: "household" }],
         index: 0,
         nextPage: null,
@@ -3347,7 +3347,10 @@ describe("catalog ingestion", () => {
     assert.equal(picks[0]?.code, krogerProductIdForLookup("049000042566"));
     assert.equal(picks[0]?.priority, "staple");
     assert.equal(picks[1]?.code, krogerProductIdForLookup("016000275287"));
-    assert.equal(krogerLookupBlock({ name: "Sterilite Closet Organizer", brand: "Sterilite", categoryPaths: ["Household Essentials/Storage"] }), "household-low-match");
+    assert.equal(
+      krogerLookupBlock({ name: "Sterilite Closet Organizer", brand: "Sterilite", categoryPaths: ["Household Essentials/Storage"] }),
+      "out-of-scope:storage-furniture→other"
+    );
     assert.equal(
       krogerLookupBlock({ name: "Honeywell Table Lamp", brand: "Honeywell", categoryPaths: ["Home/Furniture"] }) !== null,
       true

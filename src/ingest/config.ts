@@ -400,6 +400,73 @@ export function effectiveShares(input: {
   };
 }
 
+/**
+ * Walmart shelf is stale above this share. Refresh takes the match floor
+ * until the shelf is back under {@link WALMART_STALE_RAISE}. The daily call
+ * cap and the minimum gap are unchanged, so this cannot add 429s.
+ */
+export const WALMART_STALE_RAISE = 0.3;
+/** Under this share, Walmart refresh drops to half of CATALOG_REFRESH_SHARE_WALMART. */
+export const WALMART_STALE_LOWER = 0.25;
+/** Refresh fraction used while Walmart stale offers are above 30%. Crawl keeps its floor. */
+export const WALMART_RAISED_REFRESH_SHARE = 0.85;
+
+export type WalmartEffectiveShares = EffectiveShares & {
+  /** Share actually used for the Walmart tick. The env value stays on configuredRefreshShare. */
+  adaptedRefreshShare: number;
+};
+
+/**
+ * Adaptive CATALOG_REFRESH_SHARE_WALMART.
+ * Above 30% stale, refresh rises to {@link WALMART_RAISED_REFRESH_SHARE} and
+ * the match floor is given to refresh. Crawl keeps CATALOG_STALE_DISCOVERY_SHARE
+ * so the walk does not stall. Between 25% and 30% the configured share is used.
+ * Under 25% the configured share is cut in half. The daily budget is not raised.
+ */
+export function walmartEffectiveShares(input: {
+  staleRatio: number;
+  lookupShare: number;
+  refreshShare: number;
+  staleDiscoveryShare?: number;
+  staleLookupShare?: number;
+}): WalmartEffectiveShares {
+  const configured = clampShare(input.refreshShare);
+  const staleRatio = clampShare(input.staleRatio);
+  if (configured <= 0 || clampShare(input.lookupShare) >= 1) {
+    const shares = effectiveShares(input);
+    return { ...shares, adaptedRefreshShare: shares.refreshShare };
+  }
+  if (staleRatio > WALMART_STALE_RAISE) {
+    const raised = Math.max(configured, WALMART_RAISED_REFRESH_SHARE);
+    const shares = effectiveShares({
+      ...input,
+      refreshShare: raised,
+      staleLookupShare: 0,
+      staleDiscoveryShare: input.staleDiscoveryShare ?? DEFAULT_STALE_DISCOVERY_SHARE,
+    });
+    return { ...shares, configuredRefreshShare: configured, adaptedRefreshShare: shares.refreshShare };
+  }
+  if (staleRatio < WALMART_STALE_LOWER) {
+    const lowered = roundShare(configured * 0.5);
+    const shares = effectiveShares({
+      ...input,
+      staleRatio: (WALMART_STALE_LOWER + WALMART_STALE_RAISE) / 2,
+      refreshShare: lowered,
+    });
+    return {
+      ...shares,
+      mode: "discover",
+      staleRatio: roundShare(staleRatio),
+      refreshShare: lowered,
+      configuredRefreshShare: configured,
+      adaptedRefreshShare: lowered,
+      refreshFirst: false,
+    };
+  }
+  const shares = effectiveShares(input);
+  return { ...shares, adaptedRefreshShare: shares.refreshShare };
+}
+
 export function ingestConfig(): IngestConfig {
   const enabled = boolEnv("CATALOG_INGEST_ENABLED");
   const dbFirst = boolEnv("CATALOG_DB_FIRST") || enabled;

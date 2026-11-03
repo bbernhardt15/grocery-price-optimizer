@@ -107,7 +107,16 @@ function taxonomyPath(reported: string, parentPath: string, name: string): strin
 }
 
 /** Bump when grocery leaves change so a resume re-reads the Walmart tree. */
-export const WALMART_TAXONOMY_VERSION = 8;
+export const WALMART_TAXONOMY_VERSION = 9;
+
+/**
+ * A crawled item is stored only when it lands in a grocery department.
+ * Durable goods that share a page with paper or food are dropped here.
+ */
+export function shouldStoreCrawledProduct(categories: string[] | undefined, name: string): boolean {
+  const mapped = mapToDepartment(categories, name);
+  return mapped.signal !== "excluded" && !mapped.generalMerchandise && mapped.departmentId !== "other";
+}
 
 /**
  * Crawl a leaf only when it maps to a grocery department.

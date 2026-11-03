@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { krogerAdvance, krogerStartParam, nextKrogerStart, pickBrandSplits, sanitizeKrogerParam } from "./krogerTerms";
-import { groceryLeaves, normalizeWalmartPage, recordsFromWalmartPage, walmartNextCursor, walmartPagePath } from "./walmartWalk";
+import { groceryLeaves, normalizeWalmartPage, recordsFromWalmartPage, shouldStoreCrawledProduct, walmartNextCursor, walmartPagePath } from "./walmartWalk";
 
 describe("walmart catalog walk", () => {
   it("keeps grocery leaves and skips other departments", () => {
@@ -311,6 +311,56 @@ describe("walmart catalog walk", () => {
     );
     assert.ok(leaves.every((leaf) => leaf.departmentId === "household"));
     assert.equal(leaves.find((leaf) => leaf.id === "paper")?.path, "Household Essentials/Paper Towels");
+  });
+
+  it("does not crawl appliances, laundry storage, or movies, and still crawls grocery consumables", () => {
+    const leaves = groceryLeaves({
+      categories: [
+        {
+          id: "home",
+          name: "Home",
+          path: "Home",
+          children: [
+            { id: "appliances", name: "Appliances", path: "Home", children: [] },
+            { id: "dishwashers", name: "Dishwashers", path: "Home", children: [] },
+            { id: "laundry-storage", name: "Laundry Storage and Organization", path: "Home", children: [] },
+            { id: "delivery", name: "Appliance Delivery", path: "Home", children: [] },
+            { id: "movies", name: "Frozen Movies", path: "Home", children: [] },
+          ],
+        },
+        {
+          id: "grocery",
+          name: "Household Essentials",
+          path: "Household Essentials",
+          children: [
+            { id: "clean", name: "Cleaning Supplies", path: "Household Essentials", children: [] },
+            { id: "paper", name: "Paper Towels", path: "Household Essentials", children: [] },
+            { id: "laundry", name: "Laundry Detergent", path: "Household Essentials", children: [] },
+            { id: "trash", name: "Trash Bags", path: "Household Essentials", children: [] },
+            { id: "bags", name: "Food Storage Bags", path: "Household Essentials", children: [] },
+            { id: "batteries", name: "Batteries", path: "Household Essentials", children: [] },
+            { id: "bulbs", name: "Light Bulbs", path: "Household Essentials", children: [] },
+          ],
+        },
+        {
+          id: "frozen",
+          name: "Frozen",
+          path: "Food/Frozen",
+          children: [{ id: "peas", name: "Frozen Vegetables", path: "Food/Frozen", children: [] }],
+        },
+      ],
+    });
+    assert.deepEqual(
+      leaves.map((leaf) => leaf.id).sort(),
+      ["bags", "batteries", "bulbs", "clean", "laundry", "paper", "peas", "trash"]
+    );
+    assert.equal(shouldStoreCrawledProduct(["Home/Appliances/Dishwashers"], "GE Profile Dishwasher"), false);
+    assert.equal(shouldStoreCrawledProduct(["Movies/Frozen Movies"], "Disney Frozen"), false);
+    assert.equal(shouldStoreCrawledProduct(["Home/Services/Appliance Delivery"], "Haul away"), false);
+    assert.equal(shouldStoreCrawledProduct(["Household Essentials/Paper"], "Bounty Paper Towels"), true);
+    assert.equal(shouldStoreCrawledProduct(["Household Essentials/Cleaning"], "Cascade Dishwasher Detergent Pods"), true);
+    assert.equal(shouldStoreCrawledProduct(["Baby/Diapers"], "Pampers Baby Wipes"), true);
+    assert.equal(shouldStoreCrawledProduct(["Pets/Dog Food"], "Purina Dog Chow"), true);
   });
 
   it("follows a nextPage URL, path, or cursor without dropping the category", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
-import { effectiveShares, lookupCallsForTick, nextTickTurn, tickCallSplit } from "./config";
+import { effectiveShares, lookupCallsForTick, nextTickTurn, tickCallSplit, walmartEffectiveShares } from "./config";
 
 describe("lookup share", () => {
   it("gives lookups a fraction of the tick and at least one call when the share is above zero", () => {
@@ -74,6 +74,35 @@ describe("lookup share", () => {
     assert.equal(mid.refreshShare, 0.6);
     assert.equal(mid.lookupShare, 0.5);
     assert.equal(mid.refreshFirst, false);
+  });
+
+  it("raises the Walmart refresh share above 30% stale and lowers it under 25%", () => {
+    const high = walmartEffectiveShares({ staleRatio: 0.349, lookupShare: 0.5, refreshShare: 0.3 });
+    assert.equal(high.mode, "refresh");
+    assert.equal(high.refreshFirst, true);
+    assert.ok(high.refreshShare >= 0.8);
+    assert.equal(high.lookupShare, 0);
+    assert.equal(high.configuredRefreshShare, 0.3);
+    const tick = tickCallSplit(4, high.lookupShare, high.refreshShare, high.refreshFirst, high.discoveryShare);
+    assert.equal(tick.refresh, 3);
+    assert.equal(tick.discovery, 1);
+    assert.equal(tick.lookup, 0);
+    assert.equal(tick.refresh + tick.lookup + tick.discovery, 4);
+
+    const hold = walmartEffectiveShares({ staleRatio: 0.27, lookupShare: 0.5, refreshShare: 0.3 });
+    assert.equal(hold.mode, "balanced");
+    assert.equal(hold.refreshShare, 0.3);
+    assert.equal(hold.adaptedRefreshShare, 0.3);
+
+    const low = walmartEffectiveShares({ staleRatio: 0.22, lookupShare: 0.5, refreshShare: 0.3 });
+    assert.equal(low.mode, "discover");
+    assert.equal(low.refreshFirst, false);
+    assert.equal(low.refreshShare, 0.15);
+    assert.equal(low.adaptedRefreshShare, 0.15);
+
+    const kroger = effectiveShares({ staleRatio: 0.22, lookupShare: 0.5, refreshShare: 0.6 });
+    assert.equal(kroger.mode, "balanced");
+    assert.equal(kroger.refreshShare, 0.6);
   });
 
   it("does not invent refresh budget or cut a tick that is entirely lookups", () => {

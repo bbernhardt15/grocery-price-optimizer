@@ -1,3 +1,5 @@
+import { groceryScopeDenial } from "./groceryScope";
+
 /**
  * Shared grocery department tree.
  *
@@ -109,6 +111,7 @@ const RULES: readonly Rule[] = [
   { test: /^(?:cleaning|cleaners?|cleaning tools?|janitorial(?:\s+supplies)?|cleaning chemicals?)$/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /^(?:paper(?:\s+goods|\s+products)?|paper\s*(?:&|and)\s*plastics?|food-?\s*service(?:\s+disposables?)?|foodservice(?:\s+disposables?)?|disposables?)$/i, departmentId: "household", subcategory: "Paper" },
   { test: /^(?:household|household essentials?)$/i, departmentId: "household" },
+  { test: /^(?:batteries|light bulbs?)$/i, departmentId: "household" },
   { test: /^(?:diapering|training pants|pull-?ups)$/i, departmentId: "baby", subcategory: "Diapers" },
   { test: /^(?:dog|cat)\s+(?:food|treats?|litter|bedding)$/i, departmentId: "pet" },
   { test: /baby back ribs?/i, departmentId: "meat-seafood", subcategory: "Pork" },
@@ -124,7 +127,8 @@ const RULES: readonly Rule[] = [
   { test: /cat food|cat treats?|cat litter|kitten food/i, departmentId: "pet", subcategory: "Cat" },
   { test: /pet food|pet treats?/i, departmentId: "pet" },
   { test: /\b(?:dog|cat|pet|puppy|kitten|cedar|small animal)\s+bedding\b|\bcedar bedding\b/i, departmentId: "pet" },
-  { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bag/i, departmentId: "household", subcategory: "Paper" },
+  { test: /paper towel|toilet paper|bath tissue|paper napkin|paper plate|\bnapkins?\b|facial tissue|paper goods|plastic wrap|aluminum foil|sandwich bags?|storage bags?|freezer bags?/i, departmentId: "household", subcategory: "Paper" },
+  { test: /\b(?:alkaline\s+)?batteries\b|\blight bulbs?\b|\bled bulbs?\b/i, departmentId: "household" },
   { test: /dish soap|dish detergent|dishwasher\s+(?:detergent|soap|pods?|pacs?|tablets?)|dishwashing|all-purpose cleaner|disinfect(?:ant|ing)|\bbleach\b|trash bag|garbage bag|\bsponges?\b/i, departmentId: "household", subcategory: "Cleaning" },
   { test: /laundry|detergent|fabric softener|dryer sheets?/i, departmentId: "household", subcategory: "Laundry" },
   { test: /household|cleaning supplies?|paper\s*(?:&|and)\s*plastic/i, departmentId: "household" },
@@ -159,7 +163,7 @@ const RULES: readonly Rule[] = [
   { test: /bagel|muffin|croissant/i, departmentId: "bakery", subcategory: "Rolls & Bagels" },
   { test: /tortilla/i, departmentId: "bakery", subcategory: "Tortillas" },
   { test: /bread|bakery|bun\b/i, departmentId: "bakery", subcategory: "Bread" },
-  { test: /deli|sliced turkey|sliced ham|sliced meat|lunch ?meat/i, departmentId: "deli", subcategory: "Sliced Meat" },
+  { test: /\bdeli\b|sliced turkey|sliced ham|sliced meat|lunch ?meat/i, departmentId: "deli", subcategory: "Sliced Meat" },
   { test: /salmon|shrimp|seafood|fish fillet/i, departmentId: "meat-seafood", subcategory: "Seafood" },
   { test: /chicken|poultry/i, departmentId: "meat-seafood", subcategory: "Chicken" },
   { test: /ground beef|\bbeef\b|steak/i, departmentId: "meat-seafood", subcategory: "Beef" },
@@ -801,6 +805,16 @@ export function mapToDepartment(
     return named.mapped;
   }
   const skipHealth = named.blockHealth;
+  const denial = groceryScopeDenial(labels, name);
+  if (denial) {
+    return {
+      departmentId: other.id,
+      departmentName: other.name,
+      signal: "excluded",
+      generalMerchandise: true,
+      reason: `out-of-scope:${denial}→other`,
+    };
+  }
   const junk = notGroceryLabel(labels, name);
   if (junk) {
     return {

@@ -29,6 +29,8 @@ const masterSchema = new Schema(
     matchKrogerVariant: { type: Number },
     /** When this master first carried both a Walmart id and a Kroger id. */
     mergedAt: { type: Date },
+    /** Set by the scope job. Hidden from search, plans, and shelf counts. Not a hard delete. */
+    outOfScope: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -45,6 +47,7 @@ masterSchema.index({ departmentId: 1, status: 1, name: 1 });
 masterSchema.index({ matchWalmartAt: 1, departmentId: 1 });
 masterSchema.index({ matchKrogerAt: 1, departmentId: 1 });
 masterSchema.index({ mergedAt: 1 });
+masterSchema.index({ outOfScope: 1, departmentId: 1, status: 1 });
 
 const offerSchema = new Schema(
   {
@@ -72,6 +75,8 @@ const offerSchema = new Schema(
     refreshAttemptAt: { type: Date },
     /** Confirmed misses. Three in a row leaves the offer out of the queue. */
     refreshMisses: { type: Number, default: 0 },
+    /** Set with the master when the product is outside grocery-store scope. */
+    outOfScope: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["active", "stale", "discontinued"],
@@ -86,6 +91,7 @@ offerSchema.index({ storeName: 1, locationId: 1, status: 1 });
 offerSchema.index({ storeName: 1, zip: 1, status: 1 });
 offerSchema.index({ status: 1, lastSeenAt: 1 });
 offerSchema.index({ storeName: 1, status: 1, lastSeenAt: 1 });
+offerSchema.index({ outOfScope: 1, status: 1 });
 
 const checkpointSchema = new Schema(
   {
@@ -144,6 +150,8 @@ const matchDaySchema = new Schema({
   walmartHits: { type: Number, default: 0 },
   krogerAttempts: { type: Number, default: 0 },
   krogerHits: { type: Number, default: 0 },
+  /** attempts and hits keyed by department id, for the health check. */
+  krogerByDepartment: { type: Schema.Types.Mixed, default: undefined },
 });
 
 const refreshDaySchema = new Schema({
@@ -201,6 +209,7 @@ export type CatalogMasterDoc = {
   matchWalmartVariant?: number;
   matchKrogerVariant?: number;
   mergedAt?: Date;
+  outOfScope?: boolean;
   status: CatalogStatus;
 };
 
@@ -222,6 +231,7 @@ export type CatalogOfferDoc = {
   refreshExcluded?: boolean;
   refreshAttemptAt?: Date;
   refreshMisses?: number;
+  outOfScope?: boolean;
   status: CatalogStatus;
 };
 

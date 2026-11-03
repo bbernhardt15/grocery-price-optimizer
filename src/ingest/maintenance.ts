@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { detectPriceDrops, type DetectResult } from "../alerts/detect";
 import { mapToDepartment } from "../catalog/departments";
+import { sweepKrogerLookupQueue, type KrogerQueueSweep } from "./crossLookup";
 import { CatalogMaintenanceJob, CatalogMaster, CatalogOffer, IngestCheckpoint } from "./models";
 
 /**
@@ -430,6 +431,13 @@ export async function excludeNongroceryFromRefresh(): Promise<{
         allow.add(row.key);
       }
     }
+    const hidden = await CatalogMaster.find({
+      key: { $in: flagged },
+      $or: [{ status: "discontinued" }, { outOfScope: true }],
+    })
+      .select("key")
+      .lean<Array<{ key: string }>>();
+    for (const row of hidden) allow.add(row.key);
     const drop = flagged.filter((key) => typeof key === "string" && !allow.has(key));
     cleared += await clearRefreshExclusions(drop);
   }
@@ -453,4 +461,114 @@ export async function scanPriceDropAlerts(now = new Date()): Promise<DetectResul
     console.warn(`Price-drop scan failed: ${message}`);
     return { examined: 0, created: 0, pushed: 0 };
   }
+}
+
+export type ScopeJobDepartment = { inScope: number; outOfScope: number };
+
+export type ScopeJobResult = {
+  dryRun: boolean;
+  apply: boolean;
+  examined: number;
+  inScope: number;
+  outOfScope: number;
+  offersInScope: number;
+  offersOutOfScope: number;
+  updatedMasters: number;
+  updatedOffers: number;
+  byDepartment: Record<string, ScopeJobDepartment>;
+  sample: Array<{ key: string; name: string; departmentId: string; reason: string }>;
+  krogerQueue: KrogerQueueSweep;
+};
+
+function bumpScope(table: Record<string, ScopeJobDepartment>, departmentId: string, field: "inScope" | "outOfScope"): void {
+  const id = departmentId || "unknown";
+  const row = table[id] ?? { inScope: 0, outOfScope: 0 };
+  row[field] += 1;
+  table[id] = row;
+}
+
+/**
+ * Count products outside grocery-store scope, grouped by the department
+ * they are stored in. Dry-run writes nothing. Apply sets outOfScope and
+ * discontinues the master and its offers (soft; rows stay in the database)
+ * and retires ineligible Kroger lookup rows. Pass apply true only on purpose.
+ */
+export async function deactivateOutOfScopeCatalog(apply: boolean): Promise<ScopeJobResult> {
+  const byDepartment: Record<string, ScopeJobDepartment> = {};
+  const sample: ScopeJobResult["sample"] = [];
+  const outKeys: string[] = [];
+  let examined = 0;
+  let inScope = 0;
+  let outOfScope = 0;
+  let cursor = "";
+  while (true) {
+    const rows = await CatalogMaster.find(cursor ? { key: { $gt: cursor } } : {})
+      .sort({ key: 1 })
+      .limit(400)
+      .select("key name departmentId categoryPaths")
+      .lean<Array<{ key: string; name: string; departmentId?: string; categoryPaths?: string[] }>>();
+    if (rows.length === 0) break;
+    cursor = rows[rows.length - 1]?.key ?? cursor;
+    for (const row of rows) {
+      examined += 1;
+      const stored = row.departmentId?.trim() || "unknown";
+      const mapped = mapToDepartment(row.categoryPaths, row.name);
+      const outside = mapped.signal === "excluded" || mapped.departmentId === "other";
+      if (!outside) {
+        inScope += 1;
+        bumpScope(byDepartment, stored, "inScope");
+        continue;
+      }
+      outOfScope += 1;
+      bumpScope(byDepartment, stored, "outOfScope");
+      outKeys.push(row.key);
+      if (sample.length < 20) {
+        sample.push({
+          key: row.key,
+          name: row.name,
+          departmentId: stored,
+          reason: mapped.reason ?? "other",
+        });
+      }
+    }
+    if (rows.length < 400) break;
+  }
+  let offersOutOfScope = 0;
+  for (let index = 0; index < outKeys.length; index += 500) {
+    const chunk = outKeys.slice(index, index + 500);
+    offersOutOfScope += await CatalogOffer.countDocuments({ productKey: { $in: chunk } });
+  }
+  const offers = await CatalogOffer.countDocuments();
+  let updatedMasters = 0;
+  let updatedOffers = 0;
+  if (apply && outKeys.length > 0) {
+    for (let index = 0; index < outKeys.length; index += 500) {
+      const chunk = outKeys.slice(index, index + 500);
+      const masters = await CatalogMaster.updateMany(
+        { key: { $in: chunk } },
+        { $set: { outOfScope: true, status: "discontinued" } }
+      );
+      const offerResult = await CatalogOffer.updateMany(
+        { productKey: { $in: chunk } },
+        { $set: { outOfScope: true, status: "discontinued", refreshExcluded: true } }
+      );
+      updatedMasters += masters.modifiedCount ?? 0;
+      updatedOffers += offerResult.modifiedCount ?? 0;
+    }
+  }
+  const krogerQueue = await sweepKrogerLookupQueue(new Date(), { apply, limit: 100_000 });
+  return {
+    dryRun: !apply,
+    apply,
+    examined,
+    inScope,
+    outOfScope,
+    offersInScope: Math.max(0, offers - offersOutOfScope),
+    offersOutOfScope,
+    updatedMasters,
+    updatedOffers,
+    byDepartment,
+    sample,
+    krogerQueue,
+  };
 }

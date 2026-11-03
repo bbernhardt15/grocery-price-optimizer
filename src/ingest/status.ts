@@ -3,7 +3,7 @@ import type { PipelineStage } from "mongoose";
 import { DEPARTMENTS, departmentById, mapToDepartment, SUSPICIOUS_NON_GROCERY_NAME, suspiciousNonGroceryHint } from "../catalog/departments";
 import { identifyFamily, summarizeFamilyRows } from "../catalog/family";
 import { krogerProductIdForLookup, walmartUpcForLookup } from "../catalog/normalize";
-import { effectiveShares, estimateStorageBytes, ingestConfig, lookupCallsForTick, staleBudgetMode, staleRatioOf } from "./config";
+import { effectiveShares, estimateStorageBytes, ingestConfig, lookupCallsForTick, staleBudgetMode, staleRatioOf, walmartEffectiveShares } from "./config";
 import { utcDay, type IngestErrorDetail } from "./budget";
 import { matchProgress, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
 import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip } from "./models";
@@ -144,7 +144,7 @@ export async function catalogStatus() {
   const config = ingestConfig();
   const now = new Date();
   const day = utcDay(now);
-  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshActivity, recategorize] = await Promise.all([
+  const [products, offers, stale, discontinued, byStore, byDepartment, checkpoints, budgets, zips, masters, walmartLookups, krogerLookups, progress, refreshQueue, refreshActivity, recategorize, scopeProducts, scopeOffers] = await Promise.all([
     CatalogMaster.countDocuments(),
     CatalogOffer.countDocuments(),
     CatalogOffer.countDocuments({ status: "stale" }),
@@ -155,7 +155,7 @@ export async function catalogStatus() {
       { $sort: { _id: 1 } },
     ]),
     CatalogMaster.aggregate<{ _id: string; count: number }>([
-      { $match: { status: { $ne: "discontinued" } } },
+      { $match: { status: { $ne: "discontinued" }, outOfScope: { $ne: true } } },
       { $group: { _id: "$departmentId", count: { $sum: 1 } } },
     ]),
     IngestCheckpoint.find().lean(),
@@ -168,6 +168,20 @@ export async function catalogStatus() {
     refreshQueueSize(now),
     refreshActivityToday(now),
     recategorizeProgress(),
+    CatalogMaster.aggregate<{ _id: { departmentId: string; out: boolean }; count: number }>([
+      {
+        $group: {
+          _id: {
+            departmentId: { $ifNull: ["$departmentId", "unknown"] },
+            out: { $eq: ["$outOfScope", true] },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    CatalogOffer.aggregate<{ _id: boolean; count: number }>([
+      { $group: { _id: { $eq: ["$outOfScope", true] }, count: { $sum: 1 } } },
+    ]),
   ]);
   const departmentCounts = Object.fromEntries(DEPARTMENTS.map((department) => [department.id, 0]));
   for (const row of byDepartment) {
@@ -178,7 +192,7 @@ export async function catalogStatus() {
   const krogerRun = checkpoints.find((row) => row.provider === "kroger");
   const shelf = Math.max(0, offers - discontinued);
   const staleRatio = staleRatioOf(stale, shelf);
-  const walmartShares = effectiveShares({
+  const walmartShares = walmartEffectiveShares({
     staleRatio,
     lookupShare: config.matchLookupShare,
     refreshShare: config.refreshShareWalmart,
@@ -193,6 +207,27 @@ export async function catalogStatus() {
     staleLookupShare: config.staleLookupShare,
   });
   const refreshed = refreshActivity.refreshed;
+  const scopeByDepartment: Record<string, { inScope: number; outOfScope: number }> = {};
+  let inScopeProducts = 0;
+  let outOfScopeProducts = 0;
+  for (const row of scopeProducts) {
+    const id = row._id?.departmentId || "unknown";
+    const bucket = scopeByDepartment[id] ?? { inScope: 0, outOfScope: 0 };
+    if (row._id?.out) {
+      bucket.outOfScope += row.count;
+      outOfScopeProducts += row.count;
+    } else {
+      bucket.inScope += row.count;
+      inScopeProducts += row.count;
+    }
+    scopeByDepartment[id] = bucket;
+  }
+  let inScopeOffers = 0;
+  let outOfScopeOffers = 0;
+  for (const row of scopeOffers) {
+    if (row._id) outOfScopeOffers += row.count;
+    else inScopeOffers += row.count;
+  }
   return {
     enabled: config.enabled,
     dbFirst: config.dbFirst,
@@ -211,6 +246,7 @@ export async function catalogStatus() {
     refresh: {
       share: config.refreshShare,
       shareWalmart: config.refreshShareWalmart,
+      adaptedShareWalmart: walmartShares.adaptedRefreshShare,
       shareKroger: config.refreshShareKroger,
       staleRatio,
       staleOffers: stale,
@@ -237,7 +273,7 @@ export async function catalogStatus() {
       batchSize: config.walmartLookupBatch,
       staleDiscoveryShare: config.staleDiscoveryShare,
       staleLookupShare: config.staleLookupShare,
-      note: "Refresh uses CATALOG_REFRESH_SHARE_WALMART (default CATALOG_REFRESH_SHARE, 0.3) and CATALOG_REFRESH_SHARE_KROGER (default 0.6), inside the same daily budgets and the Walmart 429 pause. staleRatio is stale offers divided by offers that are not discontinued. Above 30% refresh still goes first, but CATALOG_STALE_DISCOVERY_SHARE (default 0.15) stays on crawling and CATALOG_STALE_LOOKUP_SHARE (default 0.15) stays on matching. Refresh gets the rest. callsToday is HTTP calls spent on refresh. attemptedToday is offers those calls asked about. A Walmart batch of batchSize ids is one call. Below 15% the shares shift calls back to crawling and matching. Saved lists, shared lists, and usuals go first, then popular items (demand with at least 3 hits), price watches, recent searches, merged products, and the oldest stale offer. A miss waits a day. Three misses mark the offer out of stock and skip it. Offers marked refreshExcluded are skipped. Daily caps are not raised. Nothing is deleted.",
+      note: "Refresh uses CATALOG_REFRESH_SHARE_WALMART (default CATALOG_REFRESH_SHARE, 0.3) and CATALOG_REFRESH_SHARE_KROGER (default 0.6), inside the same daily budgets and the Walmart 429 pause. adaptedShareWalmart is the share the Walmart tick actually uses: it rises while staleRatio is above 30% and drops to half of CATALOG_REFRESH_SHARE_WALMART when staleRatio is under 25%. The daily cap and the minimum gap are not raised. staleRatio is stale offers divided by offers that are not discontinued. Out-of-scope offers are discontinued by the scope job, so they leave this ratio. Above 30% Walmart refresh still goes first and keeps CATALOG_STALE_DISCOVERY_SHARE on crawling; the Walmart match floor is given to refresh until the shelf is under 30%. Kroger keeps CATALOG_STALE_LOOKUP_SHARE. callsToday is HTTP calls spent on refresh. attemptedToday is offers those calls asked about. A Walmart batch of batchSize ids is one call. Saved lists, shared lists, usuals, and trip-plan lines (catalog demand kind list) go first, then popular items (demand with at least 3 hits), price watches, recent searches, merged products, and the oldest stale offer. A miss waits a day. Three misses mark the offer out of stock and skip it. Offers marked refreshExcluded or outOfScope are skipped. Daily caps are not raised. Nothing is deleted.",
     },
     match: {
       merged: masters.merged,
@@ -253,7 +289,16 @@ export async function catalogStatus() {
       },
       retryDays: progress.retryDays,
       walmartBatch: progress.walmartBatch,
-      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1, and when a leading zero was lost) and the body is zero-padded, so 070708200500 and 70708200500 become 0007070820050. Stored UPCs use that same id when it still matches the Walmart code. Grocery departments are looked up before household, baby, personal care, and pet. General merchandise and household rows that are not paper, cleaning, or laundry are not looked up. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. A 503 is not a miss and is not counted in the hit rate; that product waits a day and is tried again. A real miss waits out the cooldown. Nothing is deleted.",
+      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1, and when a leading zero was lost) and the body is zero-padded, so 070708200500 and 70708200500 become 0007070820050. Stored UPCs use that same id when it still matches the Walmart code. Only grocery-store products with a real UPC (valid length and check digit, or the stored 13-digit form of one) are queued. Grocery departments are looked up before household, baby, personal care, and pet. General merchandise, bad check digits, and household rows that are not paper, cleaning, or laundry are not looked up. hitRate.krogerByDepartment is today's attempts, hits, and rate per department. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. A 503 is not a miss and is not counted in the hit rate; that product waits a day and is tried again. A real miss waits out the cooldown. Nothing is deleted.",
+    },
+    scope: {
+      inScopeProducts,
+      outOfScopeProducts,
+      inScopeOffers,
+      outOfScopeOffers,
+      byDepartment: scopeByDepartment,
+      staleRatio,
+      note: "outOfScope is the persisted flag. Search, plans, and shelf counts skip those rows. GET /api/admin/catalog/deactivate-out-of-scope is a dry run that classifies the live catalog. POST { \"apply\": true } sets the flag and discontinues the rows. Nothing is hard-deleted.",
     },
     recategorize,
     caps: {
