@@ -39,7 +39,19 @@ export type ResolvedCatalog = {
 
 /** A small list should finish. A slow store must not hold the rest forever. */
 const PRICE_BUDGET_MS = 18_000;
-const PRICE_POOL = 6;
+/** Kroger's public Products API accepts one product id per call, so the pool is the batch. Capped to avoid 429s. */
+const PRICE_POOL = 8;
+
+async function withRateLimitRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/\b429\b|too many requests/i.test(message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return run();
+  }
+}
 
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
 
@@ -242,6 +254,7 @@ export async function resolveCatalogProducts(
   zipCode?: string,
   hooks?: {
     onStore?: (info: { storeName: string; ms: number; pendingStores: string[]; products: CatalogProduct[] }) => void;
+    onProgress?: (info: { storeName: string; checked: number; total: number; pendingStores: string[] }) => void;
     upcByName?: Map<string, string>;
   }
 ): Promise<ResolvedCatalog> {
@@ -300,6 +313,7 @@ export async function resolveCatalogProducts(
 
   const storeMs = new Map<string, number>();
   const storeLeft = new Map<string, number>();
+  const requestCache = new Map<string, CatalogProduct[]>();
   for (const storeName of competing) storeLeft.set(storeName, lines.length);
   const jobs: Array<() => Promise<void>> = [];
   for (const line of lines) {
@@ -344,20 +358,32 @@ export async function resolveCatalogProducts(
         return;
       }
 
+      const requestKey = `${storeName.trim().toLowerCase()}|${zip || ""}|${(hooks?.upcByName?.get(line.name.toLowerCase()) || "").trim()}|${line.name.trim().toLowerCase()}`;
+      const remembered = requestCache.get(requestKey);
+      if (remembered?.length) {
+        add(remembered, line.name, remembered[0]?.priceSource === "weekly_ad" ? "weekly_ad" : "cached_live");
+        acc.cachedHits += 1;
+        source = "request-cache";
+        return;
+      }
+
       let dedicatedError: string | undefined;
       if (dedicated?.isConfigured()) {
         acc.configured = true;
         acc.attempted = true;
         try {
-          const live = await searchWithProvider(
-            dedicated,
-            storeName,
-            line.name,
-            zipCode,
-            locationId,
-            hooks?.upcByName?.get(line.name.toLowerCase())
+          const live = await withRateLimitRetry(() =>
+            searchWithProvider(
+              dedicated,
+              storeName,
+              line.name,
+              zipCode,
+              locationId,
+              hooks?.upcByName?.get(line.name.toLowerCase())
+            )
           );
           if (live.length > 0) {
+            requestCache.set(requestKey, live);
             const saved = await upsertLiveProducts(live);
             add(saved, line.name, "live");
             acc.liveHits += 1;
@@ -485,6 +511,14 @@ export async function resolveCatalogProducts(
         storeMs.set(storeName, (storeMs.get(storeName) || 0) + elapsed);
         const left = Math.max(0, (storeLeft.get(storeName) || 1) - 1);
         storeLeft.set(storeName, left);
+        const total = lines.length;
+        const still = [...storeLeft.entries()].filter(([, count]) => count > 0).map(([name]) => name);
+        hooks?.onProgress?.({
+          storeName,
+          checked: total - left,
+          total,
+          pendingStores: still,
+        });
         console.info(`price ${storeName} "${line.name}" ${elapsed}ms ${source}`);
         if (left === 0) {
           const still = [...storeLeft.entries()].filter(([, count]) => count > 0).map(([name]) => name);

@@ -34,7 +34,13 @@ export type SavedListWrite = {
   starterBook?: StarterBook;
   /** Absent means "leave the stored taste profile alone." Present merges by time. */
   tasteProfile?: TasteProfile;
+  /** Absent means "leave stored trip receipts alone." Present replaces them. */
+  pastTrips?: PastTrip[];
 };
+
+export type PastTripItem = { name: string; quantity: number };
+export type PastTripStore = { storeName: string; totalCents: number; items: PastTripItem[] };
+export type PastTrip = { id: string; at: number; totalCents: number; savedCents: number; stores: PastTripStore[] };
 
 export type PublicSavedList = {
   listId: string;
@@ -45,6 +51,7 @@ export type PublicSavedList = {
   coupons: SavedCoupon[];
   starterBook?: StarterBook;
   tasteProfile?: TasteProfile;
+  pastTrips?: PastTrip[];
   revision: number;
   updatedAt: string | null;
 };
@@ -114,6 +121,46 @@ export function parseSavedCoupon(value: unknown): SavedCoupon | null {
   };
 }
 
+export function parsePastTrips(value: unknown): PastTrip[] | undefined {
+  if (value == null) return undefined;
+  if (!Array.isArray(value)) return [];
+  const trips: PastTrip[] = [];
+  for (const entry of value.slice(0, 24)) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const id = cleanText(row.id, 40);
+    const at = typeof row.at === "number" && Number.isFinite(row.at) ? Math.floor(row.at) : 0;
+    if (!id || at <= 0) continue;
+    const stores: PastTripStore[] = [];
+    if (Array.isArray(row.stores)) {
+      for (const storeEntry of row.stores.slice(0, 8)) {
+        if (!storeEntry || typeof storeEntry !== "object") continue;
+        const store = storeEntry as Record<string, unknown>;
+        const storeName = cleanText(store.storeName, 40);
+        if (!storeName) continue;
+        const items: PastTripItem[] = [];
+        if (Array.isArray(store.items)) {
+          for (const itemEntry of store.items.slice(0, 80)) {
+            if (!itemEntry || typeof itemEntry !== "object") continue;
+            const item = itemEntry as Record<string, unknown>;
+            const name = cleanText(item.name, 80);
+            if (!name) continue;
+            const quantity = typeof item.quantity === "number" && item.quantity > 0 ? Math.min(99, Math.floor(item.quantity)) : 1;
+            items.push({ name, quantity });
+          }
+        }
+        const totalCents = typeof store.totalCents === "number" && store.totalCents > 0 ? Math.round(store.totalCents) : 0;
+        stores.push({ storeName, totalCents, items });
+      }
+    }
+    const totalCents = typeof row.totalCents === "number" && row.totalCents > 0 ? Math.round(row.totalCents) : stores.reduce((sum, store) => sum + store.totalCents, 0);
+    const savedCents = typeof row.savedCents === "number" && row.savedCents > 0 ? Math.round(row.savedCents) : 0;
+    if (!stores.length && !(totalCents > 0)) continue;
+    trips.push({ id, at, totalCents, savedCents, stores });
+  }
+  return trips;
+}
+
 export function parseSavedCoupons(value: unknown): SavedCoupon[] | { error: string } | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value) || value.length > MAX_COUPONS) {
@@ -172,6 +219,7 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
   if (starterBook && "error" in starterBook) return starterBook;
   const tasteProfile = parseTasteProfile(row.tasteProfile);
   if (tasteProfile && "error" in tasteProfile) return tasteProfile;
+  const pastTrips = parsePastTrips(row.pastTrips);
   return {
     listId,
     listName: cleanText(row.listName, 80) || "My list",
@@ -183,6 +231,7 @@ export function parseSavedListWrite(body: unknown): SavedListWrite | { error: st
     ...(coupons ? { coupons } : {}),
     ...(starterBook ? { starterBook } : {}),
     ...(tasteProfile ? { tasteProfile } : {}),
+    ...(pastTrips ? { pastTrips } : {}),
   };
 }
 
@@ -223,11 +272,13 @@ export function toPublicSavedList(doc: {
   coupons?: SavedCoupon[];
   starterBook?: unknown;
   tasteProfile?: unknown;
+  pastTrips?: unknown;
   revision: number;
   updatedAt?: Date;
 }): PublicSavedList {
   const starterBook = parseStarterBook(doc.starterBook);
   const tasteProfile = parseTasteProfile(doc.tasteProfile);
+  const pastTrips = parsePastTrips(doc.pastTrips);
   return {
     listId: doc.listId,
     listName: doc.listName || "My list",
@@ -237,6 +288,7 @@ export function toPublicSavedList(doc: {
     coupons: Array.isArray(doc.coupons) ? doc.coupons.map(parseSavedCoupon).filter((coupon): coupon is SavedCoupon => Boolean(coupon)) : [],
     ...(starterBook && !("error" in starterBook) ? { starterBook } : {}),
     ...(tasteProfile && !("error" in tasteProfile) ? { tasteProfile } : {}),
+    ...(pastTrips?.length ? { pastTrips } : {}),
     revision: doc.revision,
     updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
   };
@@ -262,6 +314,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
       coupons: write.coupons ?? [],
       ...(write.starterBook ? { starterBook: write.starterBook } : {}),
       ...(write.tasteProfile ? { tasteProfile: write.tasteProfile } : {}),
+      ...(write.pastTrips ? { pastTrips: write.pastTrips } : {}),
       removed: write.removed.slice(-MAX_ITEMS),
       revision: 1,
     });
@@ -291,6 +344,7 @@ export async function writeSavedList(accountId: string, write: SavedListWrite): 
         ...(write.tasteProfile
           ? { tasteProfile: mergeTasteProfiles((existing as { tasteProfile?: unknown }).tasteProfile, write.tasteProfile) }
           : {}),
+        ...(write.pastTrips ? { pastTrips: write.pastTrips } : {}),
         removed: [...priorRemoved, ...write.removed].slice(-MAX_ITEMS),
         revision: current.revision + 1,
       },

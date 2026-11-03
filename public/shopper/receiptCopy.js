@@ -4,8 +4,12 @@
  */
 
 import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
+import { tripAddHtml } from "./tripAdd.js";
 
 export const RECEIPT_TITLE = "Teach Gitter your usual groceries";
+
+export const ADD_TRIP_LABEL = "Add these items to my trip";
+export const EMPTY_TRIP_LABEL = "Start with an empty trip";
 
 export const RECEIPT_HINT = "We'll learn the brands you already buy.";
 
@@ -126,8 +130,10 @@ function learnedPickerHtml(row, brands, options = {}) {
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
   const names = brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "" });
+  const pickedCount = selected.size;
+  const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
   const rule = (mode, label) => {
-    const on = mode === "brand" ? nameBrand : row?.mode === mode;
+    const on = mode === "brand" ? row?.mode === "brand" : row?.mode === mode;
     return `<button type="button" class="rule-choice" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
   };
   return `<div class="learned-picker" data-editor="${family}">
@@ -136,7 +142,8 @@ function learnedPickerHtml(row, brands, options = {}) {
       <div class="rule-list" role="radiogroup" aria-label="Rule">
         ${rule("brand", "Name brand")}
         ${rule("storeBrand", "Store brand")}
-        ${rule("cheapest", "Cheapest")}
+        ${showPicks ? rule("cheapestPicks", "Cheapest of my picks") : ""}
+        ${rule("cheapest", "Cheapest overall")}
       </div>
     </fieldset>
     <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
@@ -197,18 +204,5 @@ export function learnedSummaryHtml(learned, options = {}) {
 
 /** After Confirm: pick which learned lines join this trip. */
 export function learnedTripChoiceHtml(lines) {
-  const rows = (lines || [])
-    .map((line, index) => {
-      const name = line?.brand ? `${line.brand} ${line.name}` : line?.name || "Item";
-      return `<label class="check-row"><input type="checkbox" data-learned-trip="${index}" checked /> ${escapeText(name)}</label>`;
-    })
-    .join("");
-  return `<div class="learned-trip">
-    <p>Add these to this trip, using the brands we learned. Or start empty.</p>
-    <div class="learned-trip-lines">${rows}</div>
-    <div class="choice-stack">
-      <button type="button" class="primary" id="learned-add-trip">Add these items to my trip</button>
-      <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
-    </div>
-  </div>`;
+  return tripAddHtml(lines);
 }

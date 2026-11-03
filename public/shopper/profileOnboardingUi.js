@@ -36,6 +36,7 @@ import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakeP
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
+import { suggestZipChoices } from "./zipSuggest.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -192,6 +193,7 @@ export function mountProfileOnboarding(deps = {}) {
         </div>
         <p id="profile-zip-approx" class="zip-approx"${zipApproximate ? "" : " hidden"}>${escapeText(APPROXIMATE_ZIP_NOTE)}</p>
         <p id="profile-zip-hint" class="muted"${zip ? "" : " hidden"}>Not right? Edit it.</p>
+        <div id="profile-zip-choices" class="zip-choices" hidden></div>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
         <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
@@ -240,6 +242,7 @@ export function mountProfileOnboarding(deps = {}) {
         attributes,
         attributeChoices: current?.attributes || [],
         brands: brands.map((row) => ({ brand: row.brand, imageUrl: row.imageUrl, productId: row.productId || row.product?.id || "" })),
+        selectedBrands: categoryDraft.brands?.length ? categoryDraft.brands : brand ? [brand] : [],
         askBrand,
         produce: isProduceFamily(current?.id),
         pending: !ready,
@@ -340,6 +343,7 @@ export function mountProfileOnboarding(deps = {}) {
       if (reading) next.disabled = !readingReady;
       else next.disabled = step.id === "receipts" && !learned ? !receiptReady() : false;
     }
+    syncZipContinue();
     dots();
     const dotHost = $("profile-dots");
     if (dotHost) dotHost.hidden = welcome;
@@ -391,6 +395,28 @@ export function mountProfileOnboarding(deps = {}) {
     if (note) note.textContent = nearby.note || "Stores within about 25 miles. Uncheck one to leave it out.";
   }
 
+  function syncZipContinue() {
+    const next = $("profile-next");
+    const field = $("profile-zip");
+    const onZip = stepId === "zip" || stepId === "place";
+    if (dialog) dialog.dataset.zipTyping = onZip && (!fiveDigitZip(field?.value) || document.activeElement === field) ? "1" : "0";
+    if (!next || !onZip) return;
+    const ready = Boolean(fiveDigitZip(field?.value)) && document.activeElement !== field;
+    next.hidden = !ready;
+    const chip = $("profile-zip-done");
+    if (chip) chip.classList.toggle("is-set", Boolean(fiveDigitZip(field?.value)));
+  }
+
+  function paintZipChoices(choices) {
+    const host = $("profile-zip-choices");
+    if (!host) return;
+    const codes = (choices || []).filter((code) => /^\d{5}$/.test(String(code || "")));
+    host.hidden = codes.length < 2;
+    host.innerHTML = codes
+      .map((code) => `<button type="button" class="zip-choice" data-zip-choice="${escapeText(code)}">${escapeText(code)}</button>`)
+      .join("");
+  }
+
   function bindPlaceInput() {
     const zipInput = $("profile-zip");
     if (zipInput && zipInput.dataset.bound !== "1") {
@@ -402,15 +428,22 @@ export function mountProfileOnboarding(deps = {}) {
         const hint = $("profile-zip-hint");
         if (hint) hint.hidden = !String(zipInput.value || "").trim();
         paintStoreList();
+        syncZipContinue();
+        const list = $("profile-store-list");
+        if (five && list) list.scrollIntoView({ block: "start", behavior: "smooth" });
       };
+      zipInput.addEventListener("focus", () => syncZipContinue());
+      zipInput.addEventListener("blur", () => syncZipContinue());
       zipInput.addEventListener("input", () => {
         zipApproximate = false;
         const approx = $("profile-zip-approx");
         if (approx) approx.hidden = true;
+        paintZipChoices([]);
         const error = $("profile-zip-error");
         if (error) error.hidden = true;
         const hint = $("profile-zip-hint");
         if (hint) hint.hidden = !String(zipInput.value || "").trim();
+        syncZipContinue();
         if (fiveDigitZip(zipInput.value)) finishZip();
         else paintStoreList();
       });
@@ -428,17 +461,29 @@ export function mountProfileOnboarding(deps = {}) {
           location.disabled = true;
           try {
             const located = await deps.locateZip();
-            const zip = typeof located === "string" ? located : located?.zip || "";
-            zipApproximate = Boolean(located && typeof located === "object" && located.approximate);
+            const rawZip = typeof located === "string" ? located : located?.zip || "";
+            const suggestion = suggestZipChoices({
+              lat: located?.lat,
+              lng: located?.lng,
+              zip: rawZip,
+              approximate: true,
+            });
+            const zip = suggestion.zip || String(rawZip || "").replace(/\D/g, "").slice(0, 5);
+            zipApproximate = true;
             const field = $("profile-zip");
             if (zip && field) field.value = String(zip).replace(/\D/g, "").slice(0, 5);
             const hint = $("profile-zip-hint");
             if (hint) hint.hidden = !zip;
             const approx = $("profile-zip-approx");
-            if (approx) approx.hidden = !zipApproximate;
+            if (approx) {
+              approx.hidden = false;
+              approx.textContent = APPROXIMATE_ZIP_NOTE;
+            }
+            paintZipChoices(suggestion.choices?.length ? suggestion.choices : zip ? [zip] : []);
             field?.blur();
-            deps.setZip?.(zip);
             paintStoreList();
+            syncZipContinue();
+            $("profile-store-list")?.scrollIntoView({ block: "start", behavior: "smooth" });
           } catch (error) {
             deps.toast?.(error instanceof Error ? error.message : "Couldn't use location. Type a ZIP.");
           } finally {
@@ -1262,20 +1307,43 @@ export function mountProfileOnboarding(deps = {}) {
       finish(Date.now());
       return;
     }
+    if (target.dataset.zipChoice) {
+      const field = $("profile-zip");
+      if (field) field.value = target.dataset.zipChoice;
+      const hint = $("profile-zip-hint");
+      if (hint) hint.hidden = false;
+      paintStoreList();
+      syncZipContinue();
+      $("profile-store-list")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    if (target.dataset.tripQtyStep) {
+      const index = target.dataset.tripQtyStep;
+      const input = document.querySelector(`[data-trip-qty="${index}"]`);
+      if (input instanceof HTMLInputElement) {
+        const dir = Number(target.dataset.dir) || 0;
+        const next = Math.max(1, Math.min(99, (Number(input.value) || 1) + dir));
+        input.value = String(next);
+      }
+      return;
+    }
     if (target.id === "learned-add-trip") {
-      const picked = [...document.querySelectorAll("[data-learned-trip]")]
+      const picks = [...document.querySelectorAll("[data-trip-pick]")];
+      const picked = (picks.length ? picks : [...document.querySelectorAll("[data-learned-trip]")])
         .filter((box) => box instanceof HTMLInputElement && box.checked)
-        .map((box) => receiptLines[Number(box.getAttribute("data-learned-trip"))])
+        .map((box) => {
+          const index = Number(box.getAttribute("data-trip-pick") || box.getAttribute("data-learned-trip"));
+          const line = receiptLines[index];
+          if (!line) return null;
+          const qtyField = document.querySelector(`[data-trip-qty="${index}"]`);
+          const quantity = Math.max(1, Math.min(99, Math.floor(Number(qtyField instanceof HTMLInputElement ? qtyField.value : line.quantity) || 1)));
+          return { ...line, quantity };
+        })
         .filter(Boolean);
-      target.disabled = true;
-      const pending = deps.addLearnedLines?.(picked);
-      const done = () => finish(Date.now());
-      if (pending && typeof pending.then === "function") {
-        pending.then(done).catch(() => {
-          target.disabled = false;
-          deps.toast?.("Couldn't add those items.");
-        });
-      } else done();
+      finish(Date.now());
+      void Promise.resolve(deps.addLearnedLines?.(picked)).catch(() => {
+        deps.toast?.("Couldn't add those items.");
+      });
       return;
     }
     if (target.dataset.readRetry != null && target.dataset.readRetry !== "") {

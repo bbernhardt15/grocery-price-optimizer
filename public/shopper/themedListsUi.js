@@ -56,13 +56,35 @@ export function pickerTileHtml(tile, selectedId, escapeHtml, imageSrc) {
   </article>`;
 }
 
+const THEME_ICONS = {
+  thanksgiving: "🦃",
+  "holiday-baking": "🍪",
+  "game-day": "🏈",
+  tailgate: "🏈",
+  "july-4": "🎇",
+  "memorial-day": "🍔",
+  "labor-day": "🍔",
+  "back-to-school": "🍎",
+  birthday: "🎂",
+  "movie-night": "🍿",
+  weeknight: "🍝",
+  breakfast: "☕",
+  "taco-night": "🌮",
+  cookout: "🔥",
+  weekly: "🛒",
+  baby: "🍼",
+};
+
+export function themeIcon(id) {
+  return THEME_ICONS[id] || "✦";
+}
+
 export function listCardHtml(list, escapeHtml) {
-  return `<article class="starter-card">
-    <button type="button" class="starter" data-list-add="${text(escapeHtml, list.id)}">
+  return `<article class="starter-card theme-card">
+    <button type="button" class="starter theme-name" data-list-add="${text(escapeHtml, list.id)}">
+      <span class="theme-icon" aria-hidden="true">${themeIcon(list.id)}</span>
       <span>${text(escapeHtml, list.title)}</span>
-      <span class="muted">${text(escapeHtml, list.blurb)}</span>
     </button>
-    <button type="button" class="text-btn" data-list-open="${text(escapeHtml, list.id)}">Customize</button>
   </article>`;
 }
 
@@ -99,12 +121,11 @@ export function nudgeHtml(escapeHtml) {
   </div>`;
 }
 
-export function listsEntryHtml(hint, escapeHtml) {
+export function listsEntryHtml(_hint, escapeHtml) {
   return `<button type="button" class="feature-card" data-lists-open>
-    <span class="feature-icon" aria-hidden="true">Lists</span>
+    <span class="feature-icon" aria-hidden="true">✦</span>
     <span class="feature-copy">
       <strong>Themed lists</strong>
-      <span class="muted">${text(escapeHtml, hint || "Holiday baking, parties, and other lists")}</span>
     </span>
   </button>`;
 }

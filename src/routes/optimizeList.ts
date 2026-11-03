@@ -259,6 +259,15 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
           pendingStores: info.pendingStores,
         });
       },
+      onProgress: (info) => {
+        writeEvent({
+          type: "progress",
+          storeName: info.storeName,
+          checked: info.checked,
+          total: info.total,
+          pendingStores: info.pendingStores,
+        });
+      },
       ...(upcByName.size ? { upcByName } : {}),
     });
     const krogerUnpriced =

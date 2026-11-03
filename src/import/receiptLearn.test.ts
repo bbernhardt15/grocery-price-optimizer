@@ -361,4 +361,12 @@ trailer << /Root 1 0 R >>
     assert.equal(row?.count, 1);
     assert.equal(row?.receipts, 1);
   });
+
+  it("drops a box, bag, tax, fee, tip, or quantity-only receipt line", () => {
+    const lines = parseReceiptText("1 x Box\nBag\nSales tax\nFee\nTip\nTotal\nx6\nU by Kotex Tampons x6");
+    assert.equal(lines.some((line) => /^(box|bag|tax|fee|tip|total)$/i.test(line.name)), false);
+    const tampons = lines.find((line) => /tampon/i.test(line.name));
+    assert.ok(tampons);
+    assert.equal(tampons?.quantity, 6);
+  });
 });

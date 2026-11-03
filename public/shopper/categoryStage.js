@@ -62,11 +62,14 @@ export function categoryDetailHtml(input) {
       return `<button type="button" class="mini-chip" data-buy-attr="${escapeText(row.id)}" aria-pressed="${on ? "true" : "false"}">${escapeText(row.label)}</button>`;
     })
     .join("");
+  const selectedBrands = Array.isArray(input?.selectedBrands) ? input.selectedBrands.filter(Boolean) : [];
   const modes = [];
   if (askBrand) modes.push(["brand", "Name brand"]);
-  modes.push(["storeBrand", "Store brand"], ["cheapest", "Cheapest"]);
-  const nameOn = mode === "brand" || mode === "cheapestPicks";
-  const modeButtons = modes.map(([id, text]) => choiceButton(id, text, id === "brand" ? nameOn : mode === id)).join("");
+  modes.push(["storeBrand", "Store brand"]);
+  if (selectedBrands.length > 1 || mode === "cheapestPicks") modes.push(["cheapestPicks", "Cheapest of my picks"]);
+  modes.push(["cheapest", "Cheapest"]);
+  const modeButtons = modes.map(([id, text]) => choiceButton(id, text, mode === id)).join("");
+  const picks = selectedBrands.join(", ");
   const chosen =
     mode === "brand"
       ? `Chosen: Name brand${brand ? ` · ${brand}` : ""}`
@@ -75,13 +78,15 @@ export function categoryDetailHtml(input) {
         : mode === "cheapest"
           ? "Chosen: Cheapest"
           : mode === "cheapestPicks"
-            ? "Chosen: Name brand"
+            ? `Chosen: Cheapest of my picks${picks ? ` · ${picks}` : brand ? ` · ${brand}` : ""}`
           : mode === "never"
             ? `Chosen: I don't buy ${label.toLowerCase()}`
             : "Choose one. You can switch without losing the cut.";
+  const picked = new Set(selectedBrands.map((name) => String(name).toLowerCase()));
   const brandButtons = (input?.brands || [])
     .map((row) => {
-      const on = brand.toLowerCase() === String(row.brand || "").toLowerCase();
+      const key = String(row.brand || "").toLowerCase();
+      const on = picked.size ? picked.has(key) : brand.toLowerCase() === key;
       const image = row.imageUrl
         ? `<img class="brand-logo" src="${escapeText(row.imageUrl)}" alt="" />`
         : `<span class="brand-logo brand-logo-fallback" aria-hidden="true"></span>`;
@@ -94,8 +99,8 @@ export function categoryDetailHtml(input) {
     ? produce
       ? `<p class="muted">Fresh produce doesn't use a name brand. Store brand, cheapest, or organic is enough.</p>`
       : `<p class="muted">Not enough name brands on the shelf. Store brand or cheapest, plus the cut.</p>`
-    : mode === "brand"
-      ? `<p class="profile-label">Which name brand?</p>${
+    : mode === "brand" || mode === "cheapestPicks"
+      ? `<p class="profile-label">${mode === "cheapestPicks" ? "Brands to compare" : "Which name brand?"}</p>${
           brandButtons
             ? `<div class="brand-row">${brandButtons}</div>`
             : `<p class="muted">No name brands are on the shelf for this one.</p>`

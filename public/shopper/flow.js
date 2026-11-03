@@ -62,17 +62,13 @@ export function planBarCopy(input = {}) {
   let enabled = count > 0;
   let showButton = count > 0;
   if (step === "plan") {
-    button = input.hasPlan ? "Shop" : input.planning ? "Updating…" : "Review your trip";
-    enabled = count > 0;
-    showButton = true;
+    button = "";
+    enabled = false;
+    showButton = false;
   } else if (step === "shop") {
     button = "Clear checked";
     enabled = count > 0 && left < count;
     showButton = true;
-  }
-  if (input.planning && step === "plan" && !input.hasPlan) {
-    button = "Updating…";
-    enabled = count > 0;
   }
   return { step, countLabel, totalLabel, button, enabled, showButton, provisional };
 }

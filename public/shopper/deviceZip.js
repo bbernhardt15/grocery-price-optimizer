@@ -3,7 +3,8 @@
  * A coarse reading (cell or reduced accuracy) is labeled approximate.
  */
 
-export const COARSE_ACCURACY_METERS = 1000;
+/** iOS Safari often reports a few hundred meters for a reduced or city-center fix. */
+export const COARSE_ACCURACY_METERS = 100;
 export const APPROXIMATE_ZIP_NOTE = "Approximate: is this your ZIP?";
 
 /** @param {number | null | undefined} accuracyMeters */

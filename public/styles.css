@@ -83,14 +83,15 @@ img { max-width: 100%; display: block; }
 .shell { min-height: 100dvh; }
 .top-stack { display: contents; }
 .topbar {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  display: flex; flex-wrap: nowrap; gap: 8px; align-items: center;
   min-width: 0; max-width: 100%;
   padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
   position: sticky; top: 0; z-index: 5;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
-.brand { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.brand { display: flex; gap: 10px; align-items: center; min-width: 0; flex: 1 1 auto; }
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .brand-mark {
   width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
   background: var(--accent); color: var(--accent-ink); font-family: var(--display);
@@ -957,10 +958,17 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 
 .toast {
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
-  background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;
+  background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast button, #toast-action {
+  background: #fffdfb; color: #1c1917; border: 0; border-radius: 999px;
+  min-height: 36px; padding: 0 14px; font-weight: 750;
+}
+:root[data-resolved="dark"] .toast { background: #f3efe6; color: #1c1917; }
+:root[data-resolved="dark"] .toast button,
+:root[data-resolved="dark"] #toast-action { background: #1c1917; color: #fffdfb; }
 
 .settings-group h3 { margin: 8px 0 0; font-family: var(--display); font-size: 1.05rem; }
 .delete-box { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -1340,11 +1348,13 @@ dialog.profile-onboard[data-step="learned"] .profile-actions,
 dialog.profile-onboard[data-step="trip"] .profile-actions { position: static; }
 dialog.profile-onboard[data-step="place"] .profile-actions,
 dialog.profile-onboard[data-step="zip"] .profile-actions {
-  position: sticky;
-  bottom: var(--keyboard, 0px);
-  z-index: 4;
-  background: var(--bg);
+  position: static;
+  bottom: auto;
+  background: transparent;
 }
+dialog.profile-onboard[data-step="place"] #profile-stage,
+dialog.profile-onboard[data-step="zip"] #profile-stage { padding-bottom: 8px; }
+dialog.profile-onboard[data-zip-typing="1"] #profile-next { display: none !important; }
 dialog.profile-onboard[data-step="receipts"] .profile-dots { display: none; }
 dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padding: 16px; }
 .drop-primary {
@@ -1839,3 +1849,73 @@ body[data-step="shop"] #shop {
   }
   .app-drawer { transition: none; }
 }
+
+/* Phone test nine: contrast, sheets, and the review/in-store polish. */
+.drop-zone.drop-primary {
+  background: #0e7a45;
+  color: #ffffff;
+  border: 0;
+  min-height: 132px;
+}
+.drop-zone.drop-primary .drop-title,
+.drop-zone.drop-primary .muted { color: #ffffff; }
+:root[data-resolved="dark"] .drop-zone.drop-primary {
+  background: #d8ffe8;
+  color: #102117;
+}
+:root[data-resolved="dark"] .drop-zone.drop-primary .drop-title,
+:root[data-resolved="dark"] .drop-zone.drop-primary .muted { color: #102117; }
+.zip-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.zip-choice {
+  min-height: 44px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); padding: 0 14px; font-weight: 750;
+}
+.zip-done.is-set { box-shadow: inset 0 0 0 2px var(--accent-ink); }
+.theme-name { display: flex; align-items: center; gap: 10px; }
+.theme-icon { font-size: 1.35rem; line-height: 1; }
+dialog.sheet, dialog.list-sheet, dialog.shelf-sheet { background: var(--bg); color: var(--ink); }
+dialog.sheet::backdrop, dialog.list-sheet::backdrop { background: rgba(16, 18, 16, 0.72); }
+body[data-browse="open"] #start-here,
+body[data-browse="open"] #past-trips-home,
+body[data-browse="open"] #shelf-entry { display: none !important; }
+#browse-panel { background: var(--bg); position: relative; z-index: 2; }
+@media (max-width: 1099px) {
+  dialog.list-sheet[open], dialog.shelf-sheet[open] {
+    position: fixed; inset: 0; width: 100%; max-width: none; height: 100%;
+    max-height: none; margin: 0; border: 0; border-radius: 0; background: var(--bg);
+  }
+}
+.plan-checks { list-style: none; margin: 8px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.plan-check {
+  display: flex; gap: 8px; align-items: center; min-height: 44px; padding: 8px 12px;
+  border-radius: 14px; background: var(--surface); border: 1px solid var(--line); font-weight: 700;
+}
+.plan-check.is-done { border-color: var(--accent); }
+.store-fold { border: 0; }
+.store-fold summary {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 52px; cursor: pointer; list-style: none;
+}
+.store-fold summary::-webkit-details-marker { display: none; }
+.store-fold-name { font-family: var(--display); font-size: 1.25rem; }
+.review-lines { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.review-line { display: flex; justify-content: space-between; gap: 12px; }
+.shop-where { color: var(--muted); font-size: 0.85rem; font-weight: 650; }
+.shop-line.is-cart .shop-name { text-decoration: line-through; color: var(--muted); }
+.trip-add { display: flex; flex-direction: column; gap: 12px; }
+.trip-add-group h3 { margin: 8px 0 0; font-size: 0.85rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.trip-add-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; }
+.trip-add-row .stepper input {
+  width: 2.4rem; border: 0; background: transparent; text-align: center; font: inherit; color: var(--ink);
+}
+.trip-add-total { font-weight: 750; }
+.trip-receipt, .calm-store, .savings-card, .feature-card {
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+.trip-receipt {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 18px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.trip-receipt header, .receipt-stores li { display: flex; justify-content: space-between; gap: 12px; }
+.receipt-stores, .receipt-items { list-style: none; margin: 0; padding: 0; }
+.receipt-saved { margin: 0; color: var(--accent); font-weight: 750; }
+.layout-note { margin: 4px 0 8px; color: var(--muted); }

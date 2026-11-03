@@ -237,4 +237,12 @@ describe("parseImportText real lists", () => {
     assert.equal(items.length, 1);
     assert.equal(items[0]?.quantity, 2);
   });
+
+  it("drops box, bag, tax, fee, tip, and quantity-only lines", () => {
+    const items = parseImportText("1 x Box\nBag\nTax\nFee\nTip\nTotal\nx6\nTampons x6\n1 box of cereal");
+    assert.equal(items.some((item) => /^box$|^bag$|tax|fee|tip|total/i.test(item.name)), false);
+    const tampons = items.find((item) => /tampon/i.test(item.name));
+    assert.equal(tampons?.quantity, 6);
+    assert.ok(items.some((item) => /cereal/i.test(item.name)));
+  });
 });
