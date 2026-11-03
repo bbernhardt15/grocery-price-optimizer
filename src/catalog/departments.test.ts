@@ -437,6 +437,45 @@ const OTHER_HEALTH_FIXTURE: {
   { name: "King Oscar Sardines in Fish Oil", categories: ["Canned Goods"], expect: "stay", departmentId: "pantry" },
 ];
 
+describe("grocery-store scope", () => {
+  it("does not file Appliance Delivery as deli or Frozen Movies as frozen", () => {
+    const delivery = mapToDepartment(["Home/Services/Appliance Delivery"], "Haul away the old unit");
+    assert.equal(delivery.departmentId, "other");
+    assert.equal(delivery.signal, "excluded");
+    assert.match(delivery.reason ?? "", /appliance-delivery/);
+    assert.equal(mapToDepartment(undefined, "Appliance Delivery").departmentId, "other");
+    assert.notEqual(mapToDepartment(["Deli"], "Sliced Turkey").departmentId, "other");
+    assert.equal(mapToDepartment(["Deli"], "Sliced Turkey").departmentId, "deli");
+
+    const movies = mapToDepartment(["Movies/Frozen Movies"], "Disney Frozen");
+    assert.equal(movies.departmentId, "other");
+    assert.equal(movies.signal, "excluded");
+    assert.match(movies.reason ?? "", /movies/);
+    assert.equal(mapToDepartment(["Frozen"], "Frozen Peas").departmentId, "frozen");
+    assert.equal(mapToDepartment(["Frozen Foods"], "Frozen Mixed Vegetables").departmentId, "frozen");
+  });
+
+  it("keeps grocery consumables and drops durable home categories", () => {
+    assert.equal(mapToDepartment(["Home/Appliances/Dishwashers"], "GE Profile Dishwasher").departmentId, "other");
+    assert.equal(mapToDepartment(["Home/Appliances"], "Samsung Refrigerator").departmentId, "other");
+    assert.equal(
+      mapToDepartment(["Home/Storage & Organization/Laundry Storage and Organization"], "Closet Organizer").departmentId,
+      "other"
+    );
+    assert.equal(mapToDepartment(["Household Essentials/Laundry"], "Tide Laundry Detergent").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "Cascade Dishwasher Detergent Pods").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Paper"], "Bounty Paper Towels").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Cleaning"], "Hefty Trash Bags").departmentId, "household");
+    assert.equal(mapToDepartment(["Baby/Diapers"], "Pampers Swaddlers").departmentId, "baby");
+    assert.equal(mapToDepartment(["Pets/Dog Food"], "Purina Dog Chow").departmentId, "pet");
+    assert.equal(mapToDepartment(["Health/Vitamins"], "Nature Made Vitamin D").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Household Essentials/Batteries"], "Duracell AA Batteries").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Light Bulbs"], "Great Value LED Light Bulbs").departmentId, "household");
+    assert.equal(mapToDepartment(["Household Essentials/Paper"], "Ziploc Storage Bags").departmentId, "household");
+    assert.equal(mapToDepartment(["Food/Beverages"], "Coca-Cola").departmentId, "beverages");
+  });
+});
+
 describe("health consumable names", () => {
   it("moves vitamin names to personal care even when the path says Letter Vitamins or general merchandise", () => {
     const count = countHealthConsumableMoves(

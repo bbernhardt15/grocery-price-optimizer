@@ -1,5 +1,5 @@
 import { mapToDepartment } from "../catalog/departments";
-import { krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
+import { isGroceryUpc, krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
 import { Product } from "../models/Product";
 import { utcDay } from "./budget";
 import { ingestConfig } from "./config";
@@ -52,6 +52,8 @@ export type LookupPick = {
   priority: LookupPriority;
   /** Stored retailer code, so a Kroger hit can stay on this master. */
   upc?: string;
+  /** Department recorded on the Kroger hit-rate breakdown. */
+  departmentId?: string;
 };
 
 type CandidateRow = {
@@ -86,15 +88,18 @@ export function isWalmartOnlyBrand(brand: string | undefined): boolean {
 
 /**
  * Why a Walmart master should not be sent to Kroger.
- * Private label, general merchandise, auto/RV/outdoor rows, and household
- * items Kroger does not stock miss. Paper, cleaning, and laundry still match.
- * Null means the row is still worth a lookup.
+ * Private label, general merchandise, auto/RV/outdoor rows, durable household
+ * goods, and codes that are not a grocery UPC miss. Paper, cleaning, and
+ * laundry still match. Pass `upc` (empty string when the master has none) so
+ * a bad check digit is skipped. Omit `upc` only for callers that are not
+ * deciding a queue row. Null means the row is still worth a lookup.
  */
 export function krogerLookupBlock(row: {
   name: string;
   brand?: string;
   categoryPaths?: string[];
   departmentId?: string;
+  upc?: string;
 }): string | null {
   if (isWalmartOnlyBrand(row.brand)) {
     return "walmart-only-brand";
@@ -103,9 +108,13 @@ export function krogerLookupBlock(row: {
   if (mapped.signal === "excluded") {
     return mapped.reason ?? "non-grocery";
   }
+  if (typeof row.upc === "string" && !isGroceryUpc(row.upc)) {
+    return "upc-check";
+  }
   const stored = row.departmentId?.trim() ?? "";
   const storedGrocery = (GROCERY_DEPARTMENTS as readonly string[]).includes(stored);
-  // A grocery department wins over a vague name. General merchandise still does not.
+  // A stored grocery department wins over a vague name. An excluded signal
+  // (appliances, movies, delivery) does not. General merchandise still does not.
   if (!storedGrocery && (mapped.generalMerchandise || mapped.departmentId === "other")) {
     return mapped.reason ?? "general-merchandise";
   }
@@ -250,6 +259,7 @@ function toPick(side: Side, row: CandidateRow, priority: LookupPriority): Lookup
     variantIndex,
     priority,
     ...(row.upc ? { upc: row.upc } : {}),
+    ...(row.departmentId ? { departmentId: row.departmentId } : {}),
   };
 }
 
@@ -310,6 +320,9 @@ async function nextLookups(side: Side, now: Date, limit: number, dryRun: boolean
       extra: { departmentId },
     });
   }
+  if (side === "kroger" && !dryRun) {
+    await sweepKrogerLookupQueue(now, { apply: true, limit: 250 });
+  }
   const chosen: LookupPick[] = [];
   const seen = new Set<string>();
   const retire: string[] = [];
@@ -333,7 +346,7 @@ async function nextLookups(side: Side, now: Date, limit: number, dryRun: boolean
         continue;
       }
       seen.add(row.key);
-      if (side === "kroger" && krogerLookupBlock(row)) {
+      if (side === "kroger" && krogerLookupBlock({ ...row, upc: row.upc ?? "" })) {
         retire.push(row.key);
         continue;
       }
@@ -446,12 +459,104 @@ export async function finishLookups(
   const day = utcDay(now);
   const attemptsField = side === "walmart" ? "walmartAttempts" : "krogerAttempts";
   const hitsField = side === "walmart" ? "walmartHits" : "krogerHits";
-  await CatalogMatchDay.updateOne(
-    { day },
-    { $inc: { [attemptsField]: picks.length, [hitsField]: hits }, $setOnInsert: { day } },
-    { upsert: true }
-  );
+  const inc: Record<string, number> = { [attemptsField]: picks.length, [hitsField]: hits };
+  if (side === "kroger") {
+    const byDepartment = new Map<string, { attempts: number; hits: number }>();
+    for (const pick of picks) {
+      const id = (pick.departmentId ?? "unknown").toLowerCase().replace(/[^a-z0-9-]/g, "") || "unknown";
+      const bucket = byDepartment.get(id) ?? { attempts: 0, hits: 0 };
+      bucket.attempts += 1;
+      if (hitKeys.has(pick.key)) bucket.hits += 1;
+      byDepartment.set(id, bucket);
+    }
+    for (const [id, bucket] of byDepartment) {
+      inc[`krogerByDepartment.${id}.attempts`] = bucket.attempts;
+      if (bucket.hits > 0) inc[`krogerByDepartment.${id}.hits`] = bucket.hits;
+    }
+  }
+  await CatalogMatchDay.updateOne({ day }, { $inc: inc, $setOnInsert: { day } }, { upsert: true });
   return { attempts: picks.length, hits };
+}
+
+export type KrogerQueueSweep = {
+  examined: number;
+  eligible: number;
+  retire: number;
+  byDepartment: Record<string, { eligible: number; retire: number }>;
+  byReason: Record<string, number>;
+  sample: Array<{ key: string; name: string; departmentId: string; reason: string }>;
+  truncated: boolean;
+};
+
+function bumpQueueCount(table: Record<string, { eligible: number; retire: number }>, departmentId: string, field: "eligible" | "retire"): void {
+  const id = departmentId || "unknown";
+  const row = table[id] ?? { eligible: 0, retire: 0 };
+  row[field] += 1;
+  table[id] = row;
+}
+
+/**
+ * Walk the Kroger lookup queue and drop rows that are outside grocery scope
+ * or do not have a real grocery UPC. Dry-run counts only. Apply sets
+ * matchKrogerAt so those rows leave the due queue. Hit rate is not changed.
+ */
+export async function sweepKrogerLookupQueue(
+  now: Date,
+  options?: { apply?: boolean; limit?: number }
+): Promise<KrogerQueueSweep> {
+  const apply = options?.apply === true;
+  const limit = Math.max(1, Math.min(200_000, Math.floor(options?.limit ?? 100_000)));
+  const result: KrogerQueueSweep = {
+    examined: 0,
+    eligible: 0,
+    retire: 0,
+    byDepartment: {},
+    byReason: {},
+    sample: [],
+    truncated: false,
+  };
+  let cursor = "";
+  let lastBatchFull = false;
+  const retireKeys: string[] = [];
+  while (result.examined < limit) {
+    const batch = Math.min(400, limit - result.examined);
+    const clauses = [...dueClauses("kroger", now)];
+    if (cursor) clauses.push({ key: { $gt: cursor } });
+    const rows = await CatalogMaster.find({ $and: clauses })
+      .sort({ key: 1 })
+      .limit(batch)
+      .select("key name brand upc departmentId categoryPaths")
+      .lean<CandidateRow[]>();
+    if (rows.length === 0) break;
+    lastBatchFull = rows.length === batch;
+    cursor = rows[rows.length - 1]?.key ?? cursor;
+    for (const row of rows) {
+      result.examined += 1;
+      const departmentId = row.departmentId?.trim() || "unknown";
+      const reason = krogerLookupBlock({ ...row, upc: row.upc ?? "" });
+      if (reason) {
+        result.retire += 1;
+        result.byReason[reason] = (result.byReason[reason] ?? 0) + 1;
+        bumpQueueCount(result.byDepartment, departmentId, "retire");
+        retireKeys.push(row.key);
+        if (result.sample.length < 20) {
+          result.sample.push({ key: row.key, name: row.name, departmentId, reason });
+        }
+      } else {
+        result.eligible += 1;
+        bumpQueueCount(result.byDepartment, departmentId, "eligible");
+      }
+    }
+    if (rows.length < batch) break;
+  }
+  result.truncated = lastBatchFull && result.examined >= limit;
+  if (apply && retireKeys.length > 0) {
+    for (let index = 0; index < retireKeys.length; index += 500) {
+      const chunk = retireKeys.slice(index, index + 500);
+      await CatalogMaster.updateMany({ key: { $in: chunk } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    }
+  }
+  return result;
 }
 
 function rate(hits: number, attempts: number): number | null {
@@ -479,12 +584,19 @@ export async function matchProgress(now = new Date()) {
       walmartHits?: number;
       krogerAttempts?: number;
       krogerHits?: number;
+      krogerByDepartment?: Record<string, { attempts?: number; hits?: number }>;
     } | null>(),
   ]);
   const walmartAttempts = ledger?.walmartAttempts ?? 0;
   const walmartHits = ledger?.walmartHits ?? 0;
   const krogerAttempts = ledger?.krogerAttempts ?? 0;
   const krogerHits = ledger?.krogerHits ?? 0;
+  const krogerByDepartment: Record<string, { attempts: number; hits: number; rate: number | null }> = {};
+  for (const [id, bucket] of Object.entries(ledger?.krogerByDepartment ?? {})) {
+    const attempts = bucket?.attempts ?? 0;
+    const departmentHits = bucket?.hits ?? 0;
+    krogerByDepartment[id] = { attempts, hits: departmentHits, rate: rate(departmentHits, attempts) };
+  }
   return {
     day,
     queue: { walmart, kroger },
@@ -495,6 +607,7 @@ export async function matchProgress(now = new Date()) {
       walmartHits,
       krogerAttempts,
       krogerHits,
+      krogerByDepartment,
     },
     mergedToday,
     lookupShare: config.matchLookupShare,

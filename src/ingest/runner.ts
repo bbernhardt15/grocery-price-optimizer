@@ -19,7 +19,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
-import { effectiveShares, ingestConfig, nextTickTurn, refreshShareFor, tickCallSplit, type IngestConfig } from "./config";
+import { effectiveShares, ingestConfig, nextTickTurn, refreshShareFor, tickCallSplit, walmartEffectiveShares, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
   krogerAdvance,
@@ -39,6 +39,7 @@ import {
   isWalmartEndpointMiss,
   normalizeWalmartPage,
   recordsFromWalmartPage,
+  shouldStoreCrawledProduct,
   walmartNextCursor,
   type WalmartCategory,
   type WalmartPagePlan,
@@ -423,13 +424,14 @@ async function tickSplitFor(
   staleRatio: number | undefined
 ): Promise<{ lookup: number; refresh: number; discovery: number; refreshFirst: boolean }> {
   const ratio = staleRatio ?? (await loadStaleRatio());
-  const shares = effectiveShares({
+  const shareInput = {
     staleRatio: ratio,
     lookupShare: config.matchLookupShare,
     refreshShare: refreshShareFor(config, store),
     staleDiscoveryShare: config.staleDiscoveryShare,
     staleLookupShare: config.staleLookupShare,
-  });
+  };
+  const shares = store === "walmart" ? walmartEffectiveShares(shareInput) : effectiveShares(shareInput);
   return {
     ...tickCallSplit(
       maxCalls,
@@ -816,7 +818,9 @@ export async function stepWalmart(options: {
         break;
       }
       const payload = charged;
-      const records = recordsFromWalmartPage(payload, category);
+      const records = recordsFromWalmartPage(payload, category).filter((record) =>
+        shouldStoreCrawledProduct(record.categories, record.name)
+      );
       const saved = await upsertCatalogRecords(records, nowFn());
       upserted += saved.offers;
       const next = walmartNextCursor(payload);

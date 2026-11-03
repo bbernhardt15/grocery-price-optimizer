@@ -81,6 +81,10 @@ app.get("/api", (_req, res) => {
         "Top stored category paths in Other, with counts, three example names, and how many Other products have a Kroger id. Same admin token as status.",
       "GET /api/admin/catalog/match-queue":
         "Dry run of the next cross-store lookup batch. Does not call Walmart or Kroger and does not mark masters. Same admin token as status.",
+      "GET /api/admin/catalog/deactivate-out-of-scope":
+        "Dry run. Counts products outside grocery-store scope by the department they are stored in, plus a sample and how the Kroger lookup queue would be re-prioritized. Writes nothing.",
+      "POST /api/admin/catalog/deactivate-out-of-scope":
+        'Dry run unless the body is { "apply": true }. Apply sets outOfScope and discontinues those masters and offers (search, plans, and counts skip them) and retires ineligible Kroger lookups. Nothing is hard-deleted.',
       "POST /api/admin/catalog/exclude-nongrocery-refresh":
         'Marks offers for Other products that are still general merchandise so refresh skips them. Body { "confirm": "exclude-nongrocery-refresh" }. Nothing is deleted.',
       "POST /api/optimize-list":

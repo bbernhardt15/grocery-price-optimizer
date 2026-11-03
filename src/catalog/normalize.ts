@@ -70,7 +70,7 @@ function hasGtinCheckDigit(digits: string): boolean {
 }
 
 /** UPC-E, UPC-A, EAN-13, and GTIN-14 are the only lengths that carry a check digit. */
-function hasStandardCheckDigit(digits: string): boolean {
+export function hasStandardCheckDigit(digits: string): boolean {
   if (digits.length !== 8 && digits.length !== 12 && digits.length !== 13 && digits.length !== 14) {
     return false;
   }
@@ -169,6 +169,34 @@ function digitsWithoutCheck(upc: string | undefined | null): string | null {
  * fails the GTIN check. A valid check digit is dropped, then leading zeros
  * are stripped, so both forms land on the same key. Too-short codes are ignored.
  */
+/**
+ * A code Kroger can be asked about.
+ * Item ids and other short numbers are not UPCs. 8, 13, and 14 digit codes
+ * need a GS1 check digit. A 12-digit Walmart UPC-A is accepted even when that
+ * digit fails GS1: codes such as 070708200500 are real products this catalog
+ * already sends. The stored 13-digit form has dropped the check digit, so a
+ * body of 10 to 12 digits still counts. An 11-digit code is a UPC-A that lost
+ * its leading zero; pad it and check.
+ */
+export function isGroceryUpc(upc: string | undefined | null): boolean {
+  const raw = upc?.replace(/\D/g, "") ?? "";
+  if (!raw) return false;
+  const expanded = expandUpcE(raw) ?? raw;
+  let digits = expanded;
+  if (digits.length === 11 && digits[0] !== "0") {
+    digits = `0${digits}`;
+  }
+  if (digits.length === 12) return true;
+  if ((digits.length === 8 || digits.length === 13 || digits.length === 14) && hasStandardCheckDigit(digits)) {
+    return true;
+  }
+  if (digits.length === 13 && !hasStandardCheckDigit(digits)) {
+    const body = digits.replace(/^0+/, "");
+    return body.length >= 10 && body.length <= 12;
+  }
+  return false;
+}
+
 export function upcKey(upc: string | undefined | null): string | null {
   const digits = digitsWithoutCheck(upc);
   if (!digits) {
