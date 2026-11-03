@@ -268,6 +268,9 @@ function isJunkLine(line: string): boolean {
   if (/^(?:kroger|walmart|target|instacart|amazon|whole foods|aldi)(?:\s*#?\s*\d+)?$/i.test(value)) return true;
   if (/^page\s+\d+/i.test(value)) return true;
   if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(value)) return true;
+  if (/^(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?|qty|quantity|each|ea\.?|items?)$/i.test(value)) return true;
+  if (/^(?:\d+\s*[x×]\s*)?(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?)$/i.test(value)) return true;
+  if (/^[x×]\s*\d{1,2}$/.test(value) || /^\d{1,2}\s*[x×]$/.test(value)) return true;
   return false;
 }
 
@@ -319,11 +322,21 @@ function takeInline(line: string): { name: string; quantity: number; price: numb
     quantity = clampQty(Number(qty[1]));
     working = clean(qty[2]);
   } else {
+    const leadTimes = working.match(/^(\d{1,2})\s*[x×]\s+(.+)$/i);
     const lead = working.match(/^(\d{1,2})\s+(.+)$/);
     const unit = lead?.[2]?.split(/\s+/)[0] || "";
-    if (lead?.[1] && lead[2] && !/^(?:oz|lb|lbs|ct|gal|pk|pack|fl)$/i.test(unit)) {
+    if (leadTimes?.[1] && leadTimes[2]) {
+      quantity = clampQty(Number(leadTimes[1]));
+      working = clean(leadTimes[2]);
+    } else if (lead?.[1] && lead[2] && !/^(?:oz|lb|lbs|ct|gal|pk|pack|fl)$/i.test(unit)) {
       quantity = clampQty(Number(lead[1]));
       working = clean(lead[2]);
+    } else {
+      const tail = working.match(/^(.+?)\s*[x×]\s*(\d{1,2})$/i);
+      if (tail?.[1] && tail[2]) {
+        quantity = clampQty(Number(tail[2]));
+        working = clean(tail[1]);
+      }
     }
   }
   working = working.replace(/^[,.-]+|[,.-]+$/g, "").trim();
@@ -368,7 +381,7 @@ export function parseReceiptText(text: string): ReceiptLine[] {
   const source = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!source.trim()) return [];
   const items: Draft[] = [];
-  const state: { current: Draft | null; parts: string[]; receipt: number } = { current: null, parts: [], receipt: 1 };
+  const state: { current: Draft | null; parts: string[]; receipt: number; quantity: number } = { current: null, parts: [], receipt: 1, quantity: 1 };
   const flush = () => {
     if (state.current?.name) items.push(state.current);
     state.current = null;
@@ -381,10 +394,13 @@ export function parseReceiptText(text: string): ReceiptLine[] {
     if (state.current && state.current.price == null && !state.current.upc) {
       state.current.name = clean(`${state.current.name} ${name}`);
       state.current.raw = clean(`${state.current.raw} ${name}`);
+      if (state.quantity > 1) state.current.quantity = state.quantity;
+      state.quantity = 1;
       return;
     }
     flush();
-    state.current = { name, quantity: 1, price: null, upc: "", raw: name, receipt: state.receipt };
+    state.current = { name, quantity: state.quantity, price: null, upc: "", raw: name, receipt: state.receipt };
+    state.quantity = 1;
   };
   for (const original of source.split("\n")) {
     const line = original.trim();
@@ -440,6 +456,7 @@ export function parseReceiptText(text: string): ReceiptLine[] {
       continue;
     }
     if (state.current && (state.current.upc || state.current.price != null)) flush();
+    if (inline.quantity > 1) state.quantity = inline.quantity;
     state.parts.push(inline.name);
   }
   commitParts();

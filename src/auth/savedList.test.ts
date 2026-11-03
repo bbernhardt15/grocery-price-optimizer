@@ -74,4 +74,24 @@ describe("saved list merge", () => {
     const parsed = parseSavedListWrite({ listId: "short", items: [] });
     assert.equal("error" in parsed, true);
   });
+
+  it("keeps trip receipts on the account when a save includes them", () => {
+    const parsed = parseSavedListWrite({
+      listId: "list-123456",
+      items: [item("milk", 1)],
+      pastTrips: [
+        {
+          id: "trip-1",
+          at: 1_700_000_000_000,
+          totalCents: 1250,
+          savedCents: 150,
+          stores: [{ storeName: "Kroger", totalCents: 1250, items: [{ name: "Milk", quantity: 1 }] }],
+        },
+      ],
+    });
+    assert.equal("error" in parsed, false);
+    if ("error" in parsed) return;
+    assert.equal(parsed.pastTrips?.[0].stores[0].storeName, "Kroger");
+    assert.equal(parsed.pastTrips?.[0].stores[0].items[0].name, "Milk");
+  });
 });

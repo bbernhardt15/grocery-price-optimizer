@@ -47,13 +47,13 @@ describe("three-step flow", () => {
     assert.equal(missing.totalLabel, "");
 
     const plan = planBarCopy({ step: "plan", itemCount: 2, total: 4, hasPlan: true });
-    assert.equal(plan.button, "Shop");
-    assert.equal(plan.enabled, true);
+    assert.equal(plan.showButton, false);
+    assert.equal(plan.button, "");
     assert.equal(plan.provisional, false);
 
     const planning = planBarCopy({ step: "plan", itemCount: 2, total: 4, hasPlan: false, planning: true });
-    assert.equal(planning.enabled, true);
-    assert.equal(planning.button, "Updating…");
+    assert.equal(planning.showButton, false);
+    assert.equal(planning.button, "");
 
     const shop = planBarCopy({ step: "shop", itemCount: 4, left: 1, total: 9, complete: false });
     assert.equal(shop.countLabel, "1 left");

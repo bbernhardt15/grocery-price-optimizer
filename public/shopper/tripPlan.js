@@ -263,7 +263,7 @@ function lineFromOffer(item, offer) {
     ...(offer.onSale && Number(offer.regularPrice) > price ? { regularPrice: Number(offer.regularPrice) } : {}),
     ...(offer.onSale && offer.saleEndsOn ? { saleEndsOn: offer.saleEndsOn } : {}),
     department: offer.department || item.department,
-    ...(aisle ? { aisle } : {}),
+    ...(aisle ? { aisle, ...((offer.aisleKnown === true || item.aisleKnown === true || /^aisle\b/i.test(String(aisle))) ? { aisleKnown: true } : {}) } : {}),
     ...(offer.url ? { url: offer.url } : {}),
     ...(swap ? { matchKind: "swap" } : {}),
     ...(note ? { swapNote: note } : {}),

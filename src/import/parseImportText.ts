@@ -111,6 +111,17 @@ function isJunk(line: string): boolean {
     return true;
   }
   if (/^(?:the usual|same as last time|as usual)$/i.test(value)) return true;
+  if (isNonProductLine(value)) return true;
+  return false;
+}
+
+/** Box, bag, tax, fee, tip, total, and quantity-only rows are not groceries. */
+export function isNonProductLine(line: string): boolean {
+  const value = clean(line).replace(/[.:,]+$/g, "");
+  if (!value) return true;
+  if (/^(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?|qty|quantity|each|ea\.?|items?)$/i.test(value)) return true;
+  if (/^(?:\d+\s*[x×]\s*)?(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?)$/i.test(value)) return true;
+  if (/^[x×]\s*\d{1,2}$/.test(value) || /^\d{1,2}\s*[x×]$/.test(value)) return true;
   return false;
 }
 

@@ -148,8 +148,11 @@ import { askIntent } from "./shopper/askIntent.js";
 import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
-import { cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
+import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
+import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
+import { callbackCanClose, emptyMustNotReplace, handoffResultMessage, readTripDb, returnScreenCopy, TRIP_CHANNEL, writeTripDb } from "./shopper/tripSync.js";
+import { mergePastTrips, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
 import { APPROXIMATE_ZIP_NOTE, accuracyIsApproximate } from "./shopper/deviceZip.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
@@ -540,6 +543,10 @@ function toastAction(message, label, onClick, durationMs = 6000) {
 
 const PURCHASE_MARKS_KEY = "gg-purchase-marks";
 let undoTrip = null;
+let explicitClear = false;
+let planProgress = {};
+const shopChecked = new Set();
+let tripChannel = null;
 
 function readPurchaseMarks() {
   try {
@@ -597,14 +604,16 @@ function showTripValue() {
     lifetimeCents: lifetime,
     marks: readPurchaseMarks(),
   });
-  const stores = summary.stores
-    .map((store) => {
-      const items = store.items
-        .map((item) => `<li><span>${escapeHtml(String(item.quantity))} × ${escapeHtml(item.name)}</span><span>${escapeHtml(item.status)}</span></li>`)
-        .join("");
-      return `<section class="value-store"><h3>${escapeHtml(store.storeName)}</h3><p>${escapeHtml(money(store.subtotal))}</p><ul>${items}</ul></section>`;
-    })
-    .join("");
+  const receipt = tripReceipt({
+    id: tripFingerprint(view.stores) || `trip-${Date.now()}`,
+    at: Date.now(),
+    stores: view.stores,
+    total: view.total,
+    savedCents: Math.round((Number(summary.savedVsSingle) || 0) * 100),
+  });
+  savePastTrip(localStorage, receipt);
+  scheduleAccountSync();
+  paintPastTrips();
   const single = summary.savedVsSingleLabel
     ? `<p>You save ${escapeHtml(summary.savedVsSingleLabel)} versus ${escapeHtml(summary.singleStore)} (${escapeHtml(summary.singleTotalLabel)}).</p>`
     : "";
@@ -612,14 +621,55 @@ function showTripValue() {
     ? `<p>You save ${escapeHtml(summary.savedVsUsualLabel)} versus your usual store, ${escapeHtml(summary.usualStore)}.</p>`
     : "";
   host.innerHTML = `<div class="list-head"><h2 id="trip-value-title">What this trip saved</h2><button type="button" class="text-btn" id="trip-value-close">Close</button></div>
-    <p class="value-paid"><span>Total</span><strong>${escapeHtml(summary.paidLabel)}</strong></p>
-    ${stores}
+    ${receiptCardHtml(receipt, escapeHtml)}
     ${single}
     ${usual}
     <p class="value-lifetime">Lifetime savings <strong>${escapeHtml(summary.lifetimeLabel)}</strong></p>
-    <p class="muted">${escapeHtml(ESTIMATE_NOTE)}</p>`;
+    <p class="muted">${escapeHtml(ESTIMATE_NOTE)}</p>
+    <button type="button" class="ghost" id="back-to-trip">Back to my trip</button>`;
   $("trip-value-close")?.addEventListener("click", () => dialog.close());
+  $("back-to-trip")?.addEventListener("click", () => {
+    dialog.close();
+    showStep("plan");
+  });
+  host.querySelector("[data-reuse-trip]")?.addEventListener("click", () => {
+    dialog.close();
+    reuseTrip(receipt);
+  });
   if (!dialog.open) dialog.showModal();
+}
+
+function reuseTrip(receipt) {
+  const lines = reuseLines(receipt);
+  if (!lines.length) {
+    toast("That receipt has no items to shop again.");
+    return;
+  }
+  for (const line of lines) {
+    addProduct(customCatalogProduct(line.name), line.quantity, { quiet: true, skipAsk: true });
+  }
+  showStep("plan");
+  renderEstimate();
+  toast(lines.length === 1 ? "Added 1 item. Checking prices." : `Added ${lines.length} items. Checking prices.`);
+  void planTrip({ stay: true });
+}
+
+function paintPastTrips() {
+  const trips = readPastTrips(localStorage);
+  const home = $("past-trips-home");
+  if (home) home.innerHTML = pastTripsHomeHtml(trips.length);
+  const sheet = $("past-trips-body");
+  if (sheet) {
+    sheet.innerHTML = trips.length
+      ? trips.map((trip) => receiptCardHtml(trip, escapeHtml)).join("")
+      : `<p class="muted">Finished trips show up here as receipts.</p>`;
+  }
+}
+
+function openPastTrips() {
+  paintPastTrips();
+  const dialog = $("past-trips");
+  if (dialog && !dialog.open) dialog.showModal();
 }
 
 function openTripSummary() {
@@ -659,6 +709,7 @@ function openClearTrip() {
 }
 
 function clearTripItems() {
+  explicitClear = true;
   undoTrip = [...list.entries()];
   for (const [id, entry] of undoTrip) {
     entry.writtenAt = Date.now();
@@ -706,11 +757,19 @@ function syncPullStatus() {
   if (label) status.textContent = label;
 }
 
-function markStoreHandoff(storeName) {
+function markStoreHandoff(storeName, kind = "store") {
+  const store = String(storeName || "Walmart");
+  const mode = kind === "coupons" ? "coupons" : kind === "cart" ? "cart" : "store";
   try {
-    sessionStorage.setItem(WALMART_RETURN_KEY, String(storeName || "Walmart"));
+    sessionStorage.setItem(WALMART_RETURN_KEY, store);
+    localStorage.setItem("gg-handoff-pending", JSON.stringify({ store, kind: mode, at: Date.now() }));
   } catch {
     /* private browsing */
+  }
+  try {
+    tripChannel?.postMessage({ type: "gg-handoff", store, kind: mode, at: Date.now() });
+  } catch {
+    /* no channel */
   }
 }
 
@@ -730,16 +789,43 @@ function takeWalmartReturn() {
   return pending;
 }
 
-function showWalmartReturn() {
-  const store = takeWalmartReturn();
-  if (!store) return;
+function takeHandoffPending() {
+  const fromSession = takeWalmartReturn();
+  let pending = null;
+  try {
+    pending = JSON.parse(localStorage.getItem("gg-handoff-pending") || "null");
+    if (pending) localStorage.removeItem("gg-handoff-pending");
+  } catch {
+    pending = null;
+  }
+  if (pending?.store) return pending;
+  if (!fromSession) return null;
+  return { store: fromSession === "1" ? "Walmart" : fromSession, kind: "store" };
+}
+
+function showStoreReturn(store, kind = "store") {
+  const name = store === "1" ? "Walmart" : store || "the store";
   showReturnBanner = false;
   const dialog = $("store-return");
   const title = $("store-return-title");
+  const body = dialog?.querySelector("p");
   if (!dialog || !title) return;
-  dialog.dataset.store = store === "1" ? "Walmart" : store;
-  title.textContent = `Did you finish at ${dialog.dataset.store}?`;
+  dialog.dataset.store = name;
+  dialog.dataset.kind = kind;
+  if (kind === "coupons") {
+    title.textContent = "Did you finish clipping?";
+    if (body) body.textContent = `Clipping stays on ${name}. Grocery Gitter cannot clip coupons for you.`;
+  } else {
+    title.textContent = `Did you finish at ${name}?`;
+    if (body) body.textContent = "A website can't come back from the store on its own.";
+  }
   if (!dialog.open) dialog.showModal();
+}
+
+function showWalmartReturn() {
+  const pending = takeHandoffPending();
+  if (!pending?.store) return;
+  showStoreReturn(pending.store, pending.kind || "store");
 }
 
 function noteAppHidden() {
@@ -748,6 +834,7 @@ function noteAppHidden() {
 
 function noteAppVisible() {
   if (flowStep === "shop") void engageWake();
+  rehydrateTrip();
   if (sawAppHidden) showWalmartReturn();
 }
 
@@ -1148,7 +1235,77 @@ function consumeKrogerReturn() {
   const query = params.toString();
   const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
   history.replaceState({}, "", next);
+  const message = { type: "gg-handoff", store: "Kroger", kind: parsed.kind === "added" ? "cart" : "store", at: Date.now() };
+  try {
+    tripChannel?.postMessage(message);
+  } catch {
+    /* the other tab hears the storage copy */
+  }
+  try {
+    window.opener?.postMessage(message, window.location.origin);
+  } catch {
+    /* opener is gone */
+  }
   applyKrogerReturn(parsed);
+  if (callbackCanClose(window.opener)) {
+    const copy = returnScreenCopy("Kroger", message.kind);
+    showHandoffReturn(copy.title, copy.body);
+    window.close();
+  }
+}
+
+function showHandoffReturn(title, body) {
+  const dialog = $("handoff-return");
+  const heading = $("handoff-return-title");
+  const text = $("handoff-return-body");
+  if (heading) heading.textContent = title;
+  if (text) text.textContent = body;
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+function rehydrateTrip() {
+  if (!(storedListCount() > 0) || list.size > 0) {
+    if (flowStep === "plan" && lastOptimize) paintTrip();
+    if (flowStep === "shop" && lastOptimize) renderShop();
+    return;
+  }
+  hydrateListFromStorage();
+  loadCachedTrip();
+  const step = readFlowStep(localStorage.getItem(STEP_KEY));
+  flowStep = step;
+  syncStepVisibility();
+  renderEstimate();
+  if (step === "plan") paintTrip();
+  if (step === "shop") renderShop();
+  paintPlanBar();
+}
+
+function listenForTripTabs() {
+  if (tripChannel) return;
+  try {
+    tripChannel = new BroadcastChannel(TRIP_CHANNEL);
+    tripChannel.onmessage = (event) => {
+      const handoff = handoffResultMessage(event.data);
+      if (handoff) {
+        showStoreReturn(handoff.store, handoff.kind);
+        rehydrateTrip();
+        return;
+      }
+      if (event.data?.type === "gg-state") rehydrateTrip();
+    };
+  } catch {
+    tripChannel = null;
+  }
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    const handoff = handoffResultMessage(event.data);
+    if (!handoff) return;
+    showStoreReturn(handoff.store, handoff.kind);
+    rehydrateTrip();
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key === LIST_KEY) rehydrateTrip();
+  });
 }
 
 async function refreshKrogerFromServer() {
@@ -1369,8 +1526,18 @@ function findListEntry(id) {
   return list.get(id) || [...list.values()].find((entry) => entry.product?.id === id || entry.itemId === id) || null;
 }
 
+function storedListCount() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+    return Array.isArray(rows) ? rows.filter((row) => row?.id || row?.itemId || row?.name).length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function saveList() {
   if (deletingData) return;
+  if (emptyMustNotReplace(storedListCount(), list.size, explicitClear)) return;
   const rows = [...list.values()].map((entry) => ({
     id: entry.product.id,
     itemId: entry.itemId || entry.product.id,
@@ -1391,8 +1558,10 @@ function saveList() {
     targetPrice: entry.targetPrice ?? null,
   }));
   localStorage.setItem(LIST_KEY, JSON.stringify(rows));
+  if (list.size > 0) explicitClear = false;
   scheduleWatchSync();
   scheduleAccountSync();
+  publishTripState();
 }
 
 function scheduleWatchSync() {
@@ -2673,9 +2842,10 @@ function checkBag() {
 function mergedTripChecks(stores) {
   const bag = checkBag();
   const merged = { ...bag.line };
+  for (const id of shopChecked) merged[id] = true;
   for (const store of stores || []) {
     for (const item of store.items || []) {
-      if (item?.lineId && itemIsChecked(item, store.storeName, bag.line, bag.item)) merged[item.lineId] = true;
+      if (item?.lineId && (shopChecked.has(item.lineId) || itemIsChecked(item, store.storeName, bag.line, bag.item))) merged[item.lineId] = true;
     }
   }
   return merged;
@@ -2789,12 +2959,62 @@ function addOwnCoupon(button) {
 }
 
 function renderTrip(payload) {
-  lastOptimize = payload;
+  const names = listEntries().map((entry) => entry.name);
+  const stores = mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, payload?.unavailable);
+  lastOptimize = { ...payload, stores: stores.length ? stores : payload?.stores || [] };
+  if (lastOptimize.stores?.length) {
+    lastOptimize.total = Math.round(lastOptimize.stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
+  }
   plannedSignature = listSignature();
   tripEdits = { lockedStore: null, moves: {} };
   rememberTrip();
+  publishTripState();
   if (flowStep === "shop") renderShop();
   else paintTrip();
+}
+
+function publishTripState() {
+  const record = {
+    type: "gg-state",
+    savedAt: Date.now(),
+    step: flowStep,
+    items: storedListCount(),
+  };
+  try {
+    tripChannel?.postMessage(record);
+  } catch {
+    /* this browser has no BroadcastChannel */
+  }
+  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
+  void writeTripDb(factory, {
+    items: [...list.values()].map((entry) => ({
+      id: entry.product?.id,
+      itemId: entry.itemId || entry.product?.id,
+      name: entry.product?.familyName || entry.product?.name,
+      brand: entry.product?.brand || "",
+      quantity: entry.quantity,
+      sizeLabel: entry.product?.sizeLabel || "",
+    })),
+    plan: lastOptimize,
+    step: flowStep,
+    savedAt: record.savedAt,
+  });
+}
+
+function hydrateListFromStorage() {
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+  } catch {
+    saved = [];
+  }
+  if (!Array.isArray(saved)) return 0;
+  for (const row of saved) {
+    if (!row?.id && !row?.itemId && !row?.name) continue;
+    rememberLocalRow(row);
+  }
+  loadCachedTrip();
+  return list.size;
 }
 
 function annotatePreference(item) {
@@ -2983,7 +3203,16 @@ function paintTrip() {
         open: false,
         coupons,
       });
-      const names = (store.items || []).map((item) => reviewItemLine(item)).join(", ");
+      const count = (store.items || []).length;
+      const countLabel = count === 1 ? "1 item" : `${count} items`;
+      const itemRows = (store.items || [])
+        .map((item) => {
+          const qty = Number(item.quantity) > 1 ? ` x${item.quantity}` : "";
+          const amount = Number(item.itemTotal ?? item.price);
+          const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
+          return `<li class="review-line"><span>${escapeHtml(shortItemTitle(item))}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
+        })
+        .join("");
       const mark = handoffMark(store);
       const ready = usesStoreReadyList(store.storeName);
       const walmartNote =
@@ -2992,12 +3221,20 @@ function paintTrip() {
           : "";
       const body = ready
         ? storeReadyCardHtml(store, readChecks(localStorage, tripId()))
-        : `${names ? `<p class="review-items">${escapeHtml(names)}</p>` : ""}${walmartNote}<div class="shop-actions">${primaryAction(store)}</div>`;
+        : `${walmartNote}<div class="shop-actions">${primaryAction(store)}</div>`;
       return `<article class="calm-store">
-        <header><h3>${escapeHtml(store.storeName)}</h3><p class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</p>${total ? `<p>${escapeHtml(total)}</p>` : ""}</header>
-        ${body}
-        ${reviewSwapLines(store)}
-        ${couponsHtml}
+        <details class="store-fold">
+          <summary>
+            <span class="store-fold-name">${escapeHtml(store.storeName)}</span>
+            <span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>
+            <span>${escapeHtml(countLabel)}</span>
+            ${total ? `<strong>${escapeHtml(total)}</strong>` : ""}
+          </summary>
+          <ul class="review-lines">${itemRows}</ul>
+          ${body}
+          ${reviewSwapLines(store)}
+          ${couponsHtml}
+        </details>
       </article>`;
     })
     .join("");
@@ -3006,9 +3243,15 @@ function paintTrip() {
     : "";
   tripEl.innerHTML = `
     ${krogerBannerHtml()}
+    <section class="savings-card">
+      <p class="savings-kicker">We'll handle the math.</p>
+      <h2>${escapeHtml(card.title)}</h2>
+      ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
+      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
+    </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${choiceHtml}
-    <p class="trip-tools"><button type="button" class="text-btn" id="clear-trip-open">Clear trip</button></p>
     <div class="store-grid">${storeHtml}</div>
     ${emptyCheckedStoreHtml(stores)}
     ${missing}
@@ -3019,13 +3262,7 @@ function paintTrip() {
     ${lastOptimize?.krogerStoreNote ? `<p class="kroger-store-note">${escapeHtml(lastOptimize.krogerStoreNote)}</p>` : ""}
     ${krogerUnpricedHtml(lastOptimize?.krogerUnpriced)}
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
-    <section class="savings-card">
-      <p class="savings-kicker">We'll handle the math.</p>
-      <h2>${escapeHtml(card.title)}</h2>
-      ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
-      ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
-    </section>
+    <p class="trip-tools"><button type="button" class="text-btn" id="clear-trip-open">Clear trip</button></p>
     ${customizeBlock(stores)}
   `;
   $("clear-trip-open")?.addEventListener("click", openClearTrip);
@@ -3369,17 +3606,42 @@ function restoreOfflineTrip() {
   return true;
 }
 
+function shortItemTitle(item) {
+  const brand = String(item?.brand || "").trim();
+  const name = String(item?.name || item?.query || "Item").replace(/\s+/g, " ").trim();
+  const base = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${name}` : name;
+  const cut = base.split(",")[0].trim();
+  return cut.length > 42 ? `${cut.slice(0, 40).trim()}…` : cut;
+}
+
+function paintPlanProgress(note) {
+  const host = $("plan-checks");
+  const line = $("plan-status-line");
+  if (line && note) line.textContent = note;
+  if (host) host.outerHTML = planChecklistHtml(planChecklist(selectedStoreNames(), planProgress));
+}
+
 function paintLocalPreview(note) {
+  const catalog = catalogTripEstimate([...list.values()]);
   const rows = [...list.values()]
     .map((entry) => {
       const name = displayProductName(entry.product.familyName || entry.product.name, entry.product.brand) || "Item";
-      return `<li class="calm-item"><p class="item-name">${entry.quantity} × ${escapeHtml(name)}</p><p class="item-price"><strong>…</strong></p></li>`;
+      const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
+      const price = catalogTripEstimate([entry]).total;
+      return `<li class="calm-item"><p class="item-name">${escapeHtml(qty)}</p><p class="item-price"><strong>${price > 0 ? escapeHtml(money(price)) : ""}</strong></p></li>`;
     })
     .join("");
+  const figure = catalog.total > 0 ? money(catalog.total) : "";
   tripEl.innerHTML = `
     ${krogerBannerHtml()}
-    <section class="calm-store" id="plan-preview">
-      <header><h3>Your list</h3><p class="muted">Prices coming</p></header>
+    <section class="savings-card" id="plan-preview">
+      <p class="savings-kicker">Catalog estimate</p>
+      <h2>${figure ? escapeHtml(figure) : "Pricing your list"}</h2>
+      <p class="muted">Store prices replace this estimate as they come in.</p>
+    </section>
+    ${planChecklistHtml(planChecklist(selectedStoreNames(), planProgress))}
+    <section class="calm-store">
+      <header><h3>Your list</h3><p class="muted">${escapeHtml(figure ? "Estimated" : "Checking")}</p></header>
       <ul class="item-list">${rows}</ul>
       <p class="muted" id="plan-status-line">${escapeHtml(note || "Checking store prices…")}</p>
       <button type="button" class="ghost" id="plan-retry" hidden>Retry</button>
@@ -3428,7 +3690,7 @@ async function readPlanBody(response, onStatus) {
     } catch {
       return;
     }
-    if (event.type === "status") onStatus?.(event);
+    if (event.type === "status" || event.type === "progress") onStatus?.(event);
     if (event.type === "done" && event.result) finalBody = event.result;
     if (event.type === "error") finalBody = { error: event.error };
   };
@@ -3499,8 +3761,9 @@ async function planTrip({ stay = false, trigger = null } = {}) {
   const controller = new AbortController();
   planAbort = controller;
   planning = true;
+  planProgress = {};
+  for (const name of selectedStoreNames()) planProgress[name] = { done: false, checked: 0, total: list.size };
   planBtn.disabled = false;
-  planBtn.textContent = "Updating…";
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
   paintPlanNow();
@@ -3527,9 +3790,16 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       PLAN_TIMEOUT_MS
     );
     const body = await readPlanBody(response, (status) => {
+      const name = status.storeName || "";
+      if (name) {
+        planProgress[name] = {
+          done: status.type === "status" || (status.total > 0 && status.checked >= status.total),
+          checked: Number(status.checked) || planProgress[name]?.checked || 0,
+          total: Number(status.total) || planProgress[name]?.total || list.size,
+        };
+      }
       const waiting = status.pendingStores?.length ? ` Still checking ${status.pendingStores.join(", ")}.` : "";
-      const line = $("plan-status-line");
-      if (line) line.textContent = `Checked ${status.storeName || "a store"}.${waiting}`;
+      paintPlanProgress(name ? `${status.type === "status" ? "Priced" : "Checking"} ${name}.${waiting}` : "Checking store prices…");
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
@@ -4413,7 +4683,8 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     const url = externalLink.getAttribute("data-external-link") || externalLink.getAttribute("data-coupon-link");
     const store = externalLink.getAttribute("data-store-leave");
-    if (store) markStoreHandoff(store);
+    const kind = externalLink.getAttribute("data-leave-kind") || (externalLink.hasAttribute("data-coupon-link") ? "coupons" : "store");
+    if (store) markStoreHandoff(store, kind);
     if (url) void openExternal(url);
     return;
   }
@@ -4521,6 +4792,7 @@ document.addEventListener("click", (event) => {
   const krogerCartLink = target.closest("[data-kroger-cart], #kroger-cart-link, #settings-kroger-cart");
   if (krogerCartLink instanceof HTMLAnchorElement) {
     event.preventDefault();
+    markStoreHandoff("Kroger", "cart");
     void openExternal(krogerCartLink.href || KROGER_CART_URL);
     return;
   }
@@ -4689,7 +4961,11 @@ document.addEventListener("change", (event) => {
   }
   if (target instanceof HTMLInputElement && (target.dataset.tripCheck || target.dataset.checkKey)) {
     const on = target.checked;
-    if (target.dataset.tripCheck) writeCheck(localStorage, tripId(), target.dataset.tripCheck, on);
+    if (target.dataset.tripCheck) {
+      if (on) shopChecked.add(target.dataset.tripCheck);
+      else shopChecked.delete(target.dataset.tripCheck);
+      writeCheck(localStorage, tripId() || "gg-trip", target.dataset.tripCheck, on);
+    }
     if (target.dataset.checkKey) writeItemCheck(localStorage, target.dataset.checkKey, on);
     const key = target.dataset.checkKey || "";
     const line = target.dataset.tripCheck || "";
@@ -4945,6 +5221,38 @@ $("shop-done")?.addEventListener("click", () => {
 $("shop-status")?.addEventListener("click", onPrimary);
 $("trip-summary-close")?.addEventListener("click", () => $("trip-summary")?.close());
 $("store-return-no")?.addEventListener("click", () => $("store-return")?.close());
+$("store-return-trip")?.addEventListener("click", () => {
+  $("store-return")?.close();
+  showStep("plan");
+});
+$("cart-ready-trip")?.addEventListener("click", () => {
+  $("cart-ready")?.close();
+  showStep("plan");
+});
+$("handoff-return-back")?.addEventListener("click", () => {
+  $("handoff-return")?.close();
+  showStep("plan");
+});
+$("menu-past")?.addEventListener("click", () => {
+  closeDrawer();
+  openPastTrips();
+});
+$("past-trips-close")?.addEventListener("click", () => $("past-trips")?.close());
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  if (target.closest("#past-trips-open")) {
+    openPastTrips();
+    return;
+  }
+  const reuse = target.closest("[data-reuse-trip]");
+  if (!reuse || reuse.closest("#trip-value")) return;
+  const id = reuse.getAttribute("data-reuse-trip");
+  const receipt = readPastTrips(localStorage).find((row) => row.id === id);
+  if (!receipt) return;
+  $("past-trips")?.close();
+  reuseTrip(receipt);
+});
 $("store-return-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const store = $("store-return")?.dataset.store || "Walmart";
@@ -5517,6 +5825,7 @@ function personalListPayload() {
     coupons: readCoupons(localStorage),
     starterBook: lists().payload(),
     ...(profileIsStored(localStorage) ? { tasteProfile: getUserProfile(localStorage) } : {}),
+    pastTrips: readPastTrips(localStorage),
   };
 }
 
@@ -5590,6 +5899,11 @@ async function pushAccountList() {
     if (Array.isArray(body.list?.coupons)) writeCoupons(localStorage, body.list.coupons);
     if (body.list?.starterBook) lists().applyServer(body.list.starterBook);
     if (body.list?.tasteProfile) saveUserProfile(localStorage, mergeProfiles(getUserProfile(localStorage), body.list.tasteProfile));
+    if (Array.isArray(body.list?.pastTrips)) {
+      const merged = mergePastTrips(readPastTrips(localStorage), body.list.pastTrips);
+      localStorage.setItem("gg-past-trips", JSON.stringify(merged));
+      paintPastTrips();
+    }
     localStorage.removeItem(REMOVED_KEY);
   } catch {
     /* the list stays on this device and tries again on the next edit */
@@ -5606,6 +5920,11 @@ function rememberServerList(server) {
   if (server.tasteProfile) {
     saveUserProfile(localStorage, mergeProfiles(getUserProfile(localStorage), server.tasteProfile));
     paintUsuals();
+  }
+  if (Array.isArray(server.pastTrips)) {
+    const merged = mergePastTrips(readPastTrips(localStorage), server.pastTrips);
+    localStorage.setItem("gg-past-trips", JSON.stringify(merged));
+    paintPastTrips();
   }
   if (server.alertsEnabled && listAlertsEl) {
     listAlertsEl.checked = true;
@@ -6172,11 +6491,13 @@ function renderShop() {
           : "";
         const search = usesStoreReadyList(section.storeName) ? readySearchAnchor(section.storeName, withListFamily(item)) : "";
         const number = item.routeNumber ? `<span class="route-num">${item.routeNumber}</span>` : "";
+        const where = aisleIsKnown(item) ? String(item.aisle || "") : String(item.department || "Store");
+        const qtyLabel = Number(item.quantity) > 1 ? `${shortItemTitle(item)} x${item.quantity}` : shortItemTitle(item);
         return `<div class="shop-line${checked ? " is-cart" : ""}" data-shop-line="${escapeHtml(item.lineId || "")}">
           <label class="shop-row${checked ? " is-done" : ""}">
             ${number}
             <input type="checkbox" data-trip-check="${escapeHtml(item.lineId || "")}"${checkAttrs(item, section.storeName)}${checked ? " checked" : ""} />
-            <span class="shop-copy"><span class="shop-name">${item.quantity} × ${productTitleHtml(item)}</span><span class="muted">${escapeHtml(price)}</span></span>
+            <span class="shop-copy"><span class="shop-name">${escapeHtml(qtyLabel)}</span><span class="shop-where">${escapeHtml(where)}</span><span class="muted">${escapeHtml(price)}</span></span>
           </label>
           ${search}
           ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
@@ -6199,7 +6520,7 @@ function renderShop() {
       const showHint = Boolean(hintText) && !hintText.startsWith("Nothing on");
       const page = store?.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(section.storeName);
       const couponLink = page?.url
-        ? `<a class="shop-coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}" data-store-leave="${escapeHtml(section.storeName)}">${escapeHtml(`Open ${page.label}`)}</a>`
+        ? `<a class="shop-coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}" data-store-leave="${escapeHtml(section.storeName)}" data-leave-kind="coupons">${escapeHtml(`Open ${page.label}`)}</a>`
         : "";
       const hint =
         showHint || couponLink
@@ -6749,7 +7070,14 @@ async function zipFromLocation() {
   if (!response.ok || !/^\d{5}/.test(String(body.zip || ""))) {
     throw new Error("Couldn't read a ZIP from this location. Type one and try again.");
   }
-  return { zip: String(body.zip).slice(0, 5), approximate: Boolean(coords.approximate) };
+  const zip = String(body.zip).slice(0, 5);
+  return {
+    zip,
+    lat: coords.lat,
+    lng: coords.lng,
+    accuracy: coords.accuracy,
+    approximate: true,
+  };
 }
 
 async function findNearbyStores() {
@@ -6900,6 +7228,24 @@ async function boot() {
 }
 
 async function bootApp() {
+  listenForTripTabs();
+  hydrateListFromStorage();
+  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
+  if (list.size === 0) {
+    const saved = await readTripDb(factory);
+    if (saved?.items?.length) {
+      try {
+        localStorage.setItem(LIST_KEY, JSON.stringify(saved.items));
+      } catch {
+        /* private browsing */
+      }
+      hydrateListFromStorage();
+      if (saved.plan) lastOptimize = saved.plan;
+      if (saved.step) flowStep = readFlowStep(saved.step);
+    }
+  }
+  renderEstimate();
+  paintPastTrips();
   toastShellUpdate();
   watchShellUpdates();
   applyTheme(localStorage.getItem(THEME_KEY) || "system");
@@ -7217,22 +7563,19 @@ profileUi = mountProfileOnboarding({
   setZip: (zip) => applyZip(zip, { reload: false }),
   locateZip: () => zipFromLocation(),
   addLearnedLines: async (lines) => {
-    const text = (lines || [])
-      .map((line) => [line.quantity > 1 ? line.quantity : "", line.brand, line.name].filter(Boolean).join(" "))
-      .join("\n");
-    if (!text.trim()) return;
-    const match = await postImport("/api/import/text", { text });
+    const rows = lines || [];
     let added = 0;
-    for (const item of match?.items || []) {
-      const product = item.choices?.[0]?.product || customCatalogProduct(item.raw || item.name);
-      if (!product?.id) continue;
-      addProduct(product, item.quantity || 1, { quiet: true });
+    for (const line of rows) {
+      const name = [line.brand, line.name].filter(Boolean).join(" ").trim();
+      if (!name) continue;
+      const qty = Math.max(1, Math.min(99, Math.floor(Number(line.quantity) || 1)));
+      addProduct(customCatalogProduct(name), qty, { quiet: true, skipAsk: true });
       added += 1;
     }
     showStep("add");
-    window.scrollTo(0, 0);
     renderEstimate();
-    toast(added === 1 ? "Added 1 item." : `Added ${added} items.`);
+    openList(true);
+    toast(added === 1 ? "Added 1 item." : added ? `Added ${added} items.` : "Nothing new to add.");
   },
   readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;

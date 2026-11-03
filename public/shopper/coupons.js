@@ -19,8 +19,8 @@ export const CLIPPED_KEY = "gg-coupon-clipped";
  * coupon page could not be confirmed. Kept in step with src/coupons/pages.json.
  */
 export const COUPON_PAGES = [
-  { storeName: "Kroger", url: "https://www.kroger.com/savings/cl/coupons/", label: "Kroger digital coupons", note: "Opens Kroger’s coupon page. You clip them there, on your shopper card. Grocery Gitter cannot clip them for you.", kind: "coupons", aliases: ["kroger"] },
-  { storeName: "Walmart", url: "https://www.walmart.com/walmartcash", label: "Walmart Cash", note: "Opens Walmart Cash. Those offers come from Ibotta and are clipped on Walmart, not here.", kind: "coupons", aliases: ["walmart"] },
+  { storeName: "Kroger", url: "https://www.kroger.com/savings/cl/coupons/", label: "Kroger digital coupons", note: "Opens Kroger’s coupon page. Kroger’s public developer API has no coupon or clip method, so Grocery Gitter cannot select or clip them.", kind: "coupons", aliases: ["kroger"] },
+  { storeName: "Walmart", url: "https://www.walmart.com/walmartcash", label: "Walmart Cash", note: "Opens Walmart Cash. Walmart does not offer a coupon-clip API for apps, so nothing is clipped here.", kind: "coupons", aliases: ["walmart"] },
   { storeName: "Target", url: "https://www.target.com/circle", label: "Target Circle", note: "Opens Target Circle. You save the deals in Target’s app or on Target’s site.", kind: "coupons", aliases: ["target"] },
   { storeName: "Aldi", url: "https://www.aldi.us/store/aldi/pages/weekly-specials", label: "This week’s ALDI Finds", note: "Aldi does not offer digital coupons to clip. This opens this week’s ad.", kind: "weekly", aliases: ["aldi"] },
   { storeName: "Publix", url: "https://www.publix.com/savings/digital-coupons", label: "Publix digital coupons", note: "Opens Publix digital coupons. Clip them on your Publix account, then use your phone number at checkout.", kind: "coupons", aliases: ["publix"] },
@@ -391,12 +391,12 @@ export function storeCouponMarkup(store, options) {
   const names = couponChecklist(store?.items);
   const sentence = checklistSentence(names);
   const open = options.open ? " open" : "";
+  const storeName = escapeHtml(store?.storeName || "");
   const link = page
-    ? `<a class="coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}">${escapeHtml(`Open ${page.label}`)}</a>
+    ? `<a class="coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}" data-store-leave="${storeName}" data-leave-kind="coupons">${escapeHtml(`Open ${page.label}`)}</a>
        <p class="muted coupon-note">${escapeHtml(page.note)}</p>`
     : `<p class="muted coupon-note">We don’t have a coupon page for ${escapeHtml(store?.storeName || "this store")} yet.</p>`;
   const clipped = options.clipped ? " checked" : "";
-  const storeName = escapeHtml(store?.storeName || "");
   const lines = rows
     .map((row) => {
       return `<li class="your-coupon">

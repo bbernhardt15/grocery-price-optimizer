@@ -114,6 +114,8 @@ const savedListSchema = new Schema(
      * A missing field on a later write leaves this alone.
      */
     tasteProfile: { type: Schema.Types.Mixed },
+    /** Trip receipts: stores, totals, savings, date, and a tucked-away item list. */
+    pastTrips: { type: Schema.Types.Mixed },
     coupons: {
       type: [
         new Schema(

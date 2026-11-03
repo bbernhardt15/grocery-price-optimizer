@@ -55,11 +55,13 @@
             <p class="brand-title" id="brand-title">Add items</p>
           </div>
         </button>
-        <button type="button" id="add-items" class="primary add-items">Add items</button>
-        <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
-          My list
-          <span id="list-count" class="count-pill">0</span>
-        </button>
+        <div class="top-actions">
+          <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
+            My list
+            <span id="list-count" class="count-pill">0</span>
+          </button>
+          <button type="button" id="add-items" class="primary add-items">Add items</button>
+        </div>
       </header>
 
         <aside id="app-drawer" class="app-drawer" aria-labelledby="drawer-title" aria-hidden="true" inert>
@@ -99,6 +101,7 @@
           <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
           <nav class="menu-nav" aria-label="Menu">
             <button type="button" id="menu-home">Home</button>
+            <button type="button" id="menu-past">Past trips</button>
             <button type="button" id="menu-brands">My brands and preferences</button>
             <button type="button" id="menu-zip">Edit ZIP and stores</button>
             <button type="button" id="menu-new-trip">Start a new trip</button>
@@ -148,6 +151,7 @@
             </div>
             <h2 class="sr-only">Starter lists</h2>
             <div id="starter-lists" class="list-home"></div>
+          <div id="past-trips-home" class="feature-cards"></div>
           </section>
           <section id="browse" class="browse">
             <button type="button" id="browse-toggle" class="feature-card browse-toggle" aria-expanded="false" aria-controls="browse-panel">
@@ -488,6 +492,7 @@
         <p id="cart-ready-body">Finish checkout in the store app or site.</p>
         <div class="onboard-actions">
           <button type="button" class="ghost" id="cart-ready-retry" hidden>Retry</button>
+          <button type="button" class="ghost" id="cart-ready-trip">Back to my trip</button>
           <button type="submit" class="primary" id="cart-ready-back">Back to Grocery Gitter</button>
         </div>
       </form>
@@ -553,6 +558,7 @@
         <p>A website can't come back from the store on its own.</p>
         <div class="onboard-actions">
           <button type="button" class="ghost" id="store-return-no">Not yet</button>
+          <button type="button" class="ghost" id="store-return-trip">Back to my trip</button>
           <button type="submit" class="primary" id="store-return-yes">Yes</button>
         </div>
       </form>
@@ -566,6 +572,22 @@
           <button type="submit" class="primary" id="clear-trip-yes">Clear trip</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="past-trips" class="sheet" aria-labelledby="past-trips-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="past-trips-title">Past trips</h2>
+          <button type="button" class="text-btn" id="past-trips-close">Close</button>
+        </div>
+        <div id="past-trips-body"></div>
+      </div>
+    </dialog>
+    <dialog id="handoff-return" class="sheet" aria-labelledby="handoff-return-title">
+      <div class="sheet-body">
+        <h2 id="handoff-return-title">Return to Grocery Gitter</h2>
+        <p id="handoff-return-body">Your trip is in the other Grocery Gitter tab.</p>
+        <button type="button" class="primary" id="handoff-return-back">Back to my trip</button>
+      </div>
     </dialog>
     <dialog id="trip-value" class="sheet" aria-labelledby="trip-value-title">
       <div class="sheet-body" id="trip-value-body"></div>

@@ -3,7 +3,7 @@
     "storeName": "Kroger",
     "url": "https://www.kroger.com/savings/cl/coupons/",
     "label": "Kroger digital coupons",
-    "note": "Opens Kroger’s coupon page. You clip them there, on your shopper card. Grocery Gitter cannot clip them for you.",
+    "note": "Opens Kroger’s coupon page. Kroger’s public developer API has no coupon or clip method, so Grocery Gitter cannot select or clip them.",
     "kind": "coupons",
     "aliases": ["kroger"]
   },
@@ -11,7 +11,7 @@
     "storeName": "Walmart",
     "url": "https://www.walmart.com/walmartcash",
     "label": "Walmart Cash",
-    "note": "Opens Walmart Cash. Those offers come from Ibotta and are clipped on Walmart, not here.",
+    "note": "Opens Walmart Cash. Walmart does not offer a coupon-clip API for apps, so nothing is clipped here.",
     "kind": "coupons",
     "aliases": ["walmart"]
   },
