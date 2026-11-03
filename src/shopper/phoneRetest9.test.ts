@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v33", () => {
-    assert.match(sw, /grocery-gitter-shell-v33/);
+  it("bumps the shell cache to v34", () => {
+    assert.match(sw, /grocery-gitter-shell-v34/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -135,7 +135,7 @@ describe("ninth phone test", () => {
     assert.equal(tripRecord([{ id: "milk" }], null, "plan", null).step, "plan");
     assert.match(app, /BroadcastChannel/);
     assert.match(app, /hydrateListFromStorage/);
-    assert.match(app, /window\.opener\?\.postMessage/);
+    assert.match(app, /window\.opener\.postMessage/);
     assert.match(html, /id="handoff-return"/);
     assert.match(html, /id="cart-ready-trip"/);
     assert.match(app, /Did you finish clipping\?/);

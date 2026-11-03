@@ -82,6 +82,7 @@ export const KROGER_LEAVE_NOTE =
  */
 export function krogerLoginMode(env = {}) {
   const ua = String(env.userAgent || "");
+  if (/CriOS\//i.test(ua)) return "bridge";
   const ios = /iPad|iPhone|iPod/.test(ua) || (env.platform === "MacIntel" && Number(env.maxTouchPoints) > 1);
   const standalone = env.standalone === true || env.displayMode === "standalone";
   return ios && standalone ? "popup" : "same-tab";

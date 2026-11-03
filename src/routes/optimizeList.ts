@@ -250,6 +250,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
     const writeEvent = (value: unknown) => {
       if (stream) res.write(`${JSON.stringify(value)}\n`);
     };
+    const access = await accessFor(res);
     const productsResult = await resolveCatalogProducts(groceryList, stores, locationId, zipCode, {
       onStore: (info) => {
         writeEvent({
@@ -268,6 +269,22 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
           pendingStores: info.pendingStores,
         });
       },
+      onSnapshot: (info) => {
+        if (!info.products.length) return;
+        const grouped = enrichOptimizeResult(
+          optimizeGroceryList(groceryList, stores, info.products, access.limits.multiStore ? "split" : "single"),
+          { krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(), pricingByStore: [] }
+        );
+        writeEvent({
+          type: "partial",
+          result: {
+            ...grouped,
+            partial: true,
+            pendingStores: info.pendingStores,
+            ...(zipCode ? { zipCode, locationId } : {}),
+          },
+        });
+      },
       ...(upcByName.size ? { upcByName } : {}),
     });
     const krogerUnpriced =
@@ -283,7 +300,6 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       productsResult.products.push(...pinned);
     }
     const walmartStore = await walmartStorePromise;
-    const access = await accessFor(res);
     let groupedByStore = enrichOptimizeResult(
       optimizeGroceryList(groceryList, stores, productsResult.products, access.limits.multiStore ? "split" : "single"),
       {
