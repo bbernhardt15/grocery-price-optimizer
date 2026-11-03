@@ -5,7 +5,7 @@ const router = Router();
 
 /**
  * One-shot ZIP lookup for the phone shells. The coordinates are not stored.
- * The website does not call this unless the shopper is in a native shell.
+ * The ZIP comes from reverse-geocoding the device coordinates. The request IP is never used.
  */
 router.get("/geo/zip", async (req, res) => {
   const point = parseLatLng(req.query.lat, req.query.lng);

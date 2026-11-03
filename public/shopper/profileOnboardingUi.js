@@ -29,7 +29,9 @@ import { brandKey, displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
-import { applyLearnedChoice, learnedSummaryHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { applyLearnedChoice, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
+import { READ_HOLD_MS, readCountLine } from "./receiptHold.js";
 import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakePresent.js";
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
@@ -89,6 +91,7 @@ export function mountProfileOnboarding(deps = {}) {
   let lazyFamily = "";
   let resumeStatus = "";
   let dietMode = false;
+  let zipApproximate = false;
   /** @type {(() => void) | null} */
   let dietDone = null;
 
@@ -183,7 +186,11 @@ export function mountProfileOnboarding(deps = {}) {
     if (step.kind === "welcome") return "";
     if (step.kind === "place" || step.kind === "zip") {
       const zip = escapeText(deps.getZip?.() || "");
-      return `<label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
+      return `<div class="zip-row">
+          <label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" enterkeyhint="done" maxlength="5" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
+          <button type="button" class="zip-done" id="profile-zip-done" aria-label="Done">✓</button>
+        </div>
+        <p id="profile-zip-approx" class="zip-approx"${zipApproximate ? "" : " hidden"}>${escapeText(APPROXIMATE_ZIP_NOTE)}</p>
         <p id="profile-zip-hint" class="muted"${zip ? "" : " hidden"}>Not right? Edit it.</p>
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
@@ -192,6 +199,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (step.kind === "receipts") {
       if (receiptPhase === "reading") return readLiveHtml(readCards);
+      if (receiptPhase === "trip") return learnedTripChoiceHtml(receiptLines);
       if (receiptPhase === "learned") {
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
         const brandsByFamily = {};
@@ -289,19 +297,22 @@ export function mountProfileOnboarding(deps = {}) {
     const top = document.querySelector("#profile-onboard .profile-top");
     const learned = step.id === "receipts" && receiptPhase === "learned";
     const reading = step.id === "receipts" && receiptPhase === "reading";
+    const tripChoice = step.id === "receipts" && receiptPhase === "trip";
     const welcome = step.id === "welcome" && !dietMode;
     if (dialog) {
-      dialog.dataset.step = learned ? "learned" : reading ? "reading" : step.id;
+      dialog.dataset.step = learned ? "learned" : reading ? "reading" : tripChoice ? "trip" : step.id;
       dialog.dataset.dir = motion;
     }
     if (top) top.hidden = welcome;
-    if (title) title.textContent = learned ? "Here's what we learned" : reading ? "Reading your orders" : step.title;
+    if (title) title.textContent = tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : reading ? "Reading your orders" : step.title;
     if (hint) {
-      const hintText = learned
-        ? "Grouped by what you buy. Change anything that looks off."
-        : reading
-          ? "We'll handle the math."
-          : step.hint;
+      const hintText = tripChoice
+        ? "Pick the lines to shop, or start empty."
+        : learned
+          ? "This teaches the brands you buy. Your trip stays empty until you add them."
+          : reading
+            ? "We'll handle the math."
+            : step.hint;
       hint.textContent = hintText;
       hint.hidden = !hintText;
     }
@@ -310,7 +321,7 @@ export function mountProfileOnboarding(deps = {}) {
     const readingBusy = reading && readCards.some((card) => card.status === "reading");
     const readingReady = reading && !readingBusy && (learnedRows.length > 0 || receiptLines.length > 0);
     if (next) {
-      next.hidden = reading && !readingReady;
+      next.hidden = tripChoice || (reading && !readingReady);
       next.textContent = returnTo ? "Save" : learned ? "Confirm" : reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     }
     if (skip) {
@@ -384,13 +395,26 @@ export function mountProfileOnboarding(deps = {}) {
     const zipInput = $("profile-zip");
     if (zipInput && zipInput.dataset.bound !== "1") {
       zipInput.dataset.bound = "1";
+      const finishZip = () => {
+        const five = fiveDigitZip(zipInput.value);
+        if (five) zipInput.value = five;
+        zipInput.blur();
+        const hint = $("profile-zip-hint");
+        if (hint) hint.hidden = !String(zipInput.value || "").trim();
+        paintStoreList();
+      };
       zipInput.addEventListener("input", () => {
+        zipApproximate = false;
+        const approx = $("profile-zip-approx");
+        if (approx) approx.hidden = true;
         const error = $("profile-zip-error");
         if (error) error.hidden = true;
         const hint = $("profile-zip-hint");
         if (hint) hint.hidden = !String(zipInput.value || "").trim();
-        paintStoreList();
+        if (fiveDigitZip(zipInput.value)) finishZip();
+        else paintStoreList();
       });
+      $("profile-zip-done")?.addEventListener("click", finishZip);
     }
     const location = $("profile-use-location");
     if (location && location.dataset.bound !== "1") {
@@ -403,12 +427,16 @@ export function mountProfileOnboarding(deps = {}) {
           }
           location.disabled = true;
           try {
-            const zip = await deps.locateZip();
+            const located = await deps.locateZip();
+            const zip = typeof located === "string" ? located : located?.zip || "";
+            zipApproximate = Boolean(located && typeof located === "object" && located.approximate);
             const field = $("profile-zip");
-            if (zip && field) field.value = zip;
+            if (zip && field) field.value = String(zip).replace(/\D/g, "").slice(0, 5);
             const hint = $("profile-zip-hint");
             if (hint) hint.hidden = !zip;
-            if (field) field.focus();
+            const approx = $("profile-zip-approx");
+            if (approx) approx.hidden = !zipApproximate;
+            field?.blur();
             deps.setZip?.(zip);
             paintStoreList();
           } catch (error) {
@@ -796,6 +824,30 @@ export function mountProfileOnboarding(deps = {}) {
     for (const row of learnedRows) void loadBrandShelf(row.family);
   }
 
+  function readItemCount() {
+    const fromLines = receiptLines.length;
+    if (fromLines) return fromLines;
+    return readCards.reduce((sum, card) => sum + Math.max(card.found || 0, (card.items || []).length), 0);
+  }
+
+  async function holdThenLearned() {
+    const line = readCountLine(readItemCount());
+    for (const card of readCards) {
+      if (card.status === "error") continue;
+      card.message = line;
+      card.status = card.status === "reading" ? "done" : card.status;
+    }
+    if (receiptPhase === "reading") {
+      const stage = $("profile-stage");
+      if (stage) stage.innerHTML = readLiveHtml(readCards);
+      const title = $("profile-title");
+      if (title) title.textContent = line;
+    }
+    await new Promise((resolve) => setTimeout(resolve, READ_HOLD_MS));
+    if (receiptPhase !== "reading") return;
+    showLearned();
+  }
+
   async function retryReadFile(index) {
     const card = readCards.find((row) => row.index === Number(index));
     if (!card?.file || !deps.readReceipts) return;
@@ -830,7 +882,7 @@ export function mountProfileOnboarding(deps = {}) {
         render();
         return;
       }
-      showLearned();
+      void holdThenLearned();
     } catch (error) {
       card.status = "error";
       card.error = error instanceof Error ? error.message : "Couldn't read that file.";
@@ -900,7 +952,7 @@ export function mountProfileOnboarding(deps = {}) {
         render();
         return;
       }
-      showLearned();
+      void holdThenLearned();
     } catch (error) {
       const message = error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.";
       for (const card of readCards) {
@@ -1011,9 +1063,13 @@ export function mountProfileOnboarding(deps = {}) {
           focusTitle();
           return;
         }
-        finish(at);
+        receiptPhase = "trip";
+        motion = "forward";
+        render();
+        focusTitle();
         return;
       }
+      if (receiptPhase === "trip") return;
       const text = $("profile-receipt-paste")?.value || "";
       if ((pendingFiles.length || String(text).trim()) && deps.readReceipts) {
         await runReceipts(text, pendingFiles);
@@ -1166,7 +1222,7 @@ export function mountProfileOnboarding(deps = {}) {
       closeDiet("skipped");
       return;
     }
-    if (stepId === "receipts" && (receiptPhase === "learned" || receiptPhase === "reading") && !returnTo) {
+    if (stepId === "receipts" && (receiptPhase === "learned" || receiptPhase === "reading" || receiptPhase === "trip") && !returnTo) {
       receiptPhase = "upload";
       motion = "back";
       render();
@@ -1202,6 +1258,26 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.id === "learned-empty-trip") {
+      finish(Date.now());
+      return;
+    }
+    if (target.id === "learned-add-trip") {
+      const picked = [...document.querySelectorAll("[data-learned-trip]")]
+        .filter((box) => box instanceof HTMLInputElement && box.checked)
+        .map((box) => receiptLines[Number(box.getAttribute("data-learned-trip"))])
+        .filter(Boolean);
+      target.disabled = true;
+      const pending = deps.addLearnedLines?.(picked);
+      const done = () => finish(Date.now());
+      if (pending && typeof pending.then === "function") {
+        pending.then(done).catch(() => {
+          target.disabled = false;
+          deps.toast?.("Couldn't add those items.");
+        });
+      } else done();
+      return;
+    }
     if (target.dataset.readRetry != null && target.dataset.readRetry !== "") {
       void retryReadFile(target.dataset.readRetry);
       return;
@@ -1444,6 +1520,9 @@ export function mountProfileOnboarding(deps = {}) {
   return {
     open() {
       openAt(resumeStep(getUserProfile(storage)));
+    },
+    redo() {
+      openAt("welcome");
     },
     openEditor() {
       openAt("summary");

@@ -65,6 +65,7 @@ function blank(now = 0) {
     categoryPreferences: {},
     neverProducts: [],
     askedLock: {},
+    savings: { lifetimeCents: 0, usualStore: "" },
   };
 }
 
@@ -282,6 +283,12 @@ export function parseProfile(raw) {
     }
   }
   profile.askedLock = asked;
+  const savings = row.savings && typeof row.savings === "object" ? row.savings : {};
+  const lifetime = Math.floor(Number(savings.lifetimeCents) || 0);
+  profile.savings = {
+    lifetimeCents: Number.isFinite(lifetime) ? Math.max(0, Math.min(lifetime, 100_000_000)) : 0,
+    usualStore: clean(savings.usualStore, 40),
+  };
   const onboard = row.onboarding && typeof row.onboarding === "object" ? row.onboarding : {};
   const status = ["new", "in_progress", "done", "skipped"].includes(onboard.status) ? onboard.status : "new";
   profile.onboarding = {
@@ -358,7 +365,15 @@ export function mergeProfiles(local, remote) {
     const current = categoryPreferences[key];
     if (!current || pref.updatedAt > current.updatedAt) categoryPreferences[key] = pref;
   }
-  return { ...newer, productPreferences, categoryPreferences, updatedAt: Math.max(left.updatedAt, right.updatedAt) };
+  const lifetimeCents = Math.max(left.savings?.lifetimeCents || 0, right.savings?.lifetimeCents || 0);
+  const usualStore = newer.savings?.usualStore || older.savings?.usualStore || "";
+  return {
+    ...newer,
+    productPreferences,
+    categoryPreferences,
+    savings: { lifetimeCents, usualStore },
+    updatedAt: Math.max(left.updatedAt, right.updatedAt),
+  };
 }
 
 /**

@@ -9,6 +9,9 @@ export const RECEIPT_TITLE = "Teach Gitter your usual groceries";
 
 export const RECEIPT_HINT = "We'll learn the brands you already buy.";
 
+export const LEARNED_PURPOSE =
+  "This teaches the brands you already buy. It does not add them to a trip until you say so.";
+
 export const PAPER_WARNING =
   "Photos of paper receipts don't work well: names are abbreviated and there is no UPC or barcode.";
 
@@ -81,10 +84,10 @@ export function receiptUploadHtml() {
       `<details class="store-find"><summary>${escapeText(row.store)}</summary><p>${escapeText(row.hint)}</p></details>`
   ).join("");
   return `<div class="receipt-upload">
-    <label class="drop-zone">
+    <label class="drop-zone drop-primary">
       <input id="profile-receipt-input" type="file" accept="image/*,.pdf,.txt,.csv,text/plain,application/pdf" multiple />
       <span class="drop-title">Drop PDFs or screenshots</span>
-      <span class="muted">or tap to choose a few</span>
+      <span class="muted">Tap to upload. Skip is up top if you want to do this later.</span>
     </label>
     <div id="profile-receipt-files" class="receipt-files"></div>
     <p class="paper-note quiet">${escapeText(PAPER_WARNING)}</p>
@@ -189,5 +192,23 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  return `<div class="learned-summary">${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines)}</div>`;
+  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines)}</div>`;
+}
+
+/** After Confirm: pick which learned lines join this trip. */
+export function learnedTripChoiceHtml(lines) {
+  const rows = (lines || [])
+    .map((line, index) => {
+      const name = line?.brand ? `${line.brand} ${line.name}` : line?.name || "Item";
+      return `<label class="check-row"><input type="checkbox" data-learned-trip="${index}" checked /> ${escapeText(name)}</label>`;
+    })
+    .join("");
+  return `<div class="learned-trip">
+    <p>Add these to this trip, using the brands we learned. Or start empty.</p>
+    <div class="learned-trip-lines">${rows}</div>
+    <div class="choice-stack">
+      <button type="button" class="primary" id="learned-add-trip">Add these items to my trip</button>
+      <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
+    </div>
+  </div>`;
 }

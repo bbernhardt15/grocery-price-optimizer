@@ -1,3 +1,4 @@
+import { krogerAisleLabel } from "./catalog/krogerAisle";
 import { krogerProductIdForLookup } from "./catalog/normalize";
 import { krogerStartParam } from "./ingest/krogerTerms";
 import { readKrogerStore, rememberKrogerStore } from "./krogerLocationCache";
@@ -110,7 +111,10 @@ type KrogerProduct = {
   categories?: unknown;
   images?: KrogerImage[];
   items?: KrogerProductItem[];
+  aisleLocations?: unknown;
 };
+
+export { krogerAisleLabel };
 
 type ProductsResponse = {
   data?: KrogerProduct[];
@@ -222,6 +226,7 @@ function toCatalogProduct(
   const size = item?.size?.trim();
   const categories = categoryNames(product.categories);
   const imageUrls = krogerImageUrls(product.images);
+  const aisleLocation = krogerAisleLabel(product);
   const regular = item?.price?.regular ?? item?.nationalPrice?.regular;
   const promo = item?.price?.promo ?? item?.nationalPrice?.promo;
   const sale = krogerSale(price, regular, promo);
@@ -234,6 +239,7 @@ function toCatalogProduct(
     ...(upc ? { upc } : {}),
     ...(size ? { size } : {}),
     ...(categories.length > 0 ? { categories } : {}),
+    ...(aisleLocation ? { aisleLocation } : {}),
     ...(imageUrls.length > 0 ? { imageUrls } : {}),
     ...(sale ?? {}),
     availability: krogerAvailability(item),

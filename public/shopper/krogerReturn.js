@@ -27,11 +27,11 @@ export function parseKrogerReturn(search) {
   const kind = params.get("kroger");
   if (!kind || !KINDS.has(kind)) return null;
   const requested = params.get("step");
-  /** @type {"plan" | "shop" | null} */
-  let step = null;
-  if (kind === "added") step = "shop";
-  else if (kind === "connected") step = requested === "shop" ? "shop" : "plan";
-  else if (requested === "plan" || requested === "shop") step = requested;
+  /** @type {"plan" | "shop" | "add" | null} */
+  const explicit = requested === "plan" || requested === "shop" || requested === "add" ? requested : null;
+  let step = explicit;
+  if (!step && kind === "added") step = "shop";
+  else if (!step && kind === "connected") step = "plan";
   const fallback =
     kind === "connected"
       ? "Kroger connected."
@@ -72,7 +72,8 @@ export function krogerReturnMarksConnected(kind) {
 }
 
 export const KROGER_TRIP_KEY = "gg-kroger-trip";
-export const KROGER_LEAVE_NOTE = "Kroger will ask you to sign in once, then bring you right back.";
+export const KROGER_LEAVE_NOTE =
+  "Kroger's sign-in stays in a browser window. Their login page can't be embedded here. We'll bring you back to this same tab.";
 
 /**
  * iOS standalone PWAs lose the page when login.kroger.com replaces the tab.
@@ -107,8 +108,9 @@ export function krogerAddedConfirmation(message, fallbackCount) {
  */
 export function saveKrogerTrip(storage, state = {}) {
   if (!storage) return false;
+  const requestedStep = state.step === "plan" || state.step === "add" || state.step === "shop" ? state.step : "shop";
   const payload = {
-    step: "shop",
+    step: requestedStep,
     scroll: Math.max(0, Math.floor(Number(state.scroll) || 0)),
     itemCount: Math.max(0, Math.floor(Number(state.itemCount) || 0)),
     pendingSend: true,
@@ -136,7 +138,8 @@ export function readKrogerTrip(storage) {
   if (!storage) return null;
   try {
     const parsed = JSON.parse(storage.getItem(KROGER_TRIP_KEY) || "null");
-    if (!parsed || parsed.pendingSend !== true || parsed.step !== "shop") return null;
+    if (!parsed || parsed.pendingSend !== true) return null;
+    if (parsed.step !== "shop" && parsed.step !== "plan" && parsed.step !== "add") return null;
     return parsed;
   } catch {
     return null;

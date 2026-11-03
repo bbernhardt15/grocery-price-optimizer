@@ -13,7 +13,7 @@ const kroger = readFileSync(new URL("../../public/shopper/krogerReturn.js", impo
 
 describe("seventh phone retest regressions", () => {
   it("bumps the shell cache to v30 and keeps the Walmart cart button", () => {
-    assert.match(sw, /grocery-gitter-shell-v30/);
+    assert.match(sw, /grocery-gitter-shell-v32/);
     assert.match(app, /data-walmart-cart/);
     assert.match(app, /Open in Walmart cart/);
     assert.match(app, /startsWith\("custom:"\)/);
@@ -22,7 +22,7 @@ describe("seventh phone retest regressions", () => {
   it("shows an editable ZIP and explains the Kroger handoff before leaving", () => {
     assert.match(profile, /Not right\? Edit it/);
     assert.match(profile, /zipContinueDecision/);
-    assert.match(kroger, /Kroger will ask you to sign in once, then bring you right back/);
+    assert.match(kroger, /Kroger's sign-in stays in a browser window/);
     assert.match(app, /saveKrogerTrip/);
     assert.match(app, /emptyCheckedStoreHtml/);
     assert.match(app, /totalPhrase/);

@@ -13,6 +13,13 @@ function normName(item) {
     .trim();
 }
 
+function coreName(item) {
+  return normName(item)
+    .replace(/\b(?:sauce|pasta|traditional|original|classic|jar|bottle|can|the)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normUpc(item) {
   const raw = item?.upc || item?.choices?.[0]?.product?.upc || "";
   const digits = String(raw).replace(/\D/g, "");
@@ -30,20 +37,28 @@ export function dedupeReviewItems(items) {
   const out = [];
   const byUpc = new Map();
   const byName = new Map();
+  const byCore = new Map();
+  const bySelected = new Map();
   for (const item of list) {
     if (!item) continue;
     const upc = normUpc(item);
     const name = normName(item);
+    const core = coreName(item);
+    const selected = String(item.selectedId || "");
     const named = name && byName.has(name) ? byName.get(name) : undefined;
+    const cored = core && byCore.has(core) ? byCore.get(core) : undefined;
+    const picked = selected && bySelected.has(selected) ? bySelected.get(selected) : undefined;
     const coded = upc && byUpc.has(upc) ? byUpc.get(upc) : undefined;
     const codedName = coded == null ? "" : normName(out[coded]);
-    const priorIndex = named ?? (coded != null && (!name || !codedName || codedName === name) ? coded : undefined);
+    const priorIndex = named ?? picked ?? cored ?? (coded != null && (!name || !codedName || codedName === name) ? coded : undefined);
     if (priorIndex == null) {
       const copy = { ...item, quantity: Math.max(1, Math.min(99, Number(item.quantity) || 1)) };
       const index = out.length;
       out.push(copy);
       if (upc) byUpc.set(upc, index);
       if (name) byName.set(name, index);
+      if (core) byCore.set(core, index);
+      if (selected) bySelected.set(selected, index);
       continue;
     }
     const prior = out[priorIndex];
@@ -59,6 +74,8 @@ export function dedupeReviewItems(items) {
     out[priorIndex] = merged;
     if (upc) byUpc.set(upc, priorIndex);
     if (name) byName.set(name, priorIndex);
+    if (core) byCore.set(core, priorIndex);
+    if (selected) bySelected.set(selected, priorIndex);
   }
   return out.map((item, index) => ({ ...item, key: item.key || `item-${index + 1}` }));
 }

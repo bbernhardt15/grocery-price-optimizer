@@ -30,6 +30,8 @@ export type CatalogProduct = {
   updatedAt?: Date;
   /** Retailer size text ("12 oz", "1 gal", "18 ct") when the API sent one. */
   size?: string;
+  /** Store aisle from a retailer location feed, such as Kroger aisleLocations. */
+  aisleLocation?: string;
   /** In-memory: the grocery line that fetched this row for this request. */
   sourceQuery?: string;
   /**
@@ -88,6 +90,8 @@ export type PickedItem = {
   department?: string;
   /** Aisle or subcategory when one is known. */
   aisle?: string;
+  /** True when the aisle came from the store's product location, not a department guess. */
+  aisleKnown?: boolean;
   /** True only when this line's price source says the selling price is a sale. */
   onSale?: boolean;
   /** Old price when the same source sent one higher than `price`. */
@@ -113,6 +117,7 @@ export type ItemOffer = {
   priceSource?: PriceSource;
   department?: string;
   aisle?: string;
+  aisleKnown?: boolean;
   /** Filled in when the trip is enriched with handoff links. */
   url?: string;
   onSale?: boolean;
@@ -404,7 +409,11 @@ function toItemOffer(
     ...(product.locationId ? { locationId: product.locationId } : {}),
     ...(product.priceSource ? { priceSource: product.priceSource } : {}),
     department: mapped.departmentName,
-    ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    ...(product.aisleLocation
+      ? { aisle: product.aisleLocation, aisleKnown: true }
+      : mapped.subcategory
+        ? { aisle: mapped.subcategory }
+        : {}),
     ...saleFields(product),
     ...(extra?.matchKind ? { matchKind: extra.matchKind } : {}),
     ...(extra?.swapNote ? { swapNote: extra.swapNote } : {}),
@@ -464,7 +473,11 @@ function toPicked(
     ...(best.upc ? { upc: best.upc } : {}),
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
     department: mapped.departmentName,
-    ...(mapped.subcategory ? { aisle: mapped.subcategory } : {}),
+    ...(best.aisleLocation
+      ? { aisle: best.aisleLocation, aisleKnown: true }
+      : mapped.subcategory
+        ? { aisle: mapped.subcategory }
+        : {}),
     ...saleFields(best),
     offers,
     ...(extra.exactStore ? { exactStore: extra.exactStore } : {}),
