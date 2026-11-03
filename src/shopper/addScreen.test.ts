@@ -9,13 +9,14 @@ const listHome = readFileSync(new URL("../../public/shopper/listHome.js", import
 
 describe("calm add screen", () => {
   it("leads with one ask field, chips, and a collapsed aisle", () => {
-    assert.match(html, /id="search"[^>]*placeholder="What do you need\?"/);
+    assert.match(html, /id="add-items"/);
+    assert.match(html, /id="search"[^>]*placeholder="Search the catalog"/);
     assert.match(html, /id="ask-mic"/);
     assert.match(html, /id="ask-import"/);
     assert.match(html, /id="starter-lists"/);
     assert.match(html, /Your usuals/);
     assert.match(html, /id="browse-panel" hidden/);
-    assert.match(html, /Browse all items/);
+    assert.match(html, /Browse the catalog by aisle/);
     assert.match(html, /id="refine-count"/);
     assert.match(app, /askIntent/);
     assert.match(app, /importer\?\.find/);

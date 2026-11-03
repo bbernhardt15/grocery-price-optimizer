@@ -9,7 +9,7 @@ import { priceFigure } from "./calmPlan.js";
 export const FLOW_STEPS = [
   { id: "add", label: "Add", title: "Add items" },
   { id: "plan", label: "Review", title: "Review the split" },
-  { id: "shop", label: "Shop", title: "In the store" },
+  { id: "shop", label: "In-store", title: "In the store" },
 ];
 
 /** @param {string | null | undefined} id */
@@ -66,9 +66,8 @@ export function planBarCopy(input = {}) {
     enabled = count > 0;
     showButton = true;
   } else if (step === "shop") {
-    button = "Done";
-    // A disabled Done swallows the tap. Incomplete trips still respond.
-    enabled = count > 0;
+    button = "Clear checked";
+    enabled = count > 0 && left < count;
     showButton = true;
   }
   if (input.planning && step === "plan" && !input.hasPlan) {
@@ -85,8 +84,10 @@ export function planBarCopy(input = {}) {
  * @param {boolean} complete
  */
 export function totalPhrase(amount, complete) {
-  const figure = priceFigure(amount);
+  const value = Number(amount);
   const label = complete ? "Total" : "Estimated total";
+  if (!Number.isFinite(value) || value <= 0) return { label, text: "" };
+  const figure = priceFigure(value);
   return { label, text: figure ? `${label} ${figure}` : "" };
 }
 

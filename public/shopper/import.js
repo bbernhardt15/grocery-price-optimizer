@@ -14,6 +14,11 @@ export function foundLabel(found, total) {
   return `Found ${found} of ${total} ${noun}`;
 }
 
+/** Checked rows that will be added. This is the number on the button. */
+export function checkedReviewCount(items) {
+  return (items || []).filter((item) => item?.accepted && (item.selectedId || item.custom)).length;
+}
+
 export function acceptLabel(count) {
   if (count === 1) return "Add 1 item to my trip";
   return `Add ${count} items to my trip`;
@@ -188,6 +193,10 @@ export function mountImport(deps) {
         <h2 id="import-title" tabindex="-1">Import your list</h2>
         <button type="button" class="text-btn" id="import-close">Close</button>
       </div>
+      <div id="import-progress" class="import-progress" hidden>
+        <span class="import-spinner" aria-hidden="true"></span>
+        <p id="import-progress-text">Working…</p>
+      </div>
       <div id="import-home">
         <button type="button" class="import-mic" id="import-mic" aria-pressed="false" aria-label="Speak your list">
           ${MIC}<span>Speak</span>
@@ -214,7 +223,7 @@ export function mountImport(deps) {
           <button type="button" class="ghost" id="import-ask-go">Suggest a list</button>
         </details>
         <input id="import-photo-input" type="file" accept="image/*" hidden />
-        <input id="import-file-input" type="file" accept="image/*,audio/*,.txt,.csv,text/plain,text/csv" hidden />
+        <input id="import-file-input" type="file" accept="image/*,audio/*,.pdf,application/pdf,.txt,.csv,text/plain,text/csv" hidden />
       </div>
       <div id="import-listen" hidden>
         <div class="import-listening" data-state="recording">
@@ -249,6 +258,25 @@ export function mountImport(deps) {
     statusEl.dataset.kind = kind || "";
     if (kind === "error") statusEl.setAttribute("role", "alert");
     else statusEl.setAttribute("role", "status");
+    const banner = $("import-progress");
+    const text = $("import-progress-text");
+    if (banner && text) {
+      const show = Boolean(message);
+      banner.hidden = !show;
+      banner.dataset.kind = kind || (show ? "busy" : "");
+      text.textContent = message || "";
+      if (show) {
+        dialog.scrollTop = 0;
+        dialog.querySelector(".sheet-body")?.scrollTo?.(0, 0);
+      }
+    }
+  }
+
+  function setImportBusy(on) {
+    dialog.querySelectorAll("button, input, textarea").forEach((el) => {
+      if (el.id === "import-close") return;
+      el.disabled = Boolean(on);
+    });
   }
 
   function show(which) {
@@ -420,14 +448,11 @@ export function mountImport(deps) {
   }
 
   function acceptedCount() {
-    return addedUnits(
-      (review?.items || [])
-        .filter((item) => item.accepted && item.selectedId)
-        .map((item) => ({ productId: item.selectedId, quantity: item.quantity }))
-    );
+    return checkedReviewCount(review?.items);
   }
 
   function choiceProduct(item) {
+    if (item?.custom) return customCatalogProduct(item.raw || item.name);
     return item.choices?.find((choice) => choice.product?.id === item.selectedId)?.product || null;
   }
 
@@ -475,6 +500,7 @@ export function mountImport(deps) {
             <h3>${escapeHtml(item.raw || item.name)}</h3>
             <p class="import-note">Not on the shelf.</p>
             <div class="import-tools">
+              <button type="button" class="ghost" data-custom="${escapeHtml(item.key)}">Add as your own item</button>
               <button type="button" class="ghost" data-search="${escapeHtml(item.key)}">Search for it</button>
               <button type="button" class="text-btn" data-skip="${escapeHtml(item.key)}">Skip</button>
               <button type="button" class="text-btn" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(item.raw || item.name || "item")}">×</button>
@@ -565,13 +591,49 @@ export function mountImport(deps) {
       setStatus("Paste a list first.", "error");
       return;
     }
-    setStatus("Matching what you already buy…");
+    setStatus("Matching what you already buy…", "busy");
+    setImportBusy(true);
     try {
       review = prepareReview(await post("/api/import/text", { text: trimmed }));
-      setStatus("");
+      const found = review?.found ?? 0;
+      const total = review?.total ?? 0;
+      setStatus(total ? `Found ${found} of ${total}.` : "Done.", "done");
       renderReview();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Something went wrong reading that. Paste the list instead.", "error");
+      show("home");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function runPdf(file) {
+    setStatus("Reading the PDF…", "busy");
+    setImportBusy(true);
+    show("home");
+    try {
+      const pdfBase64 = await blobToBase64(file);
+      const analysis = await post("/api/import/pdf", { pdfBase64 });
+      const lines = Array.isArray(analysis?.lines) ? analysis.lines : [];
+      const text = lines
+        .map((line) => [line.quantity > 1 ? line.quantity : "", line.brand, line.name].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .join("\n");
+      if (!text.trim()) {
+        setStatus(analysis?.error || "Couldn't read that PDF. Try a screenshot, or paste the list.", "error");
+        return;
+      }
+      setStatus("Matching what you already buy…", "busy");
+      review = prepareReview(await post("/api/import/text", { text }));
+      const found = review?.found ?? 0;
+      const total = review?.total ?? review?.items?.length ?? 0;
+      setStatus(total ? `Found ${found} of ${total}.` : "Done.", "done");
+      renderReview();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Couldn't read that PDF. Try a screenshot, or paste the list.", "error");
+      show("home");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -593,7 +655,9 @@ export function mountImport(deps) {
       show("home");
       return;
     }
-    setStatus("Reading the photo…");
+    setStatus("Reading the photo…", "busy");
+    setImportBusy(true);
+    show("home");
     try {
       const { imageBlobs } = await import("./receiptImages.js");
       const prepared = await imageBlobs(file);
@@ -609,17 +673,42 @@ export function mountImport(deps) {
         else if (Array.isArray(part.items)) merged = prepareReview({ ...merged, items: [...(merged.items || []), ...part.items] });
       }
       review = prepareReview(merged);
-      setStatus("");
+      const found = review?.found ?? 0;
+      const total = review?.total ?? 0;
+      setStatus(total ? `Found ${found} of ${total}.` : "Done.", "done");
       renderReview();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "That photo didn't open. Try a screenshot, or paste the text.", "error");
+      show("home");
+    } finally {
+      setImportBusy(false);
     }
   }
 
   async function runFile(file) {
-    if (file.type.startsWith("image/")) return runPhoto(file);
-    if (file.type.startsWith("audio/") || file.type.startsWith("video/")) return runAudioBlob(file);
-    const text = await file.text();
+    if (!file) {
+      setStatus("Nothing was selected.", "error");
+      show("home");
+      return;
+    }
+    const name = String(file.name || "").toLowerCase();
+    const type = String(file.type || "").toLowerCase();
+    if (type === "application/pdf" || name.endsWith(".pdf")) return runPdf(file);
+    if (type.startsWith("image/")) return runPhoto(file);
+    if (type.startsWith("audio/") || type.startsWith("video/")) return runAudioBlob(file);
+    let text = "";
+    try {
+      text = await file.text();
+    } catch {
+      setStatus("That file didn't open. Try a PDF, a photo, or paste the list.", "error");
+      show("home");
+      return;
+    }
+    if (!String(text || "").trim() || type === "application/octet-stream") {
+      setStatus("Couldn't read that file. Try a PDF, a photo, or paste the list.", "error");
+      show("home");
+      return;
+    }
     return runText(text);
   }
 
@@ -982,6 +1071,7 @@ export function mountImport(deps) {
       target.dataset.size ||
       target.dataset.search ||
       target.dataset.searchGo ||
+      target.dataset.custom ||
       target.dataset.customAdd ||
       target.dataset.skip ||
       target.dataset.remove ||
@@ -1050,7 +1140,7 @@ export function mountImport(deps) {
       void searchItem(item, item.searchQuery);
       return;
     }
-    if (target.dataset.customAdd) {
+    if (target.dataset.custom || target.dataset.customAdd) {
       const product = customCatalogProduct(item.searchQuery || item.raw || item.name);
       item.choices = [{ product, score: 1 }];
       item.selectedId = product.id;
@@ -1153,12 +1243,15 @@ export function mountImport(deps) {
       if (!prepared?.product?.id) continue;
       pending.push({ productId: prepared.product.id, quantity: item.quantity, product: prepared.product, options: prepared.options || {} });
     }
-    const addedCount = addedUnits(pending);
-    const seen = new Set();
+    const addedCount = chosen.length;
+    const byId = new Map();
     for (const row of pending) {
-      if (seen.has(row.productId)) continue;
-      seen.add(row.productId);
-      deps.addProduct(row.product, Math.max(1, Math.min(99, Math.floor(Number(row.quantity) || 1))), { quiet: true, ...row.options });
+      const have = byId.get(row.productId);
+      if (have) have.quantity += Math.max(1, Math.floor(Number(row.quantity) || 1));
+      else byId.set(row.productId, { ...row, quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)) });
+    }
+    for (const row of byId.values()) {
+      deps.addProduct(row.product, Math.max(1, Math.min(99, row.quantity)), { quiet: true, ...row.options });
     }
     if (!addedCount) {
       toast("Those items don't fit your taste profile.");

@@ -48,45 +48,14 @@
           <span class="menu-glyph" aria-hidden="true">☰</span>
           <span id="menu-badge" class="menu-dot" hidden></span>
         </button>
-        <div class="brand">
+        <button type="button" id="brand-home" class="brand brand-home" aria-label="Home">
           <span class="brand-mark" aria-hidden="true">G</span>
           <div>
             <p class="brand-kicker">Grocery Gitter</p>
             <p class="brand-title" id="brand-title">Add items</p>
           </div>
-        </div>
-
-        <form id="search-form" class="search" role="search" autocomplete="off">
-          <label class="sr-only" for="search">What do you need?</label>
-          <div class="ask-field">
-            <input
-              id="search"
-              type="search"
-              name="q"
-              placeholder="What do you need?"
-              maxlength="400"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded="false"
-              aria-controls="suggest-panel"
-              aria-haspopup="listbox"
-              aria-describedby="ask-hint"
-              enterkeyhint="search"
-            />
-            <div class="ask-actions">
-              <button type="button" class="ask-mic" id="ask-mic" aria-label="Speak your list">
-                <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
-              </button>
-              <button type="button" class="ask-import" id="ask-import" aria-label="Paste, photo, or file">
-                <span class="ask-import-label">Import</span>
-              </button>
-            </div>
-          </div>
-          <div id="suggest-panel" class="suggestions" hidden>
-            <p id="suggest-status" class="suggest-status" role="status" hidden></p>
-            <ul id="suggestions" role="listbox" hidden></ul>
-          </div>
-        </form>
+        </button>
+        <button type="button" id="add-items" class="primary add-items">Add items</button>
         <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
           My list
           <span id="list-count" class="count-pill">0</span>
@@ -128,6 +97,16 @@
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="drawer-profile" type="button" class="ghost">Edit my taste profile</button>
           <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
+          <nav class="menu-nav" aria-label="Menu">
+            <button type="button" id="menu-home">Home</button>
+            <button type="button" id="menu-brands">My brands and preferences</button>
+            <button type="button" id="menu-zip">Edit ZIP and stores</button>
+            <button type="button" id="menu-new-trip">Start a new trip</button>
+            <button type="button" id="menu-settings">Settings</button>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <button type="button" id="menu-redo">Redo setup</button>
+          </nav>
           <section class="drawer-help" aria-labelledby="help-title">
             <h2 id="help-title">Help</h2>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
@@ -148,8 +127,14 @@
         <main id="catalog" class="catalog" tabindex="-1">
           <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
           <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs.</p>
-          <div id="shelf-entry" class="shelf-entry">
-            <button type="button" id="shelf-scan" class="ghost" hidden>Scan fridge or pantry</button>
+          <div id="shelf-entry" class="feature-cards">
+            <button type="button" id="shelf-scan" class="feature-card" hidden>
+              <span class="feature-icon" aria-hidden="true">Scan</span>
+              <span class="feature-copy">
+                <strong>Scan fridge or pantry</strong>
+                <span class="muted">Photo what you already have.</span>
+              </span>
+            </button>
             <p id="shelf-scan-off" class="shelf-note" hidden>Fridge and pantry scan needs photo reading, which isn't switched on.</p>
           </div>
           <p id="profile-warning" class="profile-warning" role="status" hidden></p>
@@ -165,10 +150,45 @@
             <div id="starter-lists" class="list-home"></div>
           </section>
           <section id="browse" class="browse">
-            <button type="button" id="browse-toggle" class="browse-toggle" aria-expanded="false" aria-controls="browse-panel">
-              <span id="browse-label">Browse all items</span>
+            <button type="button" id="browse-toggle" class="feature-card browse-toggle" aria-expanded="false" aria-controls="browse-panel">
+              <span class="feature-icon" aria-hidden="true">Aisles</span>
+              <span class="feature-copy">
+                <strong id="browse-label">Browse the catalog by aisle</strong>
+                <span class="muted">Every department, from produce to frozen.</span>
+              </span>
             </button>
             <div id="browse-panel" hidden>
+              <form id="search-form" class="search browse-search" role="search" autocomplete="off">
+                <label class="sr-only" for="search">Search the catalog</label>
+                <div class="ask-field">
+                  <input
+                    id="search"
+                    type="search"
+                    name="q"
+                    placeholder="Search the catalog"
+                    maxlength="400"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded="false"
+                    aria-controls="suggest-panel"
+                    aria-haspopup="listbox"
+                    aria-describedby="ask-hint"
+                    enterkeyhint="search"
+                  />
+                  <div class="ask-actions">
+                    <button type="button" class="ask-mic" id="ask-mic" aria-label="Speak your list">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                    </button>
+                    <button type="button" class="ask-import" id="ask-import" aria-label="Paste, photo, or file">
+                      <span class="ask-import-label">Import</span>
+                    </button>
+                  </div>
+                </div>
+                <div id="suggest-panel" class="suggestions" hidden>
+                  <p id="suggest-status" class="suggest-status" role="status" hidden></p>
+                  <ul id="suggestions" role="listbox" hidden></ul>
+                </div>
+              </form>
               <div class="dept-scroller">
                 <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
                 <span id="chip-hint" class="chip-hint" hidden>More</span>
@@ -297,7 +317,7 @@
         <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
           <button type="button" data-flow="add" aria-current="step" aria-label="Add items">Add</button>
           <button type="button" data-flow="plan" aria-label="Review the split">Review</button>
-          <button type="button" data-flow="shop" aria-label="In the store">Shop</button>
+          <button type="button" data-flow="shop" aria-label="In the store">In-store</button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">
@@ -314,7 +334,7 @@
             <span id="shop-count">Nothing to shop</span>
             <span id="shop-total"></span>
           </button>
-          <button type="button" id="shop-done" class="primary bar-primary" disabled>Done</button>
+          <button type="button" id="shop-done" class="primary bar-primary" disabled>Clear checked</button>
         </div>
       </footer>
     </div>
@@ -518,7 +538,39 @@
         </div>
       </form>
     </dialog>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <dialog id="trip-summary" class="sheet" aria-labelledby="trip-summary-title">
+      <div class="sheet-body">
+        <div class="list-head">
+          <h2 id="trip-summary-title">This trip</h2>
+          <button type="button" class="text-btn" id="trip-summary-close">Close</button>
+        </div>
+        <div id="trip-summary-body"></div>
+      </div>
+    </dialog>
+    <dialog id="store-return" class="sheet" aria-labelledby="store-return-title">
+      <form class="sheet-body" id="store-return-form">
+        <h2 id="store-return-title">Did you finish at the store?</h2>
+        <p>A website can't come back from the store on its own.</p>
+        <div class="onboard-actions">
+          <button type="button" class="ghost" id="store-return-no">Not yet</button>
+          <button type="submit" class="primary" id="store-return-yes">Yes</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="clear-trip" class="sheet" aria-labelledby="clear-trip-title">
+      <form class="sheet-body" id="clear-trip-form">
+        <h2 id="clear-trip-title">Clear this trip?</h2>
+        <p>Your items come off the list. You can undo it for a few seconds.</p>
+        <div class="onboard-actions">
+          <button type="button" class="ghost" id="clear-trip-cancel">Keep it</button>
+          <button type="submit" class="primary" id="clear-trip-yes">Clear trip</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="trip-value" class="sheet" aria-labelledby="trip-value-title">
+      <div class="sheet-body" id="trip-value-body"></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"><span id="toast-text"></span><button type="button" id="toast-action" hidden>Undo</button></div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>

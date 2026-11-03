@@ -53,7 +53,8 @@ describe("Kroger return", () => {
   });
 
   it("keeps the shop tab across a Kroger sign-in and says how many items were added", () => {
-    assert.equal(KROGER_LEAVE_NOTE, "Kroger will ask you to sign in once, then bring you right back.");
+    assert.match(KROGER_LEAVE_NOTE, /sign-in stays in a browser window/);
+    assert.match(KROGER_LEAVE_NOTE, /same tab/);
     assert.equal(
       krogerLoginMode({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", standalone: true }),
       "popup"

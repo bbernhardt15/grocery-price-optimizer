@@ -237,6 +237,11 @@ export function matchImportItems(items: ParsedImportItem[], products: BrowseProd
     else if (best && best.score >= 0.62) status = "ambiguous";
     else status = "missing";
 
+    if (status === "missing") {
+      console.info(
+        `import match missing name=${JSON.stringify(item.name)} brand=${JSON.stringify(item.brand || "")} best=${Number.isFinite(best?.score) ? best.score.toFixed(2) : "0"}`
+      );
+    }
     const shown = status === "missing" ? [] : close;
     const choices = shown.map((row) => {
       const variant = closestVariant(item, row.tile);

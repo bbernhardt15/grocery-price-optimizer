@@ -709,46 +709,75 @@ export function fewerStorePlan(stores, capabilities = {}) {
     };
     return rank(a) - rank(b) || a.localeCompare(b);
   });
+
+  function planFor(chosen) {
+    const buckets = new Map(chosen.map((name) => [normalizeStoreKey(name), { storeName: name, items: [] }]));
+    const leftover = new Map();
+    for (const item of items) {
+      const options = chosen
+        .map((name) => itemCover(name, item))
+        .filter(Boolean)
+        .sort((a, b) => a.price - b.price);
+      if (!options.length) {
+        const key = normalizeStoreKey(item.storeName);
+        if (!leftover.has(key)) leftover.set(key, { storeName: item.storeName, items: [] });
+        leftover.get(key).items.push(item);
+        continue;
+      }
+      const best = options[0];
+      const bucket = buckets.get(normalizeStoreKey(best.storeName));
+      bucket.items.push(best.offer ? lineFromOffer(item, best.offer) : { ...item, storeName: best.storeName });
+    }
+    const next = [...buckets.values(), ...leftover.values()].filter((store) => store.items.length);
+    const rebuilt = applyTripEdits(
+      next.map((group) => ({
+        storeName: group.storeName,
+        items: group.items,
+        subtotal: roundMoney(group.items.reduce((sum, item) => sum + Number(item.itemTotal || Number(item.price) || 0), 0)),
+      })),
+      {},
+      capabilities
+    );
+    const total = roundMoney((rebuilt.stores || []).reduce((sum, store) => sum + Number(store.subtotal || 0), 0));
+    return {
+      stores: rebuilt.stores || [],
+      total,
+      stops: (rebuilt.stores || []).length,
+      delta: roundMoney(total - spreadTotal),
+      spreadTotal,
+    };
+  }
+
+  const cartNames = ranked.filter((name) => CART_RANK.includes(normalizeStoreKey(name)));
+  let single = null;
+  for (const name of cartNames) {
+    const covers = items.filter((item) => itemCover(name, item)).length;
+    if (covers < items.length) continue;
+    const plan = planFor([name]);
+    if (!single || plan.total < single.total) single = plan;
+  }
+  if (single && single.stops < groups.length) return single;
+
   const chosen = [];
   for (const name of ranked) {
     if (chosen.length >= 2) break;
     if (items.some((item) => itemCover(name, item))) chosen.push(name);
   }
-  const buckets = new Map(chosen.map((name) => [normalizeStoreKey(name), { storeName: name, items: [] }]));
-  const leftover = new Map();
-  for (const item of items) {
-    const options = chosen
-      .map((name) => itemCover(name, item))
+  return planFor(chosen);
+}
+
+/** True when the fewer-stores plan is the same trip as the best price. */
+export function plansAreIdentical(spreadStores, spreadTotal, fewer) {
+  if (!fewer?.stores) return true;
+  const names = (rows) =>
+    (rows || [])
+      .map((store) => normalizeStoreKey(store?.storeName))
       .filter(Boolean)
-      .sort((a, b) => a.price - b.price);
-    if (!options.length) {
-      const key = normalizeStoreKey(item.storeName);
-      if (!leftover.has(key)) leftover.set(key, { storeName: item.storeName, items: [] });
-      leftover.get(key).items.push(item);
-      continue;
-    }
-    const best = options[0];
-    const bucket = buckets.get(normalizeStoreKey(best.storeName));
-    bucket.items.push(best.offer ? lineFromOffer(item, best.offer) : { ...item, storeName: best.storeName });
-  }
-  const next = [...buckets.values(), ...leftover.values()].filter((store) => store.items.length);
-  const rebuilt = applyTripEdits(
-    next.map((group) => ({
-      storeName: group.storeName,
-      items: group.items,
-      subtotal: roundMoney(group.items.reduce((sum, item) => sum + Number(item.itemTotal || Number(item.price) || 0), 0)),
-    })),
-    {},
-    capabilities
-  );
-  const total = roundMoney((rebuilt.stores || []).reduce((sum, store) => sum + Number(store.subtotal || 0), 0));
-  return {
-    stores: rebuilt.stores || [],
-    total,
-    stops: (rebuilt.stores || []).length,
-    delta: roundMoney(total - spreadTotal),
-    spreadTotal,
-  };
+      .sort();
+  const left = names(spreadStores);
+  const right = names(fewer.stores);
+  const sameStores = left.length === right.length && left.every((name, index) => name === right[index]);
+  return sameStores && Math.abs(Number(spreadTotal) - Number(fewer.total)) < 0.02;
 }
 
 /** Kroger can write the account cart. Walmart is only a cart link. Every other store is a list. */

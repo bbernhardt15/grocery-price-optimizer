@@ -5,6 +5,87 @@
 
 import { groupForAisle, readTripSnapshot } from "./tripPlan.js";
 
+/** Walking order for a store whose aisle numbers we do not have. */
+export const WALK_ORDER = [
+  { id: "produce", label: "Produce", departments: ["Produce"] },
+  { id: "bakery", label: "Bakery", departments: ["Bakery"] },
+  { id: "deli", label: "Deli", departments: ["Deli"] },
+  { id: "meat", label: "Meat", departments: ["Meat & Seafood"] },
+  { id: "dairy", label: "Dairy", departments: ["Dairy & Eggs"] },
+  { id: "center", label: "Center store", departments: ["Pantry", "Snacks", "Beverages", "Breakfast", "Baby", "Household", "Personal Care", "Pet"] },
+  { id: "frozen", label: "Frozen", departments: ["Frozen"] },
+  { id: "checkout", label: "Checkout", departments: ["Other"] },
+];
+
+export const LAYOUT_NOTE = "Typical layout, aisle numbers vary";
+
+/** @param {{ aisle?: string, aisleKnown?: boolean } | null | undefined} item */
+export function aisleIsKnown(item) {
+  if (item?.aisleKnown) return true;
+  return /^aisle\b/i.test(String(item?.aisle || ""));
+}
+
+function walkBucket(department) {
+  const name = String(department || "Other");
+  return WALK_ORDER.find((row) => row.departments.includes(name)) || WALK_ORDER[WALK_ORDER.length - 1];
+}
+
+/**
+ * Numbered walking route. Known Kroger aisles stay in aisle order.
+ * A guess uses the typical department walk and says so.
+ * Checked lines leave the route and sit in an In cart group.
+ * @param {Array<{ storeName: string, subtotal?: number, items?: object[] }>} stores
+ * @param {Record<string, boolean>} [checks]
+ */
+export function inStoreRoute(stores, checks = {}) {
+  return (stores || [])
+    .filter((store) => (store.items || []).length)
+    .map((store) => {
+      const open = [];
+      const cart = [];
+      for (const item of store.items || []) {
+        if (item?.lineId && checks?.[item.lineId]) cart.push(item);
+        else open.push(item);
+      }
+      const known = open.some((item) => aisleIsKnown(item)) || (store.items || []).some((item) => aisleIsKnown(item));
+      /** @type {Array<{ label: string, items: object[] }>} */
+      const groups = [];
+      if (known) {
+        const sorted = [...open].sort((a, b) => String(a.aisle || "zzz").localeCompare(String(b.aisle || "zzz"), undefined, { numeric: true }) || String(a.name || "").localeCompare(String(b.name || "")));
+        for (const item of sorted) {
+          const label = aisleIsKnown(item) ? String(item.aisle || "Aisle") : walkBucket(item.department).label;
+          const last = groups[groups.length - 1];
+          if (last && last.label === label) last.items.push(item);
+          else groups.push({ label, items: [item] });
+        }
+      } else {
+        for (const bucket of WALK_ORDER) {
+          const items = open
+            .filter((item) => walkBucket(item.department).id === bucket.id)
+            .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+          if (items.length) groups.push({ label: bucket.label, items });
+        }
+      }
+      let number = 0;
+      const numbered = groups.map((group) => ({
+        label: group.label,
+        items: group.items.map((item) => {
+          number += 1;
+          return { ...item, routeNumber: number };
+        }),
+      }));
+      return {
+        storeName: store.storeName,
+        subtotal: store.subtotal,
+        known,
+        note: known ? "" : LAYOUT_NOTE,
+        groups: numbered,
+        cart,
+        left: open.length,
+      };
+    });
+}
+
 /**
  * @param {Array<{ storeName: string, subtotal?: number, items?: object[] }>} stores
  */

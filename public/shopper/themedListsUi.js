@@ -100,9 +100,12 @@ export function nudgeHtml(escapeHtml) {
 }
 
 export function listsEntryHtml(hint, escapeHtml) {
-  return `<button type="button" class="lists-entry" data-lists-open>
-    <span>Themed lists</span>
-    <span class="muted">${text(escapeHtml, hint || "Holiday baking and other lists")}</span>
+  return `<button type="button" class="feature-card" data-lists-open>
+    <span class="feature-icon" aria-hidden="true">Lists</span>
+    <span class="feature-copy">
+      <strong>Themed lists</strong>
+      <span class="muted">${text(escapeHtml, hint || "Holiday baking, parties, and other lists")}</span>
+    </span>
   </button>`;
 }
 

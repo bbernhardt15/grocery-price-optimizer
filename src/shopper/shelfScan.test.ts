@@ -191,12 +191,12 @@ describe("shelf scan list rules", () => {
     const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
     const client = readFileSync(new URL("../../public/shopper/shelfScan.js", import.meta.url), "utf8");
-    assert.match(html, /id="shelf-scan"[^>]*>Scan fridge or pantry/);
+    assert.match(html, /id="shelf-scan"[\s\S]{0,300}Scan fridge or pantry/);
     assert.match(html, /id="shelf-scan-off"/);
     assert.match(html, /Fridge and pantry scan needs photo reading/);
     assert.match(app, /mountShelfScan/);
     assert.match(app, /addFromPreferences/);
-    assert.match(sw, /grocery-gitter-shell-v30/);
+    assert.match(sw, /grocery-gitter-shell-v32/);
     assert.match(client, /capture="environment"/);
     assert.match(client, /accept="image\/\*" multiple/);
     assert.match(client, /imageBlobs/);

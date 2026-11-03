@@ -10,7 +10,7 @@ describe("three-step flow", () => {
   it("stays on add, plan, and shop", () => {
     assert.deepEqual(
       FLOW_STEPS.map((step) => step.label),
-      ["Add", "Review", "Shop"]
+      ["Add", "Review", "In-store"]
     );
     assert.equal(stepTitle("add"), "Add items");
     assert.equal(stepTitle("plan"), "Review the split");
@@ -57,7 +57,7 @@ describe("three-step flow", () => {
 
     const shop = planBarCopy({ step: "shop", itemCount: 4, left: 1, total: 9, complete: false });
     assert.equal(shop.countLabel, "1 left");
-    assert.equal(shop.button, "Done");
+    assert.equal(shop.button, "Clear checked");
     assert.equal(shop.enabled, true);
 
     const done = planBarCopy({ step: "shop", itemCount: 4, left: 0, total: 9, complete: true });
@@ -89,7 +89,7 @@ describe("three-step flow", () => {
     assert.match(html, /id="shop-bar"/);
     assert.match(html, /aria-label="Add items">Add</);
     assert.match(html, /aria-label="Review the split">Review</);
-    assert.match(html, /aria-label="In the store">Shop</);
+    assert.match(html, /aria-label="In the store">In-store</);
     assert.match(html, /Add items/);
     assert.match(html, /Review the split/);
     assert.match(html, /id="bar-primary"/);

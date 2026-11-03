@@ -55,8 +55,8 @@ body[data-step="shop"] {
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; min-height: 100%; max-width: 100%; }
-html { scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--bar-h) + 16px); overflow-x: clip; }
-body { overflow-x: clip; }
+html { scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--bar-h) + 16px); overflow-x: clip; overscroll-behavior-y: none; }
+body { overflow-x: clip; overscroll-behavior-y: none; }
 body {
   font-family: var(--font);
   color: var(--ink);
@@ -659,11 +659,22 @@ dialog.shelf-sheet .sheet-body {
 .plan-btn, #sample-btn { width: 100%; }
 .sub-note { margin-top: -4px; }
 .panel-legal, .site-footer nav {
-  display: flex; flex-wrap: wrap; gap: 14px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 16px;
   margin: 4px 0 0; font-size: 0.85rem;
 }
-.site-footer { margin: 28px 0 8px; }
-.panel-legal a, .site-footer a { color: var(--muted); }
+.site-footer { margin: 28px 0 8px; text-align: left; }
+.panel-legal a, .site-footer a, .panel-legal button.linkish, .site-footer button.linkish {
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 8px 0;
+  margin: 0;
+  font: inherit;
+  line-height: 1;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
 
 .bottom-dock {
   position: fixed; left: 0; right: 0; z-index: 8; pointer-events: auto;
@@ -949,7 +960,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
 }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 
 .settings-group h3 { margin: 8px 0 0; font-family: var(--display); font-size: 1.05rem; }
 .delete-box { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -1325,7 +1336,127 @@ dialog.profile-onboard .profile-actions {
 dialog.profile-onboard[data-step="receipts"] #profile-stage,
 dialog.profile-onboard[data-step="learned"] #profile-stage { padding-bottom: 8px; }
 dialog.profile-onboard[data-step="receipts"] .profile-actions,
-dialog.profile-onboard[data-step="learned"] .profile-actions { position: static; }
+dialog.profile-onboard[data-step="learned"] .profile-actions,
+dialog.profile-onboard[data-step="trip"] .profile-actions { position: static; }
+dialog.profile-onboard[data-step="place"] .profile-actions,
+dialog.profile-onboard[data-step="zip"] .profile-actions {
+  position: sticky;
+  bottom: var(--keyboard, 0px);
+  z-index: 4;
+  background: var(--bg);
+}
+dialog.profile-onboard[data-step="receipts"] .profile-dots { display: none; }
+dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padding: 16px; }
+.drop-primary {
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-style: solid;
+  border-color: var(--accent);
+}
+.drop-primary .muted { color: inherit; opacity: 0.88; }
+.zip-row { display: flex; gap: 8px; align-items: flex-end; }
+.zip-row .profile-field { flex: 1 1 auto; min-width: 0; }
+.zip-done {
+  flex: none;
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 16px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+.feature-cards { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
+.feature-card, .lists-entry.feature-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  min-height: 76px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.feature-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+.feature-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.feature-copy strong { font-size: 1.05rem; }
+.brand-home {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  min-height: 44px;
+  text-align: left;
+}
+.add-items { min-height: 44px; border-radius: 999px; padding: 0 14px; flex: none; }
+.menu-nav { display: flex; flex-direction: column; gap: 4px; }
+.menu-nav button, .menu-nav a {
+  min-height: 44px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  padding: 8px 2px;
+  text-decoration: none;
+}
+.route-num {
+  width: 1.6rem;
+  font-weight: 750;
+  color: var(--accent);
+}
+.shop-line.is-cart .shop-name { text-decoration: line-through; }
+.layout-note { margin: 0; color: var(--muted); }
+.plan-choice-single {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.plan-choice-single p { margin: 0; }
+.value-paid, .value-lifetime { display: flex; justify-content: space-between; gap: 12px; font-size: 1.15rem; }
+.value-store { margin: 12px 0; }
+.value-store ul { list-style: none; margin: 0; padding: 0; }
+.value-store li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.trip-summary-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.trip-summary-list li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
+.toast { display: flex; align-items: center; gap: 10px; }
+.toast button { min-height: 36px; }
+.import-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+}
+.import-progress[hidden] { display: none; }
+.import-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.learned-purpose { font-weight: 650; }
 .receipt-upload { display: flex; flex-direction: column; gap: 16px; }
 .receipt-upload > * { margin: 0; }
 .receipt-upload textarea,

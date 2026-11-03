@@ -126,7 +126,14 @@ export function expandGroceryAliases(text: string): string {
     .replace(/\bcap['’]n\s+crunch\b/gi, "capn crunch")
     .replace(/\bcapn\s+crunch\b/gi, "capn crunch")
     .replace(/\bpop[-\s]?tarts?\b/gi, "pop tarts")
-    .replace(/\bshells\s+cheese\b/gi, "shells and cheese");
+    .replace(/\bshells\s+cheese\b/gi, "shells and cheese")
+    .replace(/\bmarinara\b(?!\s+sauce)/gi, "marinara sauce")
+    .replace(/\bspaghetti sauce\b/gi, "pasta sauce")
+    .replace(/\bhamburger\b/gi, "ground beef")
+    .replace(/\bveggies?\b/gi, "vegetable")
+    .replace(/\blunch meat\b/gi, "deli meat")
+    .replace(/\bpb\b/gi, "peanut butter")
+    .replace(/\boj\b/gi, "orange juice");
 }
 
 export function isFlavorToken(token: string): boolean {
