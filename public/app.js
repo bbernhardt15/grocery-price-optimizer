@@ -152,8 +152,21 @@ import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swap
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { callbackCanClose, emptyMustNotReplace, handoffResultMessage, readTripDb, returnScreenCopy, TRIP_CHANNEL, writeTripDb } from "./shopper/tripSync.js";
+import {
+  chromeFixIsApproximate,
+  handoffBridgePath,
+  handoffResultRecord,
+  handoffTabPlan,
+  HANDOFF_RESULT_KEY,
+  locationDeniedCopy,
+  pwaInstallApplies,
+  readHandoffResult,
+  safeHandoffUrl,
+  viewportInsets,
+  writeHandoffResult,
+} from "./shopper/chromeIos.js";
 import { mergePastTrips, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
-import { APPROXIMATE_ZIP_NOTE, accuracyIsApproximate } from "./shopper/deviceZip.js";
+import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
@@ -243,6 +256,60 @@ async function openExternal(url) {
     return;
   }
   window.open(url, "_blank", "noopener");
+}
+
+/** A store handoff opens our return page. Chrome on iPhone cannot close that tab or message its opener. */
+function openStoreHandoff(url, store, kind) {
+  const safe = safeHandoffUrl(url, window.location.origin) || url;
+  const record = handoffResultRecord(store, kind, { phase: "opened" });
+  writeHandoffResult(localStorage, record);
+  try {
+    tripChannel?.postMessage(record);
+  } catch {
+    /* the storage write is the fallback */
+  }
+  void writeTripDb(typeof indexedDB !== "undefined" ? indexedDB : null, {
+    handoff: record,
+    savedAt: record.at,
+    step: flowStep,
+    items: [],
+  });
+  showStoreReturn(store, record.kind);
+  if (isNative()) {
+    void openExternal(safe);
+    return;
+  }
+  const bridge = handoffBridgePath(store, record.kind, safe);
+  const opened = window.open(bridge, "_blank");
+  if (!opened) window.location.assign(bridge);
+}
+
+function publishHandoff(store, kind, detail) {
+  const record = handoffResultRecord(store, kind, detail || null);
+  writeHandoffResult(localStorage, record);
+  try {
+    tripChannel?.postMessage(record);
+  } catch {
+    /* storage event covers the other tab */
+  }
+  const plan = handoffTabPlan(navigator.userAgent, window.opener);
+  if (plan.postToOpener) {
+    try {
+      window.opener.postMessage(record, window.location.origin);
+    } catch {
+      /* opener is gone on Chrome for iPhone */
+    }
+  }
+  return { record, plan };
+}
+
+let appliedHandoffAt = 0;
+function applySharedHandoff() {
+  const record = readHandoffResult(localStorage);
+  if (!record || record.at <= appliedHandoffAt) return;
+  appliedHandoffAt = record.at;
+  showStoreReturn(record.store, record.kind);
+  rehydrateTrip();
 }
 
 async function syncSystemBars(dark) {
@@ -469,7 +536,7 @@ async function readDeviceCoords() {
     lat: pos.coords.latitude,
     lng: pos.coords.longitude,
     accuracy: meters,
-    approximate: forcedApproximate || accuracyIsApproximate(meters),
+    approximate: chromeFixIsApproximate(navigator.userAgent, meters, forcedApproximate),
   };
 }
 
@@ -875,10 +942,12 @@ function markShellPending() {
 }
 
 function applyShellOnOpen() {
-  const homeScreen = isHomeScreenApp(
-    typeof navigator === "undefined" ? null : navigator,
-    typeof window.matchMedia === "function" ? (query) => window.matchMedia(query) : undefined
-  );
+  const homeScreen =
+    pwaInstallApplies(typeof navigator === "undefined" ? "" : navigator.userAgent) &&
+    isHomeScreenApp(
+      typeof navigator === "undefined" ? null : navigator,
+      typeof window.matchMedia === "function" ? (query) => window.matchMedia(query) : undefined
+    );
   if (
     !shouldApplyShellUpdate({
       pending: shellFlag("gg-apply-shell"),
@@ -1212,8 +1281,12 @@ async function openKrogerLogin(url) {
     userAgent: navigator.userAgent,
     platform: navigator.platform,
     maxTouchPoints: navigator.maxTouchPoints,
-    standalone: isHomeScreenApp(navigator, (query) => window.matchMedia(query)),
+    standalone: pwaInstallApplies(navigator.userAgent) && isHomeScreenApp(navigator, (query) => window.matchMedia(query)),
   });
+  if (mode === "bridge") {
+    openStoreHandoff(url, "Kroger", "store");
+    return;
+  }
   if (mode === "popup") {
     const popup = window.open(url, "kroger-login", "popup,width=480,height=720");
     if (popup) {
@@ -1235,23 +1308,12 @@ function consumeKrogerReturn() {
   const query = params.toString();
   const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
   history.replaceState({}, "", next);
-  const message = { type: "gg-handoff", store: "Kroger", kind: parsed.kind === "added" ? "cart" : "store", at: Date.now() };
-  try {
-    tripChannel?.postMessage(message);
-  } catch {
-    /* the other tab hears the storage copy */
-  }
-  try {
-    window.opener?.postMessage(message, window.location.origin);
-  } catch {
-    /* opener is gone */
-  }
+  const kind = parsed.kind === "added" ? "cart" : "store";
+  const shared = publishHandoff("Kroger", kind, { phase: "returned", message: parsed.message });
   applyKrogerReturn(parsed);
-  if (callbackCanClose(window.opener)) {
-    const copy = returnScreenCopy("Kroger", message.kind);
-    showHandoffReturn(copy.title, copy.body);
-    window.close();
-  }
+  const copy = returnScreenCopy("Kroger", kind);
+  showHandoffReturn(copy.title, copy.body);
+  if (shared.plan.tryClose && callbackCanClose(window.opener)) window.close();
 }
 
 function showHandoffReturn(title, body) {
@@ -1305,7 +1367,13 @@ function listenForTripTabs() {
   });
   window.addEventListener("storage", (event) => {
     if (event.key === LIST_KEY) rehydrateTrip();
+    if (event.key === HANDOFF_RESULT_KEY) applySharedHandoff();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") applySharedHandoff();
+  });
+  window.addEventListener("focus", () => applySharedHandoff());
+  window.addEventListener("pageshow", () => applySharedHandoff());
 }
 
 async function refreshKrogerFromServer() {
@@ -2197,12 +2265,24 @@ function syncChipHint() {
 function bindKeyboardInset() {
   const apply = () => {
     const viewport = window.visualViewport;
-    const overlap = viewport ? keyboardOverlap(window.innerHeight, viewport.height, viewport.offsetTop) : 0;
-    document.documentElement.style.setProperty("--keyboard", `${overlap}px`);
+    const focused = document.activeElement instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    const insets = viewport
+      ? viewportInsets({
+          innerHeight: window.innerHeight,
+          visualHeight: viewport.height,
+          offsetTop: viewport.offsetTop,
+          focused,
+        })
+      : { keyboard: 0, toolbar: 0 };
+    document.documentElement.style.setProperty("--keyboard", `${insets.keyboard}px`);
+    document.documentElement.style.setProperty("--browser-bottom", `${insets.toolbar}px`);
+    if (viewport) document.documentElement.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
   };
   apply();
   window.visualViewport?.addEventListener("resize", apply);
   window.visualViewport?.addEventListener("scroll", apply);
+  document.addEventListener("focusin", apply);
+  document.addEventListener("focusout", apply);
 }
 
 function showCatalogError(message) {
@@ -2958,15 +3038,17 @@ function addOwnCoupon(button) {
   paintTrip();
 }
 
-function renderTrip(payload) {
+function renderTrip(payload, options = {}) {
   const names = listEntries().map((entry) => entry.name);
   const stores = mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, payload?.unavailable);
   lastOptimize = { ...payload, stores: stores.length ? stores : payload?.stores || [] };
   if (lastOptimize.stores?.length) {
     lastOptimize.total = Math.round(lastOptimize.stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
   }
-  plannedSignature = listSignature();
-  tripEdits = { lockedStore: null, moves: {} };
+  if (!options.keepEdits) {
+    plannedSignature = listSignature();
+    tripEdits = { lockedStore: null, moves: {} };
+  }
   rememberTrip();
   publishTripState();
   if (flowStep === "shop") renderShop();
@@ -3673,7 +3755,7 @@ function paintPlanNow() {
   else if (tripEl) tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
 }
 
-async function readPlanBody(response, onStatus) {
+async function readPlanBody(response, onStatus, onPartial) {
   const type = response.headers.get("content-type") || "";
   if (!type.includes("ndjson") || !response.body?.getReader) {
     return response.json().catch(() => ({}));
@@ -3691,6 +3773,7 @@ async function readPlanBody(response, onStatus) {
       return;
     }
     if (event.type === "status" || event.type === "progress") onStatus?.(event);
+    if (event.type === "partial" && event.result) onPartial?.(event.result);
     if (event.type === "done" && event.result) finalBody = event.result;
     if (event.type === "error") finalBody = { error: event.error };
   };
@@ -3800,6 +3883,8 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       }
       const waiting = status.pendingStores?.length ? ` Still checking ${status.pendingStores.join(", ")}.` : "";
       paintPlanProgress(name ? `${status.type === "status" ? "Priced" : "Checking"} ${name}.${waiting}` : "Checking store prices…");
+    }, (partial) => {
+      renderTrip(partial, { keepEdits: true });
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
@@ -4684,7 +4769,11 @@ document.addEventListener("click", (event) => {
     const url = externalLink.getAttribute("data-external-link") || externalLink.getAttribute("data-coupon-link");
     const store = externalLink.getAttribute("data-store-leave");
     const kind = externalLink.getAttribute("data-leave-kind") || (externalLink.hasAttribute("data-coupon-link") ? "coupons" : "store");
-    if (store) markStoreHandoff(store, kind);
+    if (store && url) {
+      markStoreHandoff(store, kind);
+      openStoreHandoff(url, store, kind);
+      return;
+    }
     if (url) void openExternal(url);
     return;
   }
@@ -4793,7 +4882,7 @@ document.addEventListener("click", (event) => {
   if (krogerCartLink instanceof HTMLAnchorElement) {
     event.preventDefault();
     markStoreHandoff("Kroger", "cart");
-    void openExternal(krogerCartLink.href || KROGER_CART_URL);
+    openStoreHandoff(krogerCartLink.href || KROGER_CART_URL, "Kroger", "cart");
     return;
   }
   const krogerSend = target.closest("[data-kroger-send], #kroger-send, #settings-kroger-send");
@@ -4821,20 +4910,8 @@ document.addEventListener("click", (event) => {
     haptic();
     maybeAskAccount("cart", () => {
       markWalmartHandoff();
-      setBusy(walmartCart, true);
-      void openExternal(url)
-        .catch(() => {
-          try {
-            sessionStorage.removeItem(WALMART_RETURN_KEY);
-          } catch {
-            /* private browsing */
-          }
-          toast("Couldn't open Walmart.");
-        })
-        .finally(() => {
-          setBusy(walmartCart, false);
-          window.scrollTo(0, scrollY);
-        });
+      openStoreHandoff(url, "Walmart", "cart");
+      window.scrollTo(0, scrollY);
     });
     window.scrollTo(0, scrollY);
     return;
@@ -7113,7 +7190,7 @@ async function findNearbyStores() {
     const denied = Number(error?.code) === 1 || /denied|permission/i.test(message);
     const timedOut = Number(error?.code) === 3 || /timed out|timeout/i.test(message);
     const text = denied
-      ? "Location stayed off. Type a ZIP and try again."
+      ? locationDeniedCopy(navigator.userAgent)
       : timedOut
         ? "Location timed out. Type a ZIP and try again."
         : "Couldn't use location. Type a ZIP and try again.";

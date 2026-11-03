@@ -80,7 +80,7 @@ img { max-width: 100%; display: block; }
 }
 .skip:focus { top: calc(12px + var(--safe-top)); }
 
-.shell { min-height: 100dvh; }
+.shell { min-height: 100svh; min-height: var(--vv-height, 100svh); }
 .top-stack { display: contents; }
 .topbar {
   display: flex; flex-wrap: nowrap; gap: 8px; align-items: center;
@@ -679,7 +679,7 @@ dialog.shelf-sheet .sheet-body {
 
 .bottom-dock {
   position: fixed; left: 0; right: 0; z-index: 8; pointer-events: auto;
-  bottom: var(--keyboard, 0px);
+  bottom: max(var(--keyboard, 0px), var(--browser-bottom, 0px));
   display: flex; flex-direction: column; gap: 4px;
   width: 100%; max-width: 100%; box-sizing: border-box;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
@@ -1693,6 +1693,10 @@ dialog.profile-onboard[data-dir="back"] #profile-stage {
 body[data-step="plan"] #trip,
 body[data-step="shop"] #shop {
   animation: intake-forward 420ms cubic-bezier(0.22, 0.8, 0.2, 1);
+  padding-bottom: calc(var(--bar-h) + var(--browser-bottom, 0px) + 12px);
+}
+dialog.sheet, dialog.profile-onboard {
+  max-height: min(100svh, var(--vv-height, 100svh));
 }
 @keyframes intake-forward {
   from { opacity: 0; transform: translate3d(28px, 0, 0); }

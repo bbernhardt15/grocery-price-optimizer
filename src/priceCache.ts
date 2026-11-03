@@ -25,6 +25,7 @@ import { ingestConfig } from "./ingest/config";
 import { storedLineProducts } from "./ingest/readStore";
 import { upsertCatalogRecords } from "./ingest/upsert";
 import { rawFromCatalogProduct } from "./catalog/providers/fromCatalogProduct";
+import { shouldStreamSnapshot } from "./pricing/streamPlan";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -38,7 +39,8 @@ export type ResolvedCatalog = {
 };
 
 /** A small list should finish. A slow store must not hold the rest forever. */
-const PRICE_BUDGET_MS = 18_000;
+/** Return what we have inside the time a phone will wait. Partials stream before this. */
+const PRICE_BUDGET_MS = 9_000;
 /** Kroger's public Products API accepts one product id per call, so the pool is the batch. Capped to avoid 429s. */
 const PRICE_POOL = 8;
 
@@ -255,6 +257,7 @@ export async function resolveCatalogProducts(
   hooks?: {
     onStore?: (info: { storeName: string; ms: number; pendingStores: string[]; products: CatalogProduct[] }) => void;
     onProgress?: (info: { storeName: string; checked: number; total: number; pendingStores: string[] }) => void;
+    onSnapshot?: (info: { storeName: string; checked: number; total: number; pendingStores: string[]; products: CatalogProduct[] }) => void;
     upcByName?: Map<string, string>;
   }
 ): Promise<ResolvedCatalog> {
@@ -513,12 +516,22 @@ export async function resolveCatalogProducts(
         storeLeft.set(storeName, left);
         const total = lines.length;
         const still = [...storeLeft.entries()].filter(([, count]) => count > 0).map(([name]) => name);
+        const checked = total - left;
         hooks?.onProgress?.({
           storeName,
-          checked: total - left,
+          checked,
           total,
           pendingStores: still,
         });
+        if (shouldStreamSnapshot(checked, total)) {
+          hooks?.onSnapshot?.({
+            storeName,
+            checked,
+            total,
+            pendingStores: still,
+            products: products.slice(),
+          });
+        }
         console.info(`price ${storeName} "${line.name}" ${elapsed}ms ${source}`);
         if (left === 0) {
           const still = [...storeLeft.entries()].filter(([, count]) => count > 0).map(([name]) => name);
