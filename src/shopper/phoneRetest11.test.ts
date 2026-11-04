@@ -6,7 +6,7 @@ import { once } from "node:events";
 import { describe, it } from "node:test";
 import type { AddressInfo } from "node:net";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
-import { ALERTS_COMING_SOON, ALERT_CHANNEL_NOTE, alertDeliveryState, PUSH_ALERT_COPY, SHOPPING_LIST_NOTE } from "../../public/shopper/alertDelivery.js";
+import { alertDeliveryState, PUSH_ALERT_COPY, SHOPPING_LIST_NOTE } from "../../public/shopper/alertDelivery.js";
 import { WORDMARK, homeProxyShouldShow, sheetBrandHtml } from "../../public/shopper/homeButton.js";
 import { FLOW_STEPS } from "../../public/shopper/flow.js";
 import { readCardTitle, READING_RECEIPT } from "../../public/shopper/receiptReading.js";
@@ -64,25 +64,27 @@ describe("eleventh phone test", () => {
     assert.doesNotMatch(html, /aria-label="Add items">Add</);
   });
 
-  it("names the trip list Shopping list and tells the truth about push alerts", () => {
-    assert.equal(SHOPPING_LIST_NOTE, "The list for this trip.");
+  it("names the trip list Shopping list and hides a price alert switch the server cannot send", () => {
+    assert.match(SHOPPING_LIST_NOTE, /share this trip's list/);
     assert.match(html, /<h2>Shopping list<\/h2>/);
-    assert.match(html, /The list for this trip\./);
     assert.match(html, /id="shopping-list-note"/);
-    assert.equal(alertDeliveryState(null).mode, "soon");
-    assert.equal(alertDeliveryState({ webPush: { enabled: false } }).copy, ALERTS_COMING_SOON);
+    assert.match(html, /id="list-alert-block"[^>]*hidden/);
+    assert.equal(alertDeliveryState(null).mode, "hidden");
+    assert.equal(alertDeliveryState(null).visible, false);
+    assert.equal(alertDeliveryState({ webPush: { enabled: false } }).copy, "");
     assert.equal(alertDeliveryState({ webPush: { enabled: false } }).disabled, true);
-    assert.equal(alertDeliveryState({ webPush: { enabled: true, publicKey: "" } }).mode, "soon");
+    assert.equal(alertDeliveryState({ webPush: { enabled: true, publicKey: "" } }).mode, "hidden");
     const push = alertDeliveryState({ webPush: { enabled: true, publicKey: "vapid-public" } });
     assert.equal(push.mode, "push");
     assert.equal(push.copy, PUSH_ALERT_COPY);
     assert.equal(push.disabled, false);
+    assert.equal(push.visible, true);
     assert.match(PUSH_ALERT_COPY, /We'll send a push notification/);
-    assert.match(html, /Coming soon/);
-    assert.match(html, new RegExp(ALERT_CHANNEL_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.match(html, /does not email price alerts/);
-    assert.match(html, /id="list-alerts"[^>]*disabled/);
+    assert.doesNotMatch(html, /id="list-alerts"[^>]*disabled/);
+    assert.doesNotMatch(html, /class="alert-state"/);
+    assert.match(html, /OK to swap for similar items/);
     assert.match(app, /applyAlertDelivery/);
+    assert.match(app, /block\.hidden = !state\.visible/);
     assert.match(app, /Notification\.permission/);
     assert.match(app, /enablePush\(\)/);
     assert.doesNotMatch(html, />My list</);

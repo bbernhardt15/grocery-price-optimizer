@@ -115,7 +115,7 @@ describe("estimateSavings", () => {
     const copy = describeSavings(meter, { allowSubstitutes: false });
     assert.equal(copy.badge, "Save $3.00");
     assert.match(copy.note, /highest price/);
-    assert.match(copy.note, /Allow substitutes/);
+    assert.match(copy.note, /OK to swap for similar items/);
     assert.match(copy.caption, /43%/);
   });
 

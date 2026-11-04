@@ -22,6 +22,18 @@ export const MOMENTS = ["welcome", "receipt", "running-low", "before-review", "r
 
 export type Moment = (typeof MOMENTS)[number];
 
+/** Higher wins when a new moment arrives while another card is up. */
+export const MOMENT_RANK: Record<Moment, number> = {
+  "trip-saved": 6,
+  receipt: 5,
+  "review-next": 4,
+  "running-low": 3,
+  "before-review": 2,
+  welcome: 1,
+};
+
+export const RUNNING_LOW_STAPLES = ["Milk", "Eggs", "Bread"];
+
 export type Usual = { name: string; times?: number };
 
 export type ReceiptLine = { name: string; quantity: number };
@@ -247,9 +259,52 @@ export function linesFromReceipt(payload: unknown): ReceiptLine[] {
 export function importReceiptUrl(url: string): boolean {
   try {
     const path = new URL(url, "https://grocery.gitter").pathname.replace(/\/+$/, "");
-    return path === "/api/import/receipt" || path === "/api/import/photo" || path === "/api/import/pdf";
+    return (
+      path === "/api/import/receipt" ||
+      path === "/api/import/photo" ||
+      path === "/api/import/pdf" ||
+      path === "/api/import/text" ||
+      path === "/api/import/file"
+    );
   } catch {
     return false;
+  }
+}
+
+/** Lines from a receipt read. A catalog match with no receipt is not this moment. */
+export function receiptLinesFromPayload(payload: unknown): ReceiptLine[] {
+  if (Array.isArray(payload)) return linesFromReceipt(payload);
+  const root = asRecord(payload);
+  if (!root) return [];
+  if (root.receipt) return linesFromReceipt(root.receipt);
+  if (root.analysis) return linesFromReceipt(root.analysis);
+  if (Array.isArray(root.lines) && !Array.isArray(root.items)) return linesFromReceipt(root);
+  return [];
+}
+
+export function receiptLinesFromImportBody(contentType: string, body: string): ReceiptLine[] {
+  const type = String(contentType || "").toLowerCase();
+  if (type.includes("ndjson")) {
+    let found: ReceiptLine[] = [];
+    for (const line of String(body || "").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed) as unknown;
+        const record = asRecord(event);
+        const payload = record?.type === "result" ? (record.analysis ?? record) : event;
+        const lines = receiptLinesFromPayload(payload);
+        if (lines.length) found = lines;
+      } catch {
+        /* a partial chunk is ignored */
+      }
+    }
+    return found;
+  }
+  try {
+    return receiptLinesFromPayload(JSON.parse(body) as unknown);
+  } catch {
+    return [];
   }
 }
 
@@ -294,6 +349,18 @@ export function receiptPicks(lines: ReceiptLine[], usuals: Usual[] | undefined, 
     if (!row.name || names.some((name) => namesMatch(name, row.name))) continue;
     names.push(row.name);
     if (names.length >= cap) break;
+  }
+  return names;
+}
+
+/** Usuals that are off the list, then Milk, Eggs, and Bread when those are still missing. */
+export function runningLowSuggestions(usuals: Usual[] | undefined, listNames: string[] | undefined, limit = 3): string[] {
+  const cap = Math.max(1, Math.min(3, Math.floor(limit) || 3));
+  const names = runningLowUsuals(usuals, listNames, cap);
+  for (const staple of RUNNING_LOW_STAPLES) {
+    if (names.length >= cap) break;
+    if (onList(staple, listNames) || names.some((have) => namesMatch(have, staple))) continue;
+    names.push(staple);
   }
   return names;
 }
@@ -393,7 +460,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
   }
 
   if (step === "build" && itemCount > 0 && !session.shown["running-low"]) {
-    const names = runningLowUsuals(usuals, listNames, 3);
+    const names = runningLowSuggestions(usuals, listNames, 3);
     if (names.length) {
       return {
         moment: "running-low",
@@ -460,31 +527,38 @@ export type PresentResult = {
   hidden: boolean;
 };
 
+/** True when this moment's own conditions still hold, ignoring what else is waiting. */
+export function momentStillFits(input: GuideInput, moment: Moment): boolean {
+  const session = input.session || createGuideSession();
+  const shown: Partial<Record<Moment, boolean>> = {};
+  for (const id of MOMENTS) {
+    if (id !== moment) shown[id] = true;
+  }
+  return decideGuide({ ...input, session: { ...session, shown } })?.moment === moment;
+}
+
 /** Show a moment once, keep it on screen until it no longer fits, and don't swap mid-tap. */
 export function presentGuide(input: PresentInput = {}): PresentResult {
   const session = input.session || createGuideSession();
   const settings = input.settings ? parseGuideSettings(input.settings) : emptyGuideSettings();
   const view = input.view || {};
   const current = input.current || null;
-  const decision = decideGuide({ ...view, settings, session });
+  const packed = { ...view, settings, session };
+  const decision = decideGuide(packed);
   const frame = applyGuideFrame(current, decision, input);
-  if (frame.defer && !frame.hidden) {
-    return { session, current, defer: true, hidden: false };
+  if (frame.defer) {
+    return { session, current, defer: true, hidden: frame.hidden };
   }
-  if (frame.defer && frame.hidden) {
-    return { session, current, defer: true, hidden: true };
+  if (current && momentStillFits(packed, current.moment)) {
+    const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
+    if (!decision || decision.moment === current.moment || nextRank <= MOMENT_RANK[current.moment]) {
+      const nextSession = session.shown[current.moment] ? session : noteShown(session, current.moment);
+      return { session: nextSession, current, defer: false, hidden: false };
+    }
   }
   if (frame.prompt) {
     const nextSession = session.shown[frame.prompt.moment] ? session : noteShown(session, frame.prompt.moment);
     return { session: nextSession, current: frame.prompt, defer: false, hidden: false };
-  }
-  if (current) {
-    const replay = decideGuide({
-      ...view,
-      settings,
-      session: { ...session, shown: { ...session.shown, [current.moment]: false } },
-    });
-    if (replay?.moment === current.moment) return { session, current, defer: false, hidden: false };
   }
   return { session, current: null, defer: false, hidden: true };
 }

@@ -167,6 +167,8 @@ import { bootTab, HANDOFF_TRIP_KEY, handoffTripRecord, readHandoffTrip, richerTr
 import { openHandoffSheet, pullAllowed, releaseAfterLastSheet, releaseDocumentScroll, scrollRestoreOffset } from "./shopper/sheetScroll.js";
 import { homeTransition, sheetBrandHtml } from "./shopper/homeButton.js";
 import { alertDeliveryState } from "./shopper/alertDelivery.js";
+import { SHARE_BUTTON_LABEL, listRemoveHtml } from "./shopper/shoppingListSheet.js";
+import { rankSearchResults } from "./shopper/searchRank.js";
 import { completionHook, finishCheckedOut, sentItemsHtml } from "./shopper/krogerReady.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "./shopper/inStoreShare.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
@@ -2169,10 +2171,13 @@ function renderListRows() {
             </label>
           </div>
         </div>
-        <div class="stepper">
-          <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>−</button>
-          <output>${entry.quantity}</output>
-          <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>+</button>
+        <div class="list-qty">
+          <div class="stepper">
+            <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>−</button>
+            <output>${entry.quantity}</output>
+            <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>+</button>
+          </div>
+          ${locked ? "" : listRemoveHtml(itemId, heading.title, escapeHtml)}
         </div>
       </li>`;
     })
@@ -2641,6 +2646,22 @@ function shelfForProfile(items, search) {
   return { items: only.length ? only : [resolved.product], warning: "", resolved };
 }
 
+function searchRankContext(text) {
+  const queryText = String(text || "");
+  const profile = getUserProfile(localStorage);
+  const preferences = Object.values(profile?.categoryPreferences || {}).filter(Boolean);
+  const usuals = readUsuals(localStorage).map((row) => ({ name: row.name, brand: row.brand }));
+  const history = [];
+  for (const trip of readPastTrips(localStorage)) {
+    for (const store of trip.stores || []) {
+      for (const item of store.items || []) {
+        if (item?.name) history.push({ name: item.name, brand: item.brand || "" });
+      }
+    }
+  }
+  return { query: queryText, family: familyFromQuery(queryText), preferences, usuals, history };
+}
+
 async function loadPage(reset) {
   if (loading) return;
   if (!reset && !nextCursor) return;
@@ -2662,7 +2683,7 @@ async function loadPage(reset) {
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
-    const items = body.items ?? [];
+    const items = rankSearchResults(body.items ?? [], searchRankContext(query));
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
     if (reset) showProfileWarning(viewed.warning);
@@ -2885,7 +2906,8 @@ async function loadSuggestions(text) {
     const profile = getUserProfile(localStorage);
     const warning = exclusionWarning(profile, q);
     showProfileWarning(warning);
-    suggestions = warning ? body.suggestions ?? [] : filterTiles(profile, body.suggestions ?? [], q);
+    const matched = warning ? body.suggestions ?? [] : filterTiles(profile, body.suggestions ?? [], q);
+    suggestions = rankSearchResults(matched, searchRankContext(q));
     suggestionQuery = q;
     activeSuggest = -1;
     if (suggestions.length === 0) {
@@ -5131,19 +5153,13 @@ function renderShareChrome() {
   if (revokeBtn) revokeBtn.hidden = !owner || shareState.revoked;
   if (ownBtn) ownBtn.hidden = !(localStorage.getItem(PERSONAL_KEY) && shared && !owner);
   shareBtn.disabled = shareBusy;
-  shareBtn.textContent = shareState?.revoked && owner ? "Share a new link" : "Share list";
+  shareBtn.textContent = shareState?.revoked && owner ? "Share again" : SHARE_BUTTON_LABEL;
   const shareEmpty = $("share-empty");
   if (shareEmpty) {
     if (shareProblem && !shared) {
       const state = emptyState(shareProblem);
       state.actionId = "retry-share";
       fillEmpty(shareEmpty, state, "alert");
-      shareEmpty.hidden = false;
-    } else if (!shared) {
-      const state = emptyState("shared");
-      state.action = "";
-      state.bodyId = "share-empty-body";
-      fillEmpty(shareEmpty, state);
       shareEmpty.hidden = false;
     } else {
       shareEmpty.hidden = true;
@@ -5457,6 +5473,11 @@ document.addEventListener("click", (event) => {
   if (listDec) {
     const id = listDec.getAttribute("data-list-dec");
     setQuantity(id, (list.get(id)?.quantity ?? 1) - 1);
+    return;
+  }
+  const listRemove = target.closest("[data-list-remove]");
+  if (listRemove) {
+    setQuantity(listRemove.getAttribute("data-list-remove"), 0);
     return;
   }
   const mealIdea = target.closest("[data-meal]");
@@ -6489,11 +6510,15 @@ function urlBase64ToUint8Array(value) {
 
 function applyAlertDelivery(status) {
   const state = alertDeliveryState(status);
+  const block = $("list-alert-block");
+  const panel = document.querySelector(".list-panel");
+  if (block) block.hidden = !state.visible;
+  if (panel) panel.dataset.alerts = state.visible ? "on" : "off";
   const benefit = $("list-alerts-benefit");
-  if (benefit) benefit.textContent = state.copy;
+  if (benefit) benefit.textContent = state.visible ? state.copy : "";
   if (!listAlertsEl) return;
-  listAlertsEl.disabled = state.disabled;
-  if (state.disabled && listAlertsEl.checked) {
+  listAlertsEl.disabled = !state.visible;
+  if (!state.visible && listAlertsEl.checked) {
     listAlertsEl.checked = false;
     localStorage.setItem(ALERTS_KEY, "0");
     if (listReady) saveList();
@@ -8705,6 +8730,7 @@ function onGuideAction(action, detail = {}) {
   if (action === "add-usual") {
     const row = readUsuals(localStorage).find((item) => guideNamesMatch(item.name, detail.name));
     if (row) void addOneUsual(row);
+    else if (detail.name) addProduct(customCatalogProduct(detail.name), 1, { quiet: false, skipAsk: true, source: "guide" });
     return;
   }
   if (action === "review") {

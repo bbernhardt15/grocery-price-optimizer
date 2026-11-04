@@ -15,7 +15,7 @@ import {
   createGuideSession,
   dismissGuide,
   importReceiptUrl,
-  linesFromImportBody,
+  receiptLinesFromImportBody,
   namesMatch,
   noteReceipt as rememberReceipt,
   noteTrip as rememberTrip,
@@ -80,7 +80,7 @@ function installReceiptWatch(win, note) {
       const copy = response.clone();
       const type = copy.headers?.get?.("content-type") || "";
       const body = await copy.text();
-      const lines = linesFromImportBody(type, body);
+      const lines = receiptLinesFromImportBody(type, body);
       if (lines.length) note({ lines });
     } catch {
       /* the original response is unchanged */

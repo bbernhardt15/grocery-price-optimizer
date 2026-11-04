@@ -27,8 +27,11 @@ import {
   presentGuide,
   readGuideSettings,
   receiptLine,
+  receiptLinesFromImportBody,
+  receiptLinesFromPayload,
   receiptPicks,
   runningLowLine,
+  runningLowSuggestions,
   runningLowUsuals,
   setGuideEnabled,
   tripLine,
@@ -159,7 +162,11 @@ describe("Gitter guide rules", () => {
 
   it("asks to find the best prices before Review once the list has items", () => {
     const prompt = decideGuide({
-      ...view({ itemCount: 2, listNames: ["Milk", "Eggs"], usuals: [{ name: "Milk", times: 1 }] }),
+      ...view({
+        itemCount: 3,
+        listNames: ["Milk", "Eggs", "Bread"],
+        usuals: [{ name: "Milk", times: 1 }],
+      }),
       settings: emptyGuideSettings(),
       session: createGuideSession(),
     });
@@ -233,7 +240,14 @@ describe("Gitter guide rules", () => {
         ["Keep these", "later", undefined],
       ]
     );
-    assert.equal(decideGuide({ ...view({ step: "add", itemCount: 3, unfound: names, pricesLabel }), settings, session })?.moment, "before-review");
+    assert.equal(
+      decideGuide({
+        ...view({ step: "add", itemCount: 3, listNames: ["Milk", "Eggs", "Bread"], unfound: names, pricesLabel }),
+        settings,
+        session,
+      })?.moment,
+      "before-review"
+    );
   });
 
   it("after the trip is complete, names the savings from that finish and keeps the 10 second undo", () => {
@@ -282,8 +296,15 @@ describe("Gitter guide rules", () => {
     assert.equal(closed.current, null);
 
     session = noteShown(createGuideSession(), "welcome");
-    const withItems = decideGuide({ ...view({ itemCount: 1, listNames: ["Milk"] }), settings, session });
+    const withItems = decideGuide({
+      ...view({ itemCount: 3, listNames: ["Milk", "Eggs", "Bread"] }),
+      settings,
+      session,
+    });
     assert.equal(withItems?.moment, "before-review");
+    const low = decideGuide({ ...view({ itemCount: 1, listNames: ["Yogurt"] }), settings, session });
+    assert.equal(low?.moment, "running-low");
+    assert.equal(low?.line, "Anything running low? Milk, Eggs, Bread?");
     const receipt = noteReceipt(session, { lines: [{ name: "Yogurt", quantity: 1 }] });
     assert.equal(decideGuide({ ...view(), settings, session: receipt })?.moment, "receipt");
     assert.equal(decideGuide({ ...view(), settings, session: noteShown(receipt, "receipt") }), null);
@@ -354,8 +375,15 @@ describe("Gitter guide rules", () => {
     assert.equal(importReceiptUrl("/api/import/receipt"), true);
     assert.equal(importReceiptUrl("https://grocery.gitter/api/import/photo"), true);
     assert.equal(importReceiptUrl("/api/import/pdf?progress=1"), true);
+    assert.equal(importReceiptUrl("/api/import/text"), true);
+    assert.equal(importReceiptUrl("/api/import/file"), true);
     assert.equal(importReceiptUrl("/api/import/ask"), false);
-    assert.equal(importReceiptUrl("/api/import/text"), false);
+    assert.deepEqual(receiptLinesFromPayload({ items: [{ name: "Milk", quantity: 1 }] }), []);
+    assert.deepEqual(receiptLinesFromPayload({ receipt: { lines: [{ name: "Whole Milk", quantity: 1 }] } }), [
+      { name: "Whole Milk", quantity: 1 },
+    ]);
+    assert.equal(receiptLinesFromImportBody("application/json", JSON.stringify({ items: [{ name: "Bread" }] })).length, 0);
+    assert.equal(runningLowSuggestions([], ["Whole Milk"])[0], "Eggs");
     const lines = linesFromReceipt({
       receipt: { lines: [{ name: "Milk", quantity: 2 }] },
       items: [{ name: "Other", quantity: 1 }],
@@ -367,7 +395,7 @@ describe("Gitter guide rules", () => {
     );
     assert.deepEqual(streamed, [{ name: "Bread", quantity: 1 }]);
     assert.doesNotMatch(guide, /\/api\/import\/ask/);
-    assert.match(guide, /linesFromImportBody/);
+    assert.match(guide, /receiptLinesFromImportBody/);
     assert.match(guide, /prefers-reduced-motion/);
     assert.match(guide, /pointerdown/);
     assert.match(css, /prefers-reduced-motion:\s*reduce/);

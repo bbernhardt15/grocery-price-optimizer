@@ -237,7 +237,8 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone.drop-hero input {
 
 .list-row:not(:has(img)) { grid-template-columns: minmax(0, 1fr); }
 .list-row:not(:has(img)) .list-copy,
-.list-row:not(:has(img)) > .stepper { grid-column: 1; }
+.list-row:not(:has(img)) > .stepper,
+.list-row:not(:has(img)) > .list-qty { grid-column: 1; }
 .list-row img[src=""],
 .list-row img:not([src]) { display: none; }
 .list-alert-toggle { align-items: center; }

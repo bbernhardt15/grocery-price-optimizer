@@ -268,23 +268,21 @@
           </footer>
         </main>
 
-        <aside id="list-panel" class="list-panel" aria-label="Shopping list">
+        <aside id="list-panel" class="list-panel" data-alerts="off" aria-label="Shopping list">
           <div class="list-head">
             <div>
               <h2>Shopping list</h2>
-              <p id="shopping-list-note" class="muted shopping-list-note">The list for this trip.</p>
+              <p id="shopping-list-note" class="muted shopping-list-note">Edit quantities, remove what you don't need, and share this trip's list.</p>
             </div>
             <button type="button" class="text-btn" id="list-close">Close</button>
           </div>
-          <label class="check-row list-alert-toggle">
-            <input id="list-alerts" type="checkbox" disabled aria-describedby="list-alerts-benefit" />
-            <span id="list-alerts-label">Alert me when prices on this list drop</span>
-            <span class="alert-state" data-off>Off</span>
-            <span class="alert-state" data-on>On</span>
-          </label>
-          <p id="list-alerts-benefit" class="muted">Coming soon</p>
-          <p id="list-alerts-channel" class="muted">Delivery is a push notification on this phone. Grocery Gitter does not email price alerts.</p>
-          <p class="muted sub-note">Compares the best price across stores with the price when you saved each item. Watch one item on its own, or set a target under today's price.</p>
+          <div id="list-alert-block" class="list-alert-block" hidden>
+            <label class="check-row list-alert-toggle" for="list-alerts">
+              <input id="list-alerts" type="checkbox" aria-describedby="list-alerts-benefit" />
+              <span id="list-alerts-label">Alert me when prices on this list drop</span>
+            </label>
+            <p id="list-alerts-benefit" class="muted"></p>
+          </div>
           <div id="list-empty" class="empty-state">
             <h3>Your list is empty</h3>
             <p>Tap a starter list, buy again, or browse the aisle. Items stay on this device.</p>
@@ -295,13 +293,13 @@
             <label>Your name on this list
               <input id="display-name" maxlength="40" placeholder="Optional" autocomplete="nickname" />
             </label>
-            <div id="share-empty" class="empty-state">
+            <div id="share-empty" class="empty-state" hidden>
               <h3>No shared lists</h3>
               <p id="share-empty-body">Share a link so someone else can shop this list with you.</p>
             </div>
             <p id="share-status" class="muted">Share a link so someone else can shop this list with you.</p>
             <div class="share-actions">
-              <button type="button" id="share-btn" class="primary" aria-describedby="share-empty-body">Share list</button>
+              <button type="button" id="share-btn" class="primary" aria-describedby="share-status">Share</button>
               <button type="button" id="share-viewonly" class="ghost" hidden>Make view-only</button>
               <button type="button" id="share-revoke" class="ghost" hidden>Revoke link</button>
               <button type="button" id="share-own" class="ghost" hidden>My own list</button>
@@ -324,18 +322,13 @@
             <p id="meter-caption" class="meter-caption">Waiting for your list</p>
           </div>
           <label class="check-row sub-toggle">
-            <input id="allow-subs" type="checkbox" />
-            Allow substitutes in the trip plan
+            <input id="allow-subs" type="checkbox" aria-describedby="sub-swap-note" />
+            OK to swap for similar items
           </label>
-          <p class="muted sub-note">A substitute is a different product: same department, similar name and size. It is never shown as an exact match.</p>
-          <button id="plan-btn" type="button" class="primary plan-btn" disabled>Review the split</button>
+          <p id="sub-swap-note" class="muted sub-note">If a store is missing an item, the plan can use a similar product there instead of adding another stop.</p>
+          <button id="plan-btn" type="button" class="ghost plan-btn" disabled>Review the split</button>
           <button id="sample-btn" type="button" class="ghost">Try a sample list</button>
           <p id="plan-error" class="status" role="alert" hidden></p>
-          <nav class="panel-legal" aria-label="App information">
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-            <button type="button" class="linkish settings-open">Settings</button>
-          </nav>
         </aside>
       </div>
 

@@ -9,16 +9,17 @@ export const ALERTS_COMING_SOON = "Coming soon";
 export const ALERT_CHANNEL_NOTE =
   "Delivery is a push notification on this phone. Grocery Gitter does not email price alerts.";
 export const SHOPPING_LIST_NAME = "Shopping list";
-export const SHOPPING_LIST_NOTE = "The list for this trip.";
+export const SHOPPING_LIST_NOTE = "Edit quantities, remove what you don't need, and share this trip's list.";
 
 /**
+ * A missing VAPID key hides the control. A disabled switch reads as broken.
  * @param {{ webPush?: { enabled?: boolean, publicKey?: string } } | null | undefined} status
  */
 export function alertDeliveryState(status) {
   const web = status?.webPush;
   const key = String(web?.publicKey || "").trim();
   if (web?.enabled && key) {
-    return { mode: "push", copy: PUSH_ALERT_COPY, disabled: false };
+    return { mode: "push", copy: PUSH_ALERT_COPY, disabled: false, visible: true };
   }
-  return { mode: "soon", copy: ALERTS_COMING_SOON, disabled: true };
+  return { mode: "hidden", copy: "", disabled: true, visible: false };
 }

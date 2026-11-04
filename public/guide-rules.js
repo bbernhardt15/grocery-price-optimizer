@@ -7,6 +7,15 @@ var DISMISS_LABEL = "Dismiss guide";
 var TURN_OFF_LABEL = "Turn off guide";
 var REPLIES_LABEL = "Replies";
 var MOMENTS = ["welcome", "receipt", "running-low", "before-review", "review-next", "trip-saved"];
+var MOMENT_RANK = {
+  "trip-saved": 6,
+  receipt: 5,
+  "review-next": 4,
+  "running-low": 3,
+  "before-review": 2,
+  welcome: 1
+};
+var RUNNING_LOW_STAPLES = ["Milk", "Eggs", "Bread"];
 var WELCOME_LINE = "What do you need this week?";
 var BEFORE_REVIEW_LINE = "Ready for Review?";
 var SIMILAR_LINE = "Want me to look for a similar brand?";
@@ -145,9 +154,42 @@ function linesFromReceipt(payload) {
 function importReceiptUrl(url) {
   try {
     const path = new URL(url, "https://grocery.gitter").pathname.replace(/\/+$/, "");
-    return path === "/api/import/receipt" || path === "/api/import/photo" || path === "/api/import/pdf";
+    return path === "/api/import/receipt" || path === "/api/import/photo" || path === "/api/import/pdf" || path === "/api/import/text" || path === "/api/import/file";
   } catch {
     return false;
+  }
+}
+function receiptLinesFromPayload(payload) {
+  if (Array.isArray(payload)) return linesFromReceipt(payload);
+  const root = asRecord(payload);
+  if (!root) return [];
+  if (root.receipt) return linesFromReceipt(root.receipt);
+  if (root.analysis) return linesFromReceipt(root.analysis);
+  if (Array.isArray(root.lines) && !Array.isArray(root.items)) return linesFromReceipt(root);
+  return [];
+}
+function receiptLinesFromImportBody(contentType, body) {
+  const type = String(contentType || "").toLowerCase();
+  if (type.includes("ndjson")) {
+    let found = [];
+    for (const line of String(body || "").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        const record = asRecord(event);
+        const payload = record?.type === "result" ? record.analysis ?? record : event;
+        const lines = receiptLinesFromPayload(payload);
+        if (lines.length) found = lines;
+      } catch {
+      }
+    }
+    return found;
+  }
+  try {
+    return receiptLinesFromPayload(JSON.parse(body));
+  } catch {
+    return [];
   }
 }
 function linesFromImportBody(contentType, body) {
@@ -188,6 +230,16 @@ function receiptPicks(lines, usuals, limit = 8) {
     if (!row.name || names.some((name) => namesMatch(name, row.name))) continue;
     names.push(row.name);
     if (names.length >= cap) break;
+  }
+  return names;
+}
+function runningLowSuggestions(usuals, listNames, limit = 3) {
+  const cap = Math.max(1, Math.min(3, Math.floor(limit) || 3));
+  const names = runningLowUsuals(usuals, listNames, cap);
+  for (const staple of RUNNING_LOW_STAPLES) {
+    if (names.length >= cap) break;
+    if (onList(staple, listNames) || names.some((have) => namesMatch(have, staple))) continue;
+    names.push(staple);
   }
   return names;
 }
@@ -271,7 +323,7 @@ function decideGuide(input = {}) {
     };
   }
   if (step === "build" && itemCount > 0 && !session.shown["running-low"]) {
-    const names = runningLowUsuals(usuals, listNames, 3);
+    const names = runningLowSuggestions(usuals, listNames, 3);
     if (names.length) {
       return {
         moment: "running-low",
@@ -308,30 +360,35 @@ function applyGuideFrame(current, next, options = {}) {
   if (options.dialogOpen || options.fieldFocused) return { prompt: null, defer: true, hidden: true };
   return { prompt: next, defer: false, hidden: !next };
 }
+function momentStillFits(input, moment) {
+  const session = input.session || createGuideSession();
+  const shown = {};
+  for (const id of MOMENTS) {
+    if (id !== moment) shown[id] = true;
+  }
+  return decideGuide({ ...input, session: { ...session, shown } })?.moment === moment;
+}
 function presentGuide(input = {}) {
   const session = input.session || createGuideSession();
   const settings = input.settings ? parseGuideSettings(input.settings) : emptyGuideSettings();
   const view = input.view || {};
   const current = input.current || null;
-  const decision = decideGuide({ ...view, settings, session });
+  const packed = { ...view, settings, session };
+  const decision = decideGuide(packed);
   const frame = applyGuideFrame(current, decision, input);
-  if (frame.defer && !frame.hidden) {
-    return { session, current, defer: true, hidden: false };
+  if (frame.defer) {
+    return { session, current, defer: true, hidden: frame.hidden };
   }
-  if (frame.defer && frame.hidden) {
-    return { session, current, defer: true, hidden: true };
+  if (current && momentStillFits(packed, current.moment)) {
+    const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
+    if (!decision || decision.moment === current.moment || nextRank <= MOMENT_RANK[current.moment]) {
+      const nextSession = session.shown[current.moment] ? session : noteShown(session, current.moment);
+      return { session: nextSession, current, defer: false, hidden: false };
+    }
   }
   if (frame.prompt) {
     const nextSession = session.shown[frame.prompt.moment] ? session : noteShown(session, frame.prompt.moment);
     return { session: nextSession, current: frame.prompt, defer: false, hidden: false };
-  }
-  if (current) {
-    const replay = decideGuide({
-      ...view,
-      settings,
-      session: { ...session, shown: { ...session.shown, [current.moment]: false } }
-    });
-    if (replay?.moment === current.moment) return { session, current, defer: false, hidden: false };
   }
   return { session, current: null, defer: false, hidden: true };
 }
@@ -381,7 +438,9 @@ export {
   GUIDE_LABEL,
   GUIDE_QUIET_MS,
   MOMENTS,
+  MOMENT_RANK,
   REPLIES_LABEL,
+  RUNNING_LOW_STAPLES,
   TURN_OFF_LABEL,
   applyGuideFrame,
   clearTripNote,
@@ -394,6 +453,7 @@ export {
   importReceiptUrl,
   linesFromImportBody,
   linesFromReceipt,
+  momentStillFits,
   namesMatch,
   normalizeName,
   noteReceipt,
@@ -404,9 +464,12 @@ export {
   presentGuide,
   readGuideSettings,
   receiptLine,
+  receiptLinesFromImportBody,
+  receiptLinesFromPayload,
   receiptPicks,
   reviewLine,
   runningLowLine,
+  runningLowSuggestions,
   runningLowUsuals,
   setGuideEnabled,
   tripLine,
