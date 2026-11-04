@@ -18,10 +18,15 @@ const html = readFileSync(new URL("../../public/index.html", import.meta.url), "
 const profileUi = readFileSync(new URL("../../public/shopper/profileOnboardingUi.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../public/shopper/onboardingPolish.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
+const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
+  it("bumps the shell cache to v36", () => {
+    assert.match(sw, /grocery-gitter-shell-v36/);
+  });
+
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
     assert.equal(fieldZip(""), "");
     assert.equal(fieldZip(null), "");
