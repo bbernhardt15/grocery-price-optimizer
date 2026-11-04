@@ -1923,3 +1923,81 @@ body[data-browse="open"] #shelf-entry { display: none !important; }
 .receipt-stores, .receipt-items { list-style: none; margin: 0; padding: 0; }
 .receipt-saved { margin: 0; color: var(--accent); font-weight: 750; }
 .layout-note { margin: 4px 0 8px; color: var(--muted); }
+
+/* Phone test ten: handoff sheets scroll inside themselves. The page keeps rubber-banding. */
+html:has(body[data-handoff-sheet="open"]) {
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+}
+body[data-handoff-sheet="open"] {
+  overflow-y: auto !important;
+  position: static !important;
+  width: auto;
+  overscroll-behavior-y: auto;
+}
+dialog.handoff-sheet[open] {
+  position: fixed;
+  z-index: 40;
+  inset: auto 0 max(12px, env(safe-area-inset-bottom)) 0;
+  margin-inline: auto;
+  width: min(560px, calc(100% - 24px));
+  max-height: min(85dvh, var(--vv-height, 85dvh));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+#cart-ready.handoff-sheet[open] { z-index: 41; }
+#store-return.handoff-sheet[open] { z-index: 42; }
+dialog.handoff-sheet[open] .sheet-body {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  max-height: min(85dvh, var(--vv-height, 85dvh));
+}
+.brand-home { -webkit-tap-highlight-color: transparent; }
+.brand-mark { transition: transform 80ms ease, filter 80ms ease; }
+.brand-home.is-pressed .brand-mark,
+.brand-home:active .brand-mark {
+  transform: scale(0.94);
+  filter: brightness(0.9);
+}
+.brand-home-proxy {
+  display: none;
+  position: fixed;
+  z-index: 2147483000;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  place-items: center;
+}
+.brand-home-proxy:popover-open { display: grid; }
+.brand-home-proxy.is-pressed,
+.brand-home-proxy:active,
+.sheet-home.is-pressed,
+.sheet-home:active {
+  transform: scale(0.94);
+  filter: brightness(0.9);
+}
+.sheet-home {
+  position: fixed;
+  z-index: 80;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  display: grid;
+  place-items: center;
+}

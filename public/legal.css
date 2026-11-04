@@ -40,6 +40,17 @@ h2 { font-family: var(--display); font-size: 1.35rem; margin: 28px 0 8px; }
 p, li { font-size: 1.02rem; }
 ul { padding-left: 1.2rem; }
 li + li { margin-top: 6px; }
+.draft {
+  background: #fff4cc;
+  border: 1px solid #e0c36a;
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin: 12px 0 8px;
+}
+.draft p { margin: 0; }
+@media (prefers-color-scheme: dark) {
+  .draft { background: #3a3420; border-color: #8a7430; }
+}
 .card {
   background: var(--surface);
   border: 1px solid var(--line);

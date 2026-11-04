@@ -1,0 +1,37 @@
+/* Review tab: plan cards, missing items, customize rows, store checkout. */
+[data-plan-panel][hidden] { display: none !important; }
+.plan-status { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.plan-status-line { margin: 0; font-weight: 750; }
+.plan-savings-line { margin: 0 0 8px; font-weight: 750; color: var(--accent); }
+.coverage-note { margin: 0 0 8px; color: var(--muted); font-weight: 650; }
+.review-store-main { display: flex; flex-direction: column; gap: 8px; }
+.review-checkout { margin: 0; }
+.review-checkout .handoff-btn { min-height: 48px; }
+.missing-fold {
+  margin: 8px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 0 12px 8px;
+}
+.missing-fold summary { min-height: 48px; cursor: pointer; font-weight: 750; display: flex; align-items: center; }
+.missing-line { margin: 0 0 8px; color: var(--muted); }
+.missing-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.missing-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.missing-row p { margin: 0; font-weight: 750; }
+.swap-suggestions { display: flex; flex-direction: column; gap: 6px; }
+.swap-suggestion {
+  min-height: 44px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 8px 10px;
+  font-weight: 700;
+}
+.customize-row { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); }
+.customize-item { margin: 0; font-weight: 750; }
+.customize-now, .customize-save { margin: 0; }
+.customize-save { color: var(--accent); font-weight: 700; }
+.customize-switch { text-align: left; min-height: 44px; }
+.customize-total { margin: 8px 0 0; font-weight: 750; }
