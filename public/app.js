@@ -77,8 +77,6 @@ import {
   clearTripSnapshot,
   shareItemId,
   consolidateStops,
-  fewerStorePlan,
-  plansAreIdentical,
   filterTripStores,
   planningStoreNames,
   handoffMark,
@@ -94,6 +92,18 @@ import {
   pruneStoresToList,
   emptyStoreNotes,
 } from "./shopper/tripPlan.js";
+import {
+  buildReviewPlans,
+  dedupeStores,
+  fewerDeltaText,
+  formatPlanDetail,
+  savingsVersusBaseline,
+} from "./shopper/reviewPlans.js";
+import { dedupeReviewLines } from "./shopper/reviewList.js";
+import { missingAccordionHtml, rankSwapSuggestions } from "./shopper/reviewMissing.js";
+import { customizeRowsHtml } from "./shopper/reviewCustomize.js";
+import { reviewCheckoutLabel, reviewStoreCardHtml, withCheckoutLabel } from "./shopper/reviewStoreCard.js";
+import { planStatusHtml, planStatusModel } from "./shopper/reviewProgress.js";
 import {
   buildStoreReadyList,
   repairStoreUrl,
@@ -147,8 +157,14 @@ import { customCatalogProduct, mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
 import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
-import { calmPriceNote, ESTIMATE_NOTE, fewerStopsOffer, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
+import { calmPriceNote, ESTIMATE_NOTE, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
+import { dedupeTripStores, inStoreSendHtml } from "./shopper/tripLines.js";
+import { armHandoff, createReturnWatch, dismissReturnChoice, returnPromptDecision } from "./shopper/returnPrompt.js";
+import { allowTabChange, armClickShield, clickShielded, createTabGuard, noteTabInteraction, settleTabBoot } from "./shopper/tabGuard.js";
+import { bootTab, handoffTripRecord, readHandoffTrip, richerTrip, writeHandoffTrip, writeTripKeepingItems } from "./shopper/handoffRestore.js";
+import { openHandoffSheet, releaseDocumentScroll, scrollRestoreOffset } from "./shopper/sheetScroll.js";
+import { homeProxyShouldShow, homeTransition, placeHomeProxy } from "./shopper/homeButton.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { callbackCanClose, emptyMustNotReplace, handoffResultMessage, readTripDb, returnScreenCopy, TRIP_CHANNEL, writeTripDb } from "./shopper/tripSync.js";
@@ -269,13 +285,8 @@ function openStoreHandoff(url, store, kind) {
   } catch {
     /* the storage write is the fallback */
   }
-  void writeTripDb(typeof indexedDB !== "undefined" ? indexedDB : null, {
-    handoff: record,
-    savedAt: record.at,
-    step: flowStep,
-    items: [],
-  });
-  showStoreReturn(store, record.kind);
+  returnWatch = armHandoff(returnWatch, { store: record.store, kind: record.kind, at: record.at });
+  captureHandoffTrip(record.store, record.kind);
   if (isNative()) {
     void openExternal(safe);
     return;
@@ -309,8 +320,142 @@ function applySharedHandoff() {
   const record = readHandoffResult(localStorage);
   if (!record || record.at <= appliedHandoffAt) return;
   appliedHandoffAt = record.at;
-  showStoreReturn(record.store, record.kind);
   rehydrateTrip();
+}
+
+/* Phone test 10. The finish sheet, tab changes, and handoff restore
+   are decided in the shopper modules imported above. */
+
+function captureHandoffTrip(store, kind) {
+  let items = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+    items = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    items = [];
+  }
+  const record = handoffTripRecord({
+    items,
+    plan: lastOptimize,
+    step: flowStep,
+    scroll: window.scrollY || 0,
+    store,
+    kind,
+    at: Date.now(),
+  });
+  writeHandoffTrip(localStorage, record);
+  void writeTripKeepingItems(typeof indexedDB !== "undefined" ? indexedDB : null, {
+    items: record.items,
+    plan: record.plan,
+    step: record.step,
+    handoff: { store: record.store, kind: record.kind, at: record.at },
+    savedAt: record.at,
+  });
+}
+
+function handoffSheetOpen() {
+  return Boolean($("cart-ready")?.open || $("handoff-return")?.open || $("store-return")?.open);
+}
+
+function syncHandoffSheetFlag() {
+  document.body.dataset.handoffSheet = handoffSheetOpen() ? "open" : "closed";
+  if (handoffSheetOpen()) releaseDocumentScroll(document);
+}
+
+function presentHandoffSheet(dialog) {
+  const opened = openHandoffSheet(dialog, {
+    readScroll: () => window.scrollY || 0,
+    writeScroll: (y) => window.scrollTo(0, y),
+    releaseScroll: () => releaseDocumentScroll(document),
+  });
+  syncHandoffSheetFlag();
+  return opened;
+}
+
+function armTabShield() {
+  tabGuard = armClickShield(tabGuard, Date.now());
+}
+
+function maybeShowReturnPrompt(source) {
+  const decision = returnPromptDecision(returnWatch, {
+    source,
+    visibility: source === "visibility" ? document.visibilityState : "visible",
+    now: Date.now(),
+    cartReadyOpen: Boolean($("cart-ready")?.open),
+    returnScreenOpen: Boolean($("handoff-return")?.open),
+  });
+  returnWatch = decision.state;
+  if (decision.show) showStoreReturn(decision.store, decision.kind);
+}
+
+function chooseBootStep() {
+  const handoff = readHandoffTrip(localStorage);
+  return bootTab({
+    handoffStep: handoff?.step,
+    hasHandoff: Boolean(handoff && (handoff.items?.length || handoff.plan)),
+    storedStep: localStorage.getItem(STEP_KEY),
+    idbStep: idbBootStep,
+  });
+}
+
+function goHome() {
+  const open = [...document.querySelectorAll("dialog[open]")].map((dialog) => dialog.id);
+  const transition = homeTransition(open);
+  for (const id of transition.closeDialogIds) {
+    try {
+      $(id)?.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  closeDrawer();
+  const proxy = $("brand-home-proxy");
+  if (proxy?.hidePopover) {
+    try {
+      if (proxy.matches(":popover-open")) proxy.hidePopover();
+    } catch {
+      /* proxy was not showing */
+    }
+  }
+  showStep(transition.step, transition.reason);
+  window.scrollTo(0, 0);
+}
+
+function syncHomeProxy() {
+  const mark = document.querySelector("#brand-home .brand-mark");
+  const rect = mark?.getBoundingClientRect();
+  const openDialogs = [...document.querySelectorAll("dialog")].filter((dialog) => dialog.open);
+  if (!homeProxyShouldShow(openDialogs.length)) {
+    document.querySelectorAll("dialog > .sheet-home").forEach((button) => button.remove());
+    return;
+  }
+  for (const dialog of openDialogs) {
+    let button = dialog.querySelector(":scope > .sheet-home");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "sheet-home";
+      button.setAttribute("aria-label", "Home");
+      button.textContent = "G";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        goHome();
+      });
+      bindBrandPress(button);
+      dialog.append(button);
+    }
+    if (rect) placeHomeProxy(button, rect);
+  }
+}
+
+function bindBrandPress(button) {
+  if (!button) return;
+  const press = (on) => button.classList.toggle("is-pressed", on);
+  button.addEventListener("pointerdown", () => press(true));
+  button.addEventListener("pointerup", () => press(false));
+  button.addEventListener("pointercancel", () => press(false));
+  button.addEventListener("pointerleave", () => press(false));
 }
 
 async function syncSystemBars(dark) {
@@ -569,6 +714,9 @@ function applyZip(zip, { reload = true } = {}) {
 
 let toastTimer = 0;
 let flowStep = "add";
+let tabGuard = createTabGuard();
+let returnWatch = createReturnWatch();
+let idbBootStep = "";
 let planning = false;
 /** @type {AbortController | null} */
 let planAbort = null;
@@ -647,6 +795,7 @@ function showTripValue() {
   const host = $("trip-value-body");
   const dialog = $("trip-value");
   if (!view?.stores?.length || !host || !dialog) return;
+  betaEvent("trip_completed");
   const lines = view.stores.flatMap((store) => store.items || []);
   const comparison = singleStoreSavings(lines);
   const profile = getUserProfile(localStorage);
@@ -828,12 +977,15 @@ function syncPullStatus() {
 function markStoreHandoff(storeName, kind = "store") {
   const store = String(storeName || "Walmart");
   const mode = kind === "coupons" ? "coupons" : kind === "cart" ? "cart" : "store";
+  const at = Date.now();
   try {
     sessionStorage.setItem(WALMART_RETURN_KEY, store);
-    localStorage.setItem("gg-handoff-pending", JSON.stringify({ store, kind: mode, at: Date.now() }));
+    localStorage.setItem("gg-handoff-pending", JSON.stringify({ store, kind: mode, at }));
   } catch {
     /* private browsing */
   }
+  returnWatch = armHandoff(returnWatch, { store, kind: mode, at });
+  captureHandoffTrip(store, mode);
   try {
     tripChannel?.postMessage({ type: "gg-handoff", store, kind: mode, at: Date.now() });
   } catch {
@@ -887,13 +1039,12 @@ function showStoreReturn(store, kind = "store") {
     title.textContent = `Did you finish at ${name}?`;
     if (body) body.textContent = "A website can't come back from the store on its own.";
   }
-  if (!dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function showWalmartReturn() {
-  const pending = takeHandoffPending();
-  if (!pending?.store) return;
-  showStoreReturn(pending.store, pending.kind || "store");
+  /* Scroll, focus, and pageshow used to call this. The finish sheet
+     opens only from maybeShowReturnPrompt after a real leave. */
 }
 
 function noteAppHidden() {
@@ -903,7 +1054,6 @@ function noteAppHidden() {
 function noteAppVisible() {
   if (flowStep === "shop") void engageWake();
   rehydrateTrip();
-  if (sawAppHidden) showWalmartReturn();
 }
 
 function toastShellUpdate() {
@@ -1113,7 +1263,7 @@ function openCartReady(storeName, { error = "", retry = null, summary = "" } = {
   }
   if (again) again.hidden = !retry;
   krogerRetry = retry;
-  if (dialog && !dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function shortenForSearch(value) {
@@ -1146,6 +1296,14 @@ function calmPlanError(message) {
   return text;
 }
 
+function betaEvent(name) {
+  try {
+    document.dispatchEvent(new CustomEvent("gg-beta-event", { detail: name }));
+  } catch {
+    /* product counters are optional */
+  }
+}
+
 function friendlyCartError(message) {
   const text = String(message || "").trim();
   if (!text || /invalid response|upstream|authorize\.json|^\{|products request failed|locations request failed/i.test(text)) {
@@ -1162,6 +1320,7 @@ function applyKrogerReturn(parsed) {
   if (parsed.kind === "added") {
     const saved = readKrogerTrip(localStorage);
     toast(krogerAddedConfirmation(parsed.message, saved?.itemCount), 5000);
+    betaEvent("kroger_cart_sent");
   }
   try {
     localStorage.setItem(ONBOARDING_KEY, "1");
@@ -1191,9 +1350,10 @@ function finishKrogerReturn(parsed) {
   } else if (!lastOptimize) {
     loadCachedTrip();
   }
-  showStep(saved?.step || parsed.step || "plan");
-  const y = Number(saved?.scroll) || 0;
-  requestAnimationFrame(() => window.scrollTo(0, y));
+  showStep(saved?.step || parsed.step || "plan", "handoff");
+  const openingSheet = parsed.kind === "added" || parsed.kind === "error";
+  const y = scrollRestoreOffset(saved?.scroll, window.scrollY || 0, { sheetOpen: openingSheet, touching: false });
+  if (y != null) window.scrollTo(0, y);
   clearKrogerTrip(localStorage);
   if (parsed.kind === "added") {
     const confirmation = krogerAddedConfirmation(parsed.message, saved?.itemCount);
@@ -1250,6 +1410,8 @@ function rememberKrogerHandoff(itemCount) {
     checks: readChecks(localStorage, tripId()),
     itemChecks: readItemChecks(localStorage),
   });
+  returnWatch = armHandoff(returnWatch, { store: "Kroger", kind: "cart", at: Date.now() });
+  captureHandoffTrip("Kroger", "cart");
 }
 
 function watchKrogerPopup(popup) {
@@ -1257,7 +1419,7 @@ function watchKrogerPopup(popup) {
     if (!popup || popup.closed) {
       window.clearInterval(timer);
       const saved = readKrogerTrip(localStorage);
-      if (saved?.step && flowStep !== saved.step) showStep(saved.step);
+      if (saved?.step && flowStep !== saved.step) showStep(saved.step, "handoff");
       return;
     }
     let parsed = null;
@@ -1323,7 +1485,7 @@ function showHandoffReturn(title, body) {
   const text = $("handoff-return-body");
   if (heading) heading.textContent = title;
   if (text) text.textContent = body;
-  if (dialog && !dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function rehydrateTrip() {
@@ -1334,12 +1496,10 @@ function rehydrateTrip() {
   }
   hydrateListFromStorage();
   loadCachedTrip();
-  const step = readFlowStep(localStorage.getItem(STEP_KEY));
-  flowStep = step;
   syncStepVisibility();
   renderEstimate();
-  if (step === "plan") paintTrip();
-  if (step === "shop") renderShop();
+  if (flowStep === "plan") paintTrip();
+  if (flowStep === "shop") renderShop();
   paintPlanBar();
 }
 
@@ -1350,7 +1510,6 @@ function listenForTripTabs() {
     tripChannel.onmessage = (event) => {
       const handoff = handoffResultMessage(event.data);
       if (handoff) {
-        showStoreReturn(handoff.store, handoff.kind);
         rehydrateTrip();
         return;
       }
@@ -1363,18 +1522,12 @@ function listenForTripTabs() {
     if (event.origin !== window.location.origin) return;
     const handoff = handoffResultMessage(event.data);
     if (!handoff) return;
-    showStoreReturn(handoff.store, handoff.kind);
     rehydrateTrip();
   });
   window.addEventListener("storage", (event) => {
     if (event.key === LIST_KEY) rehydrateTrip();
     if (event.key === HANDOFF_RESULT_KEY) applySharedHandoff();
   });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") applySharedHandoff();
-  });
-  window.addEventListener("focus", () => applySharedHandoff());
-  window.addEventListener("pageshow", () => applySharedHandoff());
 }
 
 async function refreshKrogerFromServer() {
@@ -2700,7 +2853,7 @@ function narrowStores(stores) {
 function spreadTrip() {
   if (!lastOptimize) return null;
   const threshold = tripEdits.fewerStops ? 8 : 2;
-  const base = applyTripEdits(lastOptimize.stores ?? [], tripEdits, lastOptimize.capabilities || {});
+  const base = applyTripEdits(dedupeStores(lastOptimize.stores ?? []), tripEdits, lastOptimize.capabilities || {});
   const stores = narrowStores(base.stores);
   if (planLimited("multiStoreSplit")) return { ...base, stores };
   const consolidated = consolidateStops(stores, threshold, lastOptimize.capabilities || {});
@@ -2725,6 +2878,9 @@ function listSignature() {
 
 let replanTimer = 0;
 let plannedSignature = "";
+let planStartedAt = 0;
+let planTicker = 0;
+const missingSwapProducts = new Map();
 
 function refreshPlanSurfaces() {
   if (flowStep === "shop") renderShop();
@@ -2751,15 +2907,28 @@ function onListChanged() {
   }, 280);
 }
 
-function currentTrip() {
-  if (!list.size) return null;
+function reviewState() {
   const spread = spreadTrip();
   if (!spread) return null;
-  const mode = !planLimited("multiStoreSplit") && tripEdits.planMode === "fewer" ? "fewer" : "spread";
-  const base = mode === "fewer" ? fewerStorePlan(narrowStores(spread.stores), lastOptimize?.capabilities || {}) : spread;
-  const stores = pruneStoresToList(base.stores || spread.stores, listEntries());
-  const total = stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0);
-  return { ...spread, ...base, stores, total: Math.round(total * 100) / 100, stale: stores.length === 0 };
+  const plans = buildReviewPlans(spread.stores);
+  const mode = tripEdits.planMode === "custom" ? "custom" : tripEdits.planMode === "fewer" && plans.fewer ? "fewer" : "spread";
+  return { spread, plans, mode };
+}
+
+function presentPlan(stores) {
+  return applyTripEdits(stores || [], {}, lastOptimize?.capabilities || {}).stores;
+}
+
+function currentTrip() {
+  if (!list.size) return null;
+  const state = reviewState();
+  if (!state) return null;
+  if (state.mode === "custom") return state.spread;
+  const chosen = state.mode === "fewer" && state.plans.fewer ? state.plans.fewer : state.plans.best;
+  if (!chosen?.stores?.length) return state.spread;
+  const stores = presentPlan(chosen.stores);
+  const total = Math.round(stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
+  return { ...state.spread, stores, total, stale: stores.length === 0 };
 }
 
 function rememberTrip() {
@@ -2827,6 +2996,7 @@ function moveLine(lineId, storeName) {
     return;
   }
   const moves = { ...tripEdits.moves };
+  tripEdits = { ...tripEdits, planMode: "custom" };
   const original = (lastOptimize?.stores || [])
     .flatMap((store) => store.items || [])
     .find((item) => item.lineId === lineId);
@@ -3041,7 +3211,7 @@ function addOwnCoupon(button) {
 
 function renderTrip(payload, options = {}) {
   const names = listEntries().map((entry) => entry.name);
-  const stores = mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, payload?.unavailable);
+  const stores = dedupeStores(mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, payload?.unavailable));
   lastOptimize = { ...payload, stores: stores.length ? stores : payload?.stores || [] };
   if (lastOptimize.stores?.length) {
     lastOptimize.total = Math.round(lastOptimize.stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
@@ -3182,14 +3352,10 @@ function calmItemRow(item) {
 }
 
 function customizeBlock(stores) {
-  const moves = (stores || [])
-    .flatMap((store) => store.items || [])
-    .map((item) => {
-      const control = moveControl(item);
-      if (!control) return "";
-      return `<div data-customize-line="${escapeHtml(item.lineId || "")}">${control}</div>`;
-    })
-    .join("");
+  const moves = customizeRowsHtml(
+    (stores || []).flatMap((store) => store.items || []),
+    (item) => shortItemTitle(item)
+  );
   const locks = planLimited("multiStoreSplit")
     ? ""
     : (stores || [])
@@ -3210,6 +3376,101 @@ function customizeBlock(stores) {
   </details>`;
 }
 
+function reviewItemRows(items) {
+  return dedupeReviewLines(items, (item) => shortItemTitle(item))
+    .map((item) => {
+      const qty = Number(item.quantity) > 1 ? ` x${item.quantity}` : "";
+      const amount = Number(item.itemTotal ?? linePrice(item));
+      const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
+      return `<li class="review-line"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
+    })
+    .join("");
+}
+
+function linePrice(item) {
+  const qty = Math.max(1, Number(item?.quantity) || 1);
+  const price = Number(item?.price);
+  if (Number.isFinite(price)) return price * qty;
+  return Number(item?.itemTotal);
+}
+
+function reviewStoreArticle(store, couponSummary, coupons) {
+  const total = Number.isFinite(Number(store.subtotal)) ? priceFigure(store.subtotal) : "";
+  const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
+  const couponsHtml = storeCouponMarkup(store, {
+    page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
+    rows: storeSummary?.rows || [],
+    storeSummary,
+    clipped: isClipped(localStorage, tripId(), store.storeName),
+    canEnter: !planLimited("ownCoupons"),
+    open: false,
+    coupons,
+  });
+  const count = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item)).length;
+  const countLabel = count === 1 ? "1 item" : `${count} items`;
+  const mark = handoffMark(store);
+  const action = withCheckoutLabel(primaryAction(store), reviewCheckoutLabel(store));
+  const walmartNote =
+    store.handoff?.action?.type === "walmart_cart"
+      ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
+      : "";
+  return reviewStoreCardHtml({
+    name: store.storeName,
+    countLabel,
+    total,
+    markHtml: `<span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>`,
+    actionHtml: `${action}${walmartNote}`,
+    itemsHtml: reviewItemRows(store.items || []),
+    swapsHtml: reviewSwapLines(store),
+    couponsHtml,
+  });
+}
+
+function planStatusNow() {
+  return planStatusHtml(
+    planStatusModel(selectedStoreNames(), planProgress, {
+      itemCount: list.size,
+      startedAt: planStartedAt,
+      now: Date.now(),
+    })
+  );
+}
+
+function paintPlanningStatus() {
+  const html = planStatusNow();
+  const host = document.getElementById("plan-status-block");
+  if (host) {
+    host.outerHTML = html;
+    return;
+  }
+  if (tripEl && planning) tripEl.insertAdjacentHTML("afterbegin", html);
+}
+
+function selectReviewMode(mode) {
+  const next = mode === "fewer" ? "fewer" : "spread";
+  const state = reviewState();
+  if (next === "fewer" && !state?.plans?.fewer) return;
+  tripEdits = { ...tripEdits, planMode: next, planChosen: true };
+  rememberTrip();
+  const shell = tripEl?.querySelector("[data-review-shell]");
+  if (!shell || !state || shell.getAttribute("data-signature") !== state.plans.signature) {
+    paintTrip();
+    if (flowStep === "shop") renderShop();
+    haptic();
+    return;
+  }
+  shell.querySelectorAll("[data-plan-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.getAttribute("data-plan-mode") === next ? "true" : "false");
+  });
+  shell.querySelectorAll("[data-plan-panel]").forEach((panel) => {
+    panel.hidden = panel.getAttribute("data-plan-panel") !== next;
+  });
+  const host = shell.querySelector("[data-review-customize]");
+  const chosen = next === "fewer" && state.plans.fewer ? state.plans.fewer : state.plans.best;
+  if (host) host.innerHTML = customizeBlock(presentPlan(chosen.stores));
+  haptic();
+}
+
 function paintTrip() {
   const scrollY = window.scrollY || 0;
   const keepPlace = () => {
@@ -3220,23 +3481,30 @@ function paintTrip() {
     }
   };
   const view = currentTrip();
+  const state = reviewState();
   if (!view?.stores?.length) {
     if (!list.size) {
       tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
+    } else if (planning) {
+      tripEl.innerHTML = `${krogerBannerHtml()}${planStatusNow()}`;
     } else if (!lastOptimize) {
       tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted">Review the split to price this list.</p>`;
     } else {
-      tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted" id="plan-status-line">Updating the plan…</p><div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`;
+      tripEl.innerHTML = `${krogerBannerHtml()}${planStatusNow()}`;
     }
     keepPlace();
     return;
   }
-  const stores = view.stores ?? [];
-  const lines = stores.flatMap((store) => store.items || []);
+  const plans = state?.plans;
+  const mode = state?.mode || "spread";
+  const bestStores = presentPlan(plans?.best?.stores || view.stores);
+  const fewerStores = plans?.fewer ? presentPlan(plans.fewer.stores) : [];
+  const customStores = mode === "custom" ? view.stores : [];
+  const lines = bestStores.flatMap((store) => store.items || []);
   const card = savingsCard(singleStoreSavings(lines));
-  const fewer = fewerStopsOffer(stores, lastOptimize?.capabilities || {});
+  if (plans) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
-  const couponSummary = couponSavingsSummary(stores, coupons, todayKey());
+  const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
   const showCouponEstimate = hasCoupons;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
@@ -3249,83 +3517,33 @@ function paintTrip() {
   const lineItems = (card.lines || [])
     .map((line) => `<li><span>${escapeHtml(line.label)}</span><strong>${escapeHtml(line.value)}</strong></li>`)
     .join("");
-  const spreadView = { stores: view.stores, total: view.total };
-  const fewerPlan = spreadView && !planLimited("multiStoreSplit") ? fewerStorePlan(narrowStores(spreadView.stores), lastOptimize?.capabilities || {}) : null;
-  const spreadTotal = view.total;
-  const mode = tripEdits.planMode === "fewer" ? "fewer" : "spread";
-  const spreadStops = (view.stores || []).length;
-  const identical = !fewerPlan || plansAreIdentical(view.stores, spreadTotal, fewerPlan);
-  const spreadFigure = Number.isFinite(Number(spreadTotal)) && Number(spreadTotal) > 0 ? priceFigure(spreadTotal) : "";
-  const bestLine = `Best price${spreadFigure ? ` · ${spreadFigure}` : ""}${spreadStops ? ` · ${spreadStops} ${spreadStops === 1 ? "store" : "stores"}` : ""}. This already uses the fewest stores.`;
-  const fewerExtra = !fewerPlan
+  const showFewer = Boolean(plans?.fewer) && !planLimited("multiStoreSplit");
+  const bestDetail = plans ? formatPlanDetail(plans.best) : "";
+  const bestLine = `${bestDetail}. This already uses the fewest stores.`;
+  const fewerGap = showFewer ? Math.max(1, plans.best.stops - plans.fewer.stops) : 0;
+  const fewerDelta = showFewer ? Number(plans.fewer.total) - Number(plans.best.total) : 0;
+  const fewerExtra = !showFewer
     ? ""
-    : fewerPlan.delta > 0.009
-      ? `Costs ${priceFigure(fewerPlan.delta)} more than the best price`
-      : fewerPlan.delta < -0.009
-        ? `Saves ${priceFigure(Math.abs(fewerPlan.delta))} versus the best price`
-        : "Same price as the best price";
-  const choiceHtml = !fewerPlan || spreadStops < 2 || identical
+    : fewerDelta > 0.009
+      ? `+${priceFigure(fewerDelta)} for ${fewerGap} fewer stop${fewerGap === 1 ? "" : "s"} · more than the best price`
+      : fewerDeltaText(plans.fewer, plans.best);
+  const choiceHtml = !showFewer
     ? `<section class="plan-choice plan-choice-single" aria-label="Best price"><p><strong>Best price</strong></p><p>${escapeHtml(bestLine)}</p></section>`
     : `<section class="plan-choice" role="group" aria-label="Lowest price or fewer stores">
-        <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Best price<span>Lowest price · ${spreadStops} ${spreadStops === 1 ? "store" : "stores"}${spreadFigure ? ` · ${escapeHtml(spreadFigure)}` : ""}</span></button>
-        <button type="button" data-plan-mode="fewer" aria-pressed="${mode === "fewer" ? "true" : "false"}">Fewer stores<span>${fewerPlan.stops} ${fewerPlan.stops === 1 ? "store" : "stores"}${Number.isFinite(fewerPlan.total) ? ` · ${escapeHtml(priceFigure(fewerPlan.total))}` : ""} · ${escapeHtml(fewerExtra)}</span></button>
+        <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Best price<span>${escapeHtml(bestDetail)}</span></button>
+        <button type="button" data-plan-mode="fewer" aria-pressed="${mode === "fewer" ? "true" : "false"}">Fewer stores<span>${escapeHtml(formatPlanDetail(plans.fewer))} · ${escapeHtml(fewerExtra)}</span></button>
       </section>`;
-  const fewerHtml = fewer
-    ? `<section class="fewer-card"><p>${escapeHtml(fewer.text)}</p><button type="button" class="ghost" id="use-fewer-stops">${escapeHtml(fewer.action)}</button></section>`
-    : "";
-  const storeHtml = stores
-    .map((store) => {
-      const total = Number.isFinite(Number(store.subtotal)) ? priceFigure(store.subtotal) : "";
-      const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
-      const couponsHtml = storeCouponMarkup(store, {
-        page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
-        rows: storeSummary?.rows || [],
-        storeSummary,
-        clipped: isClipped(localStorage, tripId(), store.storeName),
-        canEnter: !planLimited("ownCoupons"),
-        open: false,
-        coupons,
-      });
-      const count = (store.items || []).length;
-      const countLabel = count === 1 ? "1 item" : `${count} items`;
-      const itemRows = (store.items || [])
-        .map((item) => {
-          const qty = Number(item.quantity) > 1 ? ` x${item.quantity}` : "";
-          const amount = Number(item.itemTotal ?? item.price);
-          const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
-          return `<li class="review-line"><span>${escapeHtml(shortItemTitle(item))}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
-        })
-        .join("");
-      const mark = handoffMark(store);
-      const ready = usesStoreReadyList(store.storeName);
-      const walmartNote =
-        store.handoff?.action?.type === "walmart_cart"
-          ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
-          : "";
-      const body = ready
-        ? storeReadyCardHtml(store, readChecks(localStorage, tripId()))
-        : `${walmartNote}<div class="shop-actions">${primaryAction(store)}</div>`;
-      return `<article class="calm-store">
-        <details class="store-fold">
-          <summary>
-            <span class="store-fold-name">${escapeHtml(store.storeName)}</span>
-            <span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>
-            <span>${escapeHtml(countLabel)}</span>
-            ${total ? `<strong>${escapeHtml(total)}</strong>` : ""}
-          </summary>
-          <ul class="review-lines">${itemRows}</ul>
-          ${body}
-          ${reviewSwapLines(store)}
-          ${couponsHtml}
-        </details>
-      </article>`;
-    })
-    .join("");
-  const missing = (lastOptimize?.unavailable ?? []).length
-    ? `<p class="muted">We couldn't price ${escapeHtml(lastOptimize.unavailable.join(", "))}.</p>`
-    : "";
+  const panel = (name, stores, hidden) =>
+    `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}</div></div>`;
+  const coverage = (plans?.coverageNotes || []).map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
+  const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
+  const missing = missingAccordionHtml(lastOptimize?.unavailable || []);
+  const progress = planning ? planStatusNow() : "";
+  const shown = mode === "custom" ? customStores : mode === "fewer" ? fewerStores : bestStores;
   tripEl.innerHTML = `
+    ${progress}
     ${krogerBannerHtml()}
+    <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}">
     <section class="savings-card">
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
@@ -3335,39 +3553,30 @@ function paintTrip() {
     </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${choiceHtml}
-    <div class="store-grid">${storeHtml}</div>
-    ${emptyCheckedStoreHtml(stores)}
+    ${savingsLine}
+    ${coverage}
+    ${panel("spread", bestStores, mode !== "spread")}
+    ${showFewer ? panel("fewer", fewerStores, mode !== "fewer") : ""}
+    ${mode === "custom" ? panel("custom", customStores, false) : ""}
+    ${emptyCheckedStoreHtml(shown)}
     ${missing}
     ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
-    ${fewerHtml}
     ${lastOptimize?.entitlement?.plan === "free" ? `<p class="muted">This plan uses one store. <button type="button" class="linkish" data-open-paywall="1">See Grocery Gitter Pro</button> to split the list.</p>` : ""}
     ${offline ? `<p class="offline-note">You're offline. This is the last plan saved on this phone.</p>` : ""}
     ${lastOptimize?.krogerStoreNote ? `<p class="kroger-store-note">${escapeHtml(lastOptimize.krogerStoreNote)}</p>` : ""}
     ${krogerUnpricedHtml(lastOptimize?.krogerUnpriced)}
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
     <p class="trip-tools"><button type="button" class="text-btn" id="clear-trip-open">Clear trip</button></p>
-    ${customizeBlock(stores)}
+    <div data-review-customize>${customizeBlock(shown)}</div>
+    </div>
   `;
   $("clear-trip-open")?.addEventListener("click", openClearTrip);
   tripEl.querySelectorAll("[data-plan-mode]").forEach((button) => {
-    button.onclick = () => {
-      tripEdits = { ...tripEdits, planMode: button.getAttribute("data-plan-mode") === "fewer" ? "fewer" : "spread", planChosen: true };
-      rememberTrip();
-      paintTrip();
-      if (flowStep === "shop") renderShop();
-      haptic();
+    button.onclick = (event) => {
+      event.preventDefault();
+      selectReviewMode(button.getAttribute("data-plan-mode") === "fewer" ? "fewer" : "spread");
     };
   });
-  const fewerButton = $("use-fewer-stops");
-  if (fewerButton && fewer) {
-    fewerButton.onclick = () => {
-      tripEdits = { ...tripEdits, moves: { ...tripEdits.moves, ...fewer.moves } };
-      rememberTrip();
-      paintTrip();
-      if (flowStep === "shop") renderShop();
-      haptic();
-    };
-  }
   const subs = $("customize-subs");
   if (subs) {
     subs.onchange = () => {
@@ -3377,7 +3586,59 @@ function paintTrip() {
       void planTrip({ stay: true });
     };
   }
+  void fillMissingSuggestions();
   keepPlace();
+}
+
+async function fillMissingSuggestions() {
+  const names = (lastOptimize?.unavailable || []).map((name) => String(name || "").trim()).filter(Boolean);
+  if (!names.length || !tripEl) return;
+  const generation = (fillMissingSuggestions.generation = (fillMissingSuggestions.generation || 0) + 1);
+  for (const name of names) {
+    if (fillMissingSuggestions.generation !== generation) return;
+    const host = [...tripEl.querySelectorAll("[data-missing-suggest]")].find((node) => node.getAttribute("data-missing-suggest") === name);
+    if (!host) continue;
+    try {
+      const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`), {}, 4000);
+      const body = await response.json().catch(() => ({}));
+      if (fillMissingSuggestions.generation !== generation || !host.isConnected) return;
+      const ranked = rankSwapSuggestions(name, body.items || []);
+      if (!ranked.length) {
+        host.innerHTML = `<p class="muted">Nothing close in the catalog.</p>`;
+        continue;
+      }
+      host.innerHTML = ranked
+        .map((pick) => {
+          const product = pick.product;
+          missingSwapProducts.set(product.id, product);
+          const label = displayProductName(product.name, product.brand) || product.name;
+          const price = Number(product.bestOffer?.price ?? product.price);
+          const figure = Number.isFinite(price) ? priceFigure(price) : "";
+          return `<button type="button" class="swap-suggestion" data-missing-swap="${escapeHtml(product.id)}" data-missing-for="${escapeHtml(name)}">${escapeHtml(label)}${figure ? ` · ${escapeHtml(figure)}` : ""}</button>`;
+        })
+        .join("");
+    } catch {
+      if (host.isConnected) host.innerHTML = `<p class="muted">Nothing close in the catalog.</p>`;
+    }
+  }
+}
+
+function removeNamedItem(name) {
+  const wanted = String(name || "").trim().toLowerCase();
+  if (!wanted) return;
+  for (const [id, entry] of [...list]) {
+    const labels = [entry.product?.catalogName, entry.product?.name, entry.product?.familyName]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    if (labels.some((label) => label === wanted || label.includes(wanted) || wanted.includes(label))) {
+      setQuantity(id, 0);
+      return;
+    }
+  }
+  if (Array.isArray(lastOptimize?.unavailable)) {
+    lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
+    paintTrip();
+  }
 }
 
 function renderStore(store, checks, coupons, couponSummary, openCoupons) {
@@ -3685,7 +3946,7 @@ function loadCachedTrip() {
 
 function restoreOfflineTrip() {
   if (!loadCachedTrip()) return false;
-  showStep("shop");
+  showStep("shop", "boot");
   return true;
 }
 
@@ -3795,6 +4056,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
   if (!stay) {
+    tabGuard = noteTabInteraction(tabGuard);
     flowStep = "plan";
     try {
       localStorage.setItem(STEP_KEY, flowStep);
@@ -3845,8 +4107,13 @@ async function planTrip({ stay = false, trigger = null } = {}) {
   const controller = new AbortController();
   planAbort = controller;
   planning = true;
+  planStartedAt = Date.now();
   planProgress = {};
   for (const name of selectedStoreNames()) planProgress[name] = { done: false, checked: 0, total: list.size };
+  window.clearInterval(planTicker);
+  planTicker = window.setInterval(() => {
+    if (planning) paintPlanningStatus();
+  }, 1000);
   planBtn.disabled = false;
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
@@ -3882,13 +4149,13 @@ async function planTrip({ stay = false, trigger = null } = {}) {
           total: Number(status.total) || planProgress[name]?.total || list.size,
         };
       }
-      const waiting = status.pendingStores?.length ? ` Still checking ${status.pendingStores.join(", ")}.` : "";
-      paintPlanProgress(name ? `${status.type === "status" ? "Priced" : "Checking"} ${name}.${waiting}` : "Checking store prices…");
+      paintPlanningStatus();
     }, (partial) => {
       renderTrip(partial, { keepEdits: true });
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
+    betaEvent("plan_built");
     if (body.partial) {
       ensurePlanRetry(PLAN_PARTIAL_NOTE);
       toast(PLAN_PARTIAL_NOTE, 4200);
@@ -3904,7 +4171,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     if (planAbort !== controller) return "replaced";
     result = "fail";
     if (navigator.onLine === false && !lastOptimize && loadCachedTrip()) {
-      showStep("shop");
+      showStep("shop", "restore");
       toast("You're offline. Showing the last plan on this phone.");
       return "fail";
     }
@@ -3928,6 +4195,10 @@ async function planTrip({ stay = false, trigger = null } = {}) {
   } finally {
     if (planAbort === controller) {
       planning = false;
+      window.clearInterval(planTicker);
+      planTicker = 0;
+      const statusBlock = document.getElementById("plan-status-block");
+      if (statusBlock) statusBlock.remove();
       planAbort = null;
       planBtn.disabled = list.size === 0;
       planBtn.textContent = "Review the split";
@@ -4026,6 +4297,7 @@ async function startKroger(storeName, button) {
     }
     if (body.status === "added" || body.krogerCartUrl) {
       rememberKrogerConnected();
+      betaEvent("kroger_cart_sent");
       openCartReady("Kroger", { summary: body.summary || "" });
       return;
     }
@@ -4816,6 +5088,7 @@ document.addEventListener("click", (event) => {
   }
   const flowButton = target.closest("[data-flow]");
   if (flowButton) {
+    if (clickShielded(tabGuard, Date.now())) return;
     haptic();
     showStep(flowButton.getAttribute("data-flow"));
     return;
@@ -4833,6 +5106,27 @@ document.addEventListener("click", (event) => {
   const starter = target.closest("[data-starter]");
   if (starter) {
     void addStarter(starter.getAttribute("data-starter"));
+    return;
+  }
+  const reviewSwitch = target.closest("[data-review-switch]");
+  if (reviewSwitch) {
+    moveLine(reviewSwitch.getAttribute("data-review-switch"), reviewSwitch.getAttribute("data-review-store"));
+    haptic();
+    return;
+  }
+  const missingRemove = target.closest("[data-missing-remove]");
+  if (missingRemove) {
+    removeNamedItem(missingRemove.getAttribute("data-missing-remove"));
+    haptic();
+    return;
+  }
+  const missingSwap = target.closest("[data-missing-swap]");
+  if (missingSwap) {
+    const product = missingSwapProducts.get(missingSwap.getAttribute("data-missing-swap") || "");
+    const name = missingSwap.getAttribute("data-missing-for") || "";
+    if (product) addProduct(product, 1, { quiet: true, skipAsk: true });
+    removeNamedItem(name);
+    haptic();
     return;
   }
   const krogerSub = target.closest("[data-kroger-sub]");
@@ -4910,6 +5204,7 @@ document.addEventListener("click", (event) => {
     }
     haptic();
     maybeAskAccount("cart", () => {
+      betaEvent("walmart_opened");
       markWalmartHandoff();
       openStoreHandoff(url, "Walmart", "cart");
       window.scrollTo(0, scrollY);
@@ -5298,7 +5593,13 @@ $("shop-done")?.addEventListener("click", () => {
 });
 $("shop-status")?.addEventListener("click", onPrimary);
 $("trip-summary-close")?.addEventListener("click", () => $("trip-summary")?.close());
-$("store-return-no")?.addEventListener("click", () => $("store-return")?.close());
+$("store-return-no")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  dismissReturnChoice();
+  tabGuard = noteTabInteraction(tabGuard);
+  $("store-return")?.close();
+});
 $("store-return-trip")?.addEventListener("click", () => {
   $("store-return")?.close();
   showStep("plan");
@@ -5345,10 +5646,26 @@ $("clear-trip-form")?.addEventListener("submit", (event) => {
   clearTripItems();
 });
 $("brand-home")?.addEventListener("click", () => {
-  closeDrawer();
-  showStep("add");
-  window.scrollTo(0, 0);
+  goHome();
 });
+$("brand-home-proxy")?.addEventListener("click", () => {
+  goHome();
+});
+bindBrandPress($("brand-home"));
+bindBrandPress($("brand-home-proxy"));
+for (const id of ["store-return", "handoff-return", "cart-ready"]) {
+  $(id)?.addEventListener("close", () => {
+    armTabShield();
+    syncHandoffSheetFlag();
+  });
+}
+new MutationObserver(() => syncHomeProxy()).observe(document.body, {
+  subtree: true,
+  attributes: true,
+  attributeFilter: ["open"],
+});
+window.addEventListener("scroll", () => syncHomeProxy(), { passive: true });
+window.addEventListener("resize", () => syncHomeProxy());
 $("add-items")?.addEventListener("click", () => {
   showStep("add");
   window.scrollTo(0, 0);
@@ -6440,7 +6757,10 @@ function syncStepVisibility() {
   syncBrowse();
 }
 
-function showStep(step) {
+function showStep(step, reason = "user") {
+  const decision = allowTabChange(tabGuard, reason);
+  tabGuard = decision.state;
+  if (!decision.allow) return;
   hidePullStatus();
   flowStep = readFlowStep(step);
   try {
@@ -6476,7 +6796,8 @@ function showStep(step) {
 function paintPlanBar() {
   const count = [...list.values()].reduce((sum, entry) => sum + entry.quantity, 0);
   const view = currentTrip();
-  const progress = view ? shopProgress(view.stores || [], mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
+  const progressStores = flowStep === "shop" && view?.stores ? dedupeTripStores(view.stores, mergedTripChecks(view.stores)) : view?.stores || [];
+  const progress = view ? shopProgress(progressStores, mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
   const total = view?.stores?.length ? view.total : lastBarTotal;
   const copy = planBarCopy({
     step: flowStep,
@@ -6538,14 +6859,16 @@ function renderShop() {
             },
             escapeHtml
           );
-    shop.innerHTML = `${krogerBannerHtml()}${backPrompt}${body}`;
+    shop.innerHTML = `${backPrompt}${body}`;
     paintPlanBar();
     return;
   }
-  const progress = shopProgress(view.stores, mergedTripChecks(view.stores));
+  const checks = mergedTripChecks(view.stores);
+  const stores = dedupeTripStores(view.stores, checks);
+  const progress = shopProgress(stores, checks);
   const done = doneMessage(progress);
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  const route = inStoreRoute(view.stores, mergedTripChecks(view.stores));
+  const route = inStoreRoute(stores, checks);
   const html = route
     .map((section) => {
       const rowHtml = (item, checked) => {
@@ -6606,14 +6929,13 @@ function renderShop() {
           : "";
       const note = section.note ? `<p class="layout-note">${escapeHtml(section.note)}</p>` : "";
       const left = section.left === 1 ? "1 left" : `${section.left} left`;
-      return `<section class="shop-store"><h2>${escapeHtml(section.storeName)}</h2><p class="muted">${escapeHtml(left)}</p>${note}${hint}${groups}${cart}<div class="shop-actions">${store ? primaryAction(store) : ""}</div></section>`;
+      return `<section class="shop-store" data-walking-list="1"><h2>${escapeHtml(section.storeName)}</h2><p class="muted">${escapeHtml(left)}</p>${note}${hint}${groups}${cart}${inStoreSendHtml()}</section>`;
     })
     .join("");
   const backPrompt = showReturnBanner
     ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
     : "";
   shop.innerHTML = `
-    ${krogerBannerHtml()}
     ${backPrompt}
     <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -7248,7 +7570,7 @@ async function refreshPrices() {
     let planned = "ok";
     if (list.size && (step === "plan" || step === "shop")) {
       planned = await planTrip({ stay: true, trigger: button });
-      if (step === "shop" && flowStep !== "shop") showStep("shop");
+      if (step === "shop" && flowStep !== "shop") showStep("shop", "restore");
       else if (step === "shop") renderShop();
     }
     if (planned !== "fail") {
@@ -7310,7 +7632,7 @@ async function bootApp() {
   hydrateListFromStorage();
   const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
   if (list.size === 0) {
-    const saved = await readTripDb(factory);
+    const saved = richerTrip(await readTripDb(factory), readHandoffTrip(localStorage));
     if (saved?.items?.length) {
       try {
         localStorage.setItem(LIST_KEY, JSON.stringify(saved.items));
@@ -7319,7 +7641,7 @@ async function bootApp() {
       }
       hydrateListFromStorage();
       if (saved.plan) lastOptimize = saved.plan;
-      if (saved.step) flowStep = readFlowStep(saved.step);
+      if (saved.step) idbBootStep = saved.step;
     }
   }
   renderEstimate();
@@ -7397,30 +7719,36 @@ async function bootApp() {
   if (isNative() && browserPlugin?.addListener) {
     void browserPlugin.addListener("browserFinished", () => {
       sawAppHidden = true;
-      showWalmartReturn();
+      maybeShowReturnPrompt("browser-finished");
     });
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
-  const storedStep = readFlowStep(localStorage.getItem(STEP_KEY));
-  if (storedStep !== "add") showStep(storedStep);
-  else syncStepVisibility();
   if (pendingKrogerReturn) {
     const parsed = pendingKrogerReturn;
     pendingKrogerReturn = null;
     finishKrogerReturn(parsed);
+  } else {
+    const step = chooseBootStep();
+    if (step !== "add") showStep(step, "boot");
+    else {
+      tabGuard = settleTabBoot(tabGuard);
+      syncStepVisibility();
+    }
   }
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") noteAppHidden();
-  if (document.visibilityState === "visible") noteAppVisible();
-});
-window.addEventListener("focus", () => {
-  if (document.visibilityState === "hidden") return;
-  if (sawAppHidden) showWalmartReturn();
-});
-window.addEventListener("pageshow", () => {
-  if (sawAppHidden) showWalmartReturn();
+  if (document.visibilityState === "hidden") {
+    noteAppHidden();
+    returnWatch = returnPromptDecision(returnWatch, {
+      source: "visibility",
+      visibility: "hidden",
+      now: Date.now(),
+    }).state;
+    return;
+  }
+  noteAppVisible();
+  maybeShowReturnPrompt("visibility");
 });
 
 const pullHost = document.querySelector(".catalog");
@@ -7577,12 +7905,15 @@ async function postImport(path, body, onProgress) {
   });
   const type = response.headers.get("content-type") || "";
   if (type.includes("ndjson")) {
-    return readNdjsonResponse(response, onProgress);
+    const streamed = await readNdjsonResponse(response, onProgress);
+    if (response.ok && path === "/api/import/receipt") betaEvent("receipt_imported");
+    return streamed;
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok && !payload?.receipt && !payload?.lines) {
     throw new Error(payload?.error || "We couldn't read that.");
   }
+  if (path === "/api/import/receipt" && (response.ok || payload?.receipt || payload?.lines)) betaEvent("receipt_imported");
   return payload;
 }
 

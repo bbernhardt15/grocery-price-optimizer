@@ -30,6 +30,12 @@ function walkBucket(department) {
   return WALK_ORDER.find((row) => row.departments.includes(name)) || WALK_ORDER[WALK_ORDER.length - 1];
 }
 
+/** A merged duplicate remembers every line id that was collapsed into it. */
+function lineChecked(item, checks) {
+  const ids = Array.isArray(item?.lineIds) && item.lineIds.length ? item.lineIds : [item?.lineId];
+  return ids.some((id) => id && checks?.[id]);
+}
+
 /**
  * Numbered walking route. Known Kroger aisles stay in aisle order.
  * A guess uses the typical department walk and says so.
@@ -44,7 +50,7 @@ export function inStoreRoute(stores, checks = {}) {
       const open = [];
       const cart = [];
       for (const item of store.items || []) {
-        if (item?.lineId && checks?.[item.lineId]) cart.push(item);
+        if (lineChecked(item, checks)) cart.push(item);
         else open.push(item);
       }
       const known = open.some((item) => aisleIsKnown(item)) || (store.items || []).some((item) => aisleIsKnown(item));
@@ -106,7 +112,7 @@ export function shopSections(stores) {
 export function shopProgress(stores, checks) {
   const items = (stores || []).flatMap((store) => store.items || []);
   const total = items.length;
-  const done = items.filter((item) => item?.lineId && checks?.[item.lineId]).length;
+  const done = items.filter((item) => lineChecked(item, checks)).length;
   return {
     total,
     done,
@@ -152,7 +158,7 @@ export function swapChoices(item) {
  * @param {Record<string, boolean>} checks
  */
 export function rowChecked(item, checks) {
-  return Boolean(item?.lineId && checks?.[item.lineId]);
+  return lineChecked(item, checks);
 }
 
 /**

@@ -37,7 +37,9 @@
     <link rel="icon" href="/icons/icon-192.png?v=store-2" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
     <link rel="stylesheet" href="/styles.css?v=shelf-1" />
+    <link rel="stylesheet" href="/shopper/review.css?v=review-1" />
     <link rel="stylesheet" href="/shopper/import.css?v=shelf-1" />
+    <link rel="stylesheet" href="/shopper/beta.css?v=beta-1" />
     <link rel="stylesheet" href="/shopper/onboardingPolish.css?v=retest-10" />
   </head>
   <body data-step="add">
@@ -56,6 +58,7 @@
             <p class="brand-title" id="brand-title">Add items</p>
           </div>
         </button>
+        <button type="button" id="brand-home-proxy" class="brand-home-proxy" popover="manual" aria-label="Home">G</button>
         <div class="top-actions">
           <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
             My list
@@ -107,6 +110,7 @@
             <button type="button" id="menu-zip">Edit ZIP and stores</button>
             <button type="button" id="menu-new-trip">Start a new trip</button>
             <button type="button" id="menu-settings">Settings</button>
+            <button type="button" id="menu-feedback">Send feedback</button>
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
             <button type="button" id="menu-redo">Redo setup</button>
@@ -115,6 +119,7 @@
             <h2 id="help-title">Help</h2>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
             <nav class="drawer-links" aria-label="About">
+              <button type="button" id="help-feedback" class="text-btn">Send feedback</button>
               <a id="help-privacy" href="/privacy">Privacy</a>
               <a id="help-terms" href="/terms">Terms</a>
             </nav>
@@ -397,6 +402,10 @@
           <button type="button" id="onboard-skip" class="text-btn">Skip</button>
           <button type="submit" id="onboard-next" class="primary">Next</button>
         </div>
+        <p class="panel-legal" id="onboard-legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </p>
       </form>
     </dialog>
     <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-title">
@@ -461,6 +470,7 @@
             <input id="delete-confirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" />
           </label>
           <button type="button" class="danger" id="delete-data-btn" disabled>Delete my data</button>
+          <button type="button" class="danger" id="delete-account-btn" disabled>Delete my account and data</button>
           <p id="delete-error" class="status" role="alert" hidden></p>
         </details>
       </div>
@@ -490,7 +500,7 @@
         <p id="paywall-error" class="status" role="alert" hidden></p>
       </div>
     </dialog>
-    <dialog id="cart-ready" class="sheet" aria-labelledby="cart-ready-title">
+    <dialog id="cart-ready" class="sheet handoff-sheet" aria-labelledby="cart-ready-title">
       <form class="sheet-body" id="cart-ready-form">
         <h2 id="cart-ready-title">Your cart is ready</h2>
         <p id="cart-ready-body">Finish checkout in the store app or site.</p>
@@ -556,7 +566,7 @@
         <div id="trip-summary-body"></div>
       </div>
     </dialog>
-    <dialog id="store-return" class="sheet" aria-labelledby="store-return-title">
+    <dialog id="store-return" class="sheet handoff-sheet" aria-labelledby="store-return-title">
       <form class="sheet-body" id="store-return-form">
         <h2 id="store-return-title">Did you finish at the store?</h2>
         <p>A website can't come back from the store on its own.</p>
@@ -586,7 +596,7 @@
         <div id="past-trips-body"></div>
       </div>
     </dialog>
-    <dialog id="handoff-return" class="sheet" aria-labelledby="handoff-return-title">
+    <dialog id="handoff-return" class="sheet handoff-sheet" aria-labelledby="handoff-return-title">
       <div class="sheet-body">
         <h2 id="handoff-return-title">Return to Grocery Gitter</h2>
         <p id="handoff-return-body">Your trip is in the other Grocery Gitter tab.</p>
@@ -600,6 +610,7 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
+    <script type="module" src="/shopper/beta.js?v=beta-1"></script>
     <script type="module" src="/app.js?v=shelf-1"></script>
   </body>
 </html>

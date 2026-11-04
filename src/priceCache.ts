@@ -25,7 +25,8 @@ import { ingestConfig } from "./ingest/config";
 import { storedLineProducts } from "./ingest/readStore";
 import { upsertCatalogRecords } from "./ingest/upsert";
 import { rawFromCatalogProduct } from "./catalog/providers/fromCatalogProduct";
-import { shouldStreamSnapshot } from "./pricing/streamPlan";
+import { shouldStreamReview } from "./pricing/reviewStream";
+import { findFreshUpcPrices } from "./pricing/freshCatalogPrice";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -319,8 +320,10 @@ export async function resolveCatalogProducts(
   const requestCache = new Map<string, CatalogProduct[]>();
   for (const storeName of competing) storeLeft.set(storeName, lines.length);
   const jobs: Array<() => Promise<void>> = [];
-  for (const line of lines) {
-    for (const storeName of competing) {
+  // One store's lines run before the next so the first store can stream
+  // while the others are still in the 9-second budget.
+  for (const storeName of competing) {
+    for (const line of lines) {
       jobs.push(async () => {
       const started = Date.now();
       let source = "miss";
@@ -361,7 +364,18 @@ export async function resolveCatalogProducts(
         return;
       }
 
-      const requestKey = `${storeName.trim().toLowerCase()}|${zip || ""}|${(hooks?.upcByName?.get(line.name.toLowerCase()) || "").trim()}|${line.name.trim().toLowerCase()}`;
+      const upc = hooks?.upcByName?.get(line.name.toLowerCase()) || "";
+      if (upc) {
+        const fresh = await findFreshUpcPrices({ storeName, upc, locationId: krogerId, zip });
+        if (fresh.length > 0) {
+          add(fresh, line.name, "cached_live");
+          acc.cachedHits += 1;
+          source = "fresh-upc";
+          return;
+        }
+      }
+
+      const requestKey = `${storeName.trim().toLowerCase()}|${zip || ""}|${upc}|${line.name.trim().toLowerCase()}`;
       const remembered = requestCache.get(requestKey);
       if (remembered?.length) {
         add(remembered, line.name, remembered[0]?.priceSource === "weekly_ad" ? "weekly_ad" : "cached_live");
@@ -523,7 +537,7 @@ export async function resolveCatalogProducts(
           total,
           pendingStores: still,
         });
-        if (shouldStreamSnapshot(checked, total)) {
+        if (shouldStreamReview(checked, total)) {
           hooks?.onSnapshot?.({
             storeName,
             checked,

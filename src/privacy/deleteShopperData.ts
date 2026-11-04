@@ -21,6 +21,7 @@ export type ShopperDeletionCounts = {
 export const NOT_LINKED_TO_YOU = {
   shopperZips: "ZIP totals have no device id and were left in place.",
   catalogDemand: "Search and list phrases have no device id and were left in place.",
+  betaEvents: "Product counters have no device id and were left in place.",
 } as const;
 
 /**

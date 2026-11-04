@@ -7,12 +7,14 @@
     <title>Return to Grocery Gitter</title>
     <style>
       :root { color-scheme: light dark; }
+      html, body {
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+      }
       body {
         margin: 0;
-        min-height: 100svh;
-        min-height: var(--vv-height, 100svh);
-        display: grid;
-        place-items: center;
+        min-height: 100%;
+        display: block;
         padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
         font-family: "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
         background: #f4efe6;
