@@ -281,6 +281,8 @@ export async function catalogStatus() {
       krogerLookups,
       queue: progress.queue,
       hitRate: progress.hitRate,
+      cooldowns: progress.cooldowns,
+      holds: progress.holds,
       mergedToday: progress.mergedToday,
       lookupShare: progress.lookupShare,
       effectiveLookupShare: {
@@ -289,7 +291,7 @@ export async function catalogStatus() {
       },
       retryDays: progress.retryDays,
       walmartBatch: progress.walmartBatch,
-      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1, and when a leading zero was lost) and the body is zero-padded, so 070708200500 and 70708200500 become 0007070820050. Stored UPCs use that same id when it still matches the Walmart code. Only grocery-store products with a real UPC (valid length and check digit, or the stored 13-digit form of one) are queued. Grocery departments are looked up before household, baby, personal care, and pet. General merchandise, bad check digits, and household rows that are not paper, cleaning, or laundry are not looked up. hitRate.krogerByDepartment is today's attempts, hits, and rate per department. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term. A 503 is not a miss and is not counted in the hit rate; that product waits a day and is tried again. A real miss waits out the cooldown. Nothing is deleted.",
+      note: "Lookups take a share of each Walmart and Kroger tick, inside the existing daily budgets and the Walmart 429 pause. Kroger sends one 13-digit productId: the UPC-A check digit is dropped (even when it fails GS1, and when a leading zero was lost) and the body is zero-padded, so 070708200500 and 70708200500 become 0007070820050. A 13-digit Kroger id is sent unchanged when it is not a UPC-A wrapped as EAN-13, including when its last digit accidentally passes the GTIN check. Stored UPCs use that same id when it still matches the Walmart code. Only grocery-store products with a real UPC (valid length and check digit, or the stored 13-digit form of one) are queued. Saved lists, usuals, shared lists, and recent trip plans are looked up before grocery departments, then household, baby, personal care, and pet. General merchandise, bad check digits, and household rows that are not paper, cleaning, or laundry are not looked up. Match lookups use the first resolved store, not the ZIP the crawl cursor is on. An empty id at that store is tried once without a location before it is a miss. hitRate.krogerByDepartment is today's attempts, hits, and rate per department. hitRate.krogerMisses and hitRate.walmartMisses are today's attempts minus hits. cooldowns counts masters already tried that still lack the other store id and are inside the retry window. holds counts server-error holds that have not expired. A 400 or an empty id is a miss and does not advance the location error streak; the product name is tried once with filter.term, and that call counts against the lookup share so it cannot run ahead of refresh. A 503 or 504 is not a miss and is not counted in the hit rate. Those calls are retried with backoff and refunded, then the product waits out the match cooldown instead of being sampled again the next day. A real miss waits out the same cooldown. Nothing is deleted.",
     },
     scope: {
       inScopeProducts,

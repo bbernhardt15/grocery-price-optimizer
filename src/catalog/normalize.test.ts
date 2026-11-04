@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { expandUpcE, gtinCheckDigit, groupOffersByUpc, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
+import { expandUpcE, gtinCheckDigit, groupOffersByUpc, hasStandardCheckDigit, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -87,6 +87,16 @@ describe("upcKey", () => {
     assert.equal(krogerProductIdForLookup(upcForStorage("70708200500")), "0007070820050");
     assert.equal(walmartUpcForLookup(upcForStorage("070708200500")), walmartUpcForLookup("070708200500"));
     assert.equal(walmartUpcForLookup(upcForStorage("049000042566")), "049000042566");
+    // 000001000078's Kroger id 0000000100007 also passes the GTIN check.
+    // The request id stays 13 digits so a second normalize cannot shorten it.
+    const accidentalUpc = "000001000078";
+    const accidentalId = "0000000100007";
+    assert.equal(gtinCheckDigit(accidentalUpc.slice(0, -1)), Number(accidentalUpc.at(-1)));
+    assert.equal(hasStandardCheckDigit(accidentalId), true);
+    assert.equal(krogerProductIdForLookup(accidentalUpc), accidentalId);
+    assert.deepEqual(krogerLookupCodes(accidentalId), [accidentalId]);
+    assert.deepEqual(krogerLookupCodes(accidentalUpc), [accidentalId]);
+    assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
     const zeroBody = "01200000345";
     const zeroCheck = String(gtinCheckDigit(zeroBody));
     assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);

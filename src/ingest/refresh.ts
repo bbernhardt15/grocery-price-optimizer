@@ -2,7 +2,7 @@ import { itemIsWatched } from "../alerts/compare";
 import { PriceWatch } from "../alerts/models";
 import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
-import { krogerProductIdForLookup, upcKey, walmartUpcForLookup } from "../catalog/normalize";
+import { krogerRequestId, upcKey, walmartUpcForLookup } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { utcDay } from "./budget";
 import { staleRatioOf } from "./config";
@@ -48,6 +48,7 @@ type MasterRow = {
   walmartItemId?: string;
   departmentId?: string;
   categoryPaths?: string[];
+  outOfScope?: boolean;
 };
 
 type PriorityKeys = {
@@ -111,7 +112,7 @@ function collectCatalogIds(value: unknown, into: Set<string>, depth = 0): void {
 
 function lookupCode(storeName: string, master: MasterRow): string | null {
   if (storeName === "Kroger") {
-    return krogerProductIdForLookup(master.krogerProductId) || krogerProductIdForLookup(master.upc || master.key);
+    return krogerRequestId(master.krogerProductId) || krogerRequestId(master.upc || master.key);
   }
   return walmartUpcForLookup(master.upc || master.key);
 }
@@ -288,7 +289,7 @@ export async function nextRefreshPicks(
         break;
       }
       const masters = await CatalogMaster.find({ key: { $in: offers.map((offer) => offer.productKey) } })
-        .select("key name upc krogerProductId walmartItemId categoryPaths")
+        .select("key name upc krogerProductId walmartItemId categoryPaths departmentId outOfScope")
         .lean<MasterRow[]>();
       const byKey = new Map(masters.map((master) => [master.key, master]));
       for (const offer of offers) {
@@ -302,7 +303,15 @@ export async function nextRefreshPicks(
         const master = byKey.get(offer.productKey);
         const code = master ? lookupCode(storeName, master) : null;
         const itemId = storeName === "Walmart" ? walmartItemIdForLookup(master?.walmartItemId) : null;
-        const nongrocery = master ? mapToDepartment(master.categoryPaths, master.name).signal === "excluded" : false;
+        const mapped = master ? mapToDepartment(master.categoryPaths, master.name) : null;
+        const storedGrocery = Boolean(master?.departmentId && master.departmentId !== "other");
+        const nongrocery = Boolean(
+          master &&
+            (master.outOfScope === true ||
+              (mapped &&
+                (mapped.signal === "excluded" ||
+                  (!storedGrocery && (mapped.generalMerchandise === true || mapped.departmentId === "other")))))
+        );
         if (!master || (!code && !itemId) || nongrocery) {
           if (nongrocery) {
             excludeIds.push(offer._id);
@@ -417,6 +426,21 @@ export async function settleRefreshOutcome(input: {
     calls: input.calls,
     attempted: input.priced.length + input.unavailable.length + input.missing.length,
   });
+}
+
+/**
+ * The products call failed and its budget charge was returned. Remember the
+ * attempt so the same offer is not sent again until the refresh cooldown.
+ * This does not count as a refreshed price.
+ */
+export async function holdRefresh(picks: RefreshPick[], now: Date): Promise<void> {
+  if (picks.length === 0) {
+    return;
+  }
+  await CatalogOffer.updateMany(
+    { _id: { $in: picks.map((pick) => pick.offerId) } },
+    { $set: { refreshAttemptAt: now } }
+  );
 }
 
 /** Remember the attempt and add successful price writes to today's count. One call, even when several offers were attempted. */

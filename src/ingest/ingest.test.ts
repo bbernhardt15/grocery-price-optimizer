@@ -13,6 +13,7 @@ import { ingestConfig } from "./config";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
 import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
+import { SavedList } from "../auth/models";
 import { SharedList } from "../models/SharedList";
 import { noteCatalogDemand } from "./demand";
 import { krogerLookupBlock, matchProgress, nextKrogerLookups, nextWalmartLookups } from "./crossLookup";
@@ -3469,9 +3470,9 @@ describe("catalog ingestion", () => {
       config,
       now: () => now,
     });
-    assert.equal(first.calls, 1);
+    assert.equal(first.calls, 0);
     assert.equal(first.paused, "server");
-    assert.deepEqual(seen, [cokeId]);
+    assert.deepEqual(seen, [cokeId, cokeId, cokeId]);
     const held = await CatalogMaster.findOne({ key: cokeKey }).lean<{ matchKrogerAt?: Date; matchKrogerHoldUntil?: Date }>();
     assert.equal(held?.matchKrogerAt, undefined);
     assert.ok(held?.matchKrogerHoldUntil && held.matchKrogerHoldUntil.getTime() > now.getTime());
@@ -3493,5 +3494,292 @@ describe("catalog ingestion", () => {
     const coke = await CatalogMaster.findOne({ key: cokeKey });
     assert.equal(coke?.krogerProductId ?? "", "");
     assert.equal(coke?.matchKrogerAt, undefined);
+    assert.ok(coke?.matchKrogerHoldUntil && coke.matchKrogerHoldUntil.getTime() > now.getTime() + 86_400_000);
+    const health = await matchProgress(now);
+    assert.equal(health.hitRate.krogerMisses, 0);
+    assert.equal(health.holds.kroger >= 1, true);
+  });
+
+  it("asks Kroger at the first resolved store, not the crawl cursor ZIP", async () => {
+    const now = new Date("2026-11-04T16:00:00.000Z");
+    const upc = "049000042566";
+    const key = upcKey(upc);
+    const productId = krogerProductIdForLookup(upc);
+    assert.ok(key && productId);
+    await CatalogMaster.deleteMany({ key });
+    await CatalogDemand.deleteMany({});
+    await CatalogMaster.create({
+      key,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      categoryPaths: ["Beverages/Soda"],
+      upc,
+      walmartItemId: "coke-loc",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $ne: key } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103", "10001"],
+        zipCursor: 2,
+        locations: [
+          { zip: "45103", locationId: "01400999" },
+          { zip: "10001", locationId: "01400001" },
+        ],
+        locationIndex: 1,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const seen: Array<string | undefined> = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 5;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShareKroger = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400999",
+        page: async () => {
+          throw new Error("discovery should wait");
+        },
+        lookupProductId: async (_id: string, locationId?: string) => {
+          seen.push(locationId);
+          return {
+            returned: 1,
+            records: [
+              {
+                name: "Coca-Cola Classic",
+                brand: "Coca-Cola",
+                storeName: "Kroger",
+                price: 1.25,
+                upc: productId,
+                productId,
+                priceSource: "live" as const,
+                categories: ["Beverages"],
+              },
+            ],
+          };
+        },
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.deepEqual(seen, ["01400999"]);
+  });
+
+  it("keeps Kroger refresh calls when a product-id miss wants a second request", async () => {
+    const now = new Date("2026-11-04T18:00:00.000Z");
+    const lookupUpc = "049000042566";
+    const refreshUpc = "016000275287";
+    const secondUpc = "003063880160";
+    const lookupKey = upcKey(lookupUpc);
+    const refreshKey = upcKey(refreshUpc);
+    const secondKey = upcKey(secondUpc);
+    const lookupId = krogerProductIdForLookup(lookupUpc);
+    const refreshId = krogerProductIdForLookup(refreshUpc);
+    const secondId = krogerProductIdForLookup(secondUpc);
+    assert.ok(lookupKey && refreshKey && secondKey && lookupId && refreshId && secondId);
+    await CatalogMaster.deleteMany({ key: { $in: [lookupKey, refreshKey, secondKey] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: [lookupKey, refreshKey, secondKey] } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Kroger" }, { $set: { refreshExcluded: true } });
+    await CatalogDemand.deleteMany({});
+    await CatalogMaster.updateMany({}, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await CatalogMaster.create({
+      key: lookupKey,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      categoryPaths: ["Beverages/Soda"],
+      upc: lookupUpc,
+      walmartItemId: "budget-lookup",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: refreshKey,
+      name: "Cheerios",
+      brand: "General Mills",
+      departmentId: "breakfast",
+      categoryPaths: ["Food/Breakfast Foods/Cereal"],
+      upc: refreshUpc,
+      walmartItemId: "budget-refresh",
+      krogerProductId: refreshId,
+      matchKrogerAt: now,
+      matchKrogerVariant: 0,
+      lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: secondKey,
+      name: "Pasta Sauce",
+      brand: "Ragu",
+      departmentId: "pantry",
+      categoryPaths: ["Food/Pantry"],
+      upc: secondUpc,
+      walmartItemId: "budget-sauce",
+      krogerProductId: secondId,
+      matchKrogerAt: now,
+      matchKrogerVariant: 0,
+      lastSeenAt: new Date("2026-01-02T00:00:00.000Z"),
+      status: "active",
+    });
+    await CatalogOffer.create({
+      productKey: refreshKey,
+      storeName: "Kroger",
+      locationId: "01400999",
+      price: 3,
+      lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
+      status: "stale",
+    });
+    await CatalogOffer.create({
+      productKey: secondKey,
+      storeName: "Kroger",
+      locationId: "01400999",
+      price: 2,
+      lastSeenAt: new Date("2026-01-02T00:00:00.000Z"),
+      status: "stale",
+    });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    const checkpoint = {
+      termsVersion: KROGER_TERMS_VERSION,
+      phase: "queries" as const,
+      plannedZips: ["45103"],
+      zipCursor: 1,
+      locations: [{ zip: "45103", locationId: "01400999" }],
+      locationIndex: 0,
+      queryIndex: 4,
+      start: 0,
+      pageIndex: 0,
+      attempts: 0,
+      pendingZips: [] as string[],
+      clientErrorStreak: 0,
+      cycleStartedAt: now.toISOString(),
+    };
+    await IngestCheckpoint.create({ provider: "kroger", status: "running", checkpoint });
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 0.5;
+    config.refreshShareKroger = 0.6;
+    const ids: string[] = [];
+    let terms = 0;
+    const slice = await stepKroger({
+      client: {
+        resolveLocation: async () => "01400999",
+        lookupProductId: async (id: string) => {
+          ids.push(id);
+          return { returned: 0, records: [] };
+        },
+        lookupTerm: async () => {
+          terms += 1;
+          return { returned: 0, records: [] };
+        },
+        page: async () => {
+          throw new Error("discovery should wait until refresh has its calls");
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.22,
+      now: () => now,
+    });
+    assert.equal(slice.calls, 4);
+    const refreshCalls = ids.filter((id) => id === refreshId || id === secondId).length;
+    assert.equal(refreshCalls, 2);
+    assert.ok(ids.filter((id) => id === lookupId).length >= 1);
+    assert.equal(ids.filter((id) => id === lookupId).length + terms <= 2, true);
+  });
+
+  it("records a Kroger miss cooldown and prefers a list or recent plan", async () => {
+    const now = new Date("2026-11-04T19:00:00.000Z");
+    const planUpc = "049000042566";
+    const otherUpc = "016000275287";
+    const planKey = upcKey(planUpc);
+    const otherKey = upcKey(otherUpc);
+    assert.ok(planKey && otherKey);
+    await CatalogMaster.deleteMany({ key: { $in: [planKey, otherKey, "cooldown-miss"] } });
+    await CatalogDemand.deleteMany({});
+    await SavedList.deleteMany({});
+    await CatalogMaster.updateMany({}, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await CatalogMaster.create({
+      key: planKey,
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      categoryPaths: ["Beverages/Soda"],
+      upc: planUpc,
+      walmartItemId: "plan-coke",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: otherKey,
+      name: "Cheerios",
+      brand: "General Mills",
+      departmentId: "breakfast",
+      categoryPaths: ["Food/Breakfast Foods/Cereal"],
+      upc: otherUpc,
+      walmartItemId: "plan-cereal",
+      lastSeenAt: new Date("2020-01-01T00:00:00.000Z"),
+      status: "active",
+    });
+    await CatalogMaster.create({
+      key: "cooldown-miss",
+      name: "Cached Miss Beans",
+      brand: "Bush's",
+      departmentId: "pantry",
+      categoryPaths: ["Food/Pantry"],
+      upc: "070708200500",
+      walmartItemId: "plan-beans",
+      matchKrogerAt: new Date(now.getTime() - 2 * 86_400_000),
+      matchKrogerVariant: 0,
+      lastSeenAt: now,
+      status: "active",
+    });
+    await SavedList.create({
+      accountId: "acct-plan",
+      listId: "list-plan",
+      revision: 1,
+      items: [],
+      pastTrips: [
+        {
+          id: "trip-1",
+          at: now.getTime(),
+          totalCents: 500,
+          savedCents: 0,
+          stores: [{ storeName: "Kroger", totalCents: 500, items: [{ name: "Coca-Cola Classic", quantity: 1 }] }],
+        },
+      ],
+    });
+    const picks = await nextKrogerLookups(now, 2);
+    assert.equal(picks[0]?.key, planKey);
+    assert.equal(picks[0]?.priority, "list");
+    assert.equal(picks.some((pick) => pick.key === "cooldown-miss"), false);
+    const progress = await matchProgress(now);
+    assert.equal(progress.cooldowns.kroger >= 1, true);
+    const status = await catalogStatus();
+    assert.equal(typeof status.match.cooldowns.kroger, "number");
+    assert.equal(typeof status.match.holds.kroger, "number");
+    assert.equal(typeof status.match.hitRate.krogerMisses, "number");
+    const tomorrow = await nextKrogerLookups(new Date(now.getTime() + 86_400_000), 5);
+    assert.equal(tomorrow.some((pick) => pick.key === "cooldown-miss"), false);
   });
 });
