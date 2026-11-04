@@ -183,7 +183,7 @@ import {
   writePlanCache,
 } from "./shopper/planCache.js";
 import { savingsNudge, savingsNudgeHtml } from "./shopper/savingsNudge.js";
-import { notInCartSection, toFindRecords, unfoundCopyText, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
+import { notInCartSection, toFindRecords, unfoundCopyText, unfoundSearchLinks, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
 import { CLEAR_TRIP_EVENT, COMPLETE_TRIP_EVENT, FINISH_TRIP_UNDO_MS } from "./shopper/tripActions.js";
 import { clearCompletedTrip, readCompletedAt, restoreWouldResurrect, writeCompletedTrip } from "./shopper/tripCompletion.js";
 import { mergeSavedStores, setShowAdStores, visibleStoreNames } from "./shopper/storeScope.js";
@@ -208,6 +208,7 @@ import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tr
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
+import { mountGuide, namesMatch as guideNamesMatch } from "./guide.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -498,6 +499,7 @@ let activeDepartment = "all";
 let query = "";
 let browseOpen = false;
 let importer = null;
+let guide = null;
 let profileUi = null;
 let myProducts = null;
 let alwaysPrompt = null;
@@ -972,6 +974,14 @@ function finishCurrentTrip() {
     zip: normalizeZip(zipEl?.value || ""),
   };
   const at = writeCompletedTrip(localStorage, Date.now());
+  guide?.noteTrip?.({
+    saved,
+    savedToPastTrips: true,
+    items: lines.map((item) => ({
+      name: item.name || item.familyName || "",
+      quantity: item.quantity || 1,
+    })),
+  });
   explicitClear = true;
   list.clear();
   lastOptimize = null;
@@ -990,6 +1000,7 @@ function finishCurrentTrip() {
   renderShop();
   showStep("add", "user");
   toastAction("Trip saved to Past trips.", "Undo", () => {
+    guide?.clearTrip?.();
     clearCompletedTrip(localStorage);
     for (const [id, entry] of snapshot.entries) {
       list.set(id, entry);
@@ -7162,6 +7173,7 @@ function paintPlanBar() {
   });
   const title = $("brand-title");
   if (title) title.textContent = stepTitle(flowStep);
+  guide?.sync?.();
 }
 
 function renderShop() {
@@ -8444,6 +8456,115 @@ $("drawer-buy")?.addEventListener("click", () => {
 $("drawer-products")?.addEventListener("click", () => {
   closeDrawer();
   myProducts?.open();
+});
+
+function guideView() {
+  let plans = null;
+  let mode = "spread";
+  try {
+    const state = reviewState();
+    plans = state?.plans || null;
+    mode = state?.mode || "spread";
+  } catch {
+    plans = null;
+  }
+  const showingSavingsCard = flowStep === "plan" && mode !== "single" && !tripEdits.keepSplit && Boolean(savingsNudge(plans));
+  const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
+  const unfound = genuineUnfound(lastOptimize?.unavailable, lastOptimize?.pricingByStore);
+  return {
+    step: flowStep,
+    itemCount: list.size,
+    listNames: [...list.values()].map((entry) => String(entry?.product?.familyName || entry?.product?.catalogName || entry?.product?.name || "")),
+    usuals: readUsuals(localStorage).map((row) => ({ name: row.name, times: row.times })),
+    savingsCard: showingSavingsCard,
+    pricesLabel: pricesUpdatedLabel(pricedAt, Date.now()),
+    unfound,
+    search: unfound[0] ? unfoundSearchLinks(unfound[0]) : null,
+  };
+}
+
+function guideNameOnList(name) {
+  for (const entry of list.values()) {
+    const have = entry?.product?.familyName || entry?.product?.catalogName || entry?.product?.name || "";
+    if (guideNamesMatch(name, have)) return true;
+  }
+  return false;
+}
+
+function onGuideAction(action, detail = {}) {
+  if (action === "later") return;
+  if (action === "focus-ask") {
+    showStep("add");
+    importer?.open?.("home");
+    const paste = document.getElementById("import-paste");
+    if (paste instanceof HTMLElement) paste.focus();
+    return;
+  }
+  if (action === "use-usuals") {
+    showStep("add");
+    usualsOpen = true;
+    paintUsuals();
+    const rows = readUsuals(localStorage);
+    if (!rows.length) {
+      toast("No usuals yet. A starter list is just below.");
+      $("start-here")?.scrollIntoView({ block: "start" });
+      return;
+    }
+    void addUsualList();
+    return;
+  }
+  if (action === "upload-receipt") {
+    importer?.open?.("home");
+    document.getElementById("import-file")?.click();
+    return;
+  }
+  if (action === "pick-receipt") {
+    const names = (detail.names || []).filter((name) => name && !guideNameOnList(name));
+    for (const name of names) addProduct(customCatalogProduct(name), 1, { quiet: true, skipAsk: true, source: "import" });
+    showStep("add");
+    if (!names.length) toast("Those are already on your list.");
+    else toast(names.length === 1 ? "Added 1 item you buy most." : `Added ${names.length} items you buy most.`);
+    return;
+  }
+  if (action === "add-usual") {
+    const row = readUsuals(localStorage).find((item) => guideNamesMatch(item.name, detail.name));
+    if (row) void addOneUsual(row);
+    return;
+  }
+  if (action === "review") {
+    showStep("plan");
+    return;
+  }
+  if (action === "open-search") {
+    const fold = document.querySelector("[data-unfound]");
+    if (fold instanceof HTMLElement) fold.scrollIntoView({ block: "nearest" });
+    if (detail.url) void openExternal(detail.url);
+    return;
+  }
+  if (action === "save-list") {
+    const fromList = [...list.values()]
+      .map((entry) => ({
+        name: entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "",
+        brand: entry.product?.brand || "",
+        catalogId: entry.product?.id || "",
+        quantity: entry.quantity || 1,
+      }))
+      .filter((row) => row.name);
+    const items = fromList.length ? fromList : (detail.names || []).map((name) => ({ name, brand: "", catalogId: "", quantity: 1 }));
+    if (!items.length) {
+      toast("Nothing on the list to save yet.");
+      return;
+    }
+    rememberUsuals(localStorage, items);
+    paintUsuals();
+    toast("Saved for the next Shopping list.");
+  }
+}
+
+guide = mountGuide({
+  storage: localStorage,
+  getState: guideView,
+  onAction: onGuideAction,
 });
 
 importer = mountImport({
