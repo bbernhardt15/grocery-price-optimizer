@@ -49,6 +49,16 @@ import {
   pickerResultsHtml,
   slotMatchHtml,
 } from "./themedListsUi.js";
+import { shelfSkeletonHtml } from "./addTabIcons.js";
+import {
+  addCustomItem,
+  checkedPicks,
+  checklistAddMessage,
+  checklistFromList,
+  checklistHtml,
+  onChecklistClick,
+  setDraft,
+} from "./themeChecklist.js";
 
 export { BOOK_KEY };
 
@@ -166,6 +176,12 @@ export function createListHome(deps) {
       });
       return;
     }
+    if (view.checklist) {
+      dialog.innerHTML = checklistHtml(view.checklist, deps.escapeHtml, {
+        dietNote: Boolean(deps.shouldOfferDiets?.()),
+      });
+      return;
+    }
     const rawModel = listModel(view.listId, book);
     const model = rawModel
       ? { ...rawModel, slots: rawModel.slots.filter((slot) => !deps.slotBlocked?.(slot)) }
@@ -191,7 +207,10 @@ export function createListHome(deps) {
   function openList(listId) {
     const model = listModel(listId, book);
     if (!model) return;
-    view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "" };
+    const checklist = model.mine
+      ? null
+      : checklistFromList(model, book, party, { isBlocked: (slot) => Boolean(deps.slotBlocked?.(slot)) });
+    view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "", checklist };
     paintSheet();
     openDialog();
   }
@@ -246,7 +265,7 @@ export function createListHome(deps) {
     if (!view || view.kind !== "picker") return;
     view.query = query;
     const results = document.getElementById("pick-results");
-    if (results) results.innerHTML = `<p class="muted">Looking on the shelf…</p>`;
+    if (results) results.innerHTML = shelfSkeletonHtml("Looking on the shelf");
     try {
       const tiles = await deps.searchTiles(query);
       if (!view || view.kind !== "picker" || view.query !== query) return;
@@ -289,6 +308,81 @@ export function createListHome(deps) {
     paintHome();
     deps.haptic();
     deps.toast(scope === "list" ? "We'll use that on this list." : "We'll remember that favorite.");
+  }
+
+  async function addChecklist(checklist, button) {
+    if (deps.locked()) {
+      deps.toast("This list is view-only.");
+      return;
+    }
+    if (button instanceof HTMLElement && button.getAttribute("aria-busy") === "true") return;
+    const picks = checkedPicks(checklist);
+    if (!picks.length) {
+      deps.toast("Tick the items you want on this trip.");
+      return;
+    }
+    markBusy(button, true);
+    try {
+      const shelf = await deps.loadShelf(
+        picks.map((pick) => ({
+          name: pick.slot?.search || pick.slot?.suggested?.name || pick.slot?.label || pick.name,
+          brand: pick.slot?.suggested?.brand || "",
+        }))
+      );
+      let added = 0;
+      const missing = [];
+      const swapped = [];
+      for (const pick of picks) {
+        const slotDef = pick.slot;
+        const override = book.overrides[checklist.listId]?.[slotDef.id];
+        const favorite = book.favorites[slotDef.id] || null;
+        const resolved = deps.guideSlot
+          ? deps.guideSlot({
+              slot: slotDef,
+              people: checklist.people,
+              favorite: favorite && favorite.cleared !== true ? favorite : null,
+              override: override && override.cleared !== true ? override : null,
+              products: shelf,
+              quantity: pick.quantity,
+            })
+          : resolveSlot({
+              slot: slotDef,
+              people: checklist.people,
+              favorite: favorite && favorite.cleared !== true ? favorite : null,
+              override: override && override.cleared !== true ? override : null,
+              products: shelf,
+              quantity: pick.quantity,
+            });
+        if (resolved.excluded) continue;
+        if (!resolved.product?.id) {
+          missing.push(slotDef.label);
+          continue;
+        }
+        const stored = deps.productById(resolved.product.id) || resolved.product;
+        if (deps.hasProduct(stored.id)) continue;
+        deps.addProduct(stored, resolved.quantity, { quiet: true });
+        added += 1;
+        if (resolved.swapped) {
+          swaps[stored.id] = { from: resolved.swapped.from, to: stored.catalogName || stored.name || resolved.swapped.to };
+          swapped.push(slotDef.label);
+        }
+      }
+      saveSwaps();
+      const title = listModel(checklist.listId, book)?.title || "That list";
+      if (!added && missing.length) deps.toast("Those items aren't on the shelf yet. Try browsing.");
+      else if (missing.length) {
+        const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
+        deps.toast(`Added ${title}. ${phrase}.`);
+      } else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
+      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
+      else deps.toast(`${title} is already on your list.`);
+      deps.haptic();
+      if (view) closeDialog();
+    } catch {
+      deps.toast("Couldn't add that list. Try again.");
+    } finally {
+      markBusy(button, false);
+    }
   }
 
   function markBusy(button, on) {
@@ -394,10 +488,38 @@ export function createListHome(deps) {
       view.finder = target.value;
       refreshMatches();
     }
+    if (target.id === "theme-add-input" && view?.checklist) {
+      view.checklist = setDraft(view.checklist, target.value);
+    }
+  }
+
+  function onSubmit(form) {
+    if (!(form instanceof HTMLFormElement) || form.id !== "theme-add-form" || !view?.checklist) return false;
+    const input = form.querySelector("input");
+    const result = addCustomItem(view.checklist, input?.value || view.checklist.draft || "");
+    if (!result.added) {
+      deps.toast(checklistAddMessage(result.reason));
+      return true;
+    }
+    view.checklist = result.state;
+    paintSheet();
+    deps.haptic();
+    return true;
   }
 
   function onClick(target) {
     if (!(target instanceof Element)) return false;
+    if (view?.checklist && view.kind === "list") {
+      const result = onChecklistClick(view.checklist, target);
+      if (result.handled) {
+        view.checklist = result.state;
+        if (result.kind === "party") party = writeParty(storage, result.state.people);
+        if (result.toast) deps.toast(result.toast);
+        paintSheet();
+        deps.haptic();
+        return true;
+      }
+    }
     const partyButton = target.closest("[data-party]");
     if (partyButton) {
       setParty(Number(partyButton.getAttribute("data-party")) || 0);
@@ -458,7 +580,8 @@ export function createListHome(deps) {
     const add = target.closest("[data-list-add], [data-sheet-add]");
     if (add) {
       const id = add.getAttribute("data-list-add") || add.getAttribute("data-sheet-add");
-      void addList(id, add);
+      if (view?.checklist && view.listId === id) void addChecklist(view.checklist, add);
+      else void addList(id, add);
       return true;
     }
     const open = target.closest("[data-list-open], [data-my-open]");
@@ -581,6 +704,7 @@ export function createListHome(deps) {
     paint: paintHome,
     onClick,
     onInput,
+    onSubmit,
     payload() {
       return book;
     },

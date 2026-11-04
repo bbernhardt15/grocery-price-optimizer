@@ -1,0 +1,349 @@
+/**
+ * Add tab polish: compact usuals, icon tiles, themed-list checklist,
+ * and a loader that stays inside its card.
+ * Spacing uses 8px steps. Radii use --radius. Colors use the theme tokens.
+ */
+
+.usuals-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.usuals-block[data-open="false"] {
+  max-height: min(3.25rem, 25dvh);
+}
+.usuals-block[data-open="true"] {
+  max-height: min(8.75rem, 25dvh);
+}
+.usuals-head {
+  min-width: 0;
+  gap: 8px;
+}
+.usuals-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.usuals-title {
+  font-family: var(--display);
+  font-size: 1.25rem;
+  line-height: 1.2;
+  min-width: 0;
+}
+.usuals-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+.usuals-chevron {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: -2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+.usuals-block[data-open="true"] .usuals-chevron {
+  margin-top: 2px;
+  transform: rotate(45deg);
+}
+.usuals-panel {
+  min-width: 0;
+  min-height: 0;
+}
+.usuals-list.usuals-scroll {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  max-height: 52px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 2px 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.usuals-list.usuals-scroll::-webkit-scrollbar { display: none; }
+.usuals-list.usuals-scroll li { flex: none; }
+.usuals-list.usuals-scroll .quick-chip {
+  white-space: nowrap;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feature-icon {
+  overflow: hidden;
+  box-sizing: border-box;
+  line-height: 1;
+}
+.feature-icon svg,
+.feature-svg {
+  width: 28px;
+  height: 28px;
+  max-width: calc(100% - 8px);
+  max-height: calc(100% - 8px);
+  display: block;
+}
+.feature-icon-word {
+  padding: 0 3px;
+  font-size: 0.68rem;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  text-align: center;
+  overflow: hidden;
+}
+
+.feature-card,
+.lists-entry.feature-card,
+.theme-card .starter,
+.trip-receipt,
+.theme-check {
+  border-radius: var(--radius);
+}
+.feature-copy,
+.theme-title,
+.theme-check-copy {
+  min-width: 0;
+}
+.feature-copy strong,
+.feature-copy .muted,
+.theme-title,
+.theme-check-copy strong,
+.theme-check-copy .muted {
+  overflow-wrap: break-word;
+}
+
+.theme-card {
+  min-width: 0;
+  overflow: visible;
+}
+.theme-card .starter {
+  position: relative;
+  min-height: 76px;
+  overflow: hidden;
+}
+.theme-card .starter.is-busy {
+  display: flex;
+  width: 100%;
+  min-height: 76px;
+  align-items: center;
+  justify-content: flex-start;
+}
+.theme-card .starter.is-busy::after,
+.theme-check-add.is-busy::after {
+  content: none;
+  display: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+  border: 0;
+  animation: none;
+}
+.theme-card .starter.is-busy .theme-icon,
+.theme-card .starter.is-busy .theme-title,
+.theme-check-add.is-busy .theme-check-label {
+  visibility: hidden;
+}
+
+.inline-loader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.theme-card .starter.is-busy .inline-loader,
+.theme-check-add.is-busy .inline-loader {
+  display: grid;
+}
+.inline-loader span {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+}
+
+.theme-sheet {
+  min-width: 0;
+}
+.theme-sheet > :not(.theme-checks) { flex: none; }
+.theme-lead {
+  margin: 0;
+  color: var(--muted);
+}
+.theme-sheet .list-head h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.theme-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.theme-check {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.theme-check[data-off="true"] {
+  background: var(--bg);
+}
+.theme-check[data-off="true"] .theme-check-copy strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.theme-check-hit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+}
+.theme-check-hit input {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  accent-color: var(--accent);
+}
+.theme-check-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.theme-sheet .party button {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+.theme-checks { padding-bottom: 4px; }
+.theme-check .stepper { flex: none; }
+.theme-add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.theme-add-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  min-height: 44px;
+  font-size: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0 12px;
+}
+.theme-add-form .ghost { flex: none; }
+.theme-check-add {
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+}
+.theme-empty { margin: 0; }
+
+.theme-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.theme-skel span {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--bg-accent), var(--surface), var(--bg-accent));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+.theme-skel span:nth-child(2) { width: 78%; }
+.theme-skel span:nth-child(3) { width: 54%; }
+
+.past-empty { margin: 8px 0 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .feature-card,
+  .theme-card .starter,
+  .usuals-toggle,
+  .usuals-chevron,
+  .quick-chip,
+  .theme-check,
+  .theme-check-add {
+    transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+  }
+}
+.feature-card:active,
+.theme-card .starter:active,
+.usuals-toggle:active,
+.quick-chip:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+@media (max-width: 1099px) {
+  dialog.list-sheet .theme-sheet {
+    max-height: 100%;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 420px) {
+  .feature-card {
+    padding: 12px;
+    gap: 10px;
+  }
+  .usuals-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .theme-check {
+    padding: 8px;
+    gap: 8px;
+  }
+  .add-items {
+    padding: 0 12px;
+  }
+}
+
+:root[data-resolved="dark"] .theme-check,
+:root[data-resolved="dark"] .theme-card .starter,
+:root[data-resolved="dark"] .feature-card,
+:root[data-resolved="dark"] .trip-receipt,
+:root[data-resolved="dark"] .past-empty {
+  color: var(--ink);
+  border-color: var(--line);
+}

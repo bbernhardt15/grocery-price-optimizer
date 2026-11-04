@@ -4,6 +4,7 @@
 
 import { displayProductName } from "./familyTile.js";
 import { activeChoice, scaleQuantity, slotMatches } from "./themedLists.js";
+import { ICON_THEMED, inlineLoaderHtml } from "./addTabIcons.js";
 
 function text(escapeHtml, value) {
   return escapeHtml(value || "");
@@ -81,9 +82,10 @@ export function themeIcon(id) {
 
 export function listCardHtml(list, escapeHtml) {
   return `<article class="starter-card theme-card">
-    <button type="button" class="starter theme-name" data-list-add="${text(escapeHtml, list.id)}">
+    <button type="button" class="starter theme-name" data-list-open="${text(escapeHtml, list.id)}">
       <span class="theme-icon" aria-hidden="true">${themeIcon(list.id)}</span>
-      <span>${text(escapeHtml, list.title)}</span>
+      <span class="theme-title">${text(escapeHtml, list.title)}</span>
+      ${inlineLoaderHtml()}
     </button>
   </article>`;
 }
@@ -123,7 +125,7 @@ export function nudgeHtml(escapeHtml) {
 
 export function listsEntryHtml(_hint, escapeHtml) {
   return `<button type="button" class="feature-card" data-lists-open>
-    <span class="feature-icon" aria-hidden="true">✦</span>
+    <span class="feature-icon" aria-hidden="true">${ICON_THEMED}</span>
     <span class="feature-copy">
       <strong>Themed lists</strong>
     </span>
