@@ -1,0 +1,161 @@
+/* Twelfth phone test: ZIP entry, learned cards, and the trip action bar. */
+
+.zip-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  position: static;
+}
+.zip-entry-label {
+  position: static;
+  display: block;
+  font-weight: 750;
+  line-height: 1.2;
+}
+.zip-entry-input {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--ink);
+  caret-color: var(--ink);
+  font-size: 16px;
+  line-height: 1.2;
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background-clip: padding-box;
+}
+.zip-entry-input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.zip-entry-input[data-filled="1"]::placeholder,
+.zip-entry-input:not(:placeholder-shown)::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+.zip-entry-input::-webkit-contacts-auto-fill-button,
+.zip-entry-input::-webkit-credentials-auto-fill-button,
+.zip-entry-input::-webkit-strong-password-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+  display: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+.zip-entry-input:-webkit-autofill,
+.zip-entry-input:-webkit-autofill:hover,
+.zip-entry-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  box-shadow: 0 0 0 1000px var(--surface) inset;
+  transition: background-color 9999s ease-out;
+}
+
+.learned-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  overflow-anchor: none;
+}
+.learned-copy {
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 100%;
+}
+.learned-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: space-evenly;
+  gap: 8px;
+  width: 100%;
+  flex: 1 0 100%;
+  min-height: 44px;
+  margin: 8px 0 0;
+}
+.learned-actions .learned-action {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+#profile-stage.is-holding-scroll,
+#profile-stage.is-holding-scroll .learned-row,
+#profile-stage.is-holding-scroll .learned-group {
+  overflow-anchor: none;
+  animation: none;
+}
+
+dialog.profile-onboard[data-step="trip"] #profile-stage {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+dialog.profile-onboard[data-step="trip"] .learned-trip.trip-add {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.trip-action-bar {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 10px;
+  background: var(--bg);
+}
+.trip-action-tools {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+.trip-action-bar .trip-select-all,
+.trip-action-tools .ghost {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+}
+.trip-action-count {
+  margin: 0 0 0 auto;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.trip-action-add {
+  width: 100%;
+  min-height: 48px;
+}
+.trip-action-add:disabled,
+#learned-add-trip:disabled {
+  opacity: 0.45;
+}
+.trip-add-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+.trip-add-body .trip-add-total {
+  position: static;
+}

@@ -29,7 +29,11 @@ import { brandKey, displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
-import { applyLearnedChoice, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { importStageHtml, learnedViewReady } from "./learnedGate.js";
+import { commitLearnedCard } from "./learnedStable.js";
+import { syncTripAddBar } from "./tripActionBar.js";
+import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
 import { readCountLine } from "./receiptHold.js";
 import { READ_BEAT_MS, readBeatHtml } from "./receiptBeat.js";
@@ -104,6 +108,9 @@ export function mountProfileOnboarding(deps = {}) {
   /** @type {(() => void) | null} */
   let skipBeat = null;
   let beatToken = 0;
+  /** Parsing and brand grouping must both finish before the learned screen exists. */
+  let importGate = { parsing: false, grouping: false, revealed: false };
+  let beatMarkup = "";
   /** @type {(() => void) | null} */
   let dietDone = null;
 
@@ -197,9 +204,9 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (step.kind === "welcome") return "";
     if (step.kind === "place" || step.kind === "zip") {
-      const zip = escapeText(fieldZip(deps.getZip?.() || ""));
+      const zip = fieldZip(deps.getZip?.() || "");
       return `<div class="zip-row">
-          <label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" enterkeyhint="done" maxlength="5" autocomplete="off" placeholder="${escapeText(ZIP_PLACEHOLDER)}" value="${zip}" /></label>
+          ${zipEntryFieldHtml({ id: "profile-zip", value: zip, placeholder: ZIP_PLACEHOLDER })}
           <button type="button" class="zip-done" id="profile-zip-done" aria-label="Done">✓</button>
         </div>
         <p id="profile-zip-approx" class="zip-approx"${zipApproximate ? "" : " hidden"}>${escapeText(APPROXIMATE_ZIP_NOTE)}</p>
@@ -211,9 +218,18 @@ export function mountProfileOnboarding(deps = {}) {
         <div id="profile-store-list" class="store-choices"></div>`;
     }
     if (step.kind === "receipts") {
-      if (receiptPhase === "reading") return readLiveHtml(readCards);
+      const importing = importGate.parsing || importGate.grouping || receiptPhase === "reading" || (receiptPhase === "learned" && !learnedViewReady(importGate));
+      if (importing) {
+        return importStageHtml({
+          parsing: importGate.parsing || receiptPhase === "reading",
+          grouping: importGate.grouping,
+          revealed: false,
+          spinnerHtml: `<div class="read-live" data-reading-screen="1">${beatMarkup || readLiveHtml(readCards)}</div>`,
+          learnedHtml: "",
+        });
+      }
       if (receiptPhase === "trip") return learnedTripChoiceHtml(receiptLines);
-      if (receiptPhase === "learned") {
+      if (receiptPhase === "learned" && learnedViewReady(importGate)) {
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
         const brandsByFamily = {};
         const pendingFamilies = {};
@@ -309,9 +325,9 @@ export function mountProfileOnboarding(deps = {}) {
     const skip = $("profile-skip");
     const stage = $("profile-stage");
     const top = document.querySelector("#profile-onboard .profile-top");
-    const learned = step.id === "receipts" && receiptPhase === "learned";
-    const reading = step.id === "receipts" && receiptPhase === "reading";
-    const tripChoice = step.id === "receipts" && receiptPhase === "trip";
+    const learned = step.id === "receipts" && receiptPhase === "learned" && learnedViewReady(importGate);
+    const reading = step.id === "receipts" && !learned && (receiptPhase === "reading" || importGate.parsing || importGate.grouping || (receiptPhase === "learned" && !learnedViewReady(importGate)));
+    const tripChoice = step.id === "receipts" && receiptPhase === "trip" && !importGate.parsing && !importGate.grouping;
     const welcome = step.id === "welcome" && !dietMode;
     if (dialog) {
       dialog.dataset.step = learned ? "learned" : reading ? "reading" : tripChoice ? "trip" : step.id;
@@ -332,10 +348,10 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (progress) progress.textContent = welcome ? "" : progressLabel(step.id);
     if (back) back.hidden = welcome || ((dietMode ? stepId === "allergies" : step.index === 0) && !returnTo && receiptPhase === "upload");
-    const readingBusy = reading && readCards.some((card) => card.status === "reading");
-    const readingReady = reading && !readingBusy && (learnedRows.length > 0 || receiptLines.length > 0);
+    const readingBusy = reading && (importGate.parsing || importGate.grouping || readCards.some((card) => card.status === "reading"));
+    const readingReady = reading && !readingBusy && !beatMarkup && learnedViewReady({ ...importGate, revealed: true }) && (learnedRows.length > 0 || receiptLines.length > 0);
     if (next) {
-      next.hidden = tripChoice || (reading && !readingReady);
+      next.hidden = tripChoice || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
       next.textContent = returnTo ? "Save" : learned ? "Confirm" : reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     }
     if (skip) {
@@ -400,10 +416,12 @@ export function mountProfileOnboarding(deps = {}) {
     if (stage) stage.scrollTop = 0;
     const body = document.querySelector("#profile-onboard .sheet-body");
     if (body) body.scrollTop = 0;
+    const list = $("trip-add-body");
+    if (list) list.scrollTop = 0;
   }
 
   function syncTripJump() {
-    const stage = $("profile-stage");
+    const stage = $("trip-add-body") || $("profile-stage");
     const jump = $("trip-jump");
     if (!jump) return;
     if (!stage) {
@@ -414,14 +432,12 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function paintTripTotal() {
-    const boxes = [...document.querySelectorAll("[data-trip-pick]")].filter((box) => box instanceof HTMLInputElement);
+    const root = $("profile-stage") || document;
+    const boxes = [...root.querySelectorAll("[data-trip-pick]")].filter((box) => box instanceof HTMLInputElement);
     const selected = boxes.filter((box) => box.checked).length;
     const total = boxes.reduce((sum, box) => sum + (box.checked ? Number(box.dataset.estimate) || 0 : 0), 0);
-    const label = $("trip-add-total");
     const status = tripAddStatus(Math.round(total * 100) / 100, selected);
-    if (label) label.textContent = status.label;
-    const add = $("learned-add-trip");
-    if (add) add.disabled = !status.canAdd;
+    syncTripAddBar(root, { ...status, selected });
   }
 
   function currentZipRaw() {
@@ -494,11 +510,13 @@ export function mountProfileOnboarding(deps = {}) {
 
   function bindPlaceInput() {
     const zipInput = $("profile-zip");
+    if (zipInput) bindZipEntry(zipInput);
     if (zipInput && zipInput.dataset.bound !== "1") {
       zipInput.dataset.bound = "1";
       const finishZip = () => {
         const five = fiveDigitZip(zipInput.value);
         if (five) zipInput.value = five;
+        syncZipPlaceholder(zipInput, ZIP_PLACEHOLDER);
         zipInput.blur();
         const hint = $("profile-zip-hint");
         if (hint) hint.hidden = !String(zipInput.value || "").trim();
@@ -546,7 +564,10 @@ export function mountProfileOnboarding(deps = {}) {
             const zip = suggestion.choices?.[0] || "";
             zipApproximate = Boolean(zip);
             const field = $("profile-zip");
-            if (field) field.value = zip ? String(zip).replace(/\D/g, "").slice(0, 5) : "";
+            if (field) {
+              field.value = zip ? String(zip).replace(/\D/g, "").slice(0, 5) : "";
+              syncZipPlaceholder(field, ZIP_PLACEHOLDER);
+            }
             if (!zip) deps.toast?.("No ZIP within about 15 miles. Type yours.");
             const hint = $("profile-zip-hint");
             if (hint) hint.hidden = !zip;
@@ -705,9 +726,8 @@ export function mountProfileOnboarding(deps = {}) {
       tiles = [];
     }
     brandShelves[family] = tiles || [];
-    if (editingFamily === family && stepId === "receipts") {
-      const stage = $("profile-stage");
-      if (stage) stage.innerHTML = stageHtml(stepById("receipts"));
+    if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
+      paintLearnedCard(family);
     }
   }
 
@@ -937,12 +957,37 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function showLearned() {
+    if (!learnedViewReady(importGate)) return;
+    beatMarkup = "";
     receiptPhase = "learned";
     motion = "forward";
     editingFamily = "";
     render();
     focusTitle();
     for (const row of learnedRows) void loadBrandShelf(row.family);
+  }
+
+  function paintLearnedCard(family, options = {}) {
+    const stage = $("profile-stage");
+    const row = learnedRows.find((item) => item.family === family);
+    const cssFamily = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(family) : String(family).replace(/["\\]/g, "");
+    const card = stage?.querySelector(`[data-learned-row="${cssFamily}"]`);
+    if (!stage || !row || !(card instanceof HTMLElement)) {
+      rerenderLearned();
+      return card instanceof HTMLElement ? card : null;
+    }
+    commitLearnedCard(card, (node) => {
+      node.innerHTML = learnedCardInnerHtml(row, {
+        editing: editingFamily === family,
+        brands: brandChoices(row),
+        pending: !brandShelves[row.family],
+      });
+    });
+    if (options.reveal) {
+      const picker = card.querySelector(".learned-picker");
+      if (picker) revealInside(stage, picker);
+    }
+    return card;
   }
 
   function readItemCount() {
@@ -960,15 +1005,12 @@ export function mountProfileOnboarding(deps = {}) {
       card.message = line;
       card.status = card.status === "reading" ? "done" : card.status;
     }
-    if (receiptPhase === "reading") {
-      const stage = $("profile-stage");
-      if (stage) stage.innerHTML = readBeatHtml(count);
+    if (!importGate.revealed && !importGate.parsing && !importGate.grouping) {
+      beatMarkup = readBeatHtml(count);
+      receiptPhase = "reading";
+      render();
       const title = $("profile-title");
-      if (title) title.textContent = line;
-      const hint = $("profile-hint");
-      if (hint) hint.hidden = true;
-      const next = $("profile-next");
-      if (next) next.hidden = true;
+      if (title && !title.textContent) title.textContent = "Reading your orders";
       resetStageScroll();
     }
     await new Promise((resolve) => {
@@ -980,7 +1022,8 @@ export function mountProfileOnboarding(deps = {}) {
       };
     });
     skipBeat = null;
-    if (token !== beatToken || receiptPhase !== "reading") return;
+    if (token !== beatToken || importGate.parsing || importGate.grouping) return;
+    importGate = { parsing: false, grouping: false, revealed: true };
     showLearned();
   }
 
@@ -992,7 +1035,11 @@ export function mountProfileOnboarding(deps = {}) {
     card.ratio = 0.12;
     card.items = [];
     card.found = 0;
+    beatToken += 1;
+    beatMarkup = "";
+    importGate = { parsing: true, grouping: false, revealed: false };
     motion = "forward";
+    receiptPhase = "reading";
     render();
     try {
       const result = await deps.readReceipts({
@@ -1012,7 +1059,9 @@ export function mountProfileOnboarding(deps = {}) {
       card.ratio = 1;
       card.items = result.lines.map((line) => line.name).filter(Boolean);
       const merged = [...fileLinesByIndex.values()].flat();
+      importGate = { parsing: false, grouping: true, revealed: false };
       const learned = deps.readLines ? await deps.readLines(merged) : result;
+      importGate = { parsing: false, grouping: false, revealed: false };
       rememberReadResult({ ...result, ...(learned || {}), lines: learned?.lines || merged });
       if (readCards.some((row) => row.status === "error")) {
         render();
@@ -1038,6 +1087,11 @@ export function mountProfileOnboarding(deps = {}) {
       readCards.push({ index, name: file.name || "Order", ratio: 0.08, found: 0, items: [], status: "reading", error: "", file });
     });
     if (!readCards.length) return;
+    beatToken += 1;
+    beatMarkup = "";
+    learnedRows = [];
+    receiptLines = [];
+    importGate = { parsing: true, grouping: false, revealed: false };
     receiptPhase = "reading";
     motion = "forward";
     render();
@@ -1046,7 +1100,18 @@ export function mountProfileOnboarding(deps = {}) {
       const result = await deps.readReceipts?.({
         text,
         files: list,
-        onProgress: (event) => applyReadProgress(event),
+        onProgress: (event) => {
+          if (event?.stage === "grouping") {
+            importGate = { parsing: false, grouping: true, revealed: false };
+            const stage = $("profile-stage");
+            if (receiptPhase === "learned" || stage?.querySelector(".learned-summary, [data-learned-row]")) {
+              beatMarkup = "";
+              receiptPhase = "reading";
+              render();
+            }
+          }
+          applyReadProgress(event);
+        },
       });
       pendingFiles = [];
       if (!result || (result.error && !result.lines?.length)) {
@@ -1060,6 +1125,8 @@ export function mountProfileOnboarding(deps = {}) {
             }
           }
         }
+        importGate = { parsing: false, grouping: false, revealed: false };
+        beatMarkup = "";
         render();
         return;
       }
@@ -1085,9 +1152,12 @@ export function mountProfileOnboarding(deps = {}) {
         }
       }
       if (readCards.some((card) => card.status === "error")) {
+        importGate = { parsing: false, grouping: false, revealed: false };
+        beatMarkup = "";
         render();
         return;
       }
+      importGate = { parsing: false, grouping: false, revealed: false };
       void holdThenLearned();
     } catch (error) {
       const message = error instanceof Error ? error.message : "We couldn't read that. You can paste the order text, or skip for now.";
@@ -1098,6 +1168,8 @@ export function mountProfileOnboarding(deps = {}) {
           card.ratio = 1;
         }
       }
+      importGate = { parsing: false, grouping: false, revealed: false };
+      beatMarkup = "";
       render();
     }
   }
@@ -1182,7 +1254,11 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (stepId === "receipts") {
       if (receiptPhase === "reading") {
-        if (learnedRows.length || receiptLines.length) showLearned();
+        if (importGate.parsing || importGate.grouping || beatMarkup) return;
+        if (learnedRows.length || receiptLines.length) {
+          importGate = { parsing: false, grouping: false, revealed: true };
+          showLearned();
+        }
         return;
       }
       if (receiptPhase === "learned") {
@@ -1391,7 +1467,18 @@ export function mountProfileOnboarding(deps = {}) {
   $("profile-stage")?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
     if (!target) return;
-    if (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedRemove || target.dataset.fileRemove || target.dataset.readRetry != null) return;
+    const card = target.closest("[data-learned-row]");
+    if (card instanceof HTMLElement && (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedToggle || target.dataset.learnedRemove)) {
+      event.preventDefault();
+      card.setAttribute("tabindex", "-1");
+      try {
+        card.focus({ preventScroll: true });
+      } catch {
+        card.focus();
+      }
+      return;
+    }
+    if (target.dataset.fileRemove || target.dataset.readRetry != null) return;
     event.preventDefault();
   });
   $("profile-stage")?.addEventListener("click", (event) => {
@@ -1421,7 +1508,10 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (target.dataset.zipChoice) {
       const field = $("profile-zip");
-      if (field) field.value = target.dataset.zipChoice;
+      if (field) {
+        field.value = target.dataset.zipChoice;
+        syncZipPlaceholder(field, ZIP_PLACEHOLDER);
+      }
       const hint = $("profile-zip-hint");
       if (hint) hint.hidden = false;
       paintStoreList();
@@ -1439,7 +1529,7 @@ export function mountProfileOnboarding(deps = {}) {
       }
       return;
     }
-    if (target.id === "learned-add-trip") {
+    if (target.dataset.tripAdd != null || target.id === "learned-add-trip" || target.id === "learned-add-trip-top") {
       if (target instanceof HTMLButtonElement && target.disabled) return;
       const picks = [...document.querySelectorAll("[data-trip-pick]")];
       const picked = (picks.length ? picks : [...document.querySelectorAll("[data-learned-trip]")])
@@ -1483,11 +1573,9 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (target.dataset.learnedChange) {
       editingFamily = editingFamily === target.dataset.learnedChange ? "" : target.dataset.learnedChange;
-      const family = editingFamily;
-      const stage = rerenderLearned();
-      const picker = stage?.querySelector(".learned-picker");
-      if (picker) revealInside(stage, picker);
-      if (family) void loadBrandShelf(family);
+      const family = target.dataset.learnedChange;
+      paintLearnedCard(family, { reveal: Boolean(editingFamily) });
+      if (editingFamily) void loadBrandShelf(editingFamily);
       return;
     }
     if (target.dataset.learnedToggle === "brand") {
@@ -1501,7 +1589,7 @@ export function mountProfileOnboarding(deps = {}) {
           : [...current, brand].slice(0, 12);
         return { ...row, brands: nextBrands, brand: nextBrands[0] || "", mode: nextBrands.length ? "cheapestPicks" : row.mode };
       });
-      rerenderLearned();
+      paintLearnedCard(family);
       return;
     }
     if (target.dataset.learnedMode) {
@@ -1519,7 +1607,7 @@ export function mountProfileOnboarding(deps = {}) {
       if (next === learnedRows) return;
       learnedRows = next;
       editingFamily = "";
-      rerenderLearned();
+      paintLearnedCard(family);
       return;
     }
     if (target.dataset.lineRemove != null && target.dataset.lineRemove !== "") {
@@ -1683,6 +1771,7 @@ export function mountProfileOnboarding(deps = {}) {
   });
 
   $("profile-stage")?.addEventListener("scroll", () => syncTripJump(), { passive: true });
+  dialog.addEventListener("scroll", () => syncTripJump(), { passive: true, capture: true });
   $("profile-stage")?.addEventListener("change", (event) => {
     const box = event.target;
     if (!(box instanceof HTMLInputElement) || box.dataset.tripPick == null) return;
