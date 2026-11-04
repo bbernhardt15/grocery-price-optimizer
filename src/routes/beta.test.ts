@@ -12,6 +12,8 @@ import { sentryIsActive } from "../observability/sentry";
 
 const DEVICE = "device-beta-01";
 const OTHER = "device-beta-02";
+const THIRD = "device-beta-03";
+const STRANGER = "device-beta-04";
 
 describe("beta tester routes", { concurrency: false }, () => {
   let memory: MongoMemoryServer;
@@ -289,6 +291,241 @@ describe("beta tester routes", { concurrency: false }, () => {
     const row = await BetaClientError.findOne().lean();
     assert.match(row?.message || "", /Something broke/);
     assert.equal(JSON.stringify(row).includes("password"), false);
+  });
+
+  it("stores the invite code from the device signup on feedback and ignores a code in the body", async () => {
+    process.env.BETA_INVITE_CODES = "mom-uqq6,dad-uqq6";
+    process.env.GG_ADMIN_TOKEN = "beta-admin";
+    const auth = { authorization: "Bearer beta-admin" };
+    await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    await post("/api/beta/invite", { code: "dad-uqq6", deviceId: OTHER }, { "x-device-id": OTHER });
+
+    const mom = await post(
+      "/api/beta/feedback",
+      { rating: 5, message: "The list was easy.", screen: "Review", code: "dad-uqq6", email: "mom@example.com", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    assert.equal(mom.status, 201);
+    const dad = await post(
+      "/api/beta/feedback",
+      { rating: 3, message: "Search was slow.", code: "mom-uqq6", deviceId: OTHER },
+      { "x-device-id": OTHER }
+    );
+    assert.equal(dad.status, 201);
+    const stranger = await post(
+      "/api/beta/feedback",
+      { rating: 4, message: "No invite yet.", code: "mom-uqq6", deviceId: STRANGER },
+      { "x-device-id": STRANGER }
+    );
+    assert.equal(stranger.status, 201);
+
+    const stored = await BetaFeedback.findOne({ deviceId: DEVICE }).lean();
+    assert.equal(stored?.code, "mom-uqq6");
+    assert.equal("email" in (stored ?? {}), false);
+    assert.equal(JSON.stringify(stored).includes("dad-uqq6"), false);
+    assert.equal(JSON.stringify(stored).includes("example.com"), false);
+    const blank = await BetaFeedback.findOne({ deviceId: STRANGER }).lean();
+    assert.equal(blank?.code || "", "");
+
+    const denied = await fetch(`${origin}/api/admin/beta/feedback?code=mom-uqq6`);
+    assert.equal(denied.status, 401);
+    const listed = await fetch(`${origin}/api/admin/beta/feedback?code=Mom-Uqq6`, { headers: auth });
+    const listedBody = (await listed.json()) as { code: string; feedback: Array<{ code: string; message: string }> };
+    assert.equal(listed.status, 200);
+    assert.equal(listedBody.code, "Mom-Uqq6");
+    assert.deepEqual(
+      listedBody.feedback.map((row) => row.message),
+      ["The list was easy."]
+    );
+    assert.equal(listedBody.feedback[0].code, "mom-uqq6");
+    const packed = JSON.stringify(listedBody);
+    assert.equal(packed.includes(DEVICE), false);
+    assert.equal(packed.includes("example.com"), false);
+
+    const wildcard = await fetch(`${origin}/api/admin/beta/feedback?code=${encodeURIComponent(".*")}`, { headers: auth });
+    const wildcardBody = (await wildcard.json()) as { feedback: unknown[] };
+    assert.equal(wildcard.status, 200);
+    assert.deepEqual(wildcardBody.feedback, []);
+
+    const csvResponse = await fetch(`${origin}/api/admin/beta/feedback.csv?code=mom-uqq6`, { headers: auth });
+    const csv = await csvResponse.text();
+    const [header, ...rows] = csv.trim().split("\n");
+    assert.equal(csvResponse.status, 200);
+    assert.equal(header.endsWith(",code"), true);
+    assert.deepEqual(rows.length, 1);
+    assert.match(rows[0], /The list was easy/);
+    assert.match(rows[0], /mom-uqq6/);
+    assert.equal(csv.includes("Search was slow"), false);
+    assert.equal(csv.includes(DEVICE), false);
+
+    const events = await fetch(`${origin}/api/admin/beta/events`, { headers: auth });
+    const eventBody = (await events.json()) as { events: Array<{ name: string; count: number; byCode: Record<string, number> }> };
+    const sent = eventBody.events.find((row) => row.name === "feedback_sent");
+    assert.equal(sent?.count, 3);
+    assert.equal(sent?.byCode["mom-uqq6"], 1);
+    assert.equal(sent?.byCode["dad-uqq6"], 1);
+    assert.equal(JSON.stringify(eventBody).includes(DEVICE), false);
+  });
+
+  it("stores the invite code from the device signup on client errors and ignores a code in the body", async () => {
+    process.env.BETA_INVITE_CODES = "mom-uqq6,dad-uqq6";
+    await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    const first = await post(
+      "/api/beta/client-errors",
+      { message: "Review failed to paint", stack: "Error: Review failed\n at plan", code: "dad-uqq6", email: "mom@example.com", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    assert.equal(first.status, 202);
+    assert.equal(first.json.stored, true);
+    const stranger = await post(
+      "/api/beta/client-errors",
+      { message: "Stranger failed", code: "mom-uqq6", deviceId: STRANGER },
+      { "x-device-id": STRANGER }
+    );
+    assert.equal(stranger.json.stored, true);
+
+    const row = await BetaClientError.findOne({ deviceId: DEVICE }).lean();
+    assert.equal(row?.code, "mom-uqq6");
+    assert.equal("email" in (row ?? {}), false);
+    assert.equal(JSON.stringify(row).includes("dad-uqq6"), false);
+    assert.equal(JSON.stringify(row).includes("example.com"), false);
+    const blank = await BetaClientError.findOne({ deviceId: STRANGER }).lean();
+    assert.equal(blank?.code || "", "");
+  });
+
+  it("splits product counters by the device invite code and keeps the totals", async () => {
+    process.env.BETA_INVITE_CODES = "mom-uqq6,dad-uqq6";
+    process.env.GG_ADMIN_TOKEN = "beta-admin";
+    const auth = { authorization: "Bearer beta-admin" };
+    await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    await post("/api/beta/invite", { code: "dad-uqq6", deviceId: OTHER }, { "x-device-id": OTHER });
+
+    const first = await post(
+      "/api/beta/events",
+      { name: "trip_completed", code: "dad-uqq6", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    const second = await post(
+      "/api/beta/events",
+      { name: "trip_completed", code: "dad-uqq6", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    const dad = await post("/api/beta/events", { name: "trip_completed", deviceId: OTHER }, { "x-device-id": OTHER });
+    const anonymous = await post("/api/beta/events", { name: "plan_built", code: "mom-uqq6" });
+    assert.equal(first.json.stored, true);
+    assert.equal(second.json.stored, true);
+    assert.equal(dad.json.stored, true);
+    assert.equal(anonymous.json.stored, true);
+
+    const denied = await fetch(`${origin}/api/admin/beta/events?code=mom-uqq6`);
+    assert.equal(denied.status, 401);
+    const response = await fetch(`${origin}/api/admin/beta/events`, { headers: auth });
+    const body = (await response.json()) as { events: Array<{ name: string; count: number; byCode: Record<string, number> }> };
+    const counts = Object.fromEntries(body.events.map((row) => [row.name, row]));
+    assert.equal(counts.trip_completed.count, 3);
+    assert.equal(counts.trip_completed.byCode["mom-uqq6"], 2);
+    assert.equal(counts.trip_completed.byCode["dad-uqq6"], 1);
+    assert.equal(counts.plan_built.count, 1);
+    assert.deepEqual(counts.plan_built.byCode, {});
+    assert.equal(JSON.stringify(body).includes(DEVICE), false);
+
+    const filtered = await fetch(`${origin}/api/admin/beta/events?code=mom-uqq6`, { headers: auth });
+    const filteredBody = (await filtered.json()) as {
+      code: string;
+      events: Array<{ name: string; count: number; codeCount: number; byCode: Record<string, number> }>;
+    };
+    assert.equal(filteredBody.code, "mom-uqq6");
+    const trip = filteredBody.events.find((row) => row.name === "trip_completed");
+    const plan = filteredBody.events.find((row) => row.name === "plan_built");
+    assert.equal(trip?.count, 3);
+    assert.equal(trip?.codeCount, 2);
+    assert.deepEqual(trip?.byCode, { "mom-uqq6": 2 });
+    assert.equal(plan?.count, 1);
+    assert.equal(plan?.codeCount, 0);
+    assert.deepEqual(plan?.byCode, {});
+
+    const wildcard = await fetch(`${origin}/api/admin/beta/events?code=${encodeURIComponent(".*")}`, { headers: auth });
+    const wildcardBody = (await wildcard.json()) as { events: Array<{ name: string; codeCount: number }> };
+    const wildcardTrip = wildcardBody.events.find((row) => row.name === "trip_completed");
+    assert.equal(wildcardTrip?.codeCount, 0);
+  });
+
+  it("summarizes each invite code with devices, activity, feedback, trips, and errors", async () => {
+    process.env.BETA_INVITE_CODES = "mom-uqq6,dad-uqq6";
+    process.env.GG_ADMIN_TOKEN = "beta-admin";
+    const auth = { authorization: "Bearer beta-admin" };
+    await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await post("/api/beta/invite", { code: "mom-uqq6", deviceId: THIRD }, { "x-device-id": THIRD });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await post("/api/beta/invite", { code: "dad-uqq6", deviceId: OTHER }, { "x-device-id": OTHER });
+
+    await post(
+      "/api/beta/feedback",
+      { rating: 5, message: "From mom.", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    await post("/api/beta/events", { name: "trip_completed", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    await post(
+      "/api/beta/client-errors",
+      { message: "Mom hit an error", deviceId: DEVICE },
+      { "x-device-id": DEVICE }
+    );
+    await post(
+      "/api/beta/feedback",
+      { rating: 2, message: "From dad.", deviceId: OTHER },
+      { "x-device-id": OTHER }
+    );
+
+    const denied = await fetch(`${origin}/api/admin/beta/signups?code=mom-uqq6`);
+    assert.equal(denied.status, 401);
+    const response = await fetch(`${origin}/api/admin/beta/signups`, { headers: auth });
+    const body = (await response.json()) as {
+      codes: Array<{
+        code: string;
+        signups: number;
+        devices: number;
+        firstSeen: string;
+        lastActive: string;
+        lastSignupAt: string;
+        feedbackCount: number;
+        tripCompleteCount: number;
+        errorCount: number;
+      }>;
+    };
+    assert.equal(response.status, 200);
+    const mom = body.codes.find((row) => row.code === "mom-uqq6");
+    const dad = body.codes.find((row) => row.code === "dad-uqq6");
+    assert.ok(mom);
+    assert.ok(dad);
+    assert.equal(mom.devices, 2);
+    assert.equal(mom.signups, 2);
+    assert.equal(mom.feedbackCount, 1);
+    assert.equal(mom.tripCompleteCount, 1);
+    assert.equal(mom.errorCount, 1);
+    assert.equal(dad.devices, 1);
+    assert.equal(dad.feedbackCount, 1);
+    assert.equal(dad.tripCompleteCount, 0);
+    assert.equal(dad.errorCount, 0);
+    assert.ok(Date.parse(mom.firstSeen) <= Date.parse(mom.lastSignupAt));
+    assert.ok(Date.parse(mom.lastActive) >= Date.parse(mom.firstSeen));
+    assert.ok(Date.parse(dad.lastActive) >= Date.parse(dad.firstSeen));
+    assert.equal(body.codes.map((row) => row.code).join(","), "dad-uqq6,mom-uqq6");
+    const packed = JSON.stringify(body);
+    assert.equal(packed.includes(DEVICE), false);
+    assert.equal(packed.includes(THIRD), false);
+    assert.equal(packed.includes("@"), false);
+
+    const filtered = await fetch(`${origin}/api/admin/beta/signups?code=Mom-Uqq6`, { headers: auth });
+    const filteredBody = (await filtered.json()) as { code: string; codes: Array<{ code: string }> };
+    assert.equal(filteredBody.code, "Mom-Uqq6");
+    assert.deepEqual(
+      filteredBody.codes.map((row) => row.code),
+      ["mom-uqq6"]
+    );
+    const wildcard = await fetch(`${origin}/api/admin/beta/signups?code=${encodeURIComponent(".*")}`, { headers: auth });
+    const wildcardBody = (await wildcard.json()) as { codes: unknown[] };
+    assert.deepEqual(wildcardBody.codes, []);
   });
 
   it("deletes feedback, the invite signup, and client errors with the account route", async () => {
