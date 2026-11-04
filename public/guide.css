@@ -1,0 +1,153 @@
+/* Conversational guide card. Fixed, so it never pushes the list or the dock. */
+
+.gitter-guide {
+  position: fixed;
+  z-index: 7;
+  left: 50%;
+  bottom: calc(var(--bar-h) + var(--keyboard, 0px) + 12px);
+  max-height: calc(100svh - var(--bar-h) - var(--keyboard, 0px) - 12px - 68px - var(--safe-top));
+  transform: translateX(-50%);
+  width: min(440px, calc(100% - 20px));
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 10px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  /* Taps pass through the card except on its own controls, so the list and the dock stay usable. */
+  pointer-events: none;
+  animation: gitter-guide-in 180ms ease;
+}
+
+.gitter-guide[hidden] {
+  display: none !important;
+}
+
+.gitter-guide-avatar {
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.gitter-guide-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gitter-guide-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.gitter-guide-line {
+  margin: 0;
+  min-height: 2.7em;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.gitter-guide-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gitter-guide-chip,
+.gitter-guide-off,
+.gitter-guide-dismiss {
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.gitter-guide-chip {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 700;
+  text-align: left;
+}
+
+.gitter-guide-off {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.gitter-guide-dismiss {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.guide-setting-block { display: flex; flex-direction: column; gap: 2px; }
+.guide-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.guide-setting input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+@keyframes gitter-guide-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gitter-guide,
+  .gitter-guide-line,
+  .gitter-guide-chip {
+    animation: none;
+    transition: none;
+  }
+}
+
+:root[data-resolved="dark"] .gitter-guide {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}

@@ -27,7 +27,7 @@ const DESKTOP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537
 
 describe("Chrome on iPhone", () => {
   it("recognizes CriOS and ignores a home-screen install", () => {
-    assert.match(sw, /grocery-gitter-shell-v39/);
+    assert.match(sw, /grocery-gitter-shell-v40/);
     assert.match(app, /openStoreHandoff/);
     assert.match(app, /applySharedHandoff/);
     assert.match(app, /handoffBridgePath/);

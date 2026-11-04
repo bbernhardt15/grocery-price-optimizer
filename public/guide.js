@@ -1,0 +1,353 @@
+/**
+ * Gitter guide card. Rules live in guide-rules.js (from src/guide/rules.ts).
+ * Receipt text is read only from a response the app already requested.
+ * The ask endpoint is never called from here.
+ */
+
+import {
+  DISMISS_LABEL,
+  GUIDE_KEY,
+  GUIDE_LABEL,
+  GUIDE_QUIET_MS,
+  REPLIES_LABEL,
+  TURN_OFF_LABEL,
+  clearTripNote,
+  createGuideSession,
+  dismissGuide,
+  importReceiptUrl,
+  linesFromImportBody,
+  namesMatch,
+  noteReceipt as rememberReceipt,
+  noteTrip as rememberTrip,
+  presentGuide,
+  readGuideSettings,
+  setGuideEnabled,
+  typeFrames,
+  writeGuideSettings,
+} from "./guide-rules.js";
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function guideSettingsHtml(on) {
+  return `<label class="guide-setting"><input type="checkbox" id="settings-guide"${on ? " checked" : ""} /> <span>Gitter guide</span></label><p id="settings-guide-note" class="muted">Short prompts while you shop. You can turn this off.</p>`;
+}
+
+export function guideChipHtml(chip) {
+  const name = chip?.name ? ` data-guide-name="${escapeHtml(chip.name)}"` : "";
+  const names = Array.isArray(chip?.names) && chip.names.length ? ` data-guide-names="${escapeHtml(chip.names.join("\n"))}"` : "";
+  const url = chip?.url ? ` data-guide-url="${escapeHtml(chip.url)}"` : "";
+  return `<button type="button" class="gitter-guide-chip" data-guide-action="${escapeHtml(chip?.action || "")}" data-guide-id="${escapeHtml(chip?.id || "")}"${name}${names}${url}>${escapeHtml(chip?.label || "")}</button>`;
+}
+
+export function guideCardHtml(prompt) {
+  const chips = (prompt?.chips || []).map((chip) => guideChipHtml(chip)).join("");
+  return `<aside class="gitter-guide" role="region" aria-label="${escapeHtml(GUIDE_LABEL)}">
+    <div class="gitter-guide-avatar" aria-hidden="true">G</div>
+    <div class="gitter-guide-copy">
+      <p class="gitter-guide-kicker" aria-hidden="true">Gitter</p>
+      <p class="gitter-guide-line" aria-hidden="true">${escapeHtml(prompt?.line || "")}</p>
+      <p class="gitter-guide-live sr-only" aria-live="polite">${escapeHtml(prompt?.line || "")}</p>
+      <div class="gitter-guide-chips" role="group" aria-label="${escapeHtml(REPLIES_LABEL)}">${chips}</div>
+      <button type="button" class="gitter-guide-off" data-guide-off="1" aria-label="${escapeHtml(TURN_OFF_LABEL)}">Turn off</button>
+    </div>
+    <button type="button" class="gitter-guide-dismiss" data-guide-dismiss="1" aria-label="${escapeHtml(DISMISS_LABEL)}">×</button>
+  </aside>`;
+}
+
+function reducedMotion(win) {
+  try {
+    return win?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  } catch {
+    return false;
+  }
+}
+
+function installReceiptWatch(win, note) {
+  if (!win || win.__gitterGuideFetch || typeof win.fetch !== "function") return;
+  const original = win.fetch.bind(win);
+  win.__gitterGuideFetch = true;
+  win.fetch = async function gitterGuideFetch(input, init) {
+    const response = await original(input, init);
+    try {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url || "";
+      if (!importReceiptUrl(String(url)) || !response?.ok || typeof response.clone !== "function") return response;
+      const copy = response.clone();
+      const type = copy.headers?.get?.("content-type") || "";
+      const body = await copy.text();
+      const lines = linesFromImportBody(type, body);
+      if (lines.length) note({ lines });
+    } catch {
+      /* the original response is unchanged */
+    }
+    return response;
+  };
+}
+
+/**
+ * @param {{
+ *   storage?: Storage,
+ *   document?: Document,
+ *   getState?: () => object,
+ *   onAction?: (action: string, detail: object) => void,
+ * }} [deps]
+ */
+export function mountGuide(deps = {}) {
+  const doc = deps.document || (typeof document !== "undefined" ? document : null);
+  if (!doc?.body) return null;
+  if (doc.getElementById("gitter-guide")) return doc.__gitterGuide || null;
+  const storage = deps.storage || (typeof localStorage !== "undefined" ? localStorage : null);
+  const win = doc.defaultView || (typeof window !== "undefined" ? window : null);
+  let settings = readGuideSettings(storage);
+  let session = createGuideSession();
+  let current = null;
+  let holding = 0;
+  let quietUntil = 0;
+  let typeTimer = 0;
+
+  const host = doc.createElement("aside");
+  host.id = "gitter-guide";
+  host.className = "gitter-guide";
+  host.hidden = true;
+  host.setAttribute("role", "region");
+  host.setAttribute("aria-label", GUIDE_LABEL);
+  host.innerHTML = `<div class="gitter-guide-avatar" aria-hidden="true">G</div>
+    <div class="gitter-guide-copy">
+      <p class="gitter-guide-kicker" aria-hidden="true">Gitter</p>
+      <p class="gitter-guide-line" aria-hidden="true"></p>
+      <p class="gitter-guide-live sr-only" aria-live="polite"></p>
+      <div class="gitter-guide-chips" role="group" aria-label="${escapeHtml(REPLIES_LABEL)}"></div>
+      <button type="button" class="gitter-guide-off" data-guide-off="1" aria-label="${escapeHtml(TURN_OFF_LABEL)}">Turn off</button>
+    </div>
+    <button type="button" class="gitter-guide-dismiss" data-guide-dismiss="1" aria-label="${escapeHtml(DISMISS_LABEL)}">×</button>`;
+  doc.body.appendChild(host);
+
+  const lineEl = host.querySelector(".gitter-guide-line");
+  const liveEl = host.querySelector(".gitter-guide-live");
+  const chipsEl = host.querySelector(".gitter-guide-chips");
+
+  const settingsHost = doc.querySelector("#settings-dialog .settings-list");
+  if (settingsHost && !doc.getElementById("settings-guide")) {
+    const block = doc.createElement("div");
+    block.className = "guide-setting-block";
+    block.innerHTML = guideSettingsHtml(settings.enabled !== false);
+    settingsHost.insertBefore(block, settingsHost.firstChild);
+  }
+
+  function persist(next) {
+    settings = next;
+    writeGuideSettings(storage, settings);
+    const box = doc.getElementById("settings-guide");
+    if (box) box.checked = settings.enabled !== false;
+  }
+
+  function paint(prompt) {
+    if (!prompt) {
+      host.hidden = true;
+      host.removeAttribute("data-moment");
+      return;
+    }
+    const same = host.dataset.moment === prompt.moment && !host.hidden;
+    host.hidden = false;
+    host.dataset.moment = prompt.moment;
+    if (chipsEl) chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");
+    if (liveEl && !same) liveEl.textContent = prompt.line || "";
+    if (!same) typeLine(prompt.line || "");
+  }
+
+  function typeLine(line) {
+    if (win) win.clearInterval(typeTimer);
+    if (!lineEl) return;
+    const frames = typeFrames(line, reducedMotion(win));
+    if (frames.length < 2) {
+      lineEl.textContent = line;
+      return;
+    }
+    let index = 0;
+    lineEl.textContent = frames[0];
+    if (!win) {
+      lineEl.textContent = line;
+      return;
+    }
+    typeTimer = win.setInterval(() => {
+      index += 1;
+      if (!lineEl || index >= frames.length) {
+        win.clearInterval(typeTimer);
+        if (lineEl) lineEl.textContent = line;
+        return;
+      }
+      lineEl.textContent = frames[index];
+    }, 18);
+  }
+
+  function fieldFocused() {
+    const active = doc.activeElement;
+    if (!active || active === doc.body) return false;
+    const tag = active.tagName;
+    if (tag === "TEXTAREA") return true;
+    if (tag === "INPUT") {
+      const type = String(active.getAttribute("type") || "text").toLowerCase();
+      return type !== "checkbox" && type !== "radio" && type !== "button";
+    }
+    return Boolean(active.isContentEditable);
+  }
+
+  function dialogOpen() {
+    return Boolean(doc.querySelector("dialog[open]"));
+  }
+
+  function sync() {
+    try {
+      const now = Date.now();
+      const result = presentGuide({
+        settings,
+        session,
+        view: deps.getState?.() || {},
+        current,
+        holding: holding > 0 || now < quietUntil,
+        dialogOpen: dialogOpen(),
+        fieldFocused: fieldFocused(),
+      });
+      session = result.session;
+      current = result.current;
+      if (result.defer && !result.hidden) return;
+      if (result.hidden || !result.current) {
+        host.hidden = true;
+        return;
+      }
+      paint(result.current);
+    } catch {
+      /* a guide miss must not block the list */
+    }
+  }
+
+  function finishQuiet() {
+    quietUntil = Date.now() + GUIDE_QUIET_MS;
+    if (!win) return;
+    win.setTimeout(() => {
+      if (holding === 0 && Date.now() >= quietUntil) sync();
+    }, GUIDE_QUIET_MS + 20);
+  }
+
+  host.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button") : null;
+    if (!button || !host.contains(button)) return;
+    event.stopPropagation();
+    if (button.hasAttribute("data-guide-dismiss")) {
+      persist(dismissGuide(settings));
+      current = null;
+      host.hidden = true;
+      return;
+    }
+    if (button.hasAttribute("data-guide-off")) {
+      persist(setGuideEnabled(settings, false));
+      current = null;
+      host.hidden = true;
+      return;
+    }
+    const action = button.getAttribute("data-guide-action");
+    if (!action) return;
+    const names = String(button.getAttribute("data-guide-names") || "")
+      .split("\n")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const detail = {
+      id: button.getAttribute("data-guide-id") || "",
+      name: button.getAttribute("data-guide-name") || "",
+      names,
+      url: button.getAttribute("data-guide-url") || "",
+      label: button.textContent || "",
+    };
+    current = null;
+    host.hidden = true;
+    deps.onAction?.(action, detail);
+  });
+
+  doc.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || target.id !== "settings-guide") return;
+    persist(setGuideEnabled(settings, target.checked));
+    if (!target.checked) {
+      current = null;
+      host.hidden = true;
+      return;
+    }
+    sync();
+  });
+
+  doc.addEventListener(
+    "pointerdown",
+    () => {
+      holding += 1;
+    },
+    true
+  );
+  doc.addEventListener(
+    "pointerup",
+    () => {
+      holding = Math.max(0, holding - 1);
+      finishQuiet();
+    },
+    true
+  );
+  doc.addEventListener(
+    "pointercancel",
+    () => {
+      holding = Math.max(0, holding - 1);
+      finishQuiet();
+    },
+    true
+  );
+  doc.addEventListener(
+    "close",
+    (event) => {
+      if (event.target && event.target.tagName === "DIALOG") sync();
+    },
+    true
+  );
+  doc.addEventListener("focusout", () => {
+    if (!win) return;
+    win.setTimeout(() => sync(), 0);
+  });
+  if (typeof MutationObserver === "function") {
+    const dialogs = new MutationObserver(() => sync());
+    dialogs.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
+  }
+
+  installReceiptWatch(win, (payload) => {
+    session = rememberReceipt(session, payload);
+    sync();
+  });
+
+  const api = {
+    sync,
+    noteReceipt(payload) {
+      session = rememberReceipt(session, payload);
+      sync();
+    },
+    noteTrip(saved) {
+      session = rememberTrip(session, saved);
+      sync();
+    },
+    clearTrip() {
+      session = clearTripNote(session);
+      if (current?.moment === "trip-saved") {
+        current = null;
+        host.hidden = true;
+      }
+    },
+    readSettings() {
+      return settings;
+    },
+  };
+  doc.__gitterGuide = api;
+  sync();
+  return api;
+}
+
+export { GUIDE_KEY, namesMatch };
