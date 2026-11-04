@@ -1,0 +1,171 @@
+/* Beta gate, feedback sheet, and the error toast. Hidden until needed. */
+
+.beta-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px 18px calc(24px + var(--safe-bottom, 0px));
+  background: var(--bg, #f4efe6);
+  color: var(--ink, #1c1917);
+}
+
+.beta-gate[hidden] {
+  display: none;
+}
+
+.beta-gate-card {
+  width: min(28rem, 100%);
+  background: var(--surface, #fffdfb);
+  border: 1px solid var(--line, #e4d9c8);
+  border-radius: 24px;
+  box-shadow: var(--shadow, none);
+  padding: 28px 22px 22px;
+}
+
+.beta-gate-card h1 {
+  font-family: var(--display, Georgia, serif);
+  font-size: 2rem;
+  line-height: 1.15;
+  margin: 0 0 8px;
+}
+
+.beta-gate-card p {
+  margin: 0 0 16px;
+  color: var(--muted, #5c5348);
+}
+
+.beta-gate-card label {
+  display: grid;
+  gap: 6px;
+  font-weight: 650;
+  margin-bottom: 16px;
+}
+
+.beta-gate-card input,
+.beta-feedback textarea,
+.beta-feedback input[type="text"] {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 14px;
+  border: 1px solid var(--line, #e4d9c8);
+  background: var(--bg, #f4efe6);
+  color: inherit;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.beta-feedback textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.beta-ratings {
+  display: flex;
+  gap: 8px;
+  border: 0;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.beta-ratings label {
+  flex: 1;
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid var(--line, #e4d9c8);
+  font-weight: 750;
+}
+
+.beta-ratings input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.beta-ratings label:has(input:checked) {
+  background: var(--accent, #0e7a45);
+  color: var(--accent-ink, #fff);
+  border-color: transparent;
+}
+
+.beta-feedback .beta-actions,
+.beta-gate-card .beta-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.beta-feedback .beta-actions button,
+.beta-gate-card .beta-actions button,
+.beta-error-toast button {
+  min-height: 44px;
+}
+
+.beta-legal {
+  display: flex;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+body.beta-gated .shell,
+body.beta-gated .drawer-scrim,
+body.beta-gated dialog {
+  visibility: hidden;
+}
+
+.beta-error-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(28rem, calc(100% - 24px));
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: #1c1917;
+  color: #f4efe6;
+  box-shadow: var(--shadow, none);
+}
+
+.beta-error-toast[hidden] {
+  display: none;
+}
+
+.beta-error-toast p {
+  margin: 0;
+  flex: 1;
+  min-width: 10rem;
+  font-weight: 650;
+}
+
+.beta-error-toast button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 700;
+  background: #fffdfb;
+  color: #1c1917;
+}
+
+.beta-note {
+  color: var(--muted, #5c5348);
+  margin: 0 0 12px;
+}
+
+#help-feedback {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  min-height: 44px;
+}
