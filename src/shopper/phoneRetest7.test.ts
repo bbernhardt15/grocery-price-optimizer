@@ -13,7 +13,7 @@ const kroger = readFileSync(new URL("../../public/shopper/krogerReturn.js", impo
 
 describe("seventh phone retest regressions", () => {
   it("bumps the shell cache to v30 and keeps the Walmart cart button", () => {
-    assert.match(sw, /grocery-gitter-shell-v43/);
+    assert.match(sw, /grocery-gitter-shell-v44/);
     assert.match(app, /data-walmart-cart/);
     assert.match(app, /Open in Walmart cart/);
     assert.match(app, /startsWith\("custom:"\)/);

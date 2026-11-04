@@ -53,6 +53,7 @@ function inPage<T>(page: Page, body: string): Promise<T> {
 
 const SEED_PAGE = `
   localStorage.setItem("gg-onboarding-done", "1");
+  localStorage.setItem("gg-beta-code", "preview");
   localStorage.setItem("gg-theme", "dark");
   localStorage.setItem("gg-zip", "45103");
   localStorage.setItem("gg-step", "add");

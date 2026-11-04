@@ -20,6 +20,7 @@ import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 import importListRouter from "./routes/importList";
 import betaRouter from "./routes/beta";
+import { enforceBetaInvite } from "./beta/gate";
 import { IMPORT_MESSAGES } from "./import/messages";
 
 initSentry();
@@ -53,6 +54,8 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use(enforceBetaInvite);
 
 app.get("/api", (_req, res) => {
   res.json({
@@ -154,23 +157,23 @@ app.get("/api", (_req, res) => {
       "GET /api/health/ready":
         "Mongo is connected. 503 when it is not. No secrets.",
       "GET /api/beta/gate":
-        "Whether BETA_INVITE_CODES is set. required is false when the variable is unset, and the body never lists the codes.",
+        "Whether BETA_INVITE_CODES is set. required is false when the variable is unset, and the body never lists the codes. Not cached.",
       "POST /api/beta/invite":
-        "Checks one invite code for this device and records the code used. 200 with required false when the gate is off.",
+        "Checks one invite code for this device and records the code used. A code no longer on the list is rejected, and a new valid code replaces it. 200 with required false when the gate is off.",
       "POST /api/beta/feedback":
-        "Stores a 1 to 5 rating and a note for this device. Rate limited. No receipt text.",
+        "Stores a 1 to 5 rating and a note for this device, tagged with the invite code already saved for that device. Rate limited. No receipt text.",
       "POST /api/beta/events":
-        "Increments one privacy-friendly product counter. No account id is stored.",
+        "Increments one privacy-friendly product counter and, when this device has a saved invite code, the matching per-code count. No account id is stored.",
       "POST /api/beta/client-errors":
-        "Throttled client error log. Also sent to Sentry when SENTRY_DSN is set.",
+        "Throttled client error log, tagged with the invite code already saved for that device. Also sent to Sentry when SENTRY_DSN is set.",
       "GET /api/admin/beta/feedback":
-        "Newest feedback first. Requires Authorization: Bearer $GG_ADMIN_TOKEN (or ADMIN_TOKEN, or x-admin-token).",
+        "Newest feedback first, including the invite code. Optional ?code= filter. Requires Authorization: Bearer $GG_ADMIN_TOKEN (or ADMIN_TOKEN, or x-admin-token).",
       "GET /api/admin/beta/feedback.csv":
-        "The same feedback as a CSV download. Same admin token.",
+        "The same feedback as a CSV download, with a code column and the same ?code= filter. Same admin token.",
       "GET /api/admin/beta/signups":
-        "Signup counts per invite code. No device ids or emails.",
+        "Per-code summary: devices, first seen, last active, feedback count, trip-complete count, and error count. Optional ?code= filter. No device ids or emails.",
       "GET /api/admin/beta/events":
-        "Product counter totals. Same admin token.",
+        "Product counter totals plus a per-code breakdown. Optional ?code= filter adds codeCount. Same admin token.",
       "GET /api/observability":
         "Crash-reporting config for the website and the native shells. enabled is false when SENTRY_DSN is unset, and the body then has no DSN. The auth token is never returned.",
     },

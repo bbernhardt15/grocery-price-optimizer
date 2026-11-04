@@ -102,8 +102,8 @@ export function installClientErrors(root, deps) {
 }
 
 export function inviteScreenHtml() {
-  return `<div id="beta-gate" class="beta-gate" hidden>
-    <form id="beta-gate-form" class="beta-gate-card">
+  return `<dialog id="beta-gate" class="beta-gate">
+    <form id="beta-gate-form" class="beta-gate-card" method="post" action="#">
       <h1>Enter your invite code</h1>
       <p>Grocery Gitter is in a private beta. The code is how Brandon knows which group you joined.</p>
       <label>Invite code <input id="beta-code" name="code" autocomplete="off" autocapitalize="off" spellcheck="false" required /></label>
@@ -111,7 +111,78 @@ export function inviteScreenHtml() {
       <p id="beta-gate-error" class="status" role="alert" hidden></p>
       <p class="beta-legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></p>
     </form>
-  </div>`;
+  </dialog>`;
+}
+
+/** A stored code is not valid until this load's check says so. Network failure stays on the screen. */
+export async function resolveInviteGate({ remembered, postInvite, fetchGate, clearCode }) {
+  if (remembered) {
+    try {
+      const { response, body } = await postInvite(remembered);
+      const payload = body || {};
+      if (response?.ok && payload.ok && payload.required === false) {
+        clearCode?.();
+        return { show: false, reason: "open" };
+      }
+      if (response?.ok && payload.ok) return { show: false, reason: "valid" };
+      if (response?.status === 401) {
+        clearCode?.();
+        return { show: true, reason: "invalid" };
+      }
+      if (response?.status === 429) return { show: true, reason: "limited" };
+      // A saved code is not known to be revoked when the recheck cannot connect.
+      return { show: false, reason: "unchecked" };
+    } catch {
+      return { show: false, reason: "offline" };
+    }
+  }
+  try {
+    const { response, body } = await fetchGate();
+    if (response?.ok && body?.required === false) return { show: false, reason: "open" };
+    return { show: true, reason: "required" };
+  } catch {
+    return { show: true, reason: "offline" };
+  }
+}
+
+export function isShopperApi(url, root) {
+  let parsed;
+  try {
+    parsed = new URL(url, root?.location?.href || "http://localhost/");
+  } catch {
+    return false;
+  }
+  if (!parsed.pathname.startsWith("/api/")) return false;
+  const pageOrigin = root?.location?.origin || "";
+  if (pageOrigin && parsed.origin === pageOrigin) return true;
+  const native = root?.GroceryGitterNative;
+  const nativePlatform = root?.Capacitor?.isNativePlatform?.() === true;
+  const resolved =
+    native?.resolveApiOrigin?.({
+      native: nativePlatform,
+      location: root?.location,
+      configured: root?.GROCERY_GITTER_API_ORIGIN,
+    }) || "";
+  if (!resolved) return false;
+  try {
+    return parsed.origin === new URL(resolved, pageOrigin || undefined).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function fetchInitWithDevice(input, init = {}, deviceId) {
+  const headers = new Headers();
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    input.headers.forEach((value, key) => headers.set(key, value));
+  }
+  new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
+  if (deviceId && !headers.has("x-device-id")) headers.set("x-device-id", deviceId);
+  return { ...init, headers };
+}
+
+export function dialogAllowedDuringGate(id, gated) {
+  return !gated || id === "beta-gate";
 }
 
 export function feedbackSheetHtml() {
@@ -204,6 +275,7 @@ async function postJson(path, payload) {
       ...sessionHeader(),
     },
     credentials: target.credentials,
+    cache: "no-store",
     body: JSON.stringify({ ...payload, deviceId: deviceId(memoryStorage()) }),
   });
   const body = await response.json().catch(() => ({}));
@@ -229,43 +301,87 @@ function openFeedback() {
 }
 
 function showGate(on) {
+  if (typeof document === "undefined") return;
   const gate = document.getElementById("beta-gate");
   document.body.classList.toggle("beta-gated", on);
-  if (gate) gate.hidden = !on;
-  if (on) document.getElementById("beta-code")?.focus();
+  document.documentElement.classList.remove("beta-gate-hold");
+  if (!(gate instanceof HTMLDialogElement)) return;
+  if (on) {
+    document.querySelectorAll("dialog").forEach((dialog) => {
+      if (dialog.id !== "beta-gate" && dialog.open) dialog.close();
+    });
+    if (!gate.open) gate.showModal();
+    document.getElementById("beta-code")?.focus();
+    return;
+  }
+  if (gate.open) gate.close();
 }
 
-async function bootGate() {
-  const storage = memoryStorage();
-  const remembered = readInvite(storage);
-  try {
-    if (remembered) {
-      const { response, body } = await postJson("/api/beta/invite", { code: remembered });
-      if (response.ok && body.ok && body.required !== false) {
-        showGate(false);
-        return;
-      }
-      if (response.ok && body.required === false) {
-        showGate(false);
-        return;
-      }
-      if (response.status === 429) {
-        showGate(false);
-        return;
-      }
-      clearInvite(storage);
-    }
-    const target = apiTarget("/api/beta/gate");
-    const response = await fetch(target.url, { headers: { accept: "application/json" }, credentials: target.credentials });
-    const body = await response.json().catch(() => ({ required: false }));
-    if (!response.ok || !body.required) {
-      showGate(false);
-      return;
-    }
-    showGate(true);
-  } catch {
-    showGate(false);
+let appAllowed = false;
+let gateCheck = null;
+
+export function whenInviteAllowsApp() {
+  if (appAllowed) return Promise.resolve(true);
+  if (!gateCheck) gateCheck = checkInviteGate();
+  return gateCheck;
+}
+
+function allowApp() {
+  appAllowed = true;
+  showGate(false);
+  if (typeof window !== "undefined") window.__ggInviteGate = Promise.resolve(true);
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(new CustomEvent("gg-beta-unlocked"));
   }
+}
+
+async function checkInviteGate() {
+  const storage = memoryStorage();
+  const decision = await resolveInviteGate({
+    remembered: readInvite(storage),
+    clearCode() {
+      clearInvite(storage);
+    },
+    async postInvite(code) {
+      const { response, body } = await postJson("/api/beta/invite", { code });
+      return { response, body };
+    },
+    async fetchGate() {
+      const target = apiTarget("/api/beta/gate");
+      const response = await fetch(target.url, {
+        headers: { accept: "application/json" },
+        credentials: target.credentials,
+        cache: "no-store",
+      });
+      const body = await response.json().catch(() => ({}));
+      return { response, body };
+    },
+  });
+  if (decision.show) showGate(true);
+  else allowApp();
+  return !decision.show;
+}
+
+function installApiDeviceHeader() {
+  if (typeof window === "undefined" || window.__ggDeviceFetch || typeof window.fetch !== "function") return;
+  const original = window.fetch.bind(window);
+  window.__ggDeviceFetch = true;
+  window.fetch = (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? String(input) : input?.url || "";
+    if (!isShopperApi(url, window)) return original(input, init);
+    return original(input, fetchInitWithDevice(input, init, deviceId(memoryStorage())));
+  };
+}
+
+function keepGateOnTop() {
+  const proto = typeof HTMLDialogElement === "undefined" ? null : HTMLDialogElement.prototype;
+  if (!proto || proto.__ggGate) return;
+  const original = proto.showModal;
+  proto.showModal = function showModalDuringGate(...args) {
+    if (!dialogAllowedDuringGate(this.id, document.body?.classList.contains("beta-gated"))) return;
+    return original.apply(this, args);
+  };
+  proto.__ggGate = true;
 }
 
 function mountFeedback() {
@@ -320,6 +436,10 @@ function mountFeedback() {
 
 function mountGate() {
   document.body.insertAdjacentHTML("beforeend", inviteScreenHtml());
+  const gate = document.getElementById("beta-gate");
+  gate?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+  });
   document.getElementById("beta-gate-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = document.getElementById("beta-code");
@@ -331,7 +451,7 @@ function mountGate() {
       if (!response.ok || !body.ok) throw new Error(body.error || "That invite code is not recognized.");
       if (body.required === false) clearInvite(memoryStorage());
       else rememberInvite(memoryStorage(), code);
-      showGate(false);
+      allowApp();
     } catch (error) {
       if (errorEl) {
         errorEl.hidden = false;
@@ -339,7 +459,8 @@ function mountGate() {
       }
     }
   });
-  void bootGate();
+  const pending = whenInviteAllowsApp();
+  if (typeof window !== "undefined") window.__ggInviteGate = pending;
 }
 
 function mountErrorToast() {
@@ -389,6 +510,8 @@ function mountEvents() {
 }
 
 export function mountBeta() {
+  installApiDeviceHeader();
+  keepGateOnTop();
   mountErrorToast();
   mountFeedback();
   mountGate();

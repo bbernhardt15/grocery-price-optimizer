@@ -112,6 +112,82 @@ export function matchInvite(presented: string, codes: readonly string[]): string
   return codes.find((code) => code.toLowerCase() === needle) ?? null;
 }
 
+/** Admin `?code=` filter. A blank or non-string value means no filter. */
+export function adminCodeFilter(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function codeMatcher(code: string): { code: RegExp } {
+  return { code: new RegExp(`^${escapeRegex(code)}$`, "i") };
+}
+
+function sameCode(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function activityAt(...values: Array<Date | string | null | undefined>): Date | null {
+  let best = Number.NaN;
+  for (const value of values) {
+    if (!value) continue;
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time) && (Number.isNaN(best) || time > best)) best = time;
+  }
+  return Number.isNaN(best) ? null : new Date(best);
+}
+
+type CodeCount = { code: string; count: number };
+
+/** Sum per-code rows. The stored code string is kept; matching is case-insensitive. */
+function codeCounts(value: unknown): CodeCount[] {
+  const totals = new Map<string, CodeCount>();
+  if (!Array.isArray(value)) return [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { code?: unknown; count?: unknown };
+    const code = typeof record.code === "string" ? record.code.trim().slice(0, 80) : "";
+    const count = Number(record.count);
+    if (!code || !Number.isFinite(count) || count <= 0) continue;
+    const key = code.toLowerCase();
+    const current = totals.get(key);
+    if (current) current.count += count;
+    else totals.set(key, { code, count });
+  }
+  return [...totals.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/**
+ * The code saved when this device redeemed an invite.
+ * A code in the request body is never read, so a tester cannot claim someone else's code.
+ */
+async function inviteCodeForDevice(deviceId: string | null, now = new Date()): Promise<string> {
+  if (!deviceId) return "";
+  const signup = await BetaSignup.findOneAndUpdate({ deviceId }, { $max: { lastActiveAt: now } }, { new: true })
+    .select("code")
+    .lean();
+  return codeStillOnList(typeof signup?.code === "string" ? signup.code : "");
+}
+
+/** Empty when this device has no signup, or the saved code was taken off BETA_INVITE_CODES. */
+export async function currentInviteCode(deviceId: string | null, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  if (!deviceId) return "";
+  const signup = await BetaSignup.findOne({ deviceId }).select("code").lean();
+  return codeStillOnList(typeof signup?.code === "string" ? signup.code : "", env);
+}
+
+function codeStillOnList(stored: string, env: NodeJS.ProcessEnv = process.env): string {
+  const code = stored.trim().slice(0, 80);
+  if (!code) return "";
+  const allowed = inviteCodes(env);
+  if (!allowed.length) return code;
+  return matchInvite(code, allowed) ?? "";
+}
+
 export function readyPayload(state = mongoose.connection.readyState): {
   status: number;
   body: { ok: boolean; mongo: "connected" | "unavailable" };
@@ -124,14 +200,28 @@ export function clientIp(req: Request): string {
   return String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 80);
 }
 
-function deviceFrom(req: Request): string | null {
-  const header = req.header("x-device-id");
+function firstString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0].trim();
+  return "";
+}
+
+/** Header, then JSON body, then ?deviceId= for navigations that cannot set a header. */
+export function deviceIdFromRequest(req: Request): string | null {
+  const header = firstString(req.header("x-device-id"));
   const bodyDevice =
     req.body && typeof req.body === "object" && !Array.isArray(req.body)
-      ? (req.body as { deviceId?: unknown }).deviceId
-      : undefined;
-  const value = typeof header === "string" && header.trim() ? header.trim() : typeof bodyDevice === "string" ? bodyDevice.trim() : "";
-  return DEVICE_ID.test(value) ? value : null;
+      ? firstString((req.body as { deviceId?: unknown }).deviceId)
+      : "";
+  const queryDevice = firstString(req.query?.deviceId);
+  for (const candidate of [header, bodyDevice, queryDevice]) {
+    if (DEVICE_ID.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+function deviceFrom(req: Request): string | null {
+  return deviceIdFromRequest(req);
 }
 
 function accountIdFrom(res: Response): string | undefined {
@@ -161,28 +251,38 @@ export async function submitFeedback(req: Request, res: Response, now = Date.now
   const screen = scrubBetaText(clip(body.screen, 80));
   const context = pickContext(body.context, new Date(now));
   const accountId = accountIdFrom(res);
+  const code = await inviteCodeForDevice(deviceId, new Date(now));
   await BetaFeedback.create({
     rating,
     message,
     screen,
     context,
     deviceId,
+    code,
     ...(accountId ? { accountId } : {}),
   });
-  await recordProductEvent("feedback_sent");
+  await recordProductEvent("feedback_sent", code);
   return { status: 201, body: { ok: true } };
 }
 
-export async function listFeedback(limit: number): Promise<{ feedback: Array<Record<string, unknown>> }> {
+export async function listFeedback(
+  limit: number,
+  code = ""
+): Promise<{ feedback: Array<Record<string, unknown>>; code?: string }> {
   const capped = Math.min(200, Math.max(1, Math.floor(limit) || 50));
-  const docs = await BetaFeedback.find().sort({ createdAt: -1 }).limit(capped).lean();
+  const docs = await BetaFeedback.find(code ? codeMatcher(code) : {})
+    .sort({ createdAt: -1 })
+    .limit(capped)
+    .lean();
   return {
+    ...(code ? { code } : {}),
     feedback: docs.map((doc) => ({
       id: String(doc._id),
       rating: doc.rating,
       message: doc.message,
       screen: doc.screen,
       context: doc.context,
+      code: typeof doc.code === "string" ? doc.code : "",
       createdAt: doc.createdAt,
     })),
   };
@@ -195,12 +295,12 @@ function csvCell(value: unknown): string {
   return text;
 }
 
-export async function feedbackCsv(limit = 2000): Promise<string> {
-  const docs = await BetaFeedback.find()
+export async function feedbackCsv(limit = 2000, code = ""): Promise<string> {
+  const docs = await BetaFeedback.find(code ? codeMatcher(code) : {})
     .sort({ createdAt: -1 })
     .limit(Math.min(5000, Math.max(1, limit)))
     .lean();
-  const header = ["createdAt", "rating", "screen", "message", "appVersion", "shellCache", "tab", "tripItemCount", "storeCount", "userAgent", "timestamp"];
+  const header = ["createdAt", "rating", "screen", "message", "appVersion", "shellCache", "tab", "tripItemCount", "storeCount", "userAgent", "timestamp", "code"];
   const lines = [header.join(",")];
   for (const doc of docs) {
     const context = (doc.context || {}) as Partial<BetaContext>;
@@ -217,6 +317,7 @@ export async function feedbackCsv(limit = 2000): Promise<string> {
         context.storeCount,
         context.userAgent,
         context.timestamp,
+        typeof doc.code === "string" ? doc.code : "",
       ]
         .map(csvCell)
         .join(",")
@@ -239,12 +340,16 @@ export async function redeemInvite(
   if (!deviceId) return { status: 401, body: { error: "Send this device's id." } };
   const presented = req.body && typeof req.body === "object" ? clip((req.body as { code?: unknown }).code, 80) : "";
   const code = matchInvite(presented, codes);
+  const seenAt = new Date(now);
   const existing = await BetaSignup.findOne({ deviceId }).lean();
-  if (existing && code && existing.code === code) {
+  const stored = existing && matchInvite(existing.code, codes);
+  if (existing && code && stored === code) {
     const accountId = accountIdFrom(res);
-    if (accountId && !existing.accountId) {
-      await BetaSignup.updateOne({ deviceId, accountId: { $exists: false } }, { $set: { accountId } });
-    }
+    const update: { $max: { lastActiveAt: Date }; $set?: { accountId: string } } = {
+      $max: { lastActiveAt: seenAt },
+    };
+    if (accountId && !existing.accountId) update.$set = { accountId };
+    await BetaSignup.updateOne({ deviceId }, update);
     return { status: 200, body: { ok: true, required: true } };
   }
   const ip = clientIp(req);
@@ -252,43 +357,138 @@ export async function redeemInvite(
     return { status: 429, body: { error: "Too many invite attempts. Wait a moment and try again." } };
   }
   if (!code) return { status: 401, body: { error: "That invite code is not recognized." } };
-  const accountId = accountIdFrom(res);
-  await BetaSignup.updateOne(
-    { deviceId },
-    {
-      $setOnInsert: {
-        deviceId,
-        code,
-        ...(accountId ? { accountId } : {}),
-      },
-    },
-    { upsert: true }
-  );
-  if (accountId) {
-    await BetaSignup.updateOne({ deviceId, accountId: { $exists: false } }, { $set: { accountId } });
+  if (stored) {
+    await BetaSignup.updateOne({ deviceId }, { $max: { lastActiveAt: seenAt } });
+    return { status: 200, body: { ok: true, required: true } };
   }
+  const accountId = accountIdFrom(res);
+  const set: { code: string; lastActiveAt: Date; accountId?: string } = { code, lastActiveAt: seenAt };
+  if (accountId) set.accountId = accountId;
+  await BetaSignup.updateOne({ deviceId }, { $set: set, $setOnInsert: { deviceId } }, { upsert: true });
   return { status: 200, body: { ok: true, required: true } };
 }
 
-export async function signupSummary(): Promise<{
-  codes: Array<{ code: string; signups: number; lastSignupAt: Date | null }>;
-}> {
-  const rows = await BetaSignup.aggregate<{ _id: string; signups: number; lastSignupAt: Date | null }>([
-    { $group: { _id: "$code", signups: { $sum: 1 }, lastSignupAt: { $max: "$createdAt" } } },
-    { $sort: { lastSignupAt: -1, _id: 1 } },
+export type BetaCodeSummary = {
+  code: string;
+  signups: number;
+  devices: number;
+  firstSeen: Date | null;
+  lastActive: Date | null;
+  lastSignupAt: Date | null;
+  feedbackCount: number;
+  tripCompleteCount: number;
+  errorCount: number;
+};
+
+export async function signupSummary(filterCode = ""): Promise<{ codes: BetaCodeSummary[]; code?: string }> {
+  const match = filterCode ? codeMatcher(filterCode) : null;
+  const [signupRows, feedbackRows, errorRows, tripEvent] = await Promise.all([
+    BetaSignup.aggregate<{
+      _id: string;
+      signups: number;
+      firstSeen: Date | null;
+      lastSignupAt: Date | null;
+      lastActive: Date | null;
+    }>([
+      ...(match ? [{ $match: match }] : []),
+      {
+        $group: {
+          _id: "$code",
+          signups: { $sum: 1 },
+          firstSeen: { $min: "$createdAt" },
+          lastSignupAt: { $max: "$createdAt" },
+          lastActive: { $max: { $ifNull: ["$lastActiveAt", { $ifNull: ["$updatedAt", "$createdAt"] }] } },
+        },
+      },
+    ]),
+    BetaFeedback.aggregate<{ _id: string; count: number; lastAt: Date | null }>([
+      { $match: match ?? { code: { $type: "string", $ne: "" } } },
+      { $group: { _id: "$code", count: { $sum: 1 }, lastAt: { $max: "$createdAt" } } },
+    ]),
+    BetaClientError.aggregate<{ _id: string; count: number; lastAt: Date | null }>([
+      { $match: match ?? { code: { $type: "string", $ne: "" } } },
+      { $group: { _id: "$code", count: { $sum: 1 }, lastAt: { $max: "$createdAt" } } },
+    ]),
+    BetaEvent.findOne({ name: "trip_completed" }).lean(),
   ]);
+
+  const feedback = feedbackRows.map((row) => ({ code: row._id, count: row.count, lastAt: row.lastAt }));
+  const errors = errorRows.map((row) => ({ code: row._id, count: row.count, lastAt: row.lastAt }));
+  const trips = codeCounts(tripEvent?.byCode).filter((row) => !filterCode || sameCode(row.code, filterCode));
+
+  const codes = signupRows
+    .map((row) => {
+      const notes = feedback.find((entry) => sameCode(entry.code, row._id)) ?? { count: 0, lastAt: null };
+      const failures = errors.find((entry) => sameCode(entry.code, row._id)) ?? { count: 0, lastAt: null };
+      const trip = trips.find((entry) => sameCode(entry.code, row._id));
+      return {
+        code: row._id,
+        signups: row.signups,
+        devices: row.signups,
+        firstSeen: row.firstSeen ? new Date(row.firstSeen) : null,
+        lastActive: activityAt(row.lastActive, notes.lastAt, failures.lastAt),
+        lastSignupAt: row.lastSignupAt ? new Date(row.lastSignupAt) : null,
+        feedbackCount: notes.count,
+        tripCompleteCount: trip?.count ?? 0,
+        errorCount: failures.count,
+      };
+    })
+    .sort((a, b) => {
+      const aTime = a.lastSignupAt ? a.lastSignupAt.getTime() : 0;
+      const bTime = b.lastSignupAt ? b.lastSignupAt.getTime() : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return a.code.localeCompare(b.code);
+    });
+
+  return filterCode ? { code: filterCode, codes } : { codes };
+}
+
+function byCodeIncrement(code: string): Record<string, unknown> {
+  if (!code) return { $ifNull: ["$byCode", []] };
   return {
-    codes: rows.map((row) => ({
-      code: row._id,
-      signups: row.signups,
-      lastSignupAt: row.lastSignupAt,
-    })),
+    $let: {
+      vars: { existing: { $ifNull: ["$byCode", []] } },
+      in: {
+        $cond: [
+          { $in: [code, { $map: { input: "$$existing", as: "row", in: "$$row.code" } }] },
+          {
+            $map: {
+              input: "$$existing",
+              as: "row",
+              in: {
+                $cond: [
+                  { $eq: ["$$row.code", code] },
+                  { code: "$$row.code", count: { $add: [{ $ifNull: ["$$row.count", 0] }, 1] } },
+                  "$$row",
+                ],
+              },
+            },
+          },
+          { $concatArrays: ["$$existing", [{ code, count: 1 }]] },
+        ],
+      },
+    },
   };
 }
 
-export async function recordProductEvent(name: string): Promise<boolean> {
+export async function recordProductEvent(name: string, code = ""): Promise<boolean> {
   if (!PRODUCT_EVENTS.includes(name as ProductEventName)) return false;
-  await BetaEvent.updateOne({ name }, { $inc: { count: 1 } }, { upsert: true });
+  const trimmed = code.trim().slice(0, 80);
+  await BetaEvent.collection.updateOne(
+    { name },
+    [
+      {
+        $set: {
+          name,
+          count: { $add: [{ $ifNull: ["$count", 0] }, 1] },
+          byCode: byCodeIncrement(trimmed),
+          createdAt: { $ifNull: ["$createdAt", "$$NOW"] },
+          updatedAt: "$$NOW",
+        },
+      },
+    ],
+    { upsert: true }
+  );
   return true;
 }
 
@@ -301,16 +501,30 @@ export async function acceptProductEvent(req: Request, now = Date.now()): Promis
   if (!allowRate(`events:${ip}`, EVENT_LIMIT, EVENT_WINDOW_MS, now)) {
     return { status: 202, body: { ok: true, stored: false } };
   }
-  await recordProductEvent(name);
+  const code = await inviteCodeForDevice(deviceFrom(req), new Date(now));
+  await recordProductEvent(name, code);
   return { status: 202, body: { ok: true, stored: true } };
 }
 
-export async function eventSummary(): Promise<{ events: Array<{ name: ProductEventName; count: number }> }> {
+export async function eventSummary(filterCode = ""): Promise<{
+  code?: string;
+  events: Array<{ name: ProductEventName; count: number; byCode: Record<string, number>; codeCount?: number }>;
+}> {
   const rows = await BetaEvent.find().lean();
-  const counts = new Map(rows.map((row) => [row.name, row.count]));
-  return {
-    events: PRODUCT_EVENTS.map((name) => ({ name, count: counts.get(name) || 0 })),
-  };
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  const events = PRODUCT_EVENTS.map((name) => {
+    const row = byName.get(name);
+    const counts = codeCounts(row?.byCode).filter((entry) => !filterCode || sameCode(entry.code, filterCode));
+    const byCode = Object.fromEntries(counts.map((entry) => [entry.code, entry.count]));
+    const matched = filterCode ? codeCounts(row?.byCode).find((entry) => sameCode(entry.code, filterCode)) : undefined;
+    return {
+      name,
+      count: row?.count || 0,
+      byCode,
+      ...(filterCode ? { codeCount: matched?.count ?? 0 } : {}),
+    };
+  });
+  return filterCode ? { code: filterCode, events } : { events };
 }
 
 export async function recordClientError(req: Request, now = Date.now()): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -325,12 +539,14 @@ export async function recordClientError(req: Request, now = Date.now()): Promise
   if (duplicate || flooded) return { status: 202, body: { ok: true, stored: false } };
   const stack = scrubBetaText(clip(body.stack, 4000));
   const deviceId = deviceFrom(req);
+  const code = await inviteCodeForDevice(deviceId, new Date(now));
   await BetaClientError.create({
     message,
     stack,
     screen: scrubBetaText(clip(body.screen, 80)),
     tab: scrubBetaText(clip(body.tab, 40)),
     userAgent: scrubBetaText(clip(req.header("user-agent"), 300)),
+    code,
     ...(deviceId ? { deviceId } : {}),
   });
   const error = new Error(message.slice(0, 200));

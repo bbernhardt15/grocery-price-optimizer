@@ -26,7 +26,18 @@
     <style>
       html { background: #f4efe6; color-scheme: light; }
       html[data-resolved="dark"] { background: #1c221e; color-scheme: dark; }
+      html.beta-gate-hold .shell,
+      html.beta-gate-hold dialog { visibility: hidden; }
     </style>
+    <script>
+      (function () {
+        try {
+          var code = localStorage.getItem("gg-beta-code") || "";
+          if (String(code).trim()) return;
+        } catch (err) {}
+        document.documentElement.classList.add("beta-gate-hold");
+      })();
+    </script>
     <meta name="description" content="Grocery Gitter — browse groceries by department, compare prices, and split the trip across stores." />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -39,7 +50,7 @@
     <link rel="stylesheet" href="/styles.css?v=shelf-1" />
     <link rel="stylesheet" href="/shopper/review.css?v=review-2" />
     <link rel="stylesheet" href="/shopper/import.css?v=shelf-1" />
-    <link rel="stylesheet" href="/shopper/beta.css?v=beta-1" />
+    <link rel="stylesheet" href="/shopper/beta.css?v=beta-2" />
     <link rel="stylesheet" href="/shopper/onboardingPolish.css?v=retest-10" />
     <link rel="stylesheet" href="/shopper/addTabPolish.css?v=add-10" />
     <link rel="stylesheet" href="/shopper/phoneRetest11.css?v=retest-11" />
@@ -619,7 +630,7 @@
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>
-    <script type="module" src="/shopper/beta.js?v=beta-1"></script>
+    <script type="module" src="/shopper/beta.js?v=beta-2"></script>
     <script type="module" src="/app.js?v=shelf-1"></script>
   </body>
 </html>

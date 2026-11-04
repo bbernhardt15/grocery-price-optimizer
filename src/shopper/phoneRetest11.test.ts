@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v43", () => {
-    assert.match(sw, /grocery-gitter-shell-v43/);
+  it("bumps the shell cache to v44", () => {
+    assert.match(sw, /grocery-gitter-shell-v44/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -369,6 +369,7 @@ describe("eleventh phone test at 390px", { timeout: 60_000, skip: chrome ? false
       await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
       await page.evaluateOnNewDocument(() => {
         localStorage.setItem("gg-onboarding-done", "1");
+        localStorage.setItem("gg-beta-code", "preview");
         localStorage.setItem("gg-theme", "light");
       });
       await page.goto(origin, { waitUntil: "domcontentloaded" });

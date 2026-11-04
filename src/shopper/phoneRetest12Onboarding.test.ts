@@ -32,8 +32,8 @@ function chromeExecutable() {
 const chrome = chromeExecutable();
 
 describe("twelfth phone test — onboarding and receipt import", () => {
-  it("bumps the shell cache to one above v42", () => {
-    assert.equal(SHELL_CACHE, "v43");
+  it("bumps the shell cache to v44", () => {
+    assert.equal(SHELL_CACHE, "v44");
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
   });
 
@@ -460,6 +460,7 @@ async function openPhone(): Promise<Page> {
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   await page.evaluateOnNewDocument(() => {
     localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-beta-code", "preview");
     localStorage.setItem("gg-theme", "light");
   });
   await page.goto(server.origin, { waitUntil: "domcontentloaded" });

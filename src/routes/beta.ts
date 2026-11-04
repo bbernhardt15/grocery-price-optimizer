@@ -1,7 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { betaAdminOk } from "../beta/adminAuth";
 import {
   acceptProductEvent,
+  adminCodeFilter,
   eventSummary,
   feedbackCsv,
   inviteCodes,
@@ -13,6 +14,10 @@ import {
   submitFeedback,
 } from "../beta/service";
 
+function requestedCode(req: Request): string {
+  return adminCodeFilter(req.query.code);
+}
+
 const router = Router();
 
 router.get("/health/ready", (_req, res) => {
@@ -21,11 +26,13 @@ router.get("/health/ready", (_req, res) => {
 });
 
 router.get("/beta/gate", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   res.json({ required: inviteCodes().length > 0 });
 });
 
 router.post("/beta/invite", async (req, res) => {
   const result = await redeemInvite(req, res);
+  res.setHeader("Cache-Control", "no-store");
   res.status(result.status).json(result.body);
 });
 
@@ -47,12 +54,12 @@ router.post("/beta/client-errors", async (req, res) => {
 router.get("/admin/beta/feedback", async (req, res) => {
   if (!betaAdminOk(req, res)) return;
   const limit = Number(req.query.limit);
-  res.json(await listFeedback(Number.isFinite(limit) ? limit : 50));
+  res.json(await listFeedback(Number.isFinite(limit) ? limit : 50, requestedCode(req)));
 });
 
 router.get("/admin/beta/feedback.csv", async (req, res) => {
   if (!betaAdminOk(req, res)) return;
-  const csv = await feedbackCsv();
+  const csv = await feedbackCsv(2000, requestedCode(req));
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="grocery-gitter-feedback.csv"');
   res.send(csv);
@@ -60,12 +67,12 @@ router.get("/admin/beta/feedback.csv", async (req, res) => {
 
 router.get("/admin/beta/signups", async (req, res) => {
   if (!betaAdminOk(req, res)) return;
-  res.json(await signupSummary());
+  res.json(await signupSummary(requestedCode(req)));
 });
 
 router.get("/admin/beta/events", async (req, res) => {
   if (!betaAdminOk(req, res)) return;
-  res.json(await eventSummary());
+  res.json(await eventSummary(requestedCode(req)));
 });
 
 export default router;

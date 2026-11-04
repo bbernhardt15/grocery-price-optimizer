@@ -52,9 +52,9 @@ No `sessionStorage` keys are used. The Kroger cookie is HttpOnly, so the page ca
 | `PriceAlert` | `deviceId`, list id and name, item, store, old and new price, savings, baseline, target, seen time, push state. | Same rule as `PriceWatch`. |
 | `PushSubscription` | `deviceId`, channel (`web` or `native`), endpoint, `p256dh`, `auth`, optional native token and platform. | Deleted for this `deviceId`. The page also calls `PushSubscription.unsubscribe()` so the browser drops the push registration. No VAPID keys are required to delete the row. |
 | `SharedList` | Hashes of the share secret and the owner secret, up to 10 retired share hashes, title, edit or view-only, `revokedAt`, items (name, brand, size, quantity, catalog id, checked, optional display name, timestamps, deletion markers), and a sequence number. The raw secrets are not stored. | The document is deleted when the owner secret matches. Live listeners are notified so an open link refreshes and then fails. Revoke link, by itself, still does not delete the document. |
-| `beta_feedback` | Rating, note, optional screen label, and non-sensitive context (shell cache, tab, user agent, item count, store count). | Deleted for this `deviceId`, and for the account when the request is signed in. |
-| `beta_signups` | The invite code this device entered, and the account id when one exists. No email. | Deleted for this `deviceId`, and for the account when the request is signed in. |
-| `beta_client_errors` | A scrubbed error message and stack for this device. | Deleted for this `deviceId`. |
+| `beta_feedback` | Rating, note, optional screen label, the invite code already saved for this device, and non-sensitive context (shell cache, tab, user agent, item count, store count). No email. | Deleted for this `deviceId`, and for the account when the request is signed in. |
+| `beta_signups` | The invite code this device entered, when it was last active, and the account id when one exists. No email. | Deleted for this `deviceId`, and for the account when the request is signed in. |
+| `beta_client_errors` | A scrubbed error message and stack for this device, plus the invite code already saved for this device. No email. | Deleted for this `deviceId`. |
 
 A guest who only has the share link can delete their own device rows. They cannot delete the owner’s list.
 
@@ -102,7 +102,7 @@ These are not deleted. Removing them would change counts other shoppers rely on,
 | --- | --- | --- |
 | `ShopperZip` | 5-digit ZIP, hit count, last seen, sometimes a Kroger location id. Written from browse and trip planning. | No device id and no name. The catalog job uses recent ZIPs to refresh prices. |
 | `CatalogDemand` | `kind` `search` or `list`, the phrase or `upc:` key, hit count, last seen. Search comes from catalog browse. List lines come from trip planning. Kept for 30 days of priority in cross-store lookup. | This is the search history used for refresh prioritization. It is a shared counter, not a per-shopper log. |
-| `beta_events` | A name such as `plan_built` and a count. No device id. | Product counters are shared totals. |
+| `beta_events` | A name such as `plan_built`, a total count, and a per-code count when the device had redeemed an invite code. No device id and no email. | Product counters are shared totals. The per-code split stays with the total. |
 
 Product documents (`CatalogMaster`, `CatalogOffer`), ingest checkpoints, and shelf cache are catalog data, not a shopper profile.
 

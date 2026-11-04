@@ -167,7 +167,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v43/);
+    assert.match(sw, /grocery-gitter-shell-v44/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);
@@ -229,6 +229,7 @@ describe("Add tab at 390px on Chrome", { timeout: 60_000, skip: chrome ? false :
       await page.evaluateOnNewDocument(
         new Function(`
           localStorage.setItem("gg-onboarding-done", "1");
+          localStorage.setItem("gg-beta-code", "preview");
           localStorage.setItem("gg-theme", "dark");
           localStorage.setItem("gg-zip", "45103");
           localStorage.setItem("gg-step", "add");
