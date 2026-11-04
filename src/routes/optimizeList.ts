@@ -14,6 +14,7 @@ import { noteShopperZip } from "../ingest/runner";
 import { accessFor } from "../billing/access";
 import { entitlementPayload, lockCartHandoffs } from "../billing/applyPlan";
 import { withDeadline } from "../withDeadline";
+import { scopeStoreNames } from "../pricing/storeScope";
 
 /** Nearby-store lookups must not hold the whole plan. Prices still return. */
 const STORE_LOOKUP_MS = 3000;
@@ -218,7 +219,8 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   }
 
   try {
-    const { groceryList, stores, zipCode } = parsed;
+    const { groceryList, zipCode } = parsed;
+    const stores = scopeStoreNames(parsed.stores);
 
     const stream = String(req.headers.accept || "").toLowerCase().includes("application/x-ndjson");
     if (stream) {

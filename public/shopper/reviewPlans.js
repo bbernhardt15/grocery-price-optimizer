@@ -331,6 +331,7 @@ export function buildReviewPlans(stores) {
   }
 
   const baseline = coverage.find((row) => row.complete) || null;
+  const single = baseline?.complete ? assign(lines, [baseline.storeName]) : null;
   const saved = baseline && Number.isFinite(baseline.total) ? roundMoney(baseline.total - best.total) : null;
   const coverageNotes = coverage
     .filter((row) => row.missing > 0)
@@ -345,6 +346,7 @@ export function buildReviewPlans(stores) {
     best,
     fewer,
     baseline,
+    single,
     saved,
     coverageNotes,
     signature: lines.map((line) => assignmentKey(line)).sort().join("|"),

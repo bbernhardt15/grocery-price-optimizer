@@ -16,6 +16,7 @@ export function emptyAccumulator(storeName: string): StorePricingAccumulator {
     seedHits: 0,
     errors: [],
     unpricedItems: [],
+    uncheckedItems: [],
   };
 }
 
@@ -169,6 +170,8 @@ export function finalizeStoreReport(
   const source = sourceOf(acc);
   const errors = uniqueMessages(acc.errors).filter((message) => !isPerItemProviderError(message));
   const unpricedItems = uniqueMessages(acc.unpricedItems || []);
+  const uncheckedItems = uniqueMessages(acc.uncheckedItems || []);
+  const check = acc.check;
   const usedFallback = acc.seedHits > 0 && acc.attempted;
   const ok =
     source === "live" ||
@@ -223,6 +226,8 @@ export function finalizeStoreReport(
     ...(acc.fetchedAt ? { fetchedAt: acc.fetchedAt.toISOString() } : {}),
     ...(acc.locationId ? { locationId: acc.locationId } : {}),
     ...(unpricedItems.length ? { unpricedItems } : {}),
+    ...(check ? { check } : {}),
+    ...(uncheckedItems.length ? { uncheckedItems } : {}),
   };
 }
 

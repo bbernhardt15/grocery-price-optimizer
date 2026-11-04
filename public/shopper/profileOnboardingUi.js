@@ -37,6 +37,7 @@ import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakeP
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
+import { adStoresVisible, mergeSavedStores, visibleStoreNames } from "./storeScope.js";
 import { suggestZipChoices } from "./zipSuggest.js";
 import { fieldZip, ZIP_PLACEHOLDER } from "./zipField.js";
 import { installChainColors } from "./chainColors.js";
@@ -424,9 +425,10 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     const nearby = storesForZip(zip);
+    const names = visibleStoreNames(nearby.stores);
     const selected = new Set(draft.shopStores || []);
     const open = !draft.shopStores?.length;
-    host.innerHTML = storeChoiceHtml(nearby.stores, { selected, open });
+    host.innerHTML = storeChoiceHtml(names, { selected, open });
     if (note) note.textContent = nearby.note || "Stores within about 25 miles. Uncheck one to leave it out.";
   }
 
@@ -653,7 +655,7 @@ export function mountProfileOnboarding(deps = {}) {
       deps.toast?.("Pick at least one store.");
       return null;
     }
-    return { stores: picked.length === boxes.length ? [] : picked };
+    return { stores: mergeSavedStores(picked, draft.shopStores, picked.length === boxes.length) };
   }
 
   async function loadBrandShelf(family) {
@@ -1126,10 +1128,12 @@ export function mountProfileOnboarding(deps = {}) {
     if (stepId === "place" && !skipped) {
       const zip = normalizeZipInput(currentZipRaw());
       const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
-      const decision = zipContinueDecision(nearby);
+      const names = visibleStoreNames(nearby.stores);
+      const decision = zipContinueDecision({ stores: names });
       paintStoreList();
       if (!decision.advance) {
-        deps.toast?.("No stores near that ZIP. Try another.");
+        const hiddenOnly = !adStoresVisible() && nearby.stores.length > 0;
+        deps.toast?.(hiddenOnly ? "Kroger and Walmart aren't near that ZIP." : "No stores near that ZIP. Try another.");
         return;
       }
     }
