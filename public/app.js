@@ -159,6 +159,12 @@ import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
 import { calmPriceNote, ESTIMATE_NOTE, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
+import { dedupeTripStores, inStoreSendHtml } from "./shopper/tripLines.js";
+import { armHandoff, createReturnWatch, dismissReturnChoice, returnPromptDecision } from "./shopper/returnPrompt.js";
+import { allowTabChange, armClickShield, clickShielded, createTabGuard, noteTabInteraction, settleTabBoot } from "./shopper/tabGuard.js";
+import { bootTab, handoffTripRecord, readHandoffTrip, richerTrip, writeHandoffTrip, writeTripKeepingItems } from "./shopper/handoffRestore.js";
+import { openHandoffSheet, releaseDocumentScroll, scrollRestoreOffset } from "./shopper/sheetScroll.js";
+import { homeProxyShouldShow, homeTransition, placeHomeProxy } from "./shopper/homeButton.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { callbackCanClose, emptyMustNotReplace, handoffResultMessage, readTripDb, returnScreenCopy, TRIP_CHANNEL, writeTripDb } from "./shopper/tripSync.js";
@@ -278,13 +284,8 @@ function openStoreHandoff(url, store, kind) {
   } catch {
     /* the storage write is the fallback */
   }
-  void writeTripDb(typeof indexedDB !== "undefined" ? indexedDB : null, {
-    handoff: record,
-    savedAt: record.at,
-    step: flowStep,
-    items: [],
-  });
-  showStoreReturn(store, record.kind);
+  returnWatch = armHandoff(returnWatch, { store: record.store, kind: record.kind, at: record.at });
+  captureHandoffTrip(record.store, record.kind);
   if (isNative()) {
     void openExternal(safe);
     return;
@@ -318,8 +319,142 @@ function applySharedHandoff() {
   const record = readHandoffResult(localStorage);
   if (!record || record.at <= appliedHandoffAt) return;
   appliedHandoffAt = record.at;
-  showStoreReturn(record.store, record.kind);
   rehydrateTrip();
+}
+
+/* Phone test 10. The finish sheet, tab changes, and handoff restore
+   are decided in the shopper modules imported above. */
+
+function captureHandoffTrip(store, kind) {
+  let items = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+    items = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    items = [];
+  }
+  const record = handoffTripRecord({
+    items,
+    plan: lastOptimize,
+    step: flowStep,
+    scroll: window.scrollY || 0,
+    store,
+    kind,
+    at: Date.now(),
+  });
+  writeHandoffTrip(localStorage, record);
+  void writeTripKeepingItems(typeof indexedDB !== "undefined" ? indexedDB : null, {
+    items: record.items,
+    plan: record.plan,
+    step: record.step,
+    handoff: { store: record.store, kind: record.kind, at: record.at },
+    savedAt: record.at,
+  });
+}
+
+function handoffSheetOpen() {
+  return Boolean($("cart-ready")?.open || $("handoff-return")?.open || $("store-return")?.open);
+}
+
+function syncHandoffSheetFlag() {
+  document.body.dataset.handoffSheet = handoffSheetOpen() ? "open" : "closed";
+  if (handoffSheetOpen()) releaseDocumentScroll(document);
+}
+
+function presentHandoffSheet(dialog) {
+  const opened = openHandoffSheet(dialog, {
+    readScroll: () => window.scrollY || 0,
+    writeScroll: (y) => window.scrollTo(0, y),
+    releaseScroll: () => releaseDocumentScroll(document),
+  });
+  syncHandoffSheetFlag();
+  return opened;
+}
+
+function armTabShield() {
+  tabGuard = armClickShield(tabGuard, Date.now());
+}
+
+function maybeShowReturnPrompt(source) {
+  const decision = returnPromptDecision(returnWatch, {
+    source,
+    visibility: source === "visibility" ? document.visibilityState : "visible",
+    now: Date.now(),
+    cartReadyOpen: Boolean($("cart-ready")?.open),
+    returnScreenOpen: Boolean($("handoff-return")?.open),
+  });
+  returnWatch = decision.state;
+  if (decision.show) showStoreReturn(decision.store, decision.kind);
+}
+
+function chooseBootStep() {
+  const handoff = readHandoffTrip(localStorage);
+  return bootTab({
+    handoffStep: handoff?.step,
+    hasHandoff: Boolean(handoff && (handoff.items?.length || handoff.plan)),
+    storedStep: localStorage.getItem(STEP_KEY),
+    idbStep: idbBootStep,
+  });
+}
+
+function goHome() {
+  const open = [...document.querySelectorAll("dialog[open]")].map((dialog) => dialog.id);
+  const transition = homeTransition(open);
+  for (const id of transition.closeDialogIds) {
+    try {
+      $(id)?.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  closeDrawer();
+  const proxy = $("brand-home-proxy");
+  if (proxy?.hidePopover) {
+    try {
+      if (proxy.matches(":popover-open")) proxy.hidePopover();
+    } catch {
+      /* proxy was not showing */
+    }
+  }
+  showStep(transition.step, transition.reason);
+  window.scrollTo(0, 0);
+}
+
+function syncHomeProxy() {
+  const mark = document.querySelector("#brand-home .brand-mark");
+  const rect = mark?.getBoundingClientRect();
+  const openDialogs = [...document.querySelectorAll("dialog")].filter((dialog) => dialog.open);
+  if (!homeProxyShouldShow(openDialogs.length)) {
+    document.querySelectorAll("dialog > .sheet-home").forEach((button) => button.remove());
+    return;
+  }
+  for (const dialog of openDialogs) {
+    let button = dialog.querySelector(":scope > .sheet-home");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "sheet-home";
+      button.setAttribute("aria-label", "Home");
+      button.textContent = "G";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        goHome();
+      });
+      bindBrandPress(button);
+      dialog.append(button);
+    }
+    if (rect) placeHomeProxy(button, rect);
+  }
+}
+
+function bindBrandPress(button) {
+  if (!button) return;
+  const press = (on) => button.classList.toggle("is-pressed", on);
+  button.addEventListener("pointerdown", () => press(true));
+  button.addEventListener("pointerup", () => press(false));
+  button.addEventListener("pointercancel", () => press(false));
+  button.addEventListener("pointerleave", () => press(false));
 }
 
 async function syncSystemBars(dark) {
@@ -578,6 +713,9 @@ function applyZip(zip, { reload = true } = {}) {
 
 let toastTimer = 0;
 let flowStep = "add";
+let tabGuard = createTabGuard();
+let returnWatch = createReturnWatch();
+let idbBootStep = "";
 let planning = false;
 /** @type {AbortController | null} */
 let planAbort = null;
@@ -838,12 +976,15 @@ function syncPullStatus() {
 function markStoreHandoff(storeName, kind = "store") {
   const store = String(storeName || "Walmart");
   const mode = kind === "coupons" ? "coupons" : kind === "cart" ? "cart" : "store";
+  const at = Date.now();
   try {
     sessionStorage.setItem(WALMART_RETURN_KEY, store);
-    localStorage.setItem("gg-handoff-pending", JSON.stringify({ store, kind: mode, at: Date.now() }));
+    localStorage.setItem("gg-handoff-pending", JSON.stringify({ store, kind: mode, at }));
   } catch {
     /* private browsing */
   }
+  returnWatch = armHandoff(returnWatch, { store, kind: mode, at });
+  captureHandoffTrip(store, mode);
   try {
     tripChannel?.postMessage({ type: "gg-handoff", store, kind: mode, at: Date.now() });
   } catch {
@@ -897,13 +1038,12 @@ function showStoreReturn(store, kind = "store") {
     title.textContent = `Did you finish at ${name}?`;
     if (body) body.textContent = "A website can't come back from the store on its own.";
   }
-  if (!dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function showWalmartReturn() {
-  const pending = takeHandoffPending();
-  if (!pending?.store) return;
-  showStoreReturn(pending.store, pending.kind || "store");
+  /* Scroll, focus, and pageshow used to call this. The finish sheet
+     opens only from maybeShowReturnPrompt after a real leave. */
 }
 
 function noteAppHidden() {
@@ -913,7 +1053,6 @@ function noteAppHidden() {
 function noteAppVisible() {
   if (flowStep === "shop") void engageWake();
   rehydrateTrip();
-  if (sawAppHidden) showWalmartReturn();
 }
 
 function toastShellUpdate() {
@@ -1123,7 +1262,7 @@ function openCartReady(storeName, { error = "", retry = null, summary = "" } = {
   }
   if (again) again.hidden = !retry;
   krogerRetry = retry;
-  if (dialog && !dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function shortenForSearch(value) {
@@ -1210,9 +1349,10 @@ function finishKrogerReturn(parsed) {
   } else if (!lastOptimize) {
     loadCachedTrip();
   }
-  showStep(saved?.step || parsed.step || "plan");
-  const y = Number(saved?.scroll) || 0;
-  requestAnimationFrame(() => window.scrollTo(0, y));
+  showStep(saved?.step || parsed.step || "plan", "handoff");
+  const openingSheet = parsed.kind === "added" || parsed.kind === "error";
+  const y = scrollRestoreOffset(saved?.scroll, window.scrollY || 0, { sheetOpen: openingSheet, touching: false });
+  if (y != null) window.scrollTo(0, y);
   clearKrogerTrip(localStorage);
   if (parsed.kind === "added") {
     const confirmation = krogerAddedConfirmation(parsed.message, saved?.itemCount);
@@ -1269,6 +1409,8 @@ function rememberKrogerHandoff(itemCount) {
     checks: readChecks(localStorage, tripId()),
     itemChecks: readItemChecks(localStorage),
   });
+  returnWatch = armHandoff(returnWatch, { store: "Kroger", kind: "cart", at: Date.now() });
+  captureHandoffTrip("Kroger", "cart");
 }
 
 function watchKrogerPopup(popup) {
@@ -1276,7 +1418,7 @@ function watchKrogerPopup(popup) {
     if (!popup || popup.closed) {
       window.clearInterval(timer);
       const saved = readKrogerTrip(localStorage);
-      if (saved?.step && flowStep !== saved.step) showStep(saved.step);
+      if (saved?.step && flowStep !== saved.step) showStep(saved.step, "handoff");
       return;
     }
     let parsed = null;
@@ -1342,7 +1484,7 @@ function showHandoffReturn(title, body) {
   const text = $("handoff-return-body");
   if (heading) heading.textContent = title;
   if (text) text.textContent = body;
-  if (dialog && !dialog.open) dialog.showModal();
+  presentHandoffSheet(dialog);
 }
 
 function rehydrateTrip() {
@@ -1353,12 +1495,10 @@ function rehydrateTrip() {
   }
   hydrateListFromStorage();
   loadCachedTrip();
-  const step = readFlowStep(localStorage.getItem(STEP_KEY));
-  flowStep = step;
   syncStepVisibility();
   renderEstimate();
-  if (step === "plan") paintTrip();
-  if (step === "shop") renderShop();
+  if (flowStep === "plan") paintTrip();
+  if (flowStep === "shop") renderShop();
   paintPlanBar();
 }
 
@@ -1369,7 +1509,6 @@ function listenForTripTabs() {
     tripChannel.onmessage = (event) => {
       const handoff = handoffResultMessage(event.data);
       if (handoff) {
-        showStoreReturn(handoff.store, handoff.kind);
         rehydrateTrip();
         return;
       }
@@ -1382,18 +1521,12 @@ function listenForTripTabs() {
     if (event.origin !== window.location.origin) return;
     const handoff = handoffResultMessage(event.data);
     if (!handoff) return;
-    showStoreReturn(handoff.store, handoff.kind);
     rehydrateTrip();
   });
   window.addEventListener("storage", (event) => {
     if (event.key === LIST_KEY) rehydrateTrip();
     if (event.key === HANDOFF_RESULT_KEY) applySharedHandoff();
   });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") applySharedHandoff();
-  });
-  window.addEventListener("focus", () => applySharedHandoff());
-  window.addEventListener("pageshow", () => applySharedHandoff());
 }
 
 async function refreshKrogerFromServer() {
@@ -3812,7 +3945,7 @@ function loadCachedTrip() {
 
 function restoreOfflineTrip() {
   if (!loadCachedTrip()) return false;
-  showStep("shop");
+  showStep("shop", "boot");
   return true;
 }
 
@@ -3922,6 +4055,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
   if (!stay) {
+    tabGuard = noteTabInteraction(tabGuard);
     flowStep = "plan";
     try {
       localStorage.setItem(STEP_KEY, flowStep);
@@ -4036,7 +4170,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     if (planAbort !== controller) return "replaced";
     result = "fail";
     if (navigator.onLine === false && !lastOptimize && loadCachedTrip()) {
-      showStep("shop");
+      showStep("shop", "restore");
       toast("You're offline. Showing the last plan on this phone.");
       return "fail";
     }
@@ -4953,6 +5087,7 @@ document.addEventListener("click", (event) => {
   }
   const flowButton = target.closest("[data-flow]");
   if (flowButton) {
+    if (clickShielded(tabGuard, Date.now())) return;
     haptic();
     showStep(flowButton.getAttribute("data-flow"));
     return;
@@ -5457,7 +5592,13 @@ $("shop-done")?.addEventListener("click", () => {
 });
 $("shop-status")?.addEventListener("click", onPrimary);
 $("trip-summary-close")?.addEventListener("click", () => $("trip-summary")?.close());
-$("store-return-no")?.addEventListener("click", () => $("store-return")?.close());
+$("store-return-no")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  dismissReturnChoice();
+  tabGuard = noteTabInteraction(tabGuard);
+  $("store-return")?.close();
+});
 $("store-return-trip")?.addEventListener("click", () => {
   $("store-return")?.close();
   showStep("plan");
@@ -5504,10 +5645,26 @@ $("clear-trip-form")?.addEventListener("submit", (event) => {
   clearTripItems();
 });
 $("brand-home")?.addEventListener("click", () => {
-  closeDrawer();
-  showStep("add");
-  window.scrollTo(0, 0);
+  goHome();
 });
+$("brand-home-proxy")?.addEventListener("click", () => {
+  goHome();
+});
+bindBrandPress($("brand-home"));
+bindBrandPress($("brand-home-proxy"));
+for (const id of ["store-return", "handoff-return", "cart-ready"]) {
+  $(id)?.addEventListener("close", () => {
+    armTabShield();
+    syncHandoffSheetFlag();
+  });
+}
+new MutationObserver(() => syncHomeProxy()).observe(document.body, {
+  subtree: true,
+  attributes: true,
+  attributeFilter: ["open"],
+});
+window.addEventListener("scroll", () => syncHomeProxy(), { passive: true });
+window.addEventListener("resize", () => syncHomeProxy());
 $("add-items")?.addEventListener("click", () => {
   showStep("add");
   window.scrollTo(0, 0);
@@ -6599,7 +6756,10 @@ function syncStepVisibility() {
   syncBrowse();
 }
 
-function showStep(step) {
+function showStep(step, reason = "user") {
+  const decision = allowTabChange(tabGuard, reason);
+  tabGuard = decision.state;
+  if (!decision.allow) return;
   hidePullStatus();
   flowStep = readFlowStep(step);
   try {
@@ -6635,7 +6795,8 @@ function showStep(step) {
 function paintPlanBar() {
   const count = [...list.values()].reduce((sum, entry) => sum + entry.quantity, 0);
   const view = currentTrip();
-  const progress = view ? shopProgress(view.stores || [], mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
+  const progressStores = flowStep === "shop" && view?.stores ? dedupeTripStores(view.stores, mergedTripChecks(view.stores)) : view?.stores || [];
+  const progress = view ? shopProgress(progressStores, mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
   const total = view?.stores?.length ? view.total : lastBarTotal;
   const copy = planBarCopy({
     step: flowStep,
@@ -6697,14 +6858,16 @@ function renderShop() {
             },
             escapeHtml
           );
-    shop.innerHTML = `${krogerBannerHtml()}${backPrompt}${body}`;
+    shop.innerHTML = `${backPrompt}${body}`;
     paintPlanBar();
     return;
   }
-  const progress = shopProgress(view.stores, mergedTripChecks(view.stores));
+  const checks = mergedTripChecks(view.stores);
+  const stores = dedupeTripStores(view.stores, checks);
+  const progress = shopProgress(stores, checks);
   const done = doneMessage(progress);
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  const route = inStoreRoute(view.stores, mergedTripChecks(view.stores));
+  const route = inStoreRoute(stores, checks);
   const html = route
     .map((section) => {
       const rowHtml = (item, checked) => {
@@ -6765,14 +6928,13 @@ function renderShop() {
           : "";
       const note = section.note ? `<p class="layout-note">${escapeHtml(section.note)}</p>` : "";
       const left = section.left === 1 ? "1 left" : `${section.left} left`;
-      return `<section class="shop-store"><h2>${escapeHtml(section.storeName)}</h2><p class="muted">${escapeHtml(left)}</p>${note}${hint}${groups}${cart}<div class="shop-actions">${store ? primaryAction(store) : ""}</div></section>`;
+      return `<section class="shop-store" data-walking-list="1"><h2>${escapeHtml(section.storeName)}</h2><p class="muted">${escapeHtml(left)}</p>${note}${hint}${groups}${cart}${inStoreSendHtml()}</section>`;
     })
     .join("");
   const backPrompt = showReturnBanner
     ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
     : "";
   shop.innerHTML = `
-    ${krogerBannerHtml()}
     ${backPrompt}
     <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -7407,7 +7569,7 @@ async function refreshPrices() {
     let planned = "ok";
     if (list.size && (step === "plan" || step === "shop")) {
       planned = await planTrip({ stay: true, trigger: button });
-      if (step === "shop" && flowStep !== "shop") showStep("shop");
+      if (step === "shop" && flowStep !== "shop") showStep("shop", "restore");
       else if (step === "shop") renderShop();
     }
     if (planned !== "fail") {
@@ -7469,7 +7631,7 @@ async function bootApp() {
   hydrateListFromStorage();
   const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
   if (list.size === 0) {
-    const saved = await readTripDb(factory);
+    const saved = richerTrip(await readTripDb(factory), readHandoffTrip(localStorage));
     if (saved?.items?.length) {
       try {
         localStorage.setItem(LIST_KEY, JSON.stringify(saved.items));
@@ -7478,7 +7640,7 @@ async function bootApp() {
       }
       hydrateListFromStorage();
       if (saved.plan) lastOptimize = saved.plan;
-      if (saved.step) flowStep = readFlowStep(saved.step);
+      if (saved.step) idbBootStep = saved.step;
     }
   }
   renderEstimate();
@@ -7556,30 +7718,36 @@ async function bootApp() {
   if (isNative() && browserPlugin?.addListener) {
     void browserPlugin.addListener("browserFinished", () => {
       sawAppHidden = true;
-      showWalmartReturn();
+      maybeShowReturnPrompt("browser-finished");
     });
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
-  const storedStep = readFlowStep(localStorage.getItem(STEP_KEY));
-  if (storedStep !== "add") showStep(storedStep);
-  else syncStepVisibility();
   if (pendingKrogerReturn) {
     const parsed = pendingKrogerReturn;
     pendingKrogerReturn = null;
     finishKrogerReturn(parsed);
+  } else {
+    const step = chooseBootStep();
+    if (step !== "add") showStep(step, "boot");
+    else {
+      tabGuard = settleTabBoot(tabGuard);
+      syncStepVisibility();
+    }
   }
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") noteAppHidden();
-  if (document.visibilityState === "visible") noteAppVisible();
-});
-window.addEventListener("focus", () => {
-  if (document.visibilityState === "hidden") return;
-  if (sawAppHidden) showWalmartReturn();
-});
-window.addEventListener("pageshow", () => {
-  if (sawAppHidden) showWalmartReturn();
+  if (document.visibilityState === "hidden") {
+    noteAppHidden();
+    returnWatch = returnPromptDecision(returnWatch, {
+      source: "visibility",
+      visibility: "hidden",
+      now: Date.now(),
+    }).state;
+    return;
+  }
+  noteAppVisible();
+  maybeShowReturnPrompt("visibility");
 });
 
 const pullHost = document.querySelector(".catalog");

@@ -57,6 +57,7 @@
             <p class="brand-title" id="brand-title">Add items</p>
           </div>
         </button>
+        <button type="button" id="brand-home-proxy" class="brand-home-proxy" popover="manual" aria-label="Home">G</button>
         <div class="top-actions">
           <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
             My list
@@ -495,7 +496,7 @@
         <p id="paywall-error" class="status" role="alert" hidden></p>
       </div>
     </dialog>
-    <dialog id="cart-ready" class="sheet" aria-labelledby="cart-ready-title">
+    <dialog id="cart-ready" class="sheet handoff-sheet" aria-labelledby="cart-ready-title">
       <form class="sheet-body" id="cart-ready-form">
         <h2 id="cart-ready-title">Your cart is ready</h2>
         <p id="cart-ready-body">Finish checkout in the store app or site.</p>
@@ -561,7 +562,7 @@
         <div id="trip-summary-body"></div>
       </div>
     </dialog>
-    <dialog id="store-return" class="sheet" aria-labelledby="store-return-title">
+    <dialog id="store-return" class="sheet handoff-sheet" aria-labelledby="store-return-title">
       <form class="sheet-body" id="store-return-form">
         <h2 id="store-return-title">Did you finish at the store?</h2>
         <p>A website can't come back from the store on its own.</p>
@@ -591,7 +592,7 @@
         <div id="past-trips-body"></div>
       </div>
     </dialog>
-    <dialog id="handoff-return" class="sheet" aria-labelledby="handoff-return-title">
+    <dialog id="handoff-return" class="sheet handoff-sheet" aria-labelledby="handoff-return-title">
       <div class="sheet-body">
         <h2 id="handoff-return-title">Return to Grocery Gitter</h2>
         <p id="handoff-return-body">Your trip is in the other Grocery Gitter tab.</p>
