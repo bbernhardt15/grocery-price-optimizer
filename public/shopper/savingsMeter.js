@@ -169,7 +169,7 @@ export function describeSavings(meter, options = {}) {
     }
     const extra =
       options.allowSubstitutes === false
-        ? " Allow substitutes if a close item would fill a gap."
+        ? " Turn on OK to swap for similar items if a close item would fill a gap."
         : "";
     if (meter.saved > 0 && meter.highEachTotal > 0) {
       const badge = `Save ${formatMoney(meter.saved)}`;

@@ -26,6 +26,7 @@
   --step-h: 48px;
   --plan-h: 52px;
   --bar-h: calc(var(--step-h) + var(--plan-h) + 20px + var(--safe-bottom));
+  --row-gap: 10px;
 }
 
 body[data-step="shop"] {
@@ -499,7 +500,7 @@ a.text-btn:hover { background: var(--accent-soft); }
 .filters-open { font-size: 0.9rem; }
 .filters-open .count-pill { background: var(--accent); color: var(--accent-ink); margin-left: 6px; }
 .browse-tools { position: relative; }
-.browse { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.browse { display: flex; flex-direction: column; gap: var(--row-gap); margin-top: 0; }
 .browse-toggle {
   width: 100%; min-height: 52px; border-radius: 16px; border: 1px dashed var(--line);
   background: transparent; color: var(--ink); font-weight: 700; text-align: left; padding: 0 16px;
@@ -585,7 +586,11 @@ dialog.shelf-sheet .sheet-body {
 }
 .list-row img { grid-row: 1 / span 2; align-self: start; }
 .list-copy { grid-column: 2; grid-row: 1; min-width: 0; }
-.list-row > .stepper { grid-column: 2; grid-row: 2; justify-self: start; }
+.list-row > .stepper,
+.list-row > .list-qty { grid-column: 2; grid-row: 2; justify-self: start; }
+.list-qty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.list-remove { min-height: 44px; }
+.list-alert-block[hidden] { display: none !important; }
 .list-copy strong, .got-it strong {
   display: block; min-width: 0; overflow-wrap: break-word; line-height: 1.3; font-weight: 700;
 }
@@ -613,6 +618,7 @@ dialog.shelf-sheet .sheet-body {
   text-decoration: underline; text-underline-offset: 2px; min-height: 28px;
 }
 .estimate-note { margin: 0; color: var(--muted); font-size: 0.85rem; }
+#list-panel[data-alerts="off"] .watch-opt { display: none; }
 .item-watch { min-height: 44px; font-size: 0.92rem; }
 .target-price { display: flex; align-items: center; gap: 4px; font-size: 0.92rem; color: var(--muted); min-height: 44px; }
 .target-price input {
@@ -1143,7 +1149,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 }
 
 .start-here {
-  display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px;
+  display: flex; flex-direction: column; gap: var(--row-gap); margin: 0 0 var(--row-gap);
 }
 .start-here h2 { margin: 0; font-family: var(--display); font-size: 1.25rem; }
 .start-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
@@ -1152,7 +1158,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 .usuals-list li { display: inline-flex; background: none; border: 0; padding: 0; min-height: 0; }
 .starter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .starter-row.quick-row { display: flex; flex-wrap: wrap; }
-.list-home { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.list-home { display: flex; flex-direction: column; gap: var(--row-gap); min-width: 0; }
 .list-home h3,
 #seasonal-block,
 .start-head,
@@ -1250,7 +1256,7 @@ dialog.list-sheet .pick-results {
 }
 dialog.list-sheet .sheet-actions { position: static; flex: none; }
 @media (max-height: 520px) {
-  .start-here { margin: 0 0 6px; gap: 4px; }
+  .start-here { margin: 0 0 var(--row-gap); gap: var(--row-gap); }
   .start-here h2 { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .dept-chips { padding: 0 36px 0 0; }
   .starter-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1384,7 +1390,8 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   font-size: 1.35rem;
   font-weight: 750;
 }
-.feature-cards { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
+.feature-cards { display: flex; flex-direction: column; gap: var(--row-gap); margin: 0; }
+#past-trips-home { margin: 0; }
 .feature-card, .lists-entry.feature-card {
   display: flex;
   gap: 12px;

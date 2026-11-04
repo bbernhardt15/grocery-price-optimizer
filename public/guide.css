@@ -3,17 +3,18 @@
 .gitter-guide {
   position: fixed;
   z-index: 7;
-  left: 50%;
-  bottom: calc(var(--bar-h) + var(--keyboard, 0px) + 12px);
-  max-height: calc(100svh - var(--bar-h) - var(--keyboard, 0px) - 12px - 68px - var(--safe-top));
-  transform: translateX(-50%);
-  width: min(440px, calc(100% - 20px));
-  margin: 0;
+  left: max(12px, var(--safe-left));
+  right: max(12px, var(--safe-right));
+  bottom: calc(var(--bar-h) + var(--keyboard, 0px) + 16px);
+  max-height: calc(100svh - var(--bar-h) - var(--keyboard, 0px) - 16px - 68px - var(--safe-top));
+  width: auto;
+  max-width: 440px;
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: start;
-  padding: 12px 10px 10px 12px;
+  padding: 16px 14px 14px;
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--surface);
@@ -22,31 +23,39 @@
   /* Taps pass through the card except on its own controls, so the list and the dock stay usable. */
   pointer-events: none;
   animation: gitter-guide-in 180ms ease;
+  overflow: auto;
 }
 
 .gitter-guide[hidden] {
   display: none !important;
 }
 
+body:has(#gitter-guide:not([hidden])) .body {
+  padding-bottom: calc(var(--bar-h) + 196px);
+}
+
 .gitter-guide-avatar {
-  width: 36px;
-  height: 36px;
-  margin-top: 2px;
+  width: 40px;
+  height: 40px;
+  margin-top: 18px;
   border-radius: 12px;
   display: grid;
   place-items: center;
+  align-self: start;
   background: var(--accent);
   color: var(--accent-ink);
   font-family: var(--display);
   font-weight: 700;
   font-size: 1.15rem;
+  line-height: 1;
 }
 
 .gitter-guide-copy {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .gitter-guide-kicker {
@@ -56,11 +65,12 @@
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 700;
+  line-height: 1.2;
 }
 
 .gitter-guide-line {
   margin: 0;
-  min-height: 2.7em;
+  min-height: 0;
   font-family: var(--display);
   font-size: 1.05rem;
   line-height: 1.35;
@@ -71,6 +81,7 @@
 .gitter-guide-chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: stretch;
   gap: 8px;
 }
 
@@ -83,20 +94,27 @@
 }
 
 .gitter-guide-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
-  padding: 0 14px;
+  height: auto;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--accent-soft);
   color: var(--ink);
   font-weight: 700;
-  text-align: left;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
 }
 
 .gitter-guide-off {
   align-self: flex-start;
   min-height: 44px;
-  padding: 0;
+  margin-top: 2px;
+  padding: 8px 0;
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -108,12 +126,14 @@
 .gitter-guide-dismiss {
   width: 44px;
   height: 44px;
+  margin-top: 0;
   border: 0;
   border-radius: 12px;
   background: transparent;
   color: var(--ink);
   font-size: 1.4rem;
   line-height: 1;
+  align-self: start;
 }
 
 .guide-setting-block { display: flex; flex-direction: column; gap: 2px; }
@@ -137,6 +157,30 @@
   to { opacity: 1; }
 }
 
+@media (max-width: 390px) {
+  .gitter-guide {
+    left: max(10px, var(--safe-left));
+    right: max(10px, var(--safe-right));
+    padding: 16px 12px 14px;
+    gap: 10px;
+  }
+  .gitter-guide-avatar {
+    width: 36px;
+    height: 36px;
+    margin-top: 20px;
+  }
+  .gitter-guide-chip {
+    flex: 1 1 calc(50% - 8px);
+  }
+}
+
+@media (max-width: 375px) {
+  .gitter-guide {
+    padding: 14px 12px 12px;
+  }
+  .gitter-guide-line { font-size: 1rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gitter-guide,
   .gitter-guide-line,
@@ -150,4 +194,15 @@
   background: var(--surface);
   color: var(--ink);
   border-color: var(--line);
+}
+
+:root[data-resolved="dark"] .gitter-guide-chip {
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+:root[data-resolved="dark"] .gitter-guide-avatar {
+  background: var(--accent);
+  color: var(--accent-ink);
 }

@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v42", () => {
-    assert.match(sw, /grocery-gitter-shell-v42/);
+  it("bumps the shell cache to v43", () => {
+    assert.match(sw, /grocery-gitter-shell-v43/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
@@ -208,11 +208,10 @@ describe("tenth phone test onboarding", () => {
     assert.equal(listAlertStateLabel(false), "Off");
     assert.equal(listAlertStateLabel(true), "On");
     assert.equal(LIST_ALERT_BENEFIT, "We'll send a push notification.");
-    assert.match(html, /Coming soon/);
-    assert.match(html, /does not email price alerts/);
+    assert.match(html, /id="list-alert-block"[^>]*hidden/);
     assert.match(html, /id="list-alerts-benefit"/);
-    assert.match(html, /class="alert-state" data-off>Off/);
-    assert.match(html, /class="alert-state" data-on>On/);
+    assert.doesNotMatch(html, /class="alert-state"/);
+    assert.doesNotMatch(html, /id="list-alerts"[^>]*disabled/);
     assert.match(app, /listThumbHtml/);
     assert.doesNotMatch(app, /<img src="\$\{escapeHtml\(image\)\}" alt="" \/>\s*\n\s*<div class="list-copy">/);
     assert.match(css, /\.list-row:not\(:has\(img\)\)/);
