@@ -278,7 +278,7 @@ export async function readReceiptBatch(deps, input) {
     };
   }
   let analysis = { lines, learned: [], paper: false, paperNote: "" };
-  report("Matching brands…", 0.9);
+  report("Matching brands…", 0.9, { stage: "grouping" });
   if (deps.postLines) {
     try {
       analysis = await deps.postLines(lines);

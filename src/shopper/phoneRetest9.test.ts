@@ -25,7 +25,7 @@ const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.m
 
 describe("ninth phone test", () => {
   it("bumps the shell cache to v40", () => {
-    assert.match(sw, /grocery-gitter-shell-v40/);
+    assert.match(sw, /grocery-gitter-shell-v41/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {

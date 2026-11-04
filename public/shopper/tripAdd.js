@@ -3,6 +3,8 @@
  * Nothing starts selected. The quantity starts at one typical purchase.
  */
 
+import { tripActionBarHtml } from "./tripActionBar.js";
+
 export function tripQuantityDefault(quantity) {
   const qty = Math.floor(Number(quantity) || 1);
   if (!Number.isFinite(qty) || qty < 1) return 1;
@@ -145,17 +147,17 @@ export function tripAddHtml(lines, options = {}) {
       return `<section class="trip-add-group"><h3>${escape(category)}</h3><ul>${items}</ul></section>`;
     })
     .join("");
+  const disabled = status.canAdd ? "" : " disabled";
   return `<div class="learned-trip trip-add">
-    <div class="trip-add-tools">
-      <button type="button" class="ghost trip-select-all" data-trip-all="all">Select all</button>
-      <button type="button" class="ghost" data-trip-all="none">Clear all</button>
-    </div>
-    <p class="trip-add-total" id="trip-add-total">${escape(status.label)}</p>
-    ${body || `<p class="muted">Nothing to add from that.</p>`}
-    <button type="button" class="trip-jump" id="trip-jump" aria-label="Jump to Add" hidden>↓</button>
-    <div class="choice-stack" id="trip-add-end">
-      <button type="button" class="primary" id="learned-add-trip"${status.canAdd ? "" : " disabled"}>Add these items to my trip</button>
-      <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
+    ${tripActionBarHtml({ count: selectedCount, canAdd: status.canAdd, escapeHtml: escape })}
+    <div class="trip-add-body" id="trip-add-body">
+      <p class="trip-add-total" id="trip-add-total">${escape(status.label)}</p>
+      ${body || `<p class="muted">Nothing to add from that.</p>`}
+      <button type="button" class="trip-jump" id="trip-jump" aria-label="Jump to Add" hidden>↓</button>
+      <div class="choice-stack" id="trip-add-end">
+        <button type="button" class="primary" data-trip-add="1" id="learned-add-trip"${disabled}>Add these items to my trip</button>
+        <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
+      </div>
     </div>
   </div>`;
 }

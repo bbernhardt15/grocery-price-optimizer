@@ -4,6 +4,7 @@
  */
 
 import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
+import { learnedActionsHtml } from "./learnedActions.js";
 import { learnedRulePillHtml } from "./learnedRule.js";
 import { tripAddHtml } from "./tripAdd.js";
 
@@ -124,6 +125,26 @@ export function brandChipMarkup(brands, options = {}) {
   return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands"${busy}>${buttons}${skeletons}</div></fieldset>`;
 }
 
+/** Inner markup for one learned card. The section element stays put. */
+export function learnedCardInnerHtml(row, options = {}) {
+  const guess = row?.confidence === "low" ? `<p class="confidence">Is this right?</p>` : "";
+  const choice = learnedChoice(row);
+  const mode = modeLine(row);
+  const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
+  const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
+  const pending = Boolean(options.pending);
+  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending }) : "";
+  return `<div class="learned-copy">
+          <h3>${escapeText(row?.label || row?.family)}</h3>
+          ${learnedRulePillHtml(row)}
+          <p>${escapeText(choice)}</p>
+          ${meta}
+          ${guess}
+        </div>
+        ${learnedActionsHtml(row?.family || "")}
+        ${picker}`;
+}
+
 function learnedPickerHtml(row, brands, options = {}) {
   const family = escapeText(row?.family || "");
   const nameBrand = row?.mode === "brand" || row?.mode === "cheapestPicks";
@@ -166,27 +187,13 @@ export function learnedSummaryHtml(learned, options = {}) {
     .map(([category, groupRows]) => {
       const body = groupRows
         .map((row) => {
-          const guess = row.confidence === "low" ? `<p class="confidence">Is this right?</p>` : "";
-          const choice = learnedChoice(row);
-          const mode = modeLine(row);
-          const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
-          const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
           const pending = Boolean(options.pendingFamilies?.[row.family]);
-          const picker = editing && editing === row.family ? learnedPickerHtml(row, brandsByFamily[row.family] || [], { pending }) : "";
-          return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}">
-        <div>
-          <h3>${escapeText(row.label || row.family)}</h3>
-          ${learnedRulePillHtml(row)}
-          <p>${escapeText(choice)}</p>
-          ${meta}
-          ${guess}
-        </div>
-        <div class="learned-actions">
-          <button type="button" class="text-btn" data-learned-change="${escapeText(row.family)}">Change</button>
-          <button type="button" class="text-btn" data-learned-remove="${escapeText(row.family)}">Remove</button>
-        </div>
-        ${picker}
-      </section>`;
+          const inner = learnedCardInnerHtml(row, {
+            editing: Boolean(editing && editing === row.family),
+            brands: brandsByFamily[row.family] || [],
+            pending,
+          });
+          return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}" tabindex="-1">${inner}</section>`;
         })
         .join("");
       return `<section class="learned-group"><p class="learned-group-title">${escapeText(category)}</p>${body}</section>`;
