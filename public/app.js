@@ -184,6 +184,7 @@ import {
 } from "./shopper/chromeIos.js";
 import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
 import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
+import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
@@ -1975,7 +1976,7 @@ function renderListRows() {
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
       const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
-        <img src="${escapeHtml(image)}" alt="" />
+        ${listThumbHtml(image, escapeHtml)}
         <div class="list-copy">
           <label class="got-it">
             <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />

@@ -4,6 +4,7 @@
  */
 
 import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
+import { learnedRulePillHtml } from "./learnedRule.js";
 import { tripAddHtml } from "./tripAdd.js";
 
 export const RECEIPT_TITLE = "Teach Gitter your usual groceries";
@@ -88,7 +89,7 @@ export function receiptUploadHtml() {
       `<details class="store-find"><summary>${escapeText(row.store)}</summary><p>${escapeText(row.hint)}</p></details>`
   ).join("");
   return `<div class="receipt-upload">
-    <label class="drop-zone drop-primary">
+    <label class="drop-zone drop-primary drop-hero">
       <input id="profile-receipt-input" type="file" accept="image/*,.pdf,.txt,.csv,text/plain,application/pdf" multiple />
       <span class="drop-title">Drop PDFs or screenshots</span>
       <span class="muted">Tap to upload. Skip is up top if you want to do this later.</span>
@@ -175,6 +176,7 @@ export function learnedSummaryHtml(learned, options = {}) {
           return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}">
         <div>
           <h3>${escapeText(row.label || row.family)}</h3>
+          ${learnedRulePillHtml(row)}
           <p>${escapeText(choice)}</p>
           ${meta}
           ${guess}

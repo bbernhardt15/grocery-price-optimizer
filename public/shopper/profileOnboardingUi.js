@@ -31,12 +31,16 @@ import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
 import { applyLearnedChoice, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml } from "./receiptCopy.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
-import { READ_HOLD_MS, readCountLine } from "./receiptHold.js";
+import { readCountLine } from "./receiptHold.js";
+import { READ_BEAT_MS, readBeatHtml } from "./receiptBeat.js";
 import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakePresent.js";
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
 import { suggestZipChoices } from "./zipSuggest.js";
+import { fieldZip, ZIP_PLACEHOLDER } from "./zipField.js";
+import { installChainColors } from "./chainColors.js";
+import { jumpHidden, tripTotalLabel } from "./tripAdd.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -55,6 +59,7 @@ function escapeText(value) {
  * }} deps
  */
 export function mountProfileOnboarding(deps = {}) {
+  installChainColors(document);
   const dialog = document.getElementById("profile-onboard");
   if (!dialog) return { open() {}, shouldPrompt() { return false; }, openEditor() {} };
   const storage = deps.storage || localStorage;
@@ -93,6 +98,9 @@ export function mountProfileOnboarding(deps = {}) {
   let resumeStatus = "";
   let dietMode = false;
   let zipApproximate = false;
+  /** @type {(() => void) | null} */
+  let skipBeat = null;
+  let beatToken = 0;
   /** @type {(() => void) | null} */
   let dietDone = null;
 
@@ -186,9 +194,9 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (step.kind === "welcome") return "";
     if (step.kind === "place" || step.kind === "zip") {
-      const zip = escapeText(deps.getZip?.() || "");
+      const zip = escapeText(fieldZip(deps.getZip?.() || ""));
       return `<div class="zip-row">
-          <label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" enterkeyhint="done" maxlength="5" autocomplete="postal-code" placeholder="45202" value="${zip}" /></label>
+          <label class="profile-field" for="profile-zip">ZIP<input id="profile-zip" inputmode="numeric" enterkeyhint="done" maxlength="5" autocomplete="off" placeholder="${escapeText(ZIP_PLACEHOLDER)}" value="${zip}" /></label>
           <button type="button" class="zip-done" id="profile-zip-done" aria-label="Done">✓</button>
         </div>
         <p id="profile-zip-approx" class="zip-approx"${zipApproximate ? "" : " hidden"}>${escapeText(APPROXIMATE_ZIP_NOTE)}</p>
@@ -348,6 +356,33 @@ export function mountProfileOnboarding(deps = {}) {
     const dotHost = $("profile-dots");
     if (dotHost) dotHost.hidden = welcome;
     if (step.kind === "products") void loadProducts();
+    if (tripChoice || (step.id === "receipts" && receiptPhase === "upload")) resetStageScroll();
+    if (tripChoice && typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncTripJump());
+  }
+
+  function resetStageScroll() {
+    const stage = $("profile-stage");
+    if (stage) stage.scrollTop = 0;
+    const body = document.querySelector("#profile-onboard .sheet-body");
+    if (body) body.scrollTop = 0;
+  }
+
+  function syncTripJump() {
+    const stage = $("profile-stage");
+    const jump = $("trip-jump");
+    if (!jump) return;
+    if (!stage) {
+      jump.hidden = true;
+      return;
+    }
+    jump.hidden = jumpHidden(stage.scrollTop, stage.clientHeight, stage.scrollHeight);
+  }
+
+  function paintTripTotal() {
+    const boxes = [...document.querySelectorAll("[data-trip-pick]")].filter((box) => box instanceof HTMLInputElement);
+    const total = boxes.reduce((sum, box) => sum + (box.checked ? Number(box.dataset.estimate) || 0 : 0), 0);
+    const label = $("trip-add-total");
+    if (label) label.textContent = tripTotalLabel(Math.round(total * 100) / 100);
   }
 
   function currentZipRaw() {
@@ -411,7 +446,7 @@ export function mountProfileOnboarding(deps = {}) {
     const host = $("profile-zip-choices");
     if (!host) return;
     const codes = (choices || []).filter((code) => /^\d{5}$/.test(String(code || "")));
-    host.hidden = codes.length < 2;
+    host.hidden = codes.length === 0;
     host.innerHTML = codes
       .map((code) => `<button type="button" class="zip-choice" data-zip-choice="${escapeText(code)}">${escapeText(code)}</button>`)
       .join("");
@@ -468,16 +503,17 @@ export function mountProfileOnboarding(deps = {}) {
               zip: rawZip,
               approximate: true,
             });
-            const zip = suggestion.zip || String(rawZip || "").replace(/\D/g, "").slice(0, 5);
-            zipApproximate = true;
+            const zip = suggestion.choices?.[0] || "";
+            zipApproximate = Boolean(zip);
             const field = $("profile-zip");
-            if (zip && field) field.value = String(zip).replace(/\D/g, "").slice(0, 5);
+            if (field) field.value = zip ? String(zip).replace(/\D/g, "").slice(0, 5) : "";
+            if (!zip) deps.toast?.("No ZIP within about 15 miles. Type yours.");
             const hint = $("profile-zip-hint");
             if (hint) hint.hidden = !zip;
             const approx = $("profile-zip-approx");
             if (approx) {
-              approx.hidden = false;
-              approx.textContent = APPROXIMATE_ZIP_NOTE;
+              approx.hidden = !zip;
+              if (zip) approx.textContent = APPROXIMATE_ZIP_NOTE;
             }
             paintZipChoices(suggestion.choices?.length ? suggestion.choices : zip ? [zip] : []);
             field?.blur();
@@ -876,7 +912,9 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function holdThenLearned() {
-    const line = readCountLine(readItemCount());
+    const token = ++beatToken;
+    const count = readItemCount();
+    const line = readCountLine(count);
     for (const card of readCards) {
       if (card.status === "error") continue;
       card.message = line;
@@ -884,12 +922,25 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (receiptPhase === "reading") {
       const stage = $("profile-stage");
-      if (stage) stage.innerHTML = readLiveHtml(readCards);
+      if (stage) stage.innerHTML = readBeatHtml(count);
       const title = $("profile-title");
       if (title) title.textContent = line;
+      const hint = $("profile-hint");
+      if (hint) hint.hidden = true;
+      const next = $("profile-next");
+      if (next) next.hidden = true;
+      resetStageScroll();
     }
-    await new Promise((resolve) => setTimeout(resolve, READ_HOLD_MS));
-    if (receiptPhase !== "reading") return;
+    await new Promise((resolve) => {
+      const timer = window.setTimeout(resolve, READ_BEAT_MS);
+      skipBeat = () => {
+        window.clearTimeout(timer);
+        skipBeat = null;
+        resolve();
+      };
+    });
+    skipBeat = null;
+    if (token !== beatToken || receiptPhase !== "reading") return;
     showLearned();
   }
 
@@ -1111,7 +1162,10 @@ export function mountProfileOnboarding(deps = {}) {
         receiptPhase = "trip";
         motion = "forward";
         render();
+        resetStageScroll();
         focusTitle();
+        resetStageScroll();
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncTripJump());
         return;
       }
       if (receiptPhase === "trip") return;
@@ -1303,6 +1357,22 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.id === "read-beat-continue" || target.id === "read-beat-skip") {
+      skipBeat?.();
+      return;
+    }
+    if (target.id === "trip-jump") {
+      $("learned-add-trip")?.scrollIntoView({ block: "end" });
+      return;
+    }
+    if (target.dataset.tripAll) {
+      const on = target.dataset.tripAll === "all";
+      for (const box of document.querySelectorAll("[data-trip-pick]")) {
+        if (box instanceof HTMLInputElement) box.checked = on;
+      }
+      paintTripTotal();
+      return;
+    }
     if (target.id === "learned-empty-trip") {
       finish(Date.now());
       return;
@@ -1567,7 +1637,16 @@ export function mountProfileOnboarding(deps = {}) {
     }
   });
 
+  $("profile-stage")?.addEventListener("scroll", () => syncTripJump(), { passive: true });
+  $("profile-stage")?.addEventListener("change", (event) => {
+    const box = event.target;
+    if (!(box instanceof HTMLInputElement) || box.dataset.tripPick == null) return;
+    paintTripTotal();
+  });
+
   dialog.addEventListener("close", () => {
+    beatToken += 1;
+    skipBeat?.();
     if (dietMode) {
       dietMode = false;
       draft = persist(markDietPrompt(draft, "skipped"));

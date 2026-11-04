@@ -64,6 +64,30 @@ export function tripAddTotal(rows) {
   return Math.round(total * 100) / 100;
 }
 
+export const TRIP_PRESELECT_NOTE = "We preselected what you buy most often.";
+
+/** @param {number} total */
+export function tripTotalLabel(total) {
+  const amount = Number(total) || 0;
+  return amount > 0 ? `About $${amount.toFixed(2)} selected` : "Select what to add";
+}
+
+/**
+ * The jump arrow hides when the Add button is already in view.
+ * @param {number} scrollTop
+ * @param {number} clientHeight
+ * @param {number} scrollHeight
+ * @param {number} [slack]
+ */
+export function jumpHidden(scrollTop, clientHeight, scrollHeight, slack = 24) {
+  const height = Number(scrollHeight) || 0;
+  const view = Number(clientHeight) || 0;
+  const top = Number(scrollTop) || 0;
+  const room = Math.max(0, Number(slack) || 0);
+  if (height <= view + room) return true;
+  return top + view >= height - room;
+}
+
 function escapeText(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -96,7 +120,7 @@ export function tripAddHtml(lines, options = {}) {
           const price = row.estimate > 0 ? `<span class="trip-add-price">${escape(`$${row.estimate.toFixed(2)}`)}</span>` : "";
           return `<li class="trip-add-row">
             <label class="check-line">
-              <input type="checkbox" data-trip-pick="${row.index}" ${row.selected ? "checked" : ""} />
+              <input type="checkbox" data-trip-pick="${row.index}" data-estimate="${row.estimate}" ${row.selected ? "checked" : ""} />
               <span class="trip-add-name">${escape(row.label)}</span>
             </label>
             ${note}
@@ -112,12 +136,17 @@ export function tripAddHtml(lines, options = {}) {
       return `<section class="trip-add-group"><h3>${escape(category)}</h3><ul>${items}</ul></section>`;
     })
     .join("");
-  const figure = total > 0 ? `About $${total.toFixed(2)} selected` : "Select what to add";
+  const figure = tripTotalLabel(total);
   return `<div class="learned-trip trip-add">
-    <p>Usual buys are checked. Quantities start at a typical purchase, not the whole receipt.</p>
+    <div class="trip-add-tools">
+      <button type="button" class="ghost" data-trip-all="all">Select all</button>
+      <button type="button" class="ghost" data-trip-all="none">Clear all</button>
+    </div>
+    <p class="trip-add-note">${escape(TRIP_PRESELECT_NOTE)}</p>
     <p class="trip-add-total" id="trip-add-total">${escape(figure)}</p>
     ${body || `<p class="muted">Nothing to add from that.</p>`}
-    <div class="choice-stack">
+    <button type="button" class="trip-jump" id="trip-jump" aria-label="Jump to Add" hidden>↓</button>
+    <div class="choice-stack" id="trip-add-end">
       <button type="button" class="primary" id="learned-add-trip">Add these items to my trip</button>
       <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
     </div>
