@@ -1,0 +1,203 @@
+/* Phone test eleven: in-flow wordmark, tab bar, rule pills, Kroger cart, print list. */
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.brand-word {
+  display: block;
+  font-weight: 750;
+  font-size: 1rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand-title { display: block; }
+.sheet-brand {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 750;
+  text-align: left;
+  z-index: auto;
+}
+.sheet-brand .brand-mark { width: 36px; height: 36px; flex: none; }
+.sheet-brand .brand-word { display: block; }
+.brand-home-proxy,
+.sheet-home {
+  display: none !important;
+  position: static !important;
+}
+#onboard-title,
+#profile-title,
+#import-title,
+.list-head h2,
+#cart-ready-title {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 1099px) {
+  .brand { flex: 1 1 auto; min-width: 0; }
+  .brand-word { display: block; }
+}
+@media (max-width: 719px) {
+  .brand-title { display: none; }
+  .brand-word { display: block; font-size: 0.92rem; }
+  .brand-mark { width: 36px; height: 36px; }
+}
+@media (max-width: 390px) {
+  .add-items { padding: 0 10px; }
+}
+
+html { scroll-padding-top: calc(68px + var(--safe-top)); }
+
+:root { --step-h: 62px; }
+.bottom-dock {
+  background: var(--surface);
+  border-top: 0;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -10px 28px rgba(28, 25, 23, 0.14);
+}
+:root[data-resolved="dark"] .bottom-dock {
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.48);
+}
+.step-bar {
+  gap: 6px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+}
+.step-bar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.1;
+  white-space: nowrap;
+  padding: 4px 2px;
+}
+.step-bar button .tab-icon { display: block; flex: none; }
+.step-bar button[aria-current="step"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+:root[data-resolved="dark"] .step-bar button[aria-current="step"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.summary-row.learned-row,
+.learned-row {
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+}
+.learned-row > div:first-child {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.brand-picks { max-width: 100%; min-width: 0; }
+.brand-pick {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+dialog.profile-onboard[data-hold-scroll="1"] #profile-stage,
+dialog.profile-onboard[data-hold-scroll="1"] .learned-row {
+  animation: none;
+}
+
+.trip-select-all {
+  width: 100%;
+  min-height: 48px;
+  font-weight: 750;
+  border-width: 2px;
+}
+#learned-add-trip:disabled {
+  opacity: 0.45;
+}
+
+.shopping-list-note { margin: 0; }
+
+.kroger-cart-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  border-radius: 999px;
+  background: #004f9f;
+  color: #ffffff;
+  font-weight: 750;
+  text-decoration: none;
+  border: 0;
+}
+.kroger-finish-note { margin: 0; }
+.cart-sent { margin: 0; }
+.cart-sent summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 750;
+  cursor: pointer;
+}
+.cart-ready-actions { display: flex; flex-direction: column; gap: 8px; }
+.cart-ready-actions .ghost,
+.cart-ready-actions .kroger-cart-btn { width: 100%; }
+
+.instore-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.instore-share .primary,
+.instore-share .ghost { flex: 1 1 8rem; min-height: 48px; }
+
+#print-root { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  #print-root,
+  #print-root * { visibility: visible; }
+  #print-root[hidden] { display: block !important; }
+  #print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #ffffff;
+    color: #171717;
+    padding: 24px;
+  }
+  .print-list {
+    white-space: pre-wrap;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+}

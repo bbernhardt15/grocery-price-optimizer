@@ -4,6 +4,7 @@
  */
 
 import { dedupeReviewItems } from "./importDedupe.js";
+import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { shortProductTitle } from "./familyTile.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
@@ -245,6 +246,9 @@ export function mountImport(deps) {
       <p id="import-status" class="import-status" role="status"></p>
     </form>`;
   document.body.appendChild(dialog);
+  dialog.addEventListener("close", () => {
+    releaseAfterLastSheet(document);
+  });
 
   const $ = (id) => dialog.querySelector(`#${id}`);
   const home = $("import-home");

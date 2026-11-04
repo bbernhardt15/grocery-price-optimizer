@@ -32,7 +32,7 @@ export const EMPTY_STATES = {
   },
   alerts: {
     title: "No price alerts",
-    body: "No drops yet. Turn on alerts for My list and we’ll watch the saved prices.",
+    body: "No drops yet. Price drops on your shopping list show up here.",
     action: "Turn on list alerts",
     actionId: "enable-alerts",
   },

@@ -7,7 +7,7 @@
 import { priceFigure } from "./calmPlan.js";
 
 export const FLOW_STEPS = [
-  { id: "add", label: "Add", title: "Add items" },
+  { id: "add", label: "Build", title: "Add items" },
   { id: "plan", label: "Review", title: "Review the split" },
   { id: "shop", label: "In-store", title: "In the store" },
 ];

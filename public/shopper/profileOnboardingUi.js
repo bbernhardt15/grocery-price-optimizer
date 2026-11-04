@@ -33,7 +33,9 @@ import { applyLearnedChoice, learnedSummaryHtml, learnedTripChoiceHtml, receiptU
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
 import { readCountLine } from "./receiptHold.js";
 import { READ_BEAT_MS, readBeatHtml } from "./receiptBeat.js";
-import { foundLabel, orderTitle, readLiveHtml, storeChoiceHtml } from "./intakePresent.js";
+import { orderTitle, readLiveHtml, storeChoiceHtml, foundLabel } from "./intakePresent.js";
+import { readCardTitle } from "./receiptReading.js";
+import { captureRuleScroll, restoreRuleScroll, revealInside } from "./ruleScroll.js";
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
@@ -41,7 +43,7 @@ import { adStoresVisible, mergeSavedStores, visibleStoreNames } from "./storeSco
 import { suggestZipChoices } from "./zipSuggest.js";
 import { fieldZip, ZIP_PLACEHOLDER } from "./zipField.js";
 import { installChainColors } from "./chainColors.js";
-import { jumpHidden, tripTotalLabel } from "./tripAdd.js";
+import { jumpHidden, tripAddStatus } from "./tripAdd.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -361,6 +363,38 @@ export function mountProfileOnboarding(deps = {}) {
     if (tripChoice && typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncTripJump());
   }
 
+  function rerenderLearned() {
+    const stage = $("profile-stage");
+    const sheet = document.querySelector("#profile-onboard .sheet-body");
+    const saved = captureRuleScroll({
+      stage: stage instanceof HTMLElement ? stage.scrollTop : 0,
+      sheet: sheet instanceof HTMLElement ? sheet.scrollTop : 0,
+      page: window.scrollY || 0,
+    });
+    if (dialog) dialog.dataset.holdScroll = "1";
+    render();
+    const nextStage = $("profile-stage");
+    restoreRuleScroll(
+      {
+        stage: nextStage,
+        sheet: document.querySelector("#profile-onboard .sheet-body"),
+        scrollTo: (y) => window.scrollTo(0, y),
+        frame: (fn) => {
+          if (typeof requestAnimationFrame === "function") requestAnimationFrame(fn);
+        },
+      },
+      saved
+    );
+    if (dialog) {
+      const clearHold = () => {
+        if (dialog.dataset.holdScroll) delete dialog.dataset.holdScroll;
+      };
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(clearHold);
+      else clearHold();
+    }
+    return nextStage;
+  }
+
   function resetStageScroll() {
     const stage = $("profile-stage");
     if (stage) stage.scrollTop = 0;
@@ -381,9 +415,13 @@ export function mountProfileOnboarding(deps = {}) {
 
   function paintTripTotal() {
     const boxes = [...document.querySelectorAll("[data-trip-pick]")].filter((box) => box instanceof HTMLInputElement);
+    const selected = boxes.filter((box) => box.checked).length;
     const total = boxes.reduce((sum, box) => sum + (box.checked ? Number(box.dataset.estimate) || 0 : 0), 0);
     const label = $("trip-add-total");
-    if (label) label.textContent = tripTotalLabel(Math.round(total * 100) / 100);
+    const status = tripAddStatus(Math.round(total * 100) / 100, selected);
+    if (label) label.textContent = status.label;
+    const add = $("learned-add-trip");
+    if (add) add.disabled = !status.canAdd;
   }
 
   function currentZipRaw() {
@@ -873,7 +911,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     node.dataset.state = card.status;
     const title = node.querySelector("h3");
-    if (title) title.textContent = foundLabel(card.name, card.found);
+    if (title) title.textContent = readCardTitle(card, foundLabel);
     let stage = node.querySelector(".read-stage");
     if (card.message) {
       if (!stage) {
@@ -1402,6 +1440,7 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.id === "learned-add-trip") {
+      if (target instanceof HTMLButtonElement && target.disabled) return;
       const picks = [...document.querySelectorAll("[data-trip-pick]")];
       const picked = (picks.length ? picks : [...document.querySelectorAll("[data-learned-trip]")])
         .filter((box) => box instanceof HTMLInputElement && box.checked)
@@ -1414,6 +1453,7 @@ export function mountProfileOnboarding(deps = {}) {
           return { ...line, quantity };
         })
         .filter(Boolean);
+      if (!picked.length) return;
       finish(Date.now());
       void Promise.resolve(deps.addLearnedLines?.(picked)).catch(() => {
         deps.toast?.("Couldn't add those items.");
@@ -1438,14 +1478,15 @@ export function mountProfileOnboarding(deps = {}) {
       if (!family || next.length < learnedRows.length - 1) return;
       learnedRows = next;
       if (editingFamily === family) editingFamily = "";
-      render();
+      rerenderLearned();
       return;
     }
     if (target.dataset.learnedChange) {
       editingFamily = editingFamily === target.dataset.learnedChange ? "" : target.dataset.learnedChange;
       const family = editingFamily;
-      render();
-      document.querySelector(".learned-picker")?.scrollIntoView({ block: "nearest" });
+      const stage = rerenderLearned();
+      const picker = stage?.querySelector(".learned-picker");
+      if (picker) revealInside(stage, picker);
       if (family) void loadBrandShelf(family);
       return;
     }
@@ -1460,7 +1501,7 @@ export function mountProfileOnboarding(deps = {}) {
           : [...current, brand].slice(0, 12);
         return { ...row, brands: nextBrands, brand: nextBrands[0] || "", mode: nextBrands.length ? "cheapestPicks" : row.mode };
       });
-      render();
+      rerenderLearned();
       return;
     }
     if (target.dataset.learnedMode) {
@@ -1478,7 +1519,7 @@ export function mountProfileOnboarding(deps = {}) {
       if (next === learnedRows) return;
       learnedRows = next;
       editingFamily = "";
-      render();
+      rerenderLearned();
       return;
     }
     if (target.dataset.lineRemove != null && target.dataset.lineRemove !== "") {

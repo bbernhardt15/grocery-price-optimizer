@@ -1,6 +1,6 @@
 /**
  * Adding a receipt is a choice, not a dump of every line at receipt quantity.
- * Usual groceries start selected. The quantity starts at one typical purchase.
+ * Nothing starts selected. The quantity starts at one typical purchase.
  */
 
 export function tripQuantityDefault(quantity) {
@@ -29,16 +29,13 @@ function lineTotal(line) {
  * @param {object[] | null | undefined} lines
  * @param {{ usualFamilies?: Iterable<string> }} [options]
  */
-export function buildTripAddList(lines, options = {}) {
-  const usual = new Set(options.usualFamilies || []);
+export function buildTripAddList(lines, _options = {}) {
   const rows = (lines || []).map((line, index) => {
     const receiptQty = Math.max(1, Math.floor(Number(line?.quantity) || 1));
     const quantity = tripQuantityDefault(receiptQty);
     const name = clean(line?.brand ? `${line.brand} ${line.name}` : line?.name) || "Item";
     const family = clean(line?.family);
     const category = clean(line?.label || line?.category) || "Groceries";
-    const hasFamily = Boolean(family);
-    const usualHit = hasFamily && (usual.size === 0 || usual.has(family));
     return {
       index,
       name,
@@ -47,15 +44,11 @@ export function buildTripAddList(lines, options = {}) {
       family,
       receiptQty,
       quantity,
-      selected: usual.size ? usualHit : true,
+      selected: false,
       estimate: Math.round(lineTotal(line) * (quantity / receiptQty) * 100) / 100,
     };
   });
-  const anyUsual = rows.some((row) => row.family);
-  if (anyUsual && usual.size === 0) {
-    return rows.map((row) => ({ ...row, selected: Boolean(row.family) }));
-  }
-  return rows;
+  return rows.map((row) => ({ ...row, selected: false }));
 }
 
 /** @param {Array<{ selected?: boolean, estimate?: number }>} rows */
@@ -64,12 +57,26 @@ export function tripAddTotal(rows) {
   return Math.round(total * 100) / 100;
 }
 
-export const TRIP_PRESELECT_NOTE = "We preselected what you buy most often.";
+export const EMPTY_TRIP_TOTAL = "Select items to add";
 
-/** @param {number} total */
-export function tripTotalLabel(total) {
-  const amount = Number(total) || 0;
-  return amount > 0 ? `About $${amount.toFixed(2)} selected` : "Select what to add";
+/**
+ * Nothing selected reads as an invitation, not a $0 total.
+ * @param {number} total
+ * @param {number | null | undefined} [selectedCount]
+ */
+export function tripAddStatus(total, selectedCount) {
+  const count =
+    selectedCount == null ? (Number(total) > 0 ? 1 : 0) : Math.max(0, Math.floor(Number(selectedCount) || 0));
+  if (count < 1) return { label: EMPTY_TRIP_TOTAL, canAdd: false };
+  const amount = Math.round((Number(total) || 0) * 100) / 100;
+  const label =
+    amount > 0 ? `About $${amount.toFixed(2)} selected` : count === 1 ? "1 item selected" : `${count} items selected`;
+  return { label, canAdd: true };
+}
+
+/** @param {number} total @param {number | null | undefined} [selectedCount] */
+export function tripTotalLabel(total, selectedCount) {
+  return tripAddStatus(total, selectedCount).label;
 }
 
 /**
@@ -109,6 +116,8 @@ export function tripAddHtml(lines, options = {}) {
     groups.get(row.category).push(row);
   }
   const total = tripAddTotal(rows);
+  const selectedCount = rows.filter((row) => row.selected).length;
+  const status = tripAddStatus(total, selectedCount);
   const body = [...groups.entries()]
     .map(([category, group]) => {
       const items = group
@@ -136,18 +145,16 @@ export function tripAddHtml(lines, options = {}) {
       return `<section class="trip-add-group"><h3>${escape(category)}</h3><ul>${items}</ul></section>`;
     })
     .join("");
-  const figure = tripTotalLabel(total);
   return `<div class="learned-trip trip-add">
     <div class="trip-add-tools">
-      <button type="button" class="ghost" data-trip-all="all">Select all</button>
+      <button type="button" class="ghost trip-select-all" data-trip-all="all">Select all</button>
       <button type="button" class="ghost" data-trip-all="none">Clear all</button>
     </div>
-    <p class="trip-add-note">${escape(TRIP_PRESELECT_NOTE)}</p>
-    <p class="trip-add-total" id="trip-add-total">${escape(figure)}</p>
+    <p class="trip-add-total" id="trip-add-total">${escape(status.label)}</p>
     ${body || `<p class="muted">Nothing to add from that.</p>`}
     <button type="button" class="trip-jump" id="trip-jump" aria-label="Jump to Add" hidden>↓</button>
     <div class="choice-stack" id="trip-add-end">
-      <button type="button" class="primary" id="learned-add-trip">Add these items to my trip</button>
+      <button type="button" class="primary" id="learned-add-trip"${status.canAdd ? "" : " disabled"}>Add these items to my trip</button>
       <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>
     </div>
   </div>`;

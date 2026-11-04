@@ -10,7 +10,7 @@ describe("three-step flow", () => {
   it("stays on add, plan, and shop", () => {
     assert.deepEqual(
       FLOW_STEPS.map((step) => step.label),
-      ["Add", "Review", "In-store"]
+      ["Build", "Review", "In-store"]
     );
     assert.equal(stepTitle("add"), "Add items");
     assert.equal(stepTitle("plan"), "Review the split");
@@ -87,9 +87,12 @@ describe("three-step flow", () => {
     assert.match(html, /id="bottom-dock"/);
     assert.match(html, /id="step-bar"/);
     assert.match(html, /id="shop-bar"/);
-    assert.match(html, /aria-label="Add items">Add</);
-    assert.match(html, /aria-label="Review the split">Review</);
-    assert.match(html, /aria-label="In the store">In-store</);
+    assert.match(html, /aria-label="Build"/);
+    assert.match(html, /aria-label="Review"/);
+    assert.match(html, /aria-label="In-store"/);
+    assert.match(html, />Build</);
+    assert.match(html, />Review</);
+    assert.match(html, />In-store</);
     assert.match(html, /Add items/);
     assert.match(html, /Review the split/);
     assert.match(html, /id="bar-primary"/);

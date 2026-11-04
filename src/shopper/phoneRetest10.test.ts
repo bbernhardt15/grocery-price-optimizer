@@ -162,7 +162,7 @@ describe("tenth phone test", () => {
     assert.equal(home.step, "add");
     assert.equal(home.reason, "user");
     assert.equal(homeProxyShouldShow(0), false);
-    assert.equal(homeProxyShouldShow(2), true);
+    assert.equal(homeProxyShouldShow(2), false);
     const button = { style: {} as Record<string, string> };
     assert.equal(placeHomeProxy(button, { top: 12.4, left: 20.2, width: 40, height: 40 }), true);
     assert.equal(button.style.top, "12px");
@@ -170,19 +170,17 @@ describe("tenth phone test", () => {
     let guard = settleTabBoot(createTabGuard());
     assert.equal(allowTabChange(guard, "user").allow, true);
     assert.match(html, /id="brand-home"/);
-    assert.match(html, /id="brand-home-proxy"/);
-    assert.match(html, /aria-label="Home"/);
+    assert.doesNotMatch(html, /id="brand-home-proxy"/);
+    assert.match(html, /Grocery Gitter home/);
     assert.match(sliceFn(app, "goHome", "syncHomeProxy"), /homeTransition/);
     assert.match(sliceFn(app, "goHome", "syncHomeProxy"), /dialog\[open\]/);
     assert.match(app, /\$\("brand-home"\)\?\.addEventListener\("click", \(\) => \{\s*goHome\(\);/);
-    assert.match(app, /\$\("brand-home-proxy"\)\?\.addEventListener\("click", \(\) => \{\s*goHome\(\);/);
-    assert.match(sliceFn(app, "syncHomeProxy", "bindBrandPress"), /sheet-home/);
+    assert.match(sliceFn(app, "syncHomeProxy", "bindBrandPress"), /data-sheet-home/);
     assert.match(sliceFn(app, "syncHomeProxy", "bindBrandPress"), /goHome\(\)/);
-    assert.match(css, /\.sheet-home:active/);
     assert.match(css, /\.brand-home\.is-pressed \.brand-mark/);
     assert.match(css, /\.brand-home:active \.brand-mark/);
     assert.match(css, /scale\(0\.94\)/);
-    assert.match(css, /\.brand-home-proxy:active/);
+    assert.match(css, /\.sheet-brand/);
   });
 
   it("a lost tab restores the same Kroger, Walmart, and coupon trip once without a scroll jump", () => {

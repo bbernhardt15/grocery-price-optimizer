@@ -23,21 +23,72 @@ export function openHandoffSheet(dialog, io = {}) {
   return true;
 }
 
-/** Clear a document scroll lock left by a modal. Does not hide overflow. */
-export function releaseDocumentScroll(doc) {
+const LOCK_PROPS = ["overflow", "overflowY", "overflowX", "position", "top", "left", "right", "width", "height", "touchAction"];
+
+function clearLockStyles(node) {
+  if (!node?.style) return;
+  for (const prop of LOCK_PROPS) node.style[prop] = "";
+  if ("pointerEvents" in node.style) node.style.pointerEvents = "";
+}
+
+/**
+ * Clear a document scroll lock left by a modal sheet.
+ * A fixed body with a negative top is the scroll offset to restore.
+ * @param {Document | { body?: any, documentElement?: any, defaultView?: any, scrollingElement?: any, querySelector?: (selector: string) => any } | null | undefined} doc
+ */
+export function releaseScrollLock(doc) {
   const body = doc?.body;
   const root = doc?.documentElement;
-  if (body?.style) {
-    body.style.overflow = "";
-    body.style.position = "";
-    body.style.top = "";
-    body.style.width = "";
+  if (!body?.style || !root?.style) return { released: false, y: 0 };
+  let y = 0;
+  if (body.style.position === "fixed") {
+    const top = parseInt(body.style.top || "0", 10);
+    if (Number.isFinite(top)) y = Math.abs(top);
+  } else if (doc.defaultView && Number.isFinite(doc.defaultView.scrollY)) {
+    y = Math.max(0, doc.defaultView.scrollY);
+  } else if (Number.isFinite(root.scrollTop)) {
+    y = Math.max(0, root.scrollTop);
   }
-  if (root?.style) {
-    root.style.overflow = "";
-    root.style.position = "";
+  clearLockStyles(body);
+  clearLockStyles(root);
+  body.classList?.remove?.("modal-open", "scroll-lock");
+  root.classList?.remove?.("modal-open", "scroll-lock");
+  if ("inert" in body) body.inert = false;
+  doc.querySelector?.(".shell")?.removeAttribute?.("inert");
+  const view = doc.defaultView;
+  if (view && typeof view.scrollTo === "function") view.scrollTo(0, y);
+  const scroller = doc.scrollingElement || root;
+  if (scroller && typeof scroller.scrollTop === "number") {
+    const next = Math.max(0, y);
+    scroller.scrollTop = next + 1;
+    scroller.scrollTop = next;
   }
+  return { released: true, y };
+}
+
+/** Clear a document scroll lock left by a modal. Does not hide overflow. */
+export function releaseDocumentScroll(doc) {
+  releaseScrollLock(doc);
   return true;
+}
+
+/**
+ * Sheets scroll inside themselves. Releasing while one is still open
+ * would fight the next sheet. Pull-to-refresh stays off while a sheet is up.
+ * @param {Document | { querySelector?: (selector: string) => unknown } | null | undefined} doc
+ */
+export function releaseAfterLastSheet(doc) {
+  if (doc?.querySelector?.("dialog[open]")) return { released: false, y: 0, reason: "open" };
+  const result = releaseScrollLock(doc);
+  return { ...result, reason: result.released ? "released" : "missing" };
+}
+
+/**
+ * @param {{ sheetOpen?: boolean, scrollY?: number }} [input]
+ */
+export function pullAllowed(input = {}) {
+  if (input.sheetOpen) return false;
+  return !((Number(input.scrollY) || 0) > 8);
 }
 
 /**

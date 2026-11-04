@@ -1,9 +1,9 @@
 /**
- * My list rows. An empty image used to paint a square outline beside the
+ * Shopping list rows. An empty image used to paint a square outline beside the
  * real checkbox. No picture means no box.
  */
 
-export const LIST_ALERT_BENEFIT = "We'll notify you when something on your list gets cheaper.";
+export { PUSH_ALERT_COPY as LIST_ALERT_BENEFIT } from "./alertDelivery.js";
 
 /** @param {string | null | undefined} url @param {(value: string) => string} escape */
 export function listThumbHtml(url, escape) {

@@ -384,10 +384,12 @@ describe("Kroger cart handoff routes", () => {
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /Your cart is ready/);
-    assert.match(html, /Finish checkout in the Kroger app or site/);
-    assert.match(html, /Back to Grocery Gitter/);
+    assert.match(html, /After you check out at Kroger, switch back to this Grocery Gitter tab and tap Finished/);
+    assert.match(html, /Back to my trip/);
+    assert.match(html, /I checked out/);
+    assert.match(html, /Show 1 item/);
+    assert.match(html, /Open Kroger cart/);
     assert.match(html, /1 of 1 items sent/);
-    assert.match(html, /Added/);
     assert.match(html, /Whole Milk|Milk/);
     assert.doesNotMatch(html, /location\.replace/);
     assert.match(html, /kroger\.com\/cart/);

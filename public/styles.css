@@ -1969,41 +1969,14 @@ dialog.handoff-sheet[open] .sheet-body {
   transform: scale(0.94);
   filter: brightness(0.9);
 }
-.brand-home-proxy {
-  display: none;
-  position: fixed;
-  z-index: 2147483000;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 14px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.3rem;
-  place-items: center;
-}
-.brand-home-proxy:popover-open { display: grid; }
-.brand-home-proxy.is-pressed,
-.brand-home-proxy:active,
-.sheet-home.is-pressed,
-.sheet-home:active {
-  transform: scale(0.94);
-  filter: brightness(0.9);
-}
+.brand-home-proxy,
 .sheet-home {
-  position: fixed;
-  z-index: 80;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 14px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.3rem;
-  display: grid;
-  place-items: center;
+  display: none !important;
+  position: static;
+}
+.sheet-brand {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }

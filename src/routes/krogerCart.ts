@@ -27,6 +27,7 @@ import {
 } from "../krogerCartAuth";
 import { krogerSearchUrl } from "../storeHandoff";
 import { blockUnlessFeature } from "../billing/middleware";
+import { cartReadyPageBody, KROGER_BLUE } from "../krogerCartReady";
 
 const router = Router();
 const PRODUCT_NAME = "Grocery Gitter";
@@ -48,6 +49,9 @@ function htmlPage(title: string, body: string, returnPath = "/", navigate = true
       body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 40rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; color: #171717; }
       a { color: #047857; }
       a.ready-back { display: inline-block; margin-top: 0.5rem; background: #047857; color: #fff; text-decoration: none; font-weight: 700; padding: 0.85rem 1.1rem; border-radius: 999px; }
+      a.kroger-cart-btn { display: block; text-align: center; margin-top: 0.75rem; background: ${KROGER_BLUE}; color: #fff; text-decoration: none; font-weight: 750; padding: 0.95rem 1.1rem; border-radius: 999px; }
+      a.ready-secondary, a.ready-checked { display: inline-block; margin-top: 0.35rem; color: #171717; font-weight: 700; }
+      details.cart-sent summary { min-height: 44px; font-weight: 750; cursor: pointer; }
       .status { padding: 0.85rem 1rem; border-radius: 10px; background: #ecfdf5; }
       .error { background: #fef3f2; color: #b42318; }
       ul { padding-left: 1.2rem; }
@@ -152,7 +156,8 @@ const RETURN_MESSAGE_MAX = 240;
 function shopperReturnPath(
   kind: "added" | "error" | "connected",
   message: string,
-  step?: "plan" | "shop"
+  step?: "plan" | "shop",
+  checkedOut = false
 ): string {
   const clean = message
     .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -161,6 +166,7 @@ function shopperReturnPath(
     .slice(0, RETURN_MESSAGE_MAX);
   const params = new URLSearchParams({ kroger: kind, message: clean });
   if (step) params.set("step", step);
+  if (checkedOut) params.set("checkedOut", "1");
   return `/?${params.toString()}`;
 }
 
@@ -273,14 +279,6 @@ function cartSummaryFor(
   const skipped = pending?.skipped || [];
   const total = pending?.requested ?? lines.length + skipped.length;
   return { summary: krogerCartSummary(lines.length, total, skipped), skipped };
-}
-
-function addedListHtml(lines: KrogerCartLine[], skipped: string[]): string {
-  const added = lines
-    .map((item) => `<li>${escapeHtml(item.name || item.upc)}</li>`)
-    .join("");
-  const missed = skipped.map((name) => `<li>${escapeHtml(name)}</li>`).join("");
-  return `${added ? `<p>Added</p><ul>${added}</ul>` : ""}${missed ? `<p>Couldn't be matched</p><ul>${missed}</ul>` : ""}`;
 }
 
 function savePendingCart(
@@ -647,13 +645,18 @@ router.get("/kroger/oauth/callback", async (req: Request, res: Response) => {
 
   const { summary, skipped: skippedNames } = cartSummaryFor(pending.items, pending);
   const back = shopperReturnPath("added", summary, "shop");
+  const checkedOut = shopperReturnPath("added", summary, "shop", true);
   res.send(
     htmlPage(
       "Your cart is ready",
-      `<p class="status">${escapeHtml(summary)}. Finish checkout in the Kroger app or site.</p>
-       ${addedListHtml(pending.items, skippedNames)}
-       <p><a class="ready-back" href="${escapeHtml(back)}">Back to ${PRODUCT_NAME}</a></p>
-       <p><a href="${KROGER_CART_PAGE}" rel="noopener">Open Kroger cart</a></p>`,
+      cartReadyPageBody({
+        summary,
+        items: pending.items,
+        skipped: skippedNames,
+        backHref: back,
+        checkedOutHref: checkedOut,
+        cartHref: KROGER_CART_PAGE,
+      }),
       back,
       false
     )

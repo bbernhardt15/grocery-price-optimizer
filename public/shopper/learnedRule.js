@@ -38,5 +38,5 @@ export function learnedRulePillHtml(row) {
   const brandHtml = brands.length
     ? `<span class="rule-pill-brands">${escapeText(brands.join(", "))}</span>`
     : "";
-  return `<p class="rule-pill" data-rule="${escapeText(row?.mode || "brand")}"><span class="rule-pill-check" aria-hidden="true">✓</span> <span>${escapeText(label)}</span>${brandHtml}</p>`;
+  return `<p class="rule-pill" data-rule="${escapeText(row?.mode || "brand")}"><span class="rule-pill-check" aria-hidden="true">✓</span><span class="rule-pill-label">${escapeText(label)}</span>${brandHtml}</p>`;
 }

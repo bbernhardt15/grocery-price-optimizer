@@ -9,7 +9,7 @@ import { milesBetween, pointForZip } from "../../public/shopper/nearbyStores.js"
 import { READ_BEAT_MS, readBeatHeadline, readBeatHtml } from "../../public/shopper/receiptBeat.js";
 import { learnedSummaryHtml, receiptUploadHtml } from "../../public/shopper/receiptCopy.js";
 import { knownStoreNames } from "../../public/shopper/tripPlan.js";
-import { buildTripAddList, jumpHidden, TRIP_PRESELECT_NOTE, tripAddHtml } from "../../public/shopper/tripAdd.js";
+import { buildTripAddList, EMPTY_TRIP_TOTAL, jumpHidden, tripAddHtml } from "../../public/shopper/tripAdd.js";
 import { fieldZip, ZIP_PLACEHOLDER } from "../../public/shopper/zipField.js";
 import { nearbyZipChoices, NEARBY_ZIP_MILES } from "../../public/shopper/zipNearby.js";
 import { suggestZipChoices } from "../../public/shopper/zipSuggest.js";
@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v38", () => {
-    assert.match(sw, /grocery-gitter-shell-v38/);
+  it("bumps the shell cache to v39", () => {
+    assert.match(sw, /grocery-gitter-shell-v39/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
@@ -170,12 +170,12 @@ describe("tenth phone test onboarding", () => {
   });
 
   it("explains the add-to-trip list and can jump to the end", () => {
-    assert.equal(TRIP_PRESELECT_NOTE, "We preselected what you buy most often.");
+    assert.equal(EMPTY_TRIP_TOTAL, "Select items to add");
     const rows = buildTripAddList([
       { name: "Milk", brand: "Kroger", quantity: 1, price: 4, family: "milk", label: "Dairy" },
       { name: "Mystery", quantity: 2, price: 3, family: "" },
     ]);
-    assert.equal(rows[0].selected, true);
+    assert.equal(rows[0].selected, false);
     assert.equal(rows[1].selected, false);
     const markup = tripAddHtml([
       { name: "Milk", quantity: 1, price: 4, family: "milk", label: "Dairy" },
@@ -183,7 +183,9 @@ describe("tenth phone test onboarding", () => {
     ]);
     assert.match(markup, /Select all/);
     assert.match(markup, /Clear all/);
-    assert.match(markup, /We preselected what you buy most often/);
+    assert.match(markup, /Select items to add/);
+    assert.doesNotMatch(markup, /We preselected what you buy most often/);
+    assert.match(markup, /id="learned-add-trip"[^>]*disabled/);
     assert.match(markup, /id="trip-add-total"/);
     assert.match(markup, /class="trip-add-total"/);
     assert.match(markup, /id="trip-jump"/);
@@ -205,8 +207,9 @@ describe("tenth phone test onboarding", () => {
     assert.match(listThumbHtml("https://cdn.example/milk.jpg", escape), /src="https:\/\/cdn\.example\/milk\.jpg"/);
     assert.equal(listAlertStateLabel(false), "Off");
     assert.equal(listAlertStateLabel(true), "On");
-    assert.equal(LIST_ALERT_BENEFIT, "We'll notify you when something on your list gets cheaper.");
-    assert.match(html, /We'll notify you when something on your list gets cheaper\./);
+    assert.equal(LIST_ALERT_BENEFIT, "We'll send a push notification.");
+    assert.match(html, /Coming soon/);
+    assert.match(html, /does not email price alerts/);
     assert.match(html, /id="list-alerts-benefit"/);
     assert.match(html, /class="alert-state" data-off>Off/);
     assert.match(html, /class="alert-state" data-on>On/);
