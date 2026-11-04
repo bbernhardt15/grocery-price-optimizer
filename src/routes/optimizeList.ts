@@ -220,6 +220,26 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   try {
     const { groceryList, stores, zipCode } = parsed;
 
+    const stream = String(req.headers.accept || "").toLowerCase().includes("application/x-ndjson");
+    if (stream) {
+      res.status(200);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.flushHeaders?.();
+    }
+    const writeEvent = (value: unknown) => {
+      if (stream) res.write(`${JSON.stringify(value)}\n`);
+    };
+    const namedStores = stores.length ? stores : ["Kroger", "Walmart"];
+    writeEvent({
+      type: "progress",
+      storeName: namedStores[0],
+      pendingStores: namedStores,
+      checked: 0,
+      total: groceryList.length,
+      estimateSeconds: Math.max(1, Math.min(9, Math.ceil(groceryList.length / 4))),
+    });
+
     let locationId: string | undefined;
     let storeNote = "";
     const walmartStorePromise = withDeadline(lookupWalmartStore(zipCode, stores), STORE_LOOKUP_MS, undefined);
@@ -240,17 +260,23 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       catalogIds: parsed.selections?.map((item) => item.catalogId),
     });
 
-    const stream = String(req.headers.accept || "").toLowerCase().includes("application/x-ndjson");
-    if (stream) {
-      res.status(200);
-      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-      res.setHeader("Cache-Control", "no-store");
-      res.flushHeaders?.();
-    }
-    const writeEvent = (value: unknown) => {
-      if (stream) res.write(`${JSON.stringify(value)}\n`);
-    };
     const access = await accessFor(res);
+    const publishPartial = (products: Parameters<typeof optimizeGroceryList>[2], pendingStores: string[]) => {
+      if (!products.length) return;
+      const grouped = enrichOptimizeResult(
+        optimizeGroceryList(groceryList, stores, products, access.limits.multiStore ? "split" : "single"),
+        { krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(), pricingByStore: [] }
+      );
+      writeEvent({
+        type: "partial",
+        result: {
+          ...grouped,
+          partial: true,
+          pendingStores,
+          ...(zipCode ? { zipCode, locationId } : {}),
+        },
+      });
+    };
     const productsResult = await resolveCatalogProducts(groceryList, stores, locationId, zipCode, {
       onStore: (info) => {
         writeEvent({
@@ -258,7 +284,10 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
           storeName: info.storeName,
           ms: info.ms,
           pendingStores: info.pendingStores,
+          checked: groceryList.length,
+          total: groceryList.length,
         });
+        publishPartial(info.products, info.pendingStores);
       },
       onProgress: (info) => {
         writeEvent({
@@ -270,20 +299,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
         });
       },
       onSnapshot: (info) => {
-        if (!info.products.length) return;
-        const grouped = enrichOptimizeResult(
-          optimizeGroceryList(groceryList, stores, info.products, access.limits.multiStore ? "split" : "single"),
-          { krogerCartOAuthConfigured: isKrogerCartOAuthConfigured(), pricingByStore: [] }
-        );
-        writeEvent({
-          type: "partial",
-          result: {
-            ...grouped,
-            partial: true,
-            pendingStores: info.pendingStores,
-            ...(zipCode ? { zipCode, locationId } : {}),
-          },
-        });
+        publishPartial(info.products, info.pendingStores);
       },
       ...(upcByName.size ? { upcByName } : {}),
     });
