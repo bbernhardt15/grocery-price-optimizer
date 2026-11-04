@@ -27,6 +27,7 @@ import { upsertCatalogRecords } from "./ingest/upsert";
 import { rawFromCatalogProduct } from "./catalog/providers/fromCatalogProduct";
 import { shouldStreamReview } from "./pricing/reviewStream";
 import { findFreshUpcPrices } from "./pricing/freshCatalogPrice";
+import { createLookupBudget, runPricedLookup, stableLineKey } from "./pricing/lookupBudget";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -44,17 +45,6 @@ export type ResolvedCatalog = {
 const PRICE_BUDGET_MS = 9_000;
 /** Kroger's public Products API accepts one product id per call, so the pool is the batch. Capped to avoid 429s. */
 const PRICE_POOL = 8;
-
-async function withRateLimitRetry<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/\b429\b|too many requests/i.test(message)) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    return run();
-  }
-}
 
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
 
@@ -318,13 +308,14 @@ export async function resolveCatalogProducts(
   const storeMs = new Map<string, number>();
   const storeLeft = new Map<string, number>();
   const requestCache = new Map<string, CatalogProduct[]>();
+  const budget = createLookupBudget(Date.now(), { deadlineMs: PRICE_BUDGET_MS });
   for (const storeName of competing) storeLeft.set(storeName, lines.length);
-  const jobs: Array<() => Promise<void>> = [];
+  const jobs: Array<{ storeName: string; lineName: string; run: () => Promise<void> }> = [];
   // One store's lines run before the next so the first store can stream
   // while the others are still in the 9-second budget.
   for (const storeName of competing) {
     for (const line of lines) {
-      jobs.push(async () => {
+      jobs.push({ storeName, lineName: line.name, run: async () => {
       const started = Date.now();
       let source = "miss";
       try {
@@ -375,7 +366,7 @@ export async function resolveCatalogProducts(
         }
       }
 
-      const requestKey = `${storeName.trim().toLowerCase()}|${zip || ""}|${upc}|${line.name.trim().toLowerCase()}`;
+      const requestKey = `${storeName.trim().toLowerCase()}|${zip || ""}|${upc}|${stableLineKey(line.name)}`;
       const remembered = requestCache.get(requestKey);
       if (remembered?.length) {
         add(remembered, line.name, remembered[0]?.priceSource === "weekly_ad" ? "weekly_ad" : "cached_live");
@@ -388,8 +379,10 @@ export async function resolveCatalogProducts(
       if (dedicated?.isConfigured()) {
         acc.configured = true;
         acc.attempted = true;
-        try {
-          const live = await withRateLimitRetry(() =>
+        const outcome = await runPricedLookup({
+          budget,
+          storeName,
+          run: () =>
             searchWithProvider(
               dedicated,
               storeName,
@@ -397,34 +390,40 @@ export async function resolveCatalogProducts(
               zipCode,
               locationId,
               hooks?.upcByName?.get(line.name.toLowerCase())
-            )
-          );
-          if (live.length > 0) {
-            requestCache.set(requestKey, live);
-            const saved = await upsertLiveProducts(live);
-            add(saved, line.name, "live");
-            acc.liveHits += 1;
-            acc.fetchedAt = new Date();
-            source = "live";
-            if (ingestConfig().dbFirst && (storeName.trim().toLowerCase() === "walmart" || storeName.trim().toLowerCase() === "kroger")) {
-              const records = live
-                .map((product) => rawFromCatalogProduct(product, "live"))
-                .filter((record): record is NonNullable<typeof record> => record !== null);
-              await upsertCatalogRecords(records).catch((error: unknown) => {
-                console.warn(`Catalog write-back failed: ${error instanceof Error ? error.message : String(error)}`);
-              });
-            }
-            return;
+            ),
+        });
+        if (outcome.status === "ok") {
+          const live = outcome.products;
+          requestCache.set(requestKey, live);
+          const saved = await upsertLiveProducts(live);
+          add(saved, line.name, "live");
+          acc.liveHits += 1;
+          acc.fetchedAt = new Date();
+          source = "live";
+          if (ingestConfig().dbFirst && (storeName.trim().toLowerCase() === "walmart" || storeName.trim().toLowerCase() === "kroger")) {
+            const records = live
+              .map((product) => rawFromCatalogProduct(product, "live"))
+              .filter((record): record is NonNullable<typeof record> => record !== null);
+            await upsertCatalogRecords(records).catch((error: unknown) => {
+              console.warn(`Catalog write-back failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
           }
-        } catch (error) {
-          dedicatedError = errorMessage(error);
-          if (perItemProviderFailure(error)) {
+          return;
+        }
+        if (outcome.status === "failed" || outcome.status === "budget") {
+          const transient = outcome.status === "budget" || outcome.kind === "timeout" || outcome.kind === "rate_limit";
+          if (outcome.status === "failed" && perItemProviderFailure(outcome.error)) {
             acc.unpricedItems.push(line.name);
-            dedicatedError = undefined;
+          } else if (transient) {
+            acc.check = outcome.status === "budget" ? "timeout" : outcome.kind;
+            acc.uncheckedItems.push(line.name);
+            if (outcome.status === "failed" && outcome.message) {
+              console.warn(`Live ${storeName} pricing failed for "${line.name}": ${outcome.message}`);
+            }
+          } else if (outcome.status === "failed") {
+            dedicatedError = outcome.message;
+            console.warn(`Live ${storeName} pricing failed for "${line.name}": ${outcome.message}`);
           }
-          console.warn(
-            `Live ${storeName} pricing failed for "${line.name}": ${errorMessage(error)}`
-          );
         }
       } else if (dedicated) {
         const isKroger = storeName.trim().toLowerCase() === "kroger";
@@ -558,29 +557,32 @@ export async function resolveCatalogProducts(
           });
         }
       }
+      },
       });
     }
   }
 
-  const deadline = Date.now() + PRICE_BUDGET_MS;
   let cursor = 0;
   const pendingStores: string[] = [];
+  function noteSkipped(storeName: string, lineName: string): void {
+    const acc = accFor(storeName);
+    if (!acc.check) acc.check = "timeout";
+    acc.uncheckedItems.push(lineName);
+    if (!pendingStores.includes(storeName)) pendingStores.push(storeName);
+  }
   async function priceWorker(): Promise<void> {
     while (cursor < jobs.length) {
-      if (Date.now() >= deadline) return;
+      if (Date.now() >= budget.deadlineAt) return;
       const job = jobs[cursor];
       cursor += 1;
-      await job();
+      await job.run();
     }
   }
   await Promise.all(Array.from({ length: Math.min(PRICE_POOL, Math.max(jobs.length, 1)) }, () => priceWorker()));
   if (cursor < jobs.length) {
-    const skipped = new Set<string>();
     for (let index = cursor; index < jobs.length; index += 1) {
-      const storeName = competing[index % competing.length];
-      if (storeName) skipped.add(storeName);
+      noteSkipped(jobs[index].storeName, jobs[index].lineName);
     }
-    pendingStores.push(...skipped);
     console.info(`price partial pending ${pendingStores.join(", ") || "stores"}`);
   }
 

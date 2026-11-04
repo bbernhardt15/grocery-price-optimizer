@@ -163,11 +163,27 @@ import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swap
 import { dedupeTripStores, inStoreSendHtml } from "./shopper/tripLines.js";
 import { armHandoff, createReturnWatch, dismissReturnChoice, returnPromptDecision } from "./shopper/returnPrompt.js";
 import { allowTabChange, armClickShield, clickShielded, createTabGuard, noteTabInteraction, settleTabBoot } from "./shopper/tabGuard.js";
-import { bootTab, handoffTripRecord, readHandoffTrip, richerTrip, writeHandoffTrip, writeTripKeepingItems } from "./shopper/handoffRestore.js";
+import { bootTab, HANDOFF_TRIP_KEY, handoffTripRecord, readHandoffTrip, richerTrip, writeHandoffTrip, writeTripKeepingItems } from "./shopper/handoffRestore.js";
 import { openHandoffSheet, releaseDocumentScroll, scrollRestoreOffset } from "./shopper/sheetScroll.js";
 import { homeProxyShouldShow, homeTransition, placeHomeProxy } from "./shopper/homeButton.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
+import {
+  adoptReviewResult,
+  clearPlanCache,
+  coverageNotesFor,
+  genuineUnfound,
+  planIsComplete,
+  pricesUpdatedLabel,
+  readPlanCache,
+  shouldReusePlan,
+  writePlanCache,
+} from "./shopper/planCache.js";
+import { savingsNudge, savingsNudgeHtml } from "./shopper/savingsNudge.js";
+import { notInCartSection, toFindRecords, unfoundCopyText, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
+import { CLEAR_TRIP_EVENT, COMPLETE_TRIP_EVENT, FINISH_TRIP_UNDO_MS } from "./shopper/tripActions.js";
+import { clearCompletedTrip, readCompletedAt, restoreWouldResurrect, writeCompletedTrip } from "./shopper/tripCompletion.js";
+import { mergeSavedStores, setShowAdStores, visibleStoreNames } from "./shopper/storeScope.js";
 import { callbackCanClose, emptyMustNotReplace, handoffResultMessage, readTripDb, returnScreenCopy, TRIP_CHANNEL, writeTripDb } from "./shopper/tripSync.js";
 import {
   chromeFixIsApproximate,
@@ -924,6 +940,95 @@ function openClearTrip() {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+function finishCurrentTrip() {
+  const view = currentTrip();
+  if (!view?.stores?.length) {
+    toast("Nothing to finish.");
+    return;
+  }
+  const lines = view.stores.flatMap((store) => store.items || []);
+  const comparison = singleStoreSavings(lines);
+  const profile = getUserProfile(localStorage);
+  const usualStore = profile.savings?.usualStore || profile.shopStores?.[0] || comparison.singleStore?.storeName || "";
+  const saved = Math.max(0, Number(comparison.savings) || 0);
+  const fingerprint = tripFingerprint(view.stores);
+  const seenKey = "gg-savings-fingerprint";
+  if (saved > 0 && localStorage.getItem(seenKey) !== fingerprint) {
+    const next = addLifetimeSavings(profile, saved);
+    saveUserProfile(localStorage, { ...profile, savings: { ...next, usualStore: usualStore || next.usualStore } });
+    localStorage.setItem(seenKey, fingerprint);
+    scheduleAccountSync();
+  }
+  const receipt = tripReceipt({
+    id: fingerprint || `trip-${Date.now()}`,
+    at: Date.now(),
+    stores: view.stores,
+    total: view.total,
+    savedCents: Math.round(saved * 100),
+  });
+  savePastTrip(localStorage, receipt);
+  scheduleAccountSync();
+  paintPastTrips();
+  betaEvent("trip_completed");
+  const snapshot = {
+    entries: [...list.entries()],
+    plan: lastOptimize,
+    edits: { ...tripEdits, moves: { ...(tripEdits.moves || {}) } },
+    step: flowStep,
+    signature: listSignature(),
+    zip: normalizeZip(zipEl?.value || ""),
+  };
+  const at = writeCompletedTrip(localStorage, Date.now());
+  explicitClear = true;
+  list.clear();
+  lastOptimize = null;
+  clearPlanCache(localStorage);
+  clearTripSnapshot(localStorage);
+  try {
+    localStorage.removeItem(HANDOFF_TRIP_KEY);
+  } catch {
+    /* private browsing */
+  }
+  saveList();
+  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
+  void writeTripDb(factory, { items: [], plan: null, step: "add", savedAt: at, completedAt: at });
+  renderEstimate();
+  paintTrip();
+  renderShop();
+  showStep("add", "user");
+  toastAction("Trip saved to Past trips.", "Undo", () => {
+    clearCompletedTrip(localStorage);
+    for (const [id, entry] of snapshot.entries) {
+      list.set(id, entry);
+    }
+    lastOptimize = snapshot.plan;
+    tripEdits = snapshot.edits;
+    explicitClear = false;
+    saveList();
+    if (snapshot.plan && planIsComplete(snapshot.plan)) {
+      writePlanCache(localStorage, {
+        signature: snapshot.signature,
+        zip: snapshot.zip,
+        payload: snapshot.plan,
+        savedAt: snapshot.plan.pricedAt || Date.now(),
+      });
+    }
+    void writeTripDb(factory, {
+      items: snapshot.entries.map(([, entry]) => ({
+        id: entry.product?.id,
+        itemId: entry.itemId || entry.product?.id,
+        name: entry.product?.familyName || entry.product?.name,
+        quantity: entry.quantity,
+      })),
+      plan: snapshot.plan,
+      step: snapshot.step === "shop" ? "shop" : "plan",
+      savedAt: Date.now(),
+    });
+    showStep(snapshot.step === "shop" ? "shop" : "plan", "user");
+    toast("Trip restored.");
+  }, FINISH_TRIP_UNDO_MS);
+}
+
 function clearTripItems() {
   explicitClear = true;
   undoTrip = [...list.entries()];
@@ -934,6 +1039,8 @@ function clearTripItems() {
   }
   saveList();
   lastOptimize = null;
+  clearPlanCache(localStorage);
+  clearTripSnapshot(localStorage);
   renderEstimate();
   if (flowStep === "plan") paintTrip();
   if (flowStep === "shop") renderShop();
@@ -2038,6 +2145,7 @@ function addProduct(product, quantity = 1, options = {}) {
     toast("This list is view-only.");
     return;
   }
+  if (readCompletedAt(localStorage)) clearCompletedTrip(localStorage);
   const existing = list.get(product.id) || findListEntry(product.id);
   const next = Math.min(99, (existing?.quantity ?? 0) + quantity);
   const entry = {
@@ -2838,11 +2946,13 @@ function emptyCheckedStoreHtml(stores) {
 
 function selectedStoreNames() {
   const nearby = nearbyStoreChoice();
-  const universe = nearby.stores.length ? nearby.stores : planningStoreNames();
+  const raw = nearby.stores.length ? nearby.stores : planningStoreNames();
+  const universe = visibleStoreNames(raw);
+  const fallback = universe.length ? universe : ["Kroger", "Walmart"];
   const picked = getUserProfile(localStorage).shopStores;
-  if (!Array.isArray(picked) || !picked.length) return universe;
-  const next = picked.filter((name) => universe.includes(name));
-  return next.length ? next : universe;
+  if (!Array.isArray(picked) || !picked.length) return fallback;
+  const next = visibleStoreNames(picked).filter((name) => fallback.includes(name));
+  return next.length ? next : fallback;
 }
 
 function narrowStores(stores) {
@@ -2893,6 +3003,7 @@ function onListChanged() {
     lastOptimize = null;
     plannedSignature = "";
     clearTripSnapshot(localStorage);
+    clearPlanCache(localStorage);
     window.clearTimeout(replanTimer);
     refreshPlanSurfaces();
     return;
@@ -2910,7 +3021,14 @@ function reviewState() {
   const spread = spreadTrip();
   if (!spread) return null;
   const plans = buildReviewPlans(spread.stores);
-  const mode = tripEdits.planMode === "custom" ? "custom" : tripEdits.planMode === "fewer" && plans.fewer ? "fewer" : "spread";
+  const mode =
+    tripEdits.planMode === "custom"
+      ? "custom"
+      : tripEdits.planMode === "single" && plans.single
+        ? "single"
+        : tripEdits.planMode === "fewer" && plans.fewer
+          ? "fewer"
+          : "spread";
   return { spread, plans, mode };
 }
 
@@ -2923,6 +3041,11 @@ function currentTrip() {
   const state = reviewState();
   if (!state) return null;
   if (state.mode === "custom") return state.spread;
+  if (state.mode === "single" && state.plans.single?.stores?.length) {
+    const stores = presentPlan(state.plans.single.stores);
+    const total = Math.round(stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
+    return { ...state.spread, stores, total, stale: stores.length === 0 };
+  }
   const chosen = state.mode === "fewer" && state.plans.fewer ? state.plans.fewer : state.plans.best;
   if (!chosen?.stores?.length) return state.spread;
   const stores = presentPlan(chosen.stores);
@@ -3210,8 +3333,14 @@ function addOwnCoupon(button) {
 
 function renderTrip(payload, options = {}) {
   const names = listEntries().map((entry) => entry.name);
-  const stores = dedupeStores(mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, payload?.unavailable));
-  lastOptimize = { ...payload, stores: stores.length ? stores : payload?.stores || [] };
+  const unavailable = genuineUnfound(payload?.unavailable, payload?.pricingByStore);
+  const stores = dedupeStores(mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, unavailable));
+  lastOptimize = {
+    ...payload,
+    unavailable,
+    toFindInStore: toFindRecords(unavailable),
+    stores: stores.length ? stores : payload?.stores || [],
+  };
   if (lastOptimize.stores?.length) {
     lastOptimize.total = Math.round(lastOptimize.stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
   }
@@ -3446,10 +3575,11 @@ function paintPlanningStatus() {
 }
 
 function selectReviewMode(mode) {
-  const next = mode === "fewer" ? "fewer" : "spread";
+  const next = mode === "single" ? "single" : mode === "fewer" ? "fewer" : "spread";
   const state = reviewState();
   if (next === "fewer" && !state?.plans?.fewer) return;
-  tripEdits = { ...tripEdits, planMode: next, planChosen: true };
+  if (next === "single" && !state?.plans?.single?.stores?.length) return;
+  tripEdits = { ...tripEdits, planMode: next, planChosen: true, keepSplit: next === "single" ? false : tripEdits.keepSplit };
   rememberTrip();
   const shell = tripEl?.querySelector("[data-review-shell]");
   if (!shell || !state || shell.getAttribute("data-signature") !== state.plans.signature) {
@@ -3534,15 +3664,30 @@ function paintTrip() {
       </section>`;
   const panel = (name, stores, hidden) =>
     `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}</div></div>`;
-  const coverage = (plans?.coverageNotes || []).map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
+  const noteSets = coverageNotesFor(plans, lastOptimize?.pricingByStore);
+  const coverage = [...noteSets.unchecked, ...noteSets.missing].map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
   const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
-  const missing = missingAccordionHtml(lastOptimize?.unavailable || []);
+  const nudge = mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
+  const missingNames = lastOptimize?.unavailable || [];
+  const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
   const progress = planning ? planStatusNow() : "";
-  const shown = mode === "custom" ? customStores : mode === "fewer" ? fewerStores : bestStores;
+  const singleStores = plans?.single ? presentPlan(plans.single.stores) : [];
+  const shown = mode === "custom" ? customStores : mode === "single" ? singleStores : mode === "fewer" ? fewerStores : bestStores;
+  const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
+  const age = pricesUpdatedLabel(pricedAt, Date.now());
+  const reviewHead = `<div class="review-head">
+      ${age ? `<p class="prices-age">${escapeHtml(age)}</p>` : ""}
+      <div class="review-head-actions">
+        <button type="button" class="text-btn" id="plan-refresh">Refresh</button>
+        <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button>
+        <button type="button" class="text-btn" id="clear-trip-open">Clear trip</button>
+      </div>
+    </div>`;
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
     <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}">
+    ${reviewHead}
     <section class="savings-card">
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
@@ -3553,9 +3698,11 @@ function paintTrip() {
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${choiceHtml}
     ${savingsLine}
+    ${nudge ? savingsNudgeHtml(nudge, escapeHtml) : ""}
     ${coverage}
     ${panel("spread", bestStores, mode !== "spread")}
     ${showFewer ? panel("fewer", fewerStores, mode !== "fewer") : ""}
+    ${mode === "single" ? panel("single", singleStores, false) : ""}
     ${mode === "custom" ? panel("custom", customStores, false) : ""}
     ${emptyCheckedStoreHtml(shown)}
     ${missing}
@@ -3565,11 +3712,20 @@ function paintTrip() {
     ${lastOptimize?.krogerStoreNote ? `<p class="kroger-store-note">${escapeHtml(lastOptimize.krogerStoreNote)}</p>` : ""}
     ${krogerUnpricedHtml(lastOptimize?.krogerUnpriced)}
     ${shopperCopy(lastOptimize?.pricingWarning) ? `<p class="muted">${escapeHtml(shopperCopy(lastOptimize.pricingWarning))}</p>` : ""}
-    <p class="trip-tools"><button type="button" class="text-btn" id="clear-trip-open">Clear trip</button></p>
     <div data-review-customize>${customizeBlock(shown)}</div>
     </div>
   `;
   $("clear-trip-open")?.addEventListener("click", openClearTrip);
+  $("plan-refresh")?.addEventListener("click", () => {
+    void planTrip({ stay: true, force: true, trigger: $("plan-refresh") });
+  });
+  tripEl.querySelector("[data-nudge-single]")?.addEventListener("click", () => selectReviewMode("single"));
+  tripEl.querySelector("[data-nudge-keep]")?.addEventListener("click", () => {
+    tripEdits = { ...tripEdits, keepSplit: true, planMode: "spread", planChosen: true };
+    rememberTrip();
+    paintTrip();
+    if (flowStep === "shop") renderShop();
+  });
   tripEl.querySelectorAll("[data-plan-mode]").forEach((button) => {
     button.onclick = (event) => {
       event.preventDefault();
@@ -4050,7 +4206,7 @@ async function readPlanBody(response, onStatus, onPartial) {
   return finalBody || {};
 }
 
-async function planTrip({ stay = false, trigger = null } = {}) {
+async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -4102,6 +4258,16 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       ...(entry.preferenceBrands?.length ? { brands: entry.preferenceBrands } : {}),
     };
   });
+  const signature = listSignature();
+  const cachedPlan = readPlanCache(localStorage);
+  if (shouldReusePlan({ cache: cachedPlan, signature, zip, now: Date.now(), force })) {
+    setBusy(trigger, false);
+    setBusy(document.querySelector('[data-flow="plan"]'), false);
+    plannedSignature = signature;
+    renderTrip({ ...cachedPlan.payload, pricedAt: cachedPlan.payload.pricedAt || cachedPlan.savedAt }, { keepEdits: true, fromCache: true });
+    paintPlanBar();
+    return "ok";
+  }
   if (planAbort) planAbort.abort();
   const controller = new AbortController();
   planAbort = controller;
@@ -4150,12 +4316,31 @@ async function planTrip({ stay = false, trigger = null } = {}) {
       }
       paintPlanningStatus();
     }, (partial) => {
-      renderTrip(partial, { keepEdits: true });
+      if (planIsComplete(lastOptimize) || planIsComplete(readPlanCache(localStorage)?.payload)) return;
+      renderTrip(adoptReviewResult(lastOptimize, partial), { keepEdits: true });
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
-    renderTrip(body);
+    const previousPlan =
+      cachedPlan && cachedPlan.signature === signature && planIsComplete(cachedPlan.payload)
+        ? cachedPlan.payload
+        : plannedSignature === signature
+          ? lastOptimize
+          : null;
+    const adopted = adoptReviewResult(previousPlan, body, Date.now());
+    if (previousPlan && planIsComplete(previousPlan) && !planIsComplete(body)) {
+      toast("Couldn't check right now. Showing the last prices.");
+    }
+    renderTrip(adopted);
+    if (planIsComplete(adopted)) {
+      writePlanCache(localStorage, {
+        signature: listSignature(),
+        zip,
+        payload: adopted,
+        savedAt: adopted.pricedAt || Date.now(),
+      });
+    }
     betaEvent("plan_built");
-    if (body.partial) {
+    if (body.partial && !planIsComplete(adopted)) {
       ensurePlanRetry(PLAN_PARTIAL_NOTE);
       toast(PLAN_PARTIAL_NOTE, 4200);
     }
@@ -5641,13 +5826,28 @@ $("store-return-form")?.addEventListener("submit", (event) => {
   const store = $("store-return")?.dataset.store || "Walmart";
   markPurchase(store, "bought");
   $("store-return")?.close();
-  showTripValue();
+  finishCurrentTrip();
 });
 $("clear-trip-cancel")?.addEventListener("click", () => $("clear-trip")?.close());
 $("clear-trip-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   $("clear-trip")?.close();
   clearTripItems();
+});
+document.addEventListener(CLEAR_TRIP_EVENT, () => openClearTrip());
+document.addEventListener(COMPLETE_TRIP_EVENT, () => finishCurrentTrip());
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  if (target.closest("[data-complete-trip]")) {
+    finishCurrentTrip();
+    return;
+  }
+  if (target.closest("[data-copy-unfound]")) {
+    const text = unfoundCopyText(lastOptimize?.unavailable || []);
+    if (!text) return;
+    void copyText(text).then(() => toast("Unfound items copied."));
+  }
 });
 $("brand-home")?.addEventListener("click", () => {
   goHome();
@@ -6262,6 +6462,7 @@ function paintAccount() {
 }
 
 function applyAccountRows(items) {
+  if (readCompletedAt(localStorage)) return;
   applyingAccount = true;
   list.clear();
   for (const row of items ?? []) {
@@ -6873,8 +7074,11 @@ function renderShop() {
   const done = doneMessage(progress);
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const route = inStoreRoute(stores, checks);
+  const unfoundRoute = notInCartSection(lastOptimize?.toFindInStore?.length ? lastOptimize.toFindInStore : lastOptimize?.unavailable);
+  if (unfoundRoute) route.push(unfoundRoute);
   const html = route
     .map((section) => {
+      if (section.unfound) return unfoundShopSectionHtml(section, escapeHtml);
       const rowHtml = (item, checked) => {
         const noted = lists().annotate(item);
         const favoriteSwap = noted !== item ? plainSwap(noted) : null;
@@ -6941,7 +7145,7 @@ function renderShop() {
     : "";
   shop.innerHTML = `
     ${backPrompt}
-    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button></p>
+    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button> <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${emptyCheckedStoreHtml(view.stores)}
     ${done ? `<section class="done-banner"><h2>${escapeHtml(done.title)}</h2><p>${escapeHtml(done.body)}</p></section>` : ""}
@@ -7448,7 +7652,8 @@ function paintStorePicker() {
     return;
   }
   if (note) note.textContent = place ? `Near ${place}. ${nearby.note}` : nearby.note;
-  host.innerHTML = nearby.stores
+  const names = visibleStoreNames(nearby.stores);
+  host.innerHTML = names
     .map((name) => {
       const on = selected.has(name);
       return `<label class="check-row"><input type="checkbox" data-shop-store="${escapeHtml(name)}" ${on ? "checked" : ""} /> ${escapeHtml(name)}</label>`;
@@ -7464,9 +7669,9 @@ function saveStorePicker() {
     paintStorePicker();
     return;
   }
-  const all = nearbyStoreChoice().stores;
+  const visible = visibleStoreNames(nearbyStoreChoice().stores);
   const profile = getUserProfile(localStorage);
-  const shopStores = picked.length === all.length ? [] : picked;
+  const shopStores = mergeSavedStores(picked, profile.shopStores, picked.length === visible.length && visible.length > 0);
   saveUserProfile(localStorage, { ...profile, shopStores });
 }
 
@@ -7620,8 +7825,19 @@ async function sendToKrogerCart(button) {
   });
 }
 
+async function loadStoreScope() {
+  try {
+    const response = await fetchWithTimeout(fetch, apiUrl("/api/shopper/config"), {}, 4000);
+    const body = await response.json().catch(() => ({}));
+    setShowAdStores(Boolean(body.showAdStores));
+  } catch {
+    setShowAdStores(false);
+  }
+}
+
 async function boot() {
   try {
+    await loadStoreScope();
     adoptSessionFromUrl();
     consumeKrogerReturn();
     paintKrogerConnected(krogerConnectedNow());
@@ -7649,7 +7865,8 @@ async function bootApp() {
   hydrateListFromStorage();
   const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
   if (list.size === 0) {
-    const saved = richerTrip(await readTripDb(factory), readHandoffTrip(localStorage));
+    const merged = richerTrip(await readTripDb(factory), readHandoffTrip(localStorage));
+    const saved = restoreWouldResurrect(merged, readCompletedAt(localStorage)) ? null : merged;
     if (saved?.items?.length) {
       try {
         localStorage.setItem(LIST_KEY, JSON.stringify(saved.items));

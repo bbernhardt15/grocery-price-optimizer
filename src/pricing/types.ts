@@ -80,6 +80,12 @@ export type StorePricingReport = {
   locationId?: string;
   /** Item names whose live lookup failed. Not a store-wide outage. */
   unpricedItems?: string[];
+  /**
+   * Set when the store timed out, errored, or was rate-limited.
+   * Those lines were not checked. They are not missing from the shelf.
+   */
+  check?: "timeout" | "error" | "rate_limit";
+  uncheckedItems?: string[];
 };
 
 export type StorePricingAccumulator = {
@@ -94,6 +100,9 @@ export type StorePricingAccumulator = {
   errors: string[];
   /** Per-item provider failures. Kept off the shopper toast. */
   unpricedItems: string[];
+  /** Lines skipped because the store timed out, errored, or the budget ran out. */
+  uncheckedItems: string[];
+  check?: "timeout" | "error" | "rate_limit";
   locationId?: string;
   fetchedAt?: Date;
   feedKind?: PricingFeedKind;

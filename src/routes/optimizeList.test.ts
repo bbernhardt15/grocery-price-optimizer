@@ -29,6 +29,7 @@ describe("POST /api/optimize-list", () => {
     TARGET_PARTNER_API_KEY: process.env.TARGET_PARTNER_API_KEY,
     FLIPP_ENABLED: process.env.FLIPP_ENABLED,
     FLIPP_ACCESS_TOKEN: process.env.FLIPP_ACCESS_TOKEN,
+    GG_SHOW_AD_STORES: process.env.GG_SHOW_AD_STORES,
   };
 
   function clearPricingEnv(): void {
@@ -51,6 +52,7 @@ describe("POST /api/optimize-list", () => {
 
   before(async () => {
     clearPricingEnv();
+    process.env.GG_SHOW_AD_STORES = "1";
     memory = await MongoMemoryServer.create();
     await mongoose.connect(memory.getUri());
     await Product.insertMany(
@@ -147,6 +149,30 @@ describe("POST /api/optimize-list", () => {
     };
     assert.equal(body.stores[0].storeName, "Target");
     assert.equal(body.stores[0].items[0].price, 1.99);
+  });
+
+  it("leaves Target unchecked when GG_SHOW_AD_STORES is off", async () => {
+    const previous = process.env.GG_SHOW_AD_STORES;
+    delete process.env.GG_SHOW_AD_STORES;
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["Dozen Eggs"],
+        stores: ["Target", "Kroger", "Walmart"],
+      });
+      assert.equal(status, 200);
+      const body = json as {
+        stores: Array<{ storeName: string }>;
+        pricingByStore?: Array<{ storeName: string }>;
+      };
+      assert.equal(body.stores.some((store) => store.storeName === "Target"), false);
+      const priced = (body.pricingByStore || []).map((row) => row.storeName);
+      assert.equal(priced.includes("Target"), false);
+      assert.ok(priced.includes("Kroger"));
+      assert.ok(priced.includes("Walmart"));
+    } finally {
+      if (previous === undefined) delete process.env.GG_SHOW_AD_STORES;
+      else process.env.GG_SHOW_AD_STORES = previous;
+    }
   });
 
   it("returns regex matches sorted by price so cheaper milk is picked first", async () => {
