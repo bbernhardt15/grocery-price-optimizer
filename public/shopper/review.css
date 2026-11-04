@@ -1,4 +1,88 @@
-/* Review tab: plan cards, missing items, customize rows, store checkout. */
+/* Review tab: plan cards, missing items, customize rows, store checkout.
+   Loading and loaded cards share a min-height. Nothing here animates
+   its height, and the scroll anchor stays on the section. */
+body[data-step="plan"] #trip,
+body[data-step="shop"] #shop {
+  animation: none;
+  overflow-anchor: auto;
+}
+.review-stable,
+.review-head-slot,
+.review-skel-card,
+.review-store,
+.savings-card,
+.plan-choice,
+.coverage-note,
+.shop-skel,
+.shop-skel-row,
+.shop-line {
+  overflow-anchor: none;
+}
+.review-head-slot,
+body[data-step="plan"] .savings-card {
+  min-height: 196px;
+  box-sizing: border-box;
+}
+.review-loading-status {
+  min-height: 24px;
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+.review-skel-card,
+.review-store {
+  box-sizing: border-box;
+  min-height: 148px;
+}
+.review-skel-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.review-skel-line {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+}
+.review-skel-line:nth-child(2) { width: 72%; }
+.review-skel-line:nth-child(3) { width: 46%; }
+.shop-skel { display: flex; flex-direction: column; gap: 8px; }
+.shop-skel-row {
+  box-sizing: border-box;
+  min-height: 64px;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-accent);
+}
+.cart-coupon-callout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+.cart-coupon-lead { margin: 0; font-weight: 750; }
+.cart-coupon-honest { margin: 0; color: var(--muted); }
+.cart-coupon-link { min-height: 44px; display: inline-flex; align-items: center; font-weight: 750; }
+.review-checkout .handoff-btn,
+.kroger-card [data-kroger-send],
+#kroger-send,
+#settings-kroger-send,
+[data-kroger-send] {
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 [data-plan-panel][hidden] { display: none !important; }
 .plan-status { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
 .plan-status-line { margin: 0; font-weight: 750; }

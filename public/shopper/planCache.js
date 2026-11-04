@@ -104,7 +104,6 @@ export function adoptReviewResult(previous, incoming, now = Date.now()) {
     return {
       ...previous,
       keptPreviousPrices: true,
-      pricingByStore: incoming.pricingByStore?.length ? incoming.pricingByStore : previous.pricingByStore,
     };
   }
   if (!nextComplete && previous?.stores?.length) {

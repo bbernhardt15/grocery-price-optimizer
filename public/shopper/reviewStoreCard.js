@@ -43,7 +43,9 @@ export function withCheckoutLabel(actionHtml, label) {
  */
 export function reviewStoreCardHtml(card) {
   const total = card.total ? `<strong>${escapeText(card.total)}</strong>` : "";
-  return `<article class="calm-store review-store">
+  const minHeight = Math.max(0, Math.floor(Number(card.minHeight) || 0));
+  const style = minHeight ? ` style="min-height:${minHeight}px"` : "";
+  return `<article class="calm-store review-store" data-store="${escapeText(card.name)}"${style}>
     <div class="review-store-main">
       <details class="store-fold">
         <summary>
