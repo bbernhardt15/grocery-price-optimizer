@@ -38,6 +38,7 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=store-2" />
     <link rel="stylesheet" href="/styles.css?v=shelf-1" />
     <link rel="stylesheet" href="/shopper/import.css?v=shelf-1" />
+    <link rel="stylesheet" href="/shopper/addTabPolish.css?v=add-10" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -132,7 +133,7 @@
           <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs.</p>
           <div id="shelf-entry" class="feature-cards">
             <button type="button" id="shelf-scan" class="feature-card" hidden>
-              <span class="feature-icon" aria-hidden="true">Scan</span>
+              <span class="feature-icon feature-icon-word" aria-hidden="true">Scan</span>
               <span class="feature-copy">
                 <strong>Scan fridge or pantry</strong>
                 <span class="muted">Photo what you already have.</span>
@@ -142,12 +143,18 @@
           </div>
           <p id="profile-warning" class="profile-warning" role="status" hidden></p>
           <section id="start-here" class="start-here" aria-label="Start from a list">
-            <div id="usuals-block" hidden>
-              <div class="start-head">
-                <h2>Your usuals</h2>
+            <div id="usuals-block" class="usuals-block" data-open="false" hidden>
+              <div class="start-head usuals-head">
+                <button type="button" id="usuals-toggle" class="usuals-toggle" aria-expanded="false" aria-controls="usuals-panel">
+                  <span class="usuals-chevron" aria-hidden="true"></span>
+                  <span class="usuals-title">Your usuals</span>
+                  <span id="usuals-count" class="usuals-count">0</span>
+                </button>
                 <button type="button" id="add-usuals" class="text-btn">Add all</button>
               </div>
-              <ul id="usuals-list" class="usuals-list quick-row"></ul>
+              <div id="usuals-panel" class="usuals-panel" hidden>
+                <ul id="usuals-list" class="usuals-list usuals-scroll"></ul>
+              </div>
             </div>
             <h2 class="sr-only">Starter lists</h2>
             <div id="starter-lists" class="list-home"></div>
@@ -155,7 +162,7 @@
           </section>
           <section id="browse" class="browse">
             <button type="button" id="browse-toggle" class="feature-card browse-toggle" aria-expanded="false" aria-controls="browse-panel">
-              <span class="feature-icon" aria-hidden="true">Aisles</span>
+              <span class="feature-icon feature-icon-word" aria-hidden="true">Aisles</span>
               <span class="feature-copy">
                 <strong id="browse-label">Browse the catalog by aisle</strong>
                 <span class="muted">Every department, from produce to frozen.</span>

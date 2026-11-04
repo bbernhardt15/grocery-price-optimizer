@@ -3,6 +3,8 @@
  * The item list stays tucked away until someone opens it. Reuse shops it again.
  */
 
+import { ICON_RECEIPT } from "./addTabIcons.js";
+
 const KEY = "gg-past-trips";
 const MAX_TRIPS = 24;
 
@@ -159,7 +161,11 @@ export function pastTripsHomeHtml(count) {
   const n = Math.max(0, Math.floor(Number(count) || 0));
   const hint = n === 1 ? "1 saved receipt" : n > 1 ? `${n} saved receipts` : "Receipts from finished trips";
   return `<button type="button" class="feature-card" id="past-trips-open">
-    <span class="feature-icon" aria-hidden="true">Receipt</span>
+    <span class="feature-icon" aria-hidden="true">${ICON_RECEIPT}</span>
     <span class="feature-copy"><strong>Past trips</strong><span class="muted">${hint}</span></span>
   </button>`;
+}
+
+export function pastTripsEmptyHtml() {
+  return `<div class="empty-state past-empty"><h3>No trips yet</h3><p>Finish a shop and we'll keep the receipt here for next time.</p></div>`;
 }

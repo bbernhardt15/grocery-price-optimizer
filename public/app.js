@@ -142,7 +142,8 @@ import {
   readKrogerTrip,
   saveKrogerTrip,
 } from "./shopper/krogerReturn.js";
-import { matchPick, readUsuals, rememberUsuals, starterList } from "./shopper/usuals.js";
+import { matchPick, readUsuals, rememberUsuals, starterList, usualKey } from "./shopper/usuals.js";
+import { usualsRowHtml, usualsSummary } from "./shopper/usualsRow.js";
 import { customCatalogProduct, mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
 import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
@@ -165,7 +166,7 @@ import {
   viewportInsets,
   writeHandoffResult,
 } from "./shopper/chromeIos.js";
-import { mergePastTrips, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
+import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
 import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
@@ -727,9 +728,7 @@ function paintPastTrips() {
   if (home) home.innerHTML = pastTripsHomeHtml(trips.length);
   const sheet = $("past-trips-body");
   if (sheet) {
-    sheet.innerHTML = trips.length
-      ? trips.map((trip) => receiptCardHtml(trip, escapeHtml)).join("")
-      : `<p class="muted">Finished trips show up here as receipts.</p>`;
+    sheet.innerHTML = trips.length ? trips.map((trip) => receiptCardHtml(trip, escapeHtml)).join("") : pastTripsEmptyHtml();
   }
 }
 
@@ -5259,10 +5258,15 @@ $("browse-toggle")?.addEventListener("click", () => {
   syncBrowse();
   if (browseOpen) openBrowse();
 });
+$("usuals-toggle")?.addEventListener("click", () => {
+  usualsOpen = !usualsOpen;
+  paintUsuals();
+});
 $("usuals-list")?.addEventListener("click", (event) => {
-  const button = event.target instanceof Element ? event.target.closest("[data-usual]") : null;
+  const button = event.target instanceof Element ? event.target.closest("[data-usual-key]") : null;
   if (!button) return;
-  const row = readUsuals(localStorage)[Number(button.getAttribute("data-usual"))];
+  const key = button.getAttribute("data-usual-key");
+  const row = readUsuals(localStorage).find((item) => usualKey(item) === key);
   if (!row) return;
   setBusy(button, true);
   void addOneUsual(row).finally(() => setBusy(button, false));
@@ -6715,20 +6719,33 @@ function paintStarterLists() {
   lists().paint();
 }
 
+let usualsOpen = false;
+
 function paintUsuals() {
   const block = $("usuals-block");
   const listEl = $("usuals-list");
   if (!block || !listEl) return;
   const profile = getUserProfile(localStorage);
   const rows = readUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
+  const summary = usualsSummary(rows.length);
   block.hidden = rows.length === 0;
-  listEl.innerHTML = rows
-    .slice(0, 8)
-    .map(
-      (row, index) =>
-        `<li><button type="button" class="quick-chip" data-usual="${index}">${escapeHtml(displayProductName(row.name, row.brand) || row.name)}</button></li>`
-    )
-    .join("");
+  block.dataset.open = usualsOpen ? "true" : "false";
+  const toggle = $("usuals-toggle");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", usualsOpen ? "true" : "false");
+    toggle.setAttribute("aria-label", `Your usuals, ${summary.label}`);
+  }
+  const panel = $("usuals-panel");
+  if (panel) panel.hidden = !usualsOpen;
+  const count = $("usuals-count");
+  if (count) count.textContent = String(summary.count);
+  listEl.innerHTML = usualsRowHtml(
+    rows.map((row) => ({
+      key: usualKey(row),
+      label: displayProductName(row.name, row.brand) || row.name,
+    })),
+    escapeHtml
+  );
 }
 
 async function addOneUsual(row) {
@@ -7464,6 +7481,13 @@ pullHost?.addEventListener("touchcancel", () => {
 document.addEventListener("input", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (target) lists().onInput(target);
+});
+
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || form.id !== "theme-add-form") return;
+  event.preventDefault();
+  lists().onSubmit(form);
 });
 
 document.addEventListener("focusin", (event) => {
