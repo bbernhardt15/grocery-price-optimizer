@@ -8,6 +8,7 @@ import {
   readRequestCookie,
   revokeSealedShopperCookie,
 } from "../krogerCartAuth";
+import { deleteBetaForShopper } from "../beta/service";
 import { deleteShopperData, NOT_LINKED_TO_YOU, parseDeletionBody } from "../privacy/deleteShopperData";
 
 const router = Router();
@@ -40,8 +41,10 @@ router.delete("/me/data", async (req, res) => {
     };
     if (!cookieResult.hadToken && !accountResult.hadToken) kroger.revoked = false;
     res.append("Set-Cookie", clearShopperCookieHeader());
+    const beta = await deleteBetaForShopper(parsed.deviceId, auth?.accountId);
     res.json({
       deleted,
+      beta,
       account: { deleted: Boolean(account?.deleted) },
       kroger: { ...kroger, cookieCleared: true as const },
       notLinkedToYou: NOT_LINKED_TO_YOU,
