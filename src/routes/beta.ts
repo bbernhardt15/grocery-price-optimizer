@@ -26,11 +26,13 @@ router.get("/health/ready", (_req, res) => {
 });
 
 router.get("/beta/gate", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   res.json({ required: inviteCodes().length > 0 });
 });
 
 router.post("/beta/invite", async (req, res) => {
   const result = await redeemInvite(req, res);
+  res.setHeader("Cache-Control", "no-store");
   res.status(result.status).json(result.body);
 });
 

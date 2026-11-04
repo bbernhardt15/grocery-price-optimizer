@@ -1,18 +1,24 @@
 /* Beta gate, feedback sheet, and the error toast. Hidden until needed. */
 
-.beta-gate {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
+dialog.beta-gate {
+  border: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
   padding: 24px 18px calc(24px + var(--safe-bottom, 0px));
   background: var(--bg, #f4efe6);
   color: var(--ink, #1c1917);
 }
 
-.beta-gate[hidden] {
-  display: none;
+dialog.beta-gate[open] {
+  display: grid;
+  place-items: center;
+}
+
+dialog.beta-gate::backdrop {
+  background: var(--bg, #f4efe6);
 }
 
 .beta-gate-card {
@@ -112,7 +118,7 @@
 
 body.beta-gated .shell,
 body.beta-gated .drawer-scrim,
-body.beta-gated dialog {
+body.beta-gated dialog:not(#beta-gate) {
   visibility: hidden;
 }
 

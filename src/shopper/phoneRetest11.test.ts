@@ -369,6 +369,7 @@ describe("eleventh phone test at 390px", { timeout: 60_000, skip: chrome ? false
       await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
       await page.evaluateOnNewDocument(() => {
         localStorage.setItem("gg-onboarding-done", "1");
+        localStorage.setItem("gg-beta-code", "preview");
         localStorage.setItem("gg-theme", "light");
       });
       await page.goto(origin, { waitUntil: "domcontentloaded" });

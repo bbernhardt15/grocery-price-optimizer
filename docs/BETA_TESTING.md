@@ -6,7 +6,11 @@ Grocery Gitter can take a private group of testers before a public launch. The i
 
 Set `BETA_INVITE_CODES` to a comma-separated list of codes, one code per tester (`mom-uqq6,dad-uqq6`). Leave it unset and the gate stays off, so the app opens the way it does today.
 
-A tester opens the app and sees **Enter your invite code**. The code is remembered on that device. The server stores that code and a device id. It does not store an email address or any other personal detail. The code is how you tell one tester from another.
+A tester opens the app and sees **Enter your invite code** before **Get started**. The screen is part of the page itself, so it still shows when the service worker serves a saved copy of the app. On every open the app sends the saved code back to the server. If that code is missing, rejected, or no longer in `BETA_INVITE_CODES`, the screen comes back and the saved code is cleared. A code the server cannot recheck because the phone is offline stays in place.
+
+While the variable is set, the shopper API rejects a device that does not have a current code (`401` and `Enter your invite code.`). Hiding the screen is not enough. These stay open: `/privacy`, `/terms`, `GET /api/health/ready`, `GET /api/beta/gate`, and `POST /api/beta/invite`. Admin reads, the RevenueCat webhook, Kroger and sign-in callbacks, Kroger logout, and **Delete my account and data** stay open too. The gate check is not cached.
+
+The code is remembered on that device. The server stores that code and a device id. It does not store an email address or any other personal detail. The code is how you tell one tester from another.
 
 Feedback notes, client error reports, and the per-code event counters use the code already saved for that device. The server looks it up from the device id. A code typed into the feedback note, the error report, or the event request is ignored, so a tester cannot file a result under someone else's code. A device that never redeemed a code is stored with a blank code.
 
@@ -64,7 +68,7 @@ With `?code=`, each row still has the overall `count`, plus `codeCount` for that
 - Walmart opens a link. It does not sign in to a Walmart account and it does not write the cart itself.
 - Coupons cannot be clipped or applied automatically. The app can open a store’s coupon page and total coupons the shopper typed in.
 - Crash reports go to Sentry only when `SENTRY_DSN` is set. With it unset, the app still keeps a short throttled error log at `POST /api/beta/client-errors` and shows **Something went wrong** with Retry and Send feedback. The stored log includes the invite code for that device when one was redeemed. It does not include an email address.
-- **Delete my account and data** (Settings, type `DELETE`) calls `DELETE /api/me/data`. That removes this device’s feedback, invite signup, and client errors, and the account when the tester is signed in. Product counters stay, including the per-code split, because those totals are not removed with the device.
+- **Delete my account and data** (Settings, type `DELETE`) calls `DELETE /api/me/data`. That route stays available even when the invite gate is on, including after a code is removed from the list. It removes this device’s feedback, invite signup, and client errors, and the account when the tester is signed in. Product counters stay, including the per-code split, because those totals are not removed with the device.
 
 ## Railway variables this feature reads
 

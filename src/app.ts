@@ -20,6 +20,7 @@ import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 import importListRouter from "./routes/importList";
 import betaRouter from "./routes/beta";
+import { enforceBetaInvite } from "./beta/gate";
 import { IMPORT_MESSAGES } from "./import/messages";
 
 initSentry();
@@ -53,6 +54,8 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use(enforceBetaInvite);
 
 app.get("/api", (_req, res) => {
   res.json({
@@ -154,9 +157,9 @@ app.get("/api", (_req, res) => {
       "GET /api/health/ready":
         "Mongo is connected. 503 when it is not. No secrets.",
       "GET /api/beta/gate":
-        "Whether BETA_INVITE_CODES is set. required is false when the variable is unset, and the body never lists the codes.",
+        "Whether BETA_INVITE_CODES is set. required is false when the variable is unset, and the body never lists the codes. Not cached.",
       "POST /api/beta/invite":
-        "Checks one invite code for this device and records the code used. 200 with required false when the gate is off.",
+        "Checks one invite code for this device and records the code used. A code no longer on the list is rejected, and a new valid code replaces it. 200 with required false when the gate is off.",
       "POST /api/beta/feedback":
         "Stores a 1 to 5 rating and a note for this device, tagged with the invite code already saved for that device. Rate limited. No receipt text.",
       "POST /api/beta/events":

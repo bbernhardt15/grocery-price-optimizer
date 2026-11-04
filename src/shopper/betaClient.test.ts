@@ -3,7 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { SHELL_CACHE, feedbackBody, feedbackContext, rememberInvite, readInvite } from "../../public/shopper/betaContext.js";
-import { errorToastModel, installClientErrors, inviteScreenHtml, feedbackSheetHtml, reportClientFailure } from "../../public/shopper/beta.js";
+import {
+  dialogAllowedDuringGate,
+  errorToastModel,
+  fetchInitWithDevice,
+  installClientErrors,
+  inviteScreenHtml,
+  feedbackSheetHtml,
+  isShopperApi,
+  reportClientFailure,
+  resolveInviteGate,
+} from "../../public/shopper/beta.js";
 import { reviewScreen } from "../../public/shopper/freshJourney.js";
 
 const root = path.resolve(__dirname, "../..");
@@ -134,6 +144,17 @@ describe("beta client", () => {
     const onboarding = fs.readFileSync(path.join(root, "public/shopper/onboardingUi.js"), "utf8");
     assert.match(onboarding, /onboarding_completed/);
     assert.match(inviteScreenHtml(), /Enter your invite code/);
+    assert.match(inviteScreenHtml(), /<dialog id="beta-gate"/);
+    const boot = app.slice(app.indexOf("async function boot"), app.indexOf("async function bootApp"));
+    assert.ok(boot.includes("__ggInviteGate"));
+    assert.ok(boot.indexOf("__ggInviteGate") < boot.indexOf("profileUi?.open"));
+    assert.match(beta, /window\.__ggInviteGate/);
+    assert.match(app, /events\?deviceId=/);
+    const page = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
+    assert.match(page, /beta-gate-hold/);
+    assert.match(page, /gg-beta-code/);
+    assert.match(beta, /cache: "no-store"/);
+    assert.match(beta, /resolveInviteGate/);
     assert.match(feedbackSheetHtml(), /What screen were you on/);
     assert.match(feedbackSheetHtml(), /name="rating"/);
     for (const page of [privacy, terms]) {
@@ -149,6 +170,88 @@ describe("beta client", () => {
     const storage = memory();
     rememberInvite(storage, " friend ");
     assert.equal(readInvite(storage), "friend");
+  });
+
+  it("rechecks a stored invite code before onboarding, including a cached shell", async () => {
+    const cleared: string[] = [];
+    const removed = await resolveInviteGate({
+      remembered: "old-code",
+      clearCode: () => cleared.push("old-code"),
+      postInvite: async () => ({ response: { ok: false, status: 401 }, body: { error: "That invite code is not recognized." } }),
+      fetchGate: async () => ({ response: { ok: true, status: 200 }, body: { required: true } }),
+    });
+    assert.equal(removed.show, true);
+    assert.equal(removed.reason, "invalid");
+    assert.deepEqual(cleared, ["old-code"]);
+
+    const limited = await resolveInviteGate({
+      remembered: "mom-uqq6",
+      clearCode: () => cleared.push("should-not"),
+      postInvite: async () => ({ response: { ok: false, status: 429 }, body: {} }),
+      fetchGate: async () => {
+        throw new Error("unused");
+      },
+    });
+    assert.equal(limited.show, true);
+    assert.equal(limited.reason, "limited");
+    assert.deepEqual(cleared, ["old-code"]);
+
+    const offlineCode = await resolveInviteGate({
+      remembered: "mom-uqq6",
+      postInvite: async () => {
+        throw new Error("offline");
+      },
+      fetchGate: async () => {
+        throw new Error("unused");
+      },
+    });
+    assert.equal(offlineCode.show, false);
+    assert.equal(offlineCode.reason, "offline");
+
+    const fresh = await resolveInviteGate({
+      remembered: "",
+      fetchGate: async () => ({ response: { ok: true, status: 200 }, body: { required: true } }),
+      postInvite: async () => {
+        throw new Error("unused");
+      },
+    });
+    assert.equal(fresh.show, true);
+
+    const cachedShell = await resolveInviteGate({
+      remembered: "",
+      fetchGate: async () => {
+        throw new Error("cached shell cannot reach the gate");
+      },
+      postInvite: async () => {
+        throw new Error("unused");
+      },
+    });
+    assert.equal(cachedShell.show, true);
+    assert.equal(cachedShell.reason, "offline");
+
+    const open = await resolveInviteGate({
+      remembered: "stale",
+      clearCode: () => cleared.push("stale"),
+      postInvite: async () => ({ response: { ok: true, status: 200 }, body: { ok: true, required: false } }),
+      fetchGate: async () => {
+        throw new Error("unused");
+      },
+    });
+    assert.equal(open.show, false);
+    assert.deepEqual(cleared, ["old-code", "stale"]);
+
+    assert.equal(dialogAllowedDuringGate("profile-onboard", true), false);
+    assert.equal(dialogAllowedDuringGate("beta-gate", true), true);
+    assert.equal(dialogAllowedDuringGate("profile-onboard", false), true);
+
+    const rootWindow = { location: { href: "https://shop.example/", origin: "https://shop.example" } };
+    assert.equal(isShopperApi("/api/shopper/config", rootWindow), true);
+    assert.equal(isShopperApi("https://shop.example/api/beta/gate", rootWindow), true);
+    assert.equal(isShopperApi("https://example.com/api/shopper/config", rootWindow), false);
+    assert.equal(isShopperApi("/privacy", rootWindow), false);
+    const headers = fetchInitWithDevice("/api/shopper/config", { headers: { accept: "application/json" } }, "device-beta-01");
+    assert.equal(headers.headers.get("x-device-id"), "device-beta-01");
+    assert.equal(headers.headers.get("accept"), "application/json");
   });
 
   it("renders a review screen only when the plan has priced lines", () => {

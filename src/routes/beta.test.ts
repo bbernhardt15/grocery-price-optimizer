@@ -7,6 +7,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import app from "../app";
 import { BetaClientError, BetaEvent, BetaFeedback, BetaSignup } from "../beta/models";
 import { resetRateLimits } from "../beta/rateLimit";
+import { betaGateOpen } from "../beta/gate";
 import { FEEDBACK_LIMIT, feedbackTextIssue, pickContext, readyPayload } from "../beta/service";
 import { sentryIsActive } from "../observability/sentry";
 
@@ -317,15 +318,15 @@ describe("beta tester routes", { concurrency: false }, () => {
       { rating: 4, message: "No invite yet.", code: "mom-uqq6", deviceId: STRANGER },
       { "x-device-id": STRANGER }
     );
-    assert.equal(stranger.status, 201);
+    assert.equal(stranger.status, 401);
+    assert.match(String(stranger.json.error), /invite code/i);
 
     const stored = await BetaFeedback.findOne({ deviceId: DEVICE }).lean();
     assert.equal(stored?.code, "mom-uqq6");
     assert.equal("email" in (stored ?? {}), false);
     assert.equal(JSON.stringify(stored).includes("dad-uqq6"), false);
     assert.equal(JSON.stringify(stored).includes("example.com"), false);
-    const blank = await BetaFeedback.findOne({ deviceId: STRANGER }).lean();
-    assert.equal(blank?.code || "", "");
+    assert.equal(await BetaFeedback.countDocuments({ deviceId: STRANGER }), 0);
 
     const denied = await fetch(`${origin}/api/admin/beta/feedback?code=mom-uqq6`);
     assert.equal(denied.status, 401);
@@ -361,7 +362,7 @@ describe("beta tester routes", { concurrency: false }, () => {
     const events = await fetch(`${origin}/api/admin/beta/events`, { headers: auth });
     const eventBody = (await events.json()) as { events: Array<{ name: string; count: number; byCode: Record<string, number> }> };
     const sent = eventBody.events.find((row) => row.name === "feedback_sent");
-    assert.equal(sent?.count, 3);
+    assert.equal(sent?.count, 2);
     assert.equal(sent?.byCode["mom-uqq6"], 1);
     assert.equal(sent?.byCode["dad-uqq6"], 1);
     assert.equal(JSON.stringify(eventBody).includes(DEVICE), false);
@@ -382,15 +383,15 @@ describe("beta tester routes", { concurrency: false }, () => {
       { message: "Stranger failed", code: "mom-uqq6", deviceId: STRANGER },
       { "x-device-id": STRANGER }
     );
-    assert.equal(stranger.json.stored, true);
+    assert.equal(stranger.status, 401);
+    assert.equal(stranger.json.stored, undefined);
 
     const row = await BetaClientError.findOne({ deviceId: DEVICE }).lean();
     assert.equal(row?.code, "mom-uqq6");
     assert.equal("email" in (row ?? {}), false);
     assert.equal(JSON.stringify(row).includes("dad-uqq6"), false);
     assert.equal(JSON.stringify(row).includes("example.com"), false);
-    const blank = await BetaClientError.findOne({ deviceId: STRANGER }).lean();
-    assert.equal(blank?.code || "", "");
+    assert.equal(await BetaClientError.countDocuments({ deviceId: STRANGER }), 0);
   });
 
   it("splits product counters by the device invite code and keeps the totals", async () => {
@@ -415,7 +416,7 @@ describe("beta tester routes", { concurrency: false }, () => {
     assert.equal(first.json.stored, true);
     assert.equal(second.json.stored, true);
     assert.equal(dad.json.stored, true);
-    assert.equal(anonymous.json.stored, true);
+    assert.equal(anonymous.status, 401);
 
     const denied = await fetch(`${origin}/api/admin/beta/events?code=mom-uqq6`);
     assert.equal(denied.status, 401);
@@ -425,7 +426,7 @@ describe("beta tester routes", { concurrency: false }, () => {
     assert.equal(counts.trip_completed.count, 3);
     assert.equal(counts.trip_completed.byCode["mom-uqq6"], 2);
     assert.equal(counts.trip_completed.byCode["dad-uqq6"], 1);
-    assert.equal(counts.plan_built.count, 1);
+    assert.equal(counts.plan_built.count, 0);
     assert.deepEqual(counts.plan_built.byCode, {});
     assert.equal(JSON.stringify(body).includes(DEVICE), false);
 
@@ -440,7 +441,7 @@ describe("beta tester routes", { concurrency: false }, () => {
     assert.equal(trip?.count, 3);
     assert.equal(trip?.codeCount, 2);
     assert.deepEqual(trip?.byCode, { "mom-uqq6": 2 });
-    assert.equal(plan?.count, 1);
+    assert.equal(plan?.count, 0);
     assert.equal(plan?.codeCount, 0);
     assert.deepEqual(plan?.byCode, {});
 
@@ -526,6 +527,70 @@ describe("beta tester routes", { concurrency: false }, () => {
     const wildcard = await fetch(`${origin}/api/admin/beta/signups?code=${encodeURIComponent(".*")}`, { headers: auth });
     const wildcardBody = (await wildcard.json()) as { codes: unknown[] };
     assert.deepEqual(wildcardBody.codes, []);
+  });
+
+  it("rejects app API calls without a current invite code and leaves the public pages open", async () => {
+    assert.equal(betaGateOpen("GET", "/api/health/ready"), true);
+    assert.equal(betaGateOpen("GET", "/api/beta/gate"), true);
+    assert.equal(betaGateOpen("POST", "/api/beta/invite"), true);
+    assert.equal(betaGateOpen("GET", "/privacy"), true);
+    assert.equal(betaGateOpen("GET", "/terms/"), true);
+    assert.equal(betaGateOpen("GET", "/api/catalog/departments"), false);
+    assert.equal(betaGateOpen("GET", "/api/admin/beta/signups"), true);
+    assert.equal(betaGateOpen("DELETE", "/api/me/data"), true);
+
+    process.env.BETA_INVITE_CODES = "mom-uqq6,dad-uqq6";
+    const blocked = await fetch(`${origin}/api/shopper/config`);
+    assert.equal(blocked.status, 401);
+    assert.match(blocked.headers.get("cache-control") || "", /no-store/);
+    const departments = await fetch(`${origin}/api/catalog/departments`);
+    assert.equal(departments.status, 401);
+    const optimize = await post("/api/optimize-list", { groceryList: [{ name: "milk" }], zipCode: "45202" });
+    assert.equal(optimize.status, 401);
+
+    const ready = await fetch(`${origin}/api/health/ready`);
+    assert.equal(ready.status, 200);
+    const gate = await fetch(`${origin}/api/beta/gate`);
+    assert.equal(gate.status, 200);
+    assert.match(gate.headers.get("cache-control") || "", /no-store/);
+    assert.deepEqual(await gate.json(), { required: true });
+    for (const path of ["/privacy", "/terms"]) {
+      const page = await fetch(`${origin}${path}`);
+      assert.equal(page.status, 200, path);
+      assert.match(page.headers.get("content-type") || "", /html/);
+    }
+    const invite = await post("/api/beta/invite", { code: "nope", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    assert.equal(invite.status, 401);
+
+    const accepted = await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    assert.equal(accepted.status, 200);
+    const open = await fetch(`${origin}/api/shopper/config`, { headers: { "x-device-id": DEVICE } });
+    assert.equal(open.status, 200);
+    const byQuery = await fetch(`${origin}/api/shopper/config?deviceId=${DEVICE}`);
+    assert.equal(byQuery.status, 200);
+
+    process.env.BETA_INVITE_CODES = "dad-uqq6";
+    const removed = await fetch(`${origin}/api/shopper/config`, { headers: { "x-device-id": DEVICE } });
+    assert.equal(removed.status, 401);
+    const stale = await post("/api/beta/invite", { code: "mom-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    assert.equal(stale.status, 401);
+    const replaced = await post("/api/beta/invite", { code: "dad-uqq6", deviceId: DEVICE }, { "x-device-id": DEVICE });
+    assert.equal(replaced.status, 200);
+    assert.equal((await BetaSignup.findOne({ deviceId: DEVICE }).lean())?.code, "dad-uqq6");
+    const again = await fetch(`${origin}/api/shopper/config`, { headers: { "x-device-id": DEVICE } });
+    assert.equal(again.status, 200);
+
+    process.env.GG_ADMIN_TOKEN = "beta-admin";
+    const admin = await fetch(`${origin}/api/admin/beta/signups`, { headers: { authorization: "Bearer beta-admin" } });
+    assert.equal(admin.status, 200);
+    const deletion = await fetch(`${origin}/api/me/data`, { method: "DELETE" });
+    assert.equal(deletion.status, 400);
+    const authorize = await fetch(`${origin}/api/kroger/oauth/authorize`, { redirect: "manual" });
+    assert.notEqual(authorize.status, 401);
+
+    delete process.env.BETA_INVITE_CODES;
+    const ungated = await fetch(`${origin}/api/shopper/config`);
+    assert.equal(ungated.status, 200);
   });
 
   it("deletes feedback, the invite signup, and client errors with the account route", async () => {

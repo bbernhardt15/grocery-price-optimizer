@@ -170,8 +170,22 @@ async function inviteCodeForDevice(deviceId: string | null, now = new Date()): P
   const signup = await BetaSignup.findOneAndUpdate({ deviceId }, { $max: { lastActiveAt: now } }, { new: true })
     .select("code")
     .lean();
-  if (!signup || typeof signup.code !== "string") return "";
-  return signup.code.trim().slice(0, 80);
+  return codeStillOnList(typeof signup?.code === "string" ? signup.code : "");
+}
+
+/** Empty when this device has no signup, or the saved code was taken off BETA_INVITE_CODES. */
+export async function currentInviteCode(deviceId: string | null, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  if (!deviceId) return "";
+  const signup = await BetaSignup.findOne({ deviceId }).select("code").lean();
+  return codeStillOnList(typeof signup?.code === "string" ? signup.code : "", env);
+}
+
+function codeStillOnList(stored: string, env: NodeJS.ProcessEnv = process.env): string {
+  const code = stored.trim().slice(0, 80);
+  if (!code) return "";
+  const allowed = inviteCodes(env);
+  if (!allowed.length) return code;
+  return matchInvite(code, allowed) ?? "";
 }
 
 export function readyPayload(state = mongoose.connection.readyState): {
@@ -186,14 +200,28 @@ export function clientIp(req: Request): string {
   return String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 80);
 }
 
-function deviceFrom(req: Request): string | null {
-  const header = req.header("x-device-id");
+function firstString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0].trim();
+  return "";
+}
+
+/** Header, then JSON body, then ?deviceId= for navigations that cannot set a header. */
+export function deviceIdFromRequest(req: Request): string | null {
+  const header = firstString(req.header("x-device-id"));
   const bodyDevice =
     req.body && typeof req.body === "object" && !Array.isArray(req.body)
-      ? (req.body as { deviceId?: unknown }).deviceId
-      : undefined;
-  const value = typeof header === "string" && header.trim() ? header.trim() : typeof bodyDevice === "string" ? bodyDevice.trim() : "";
-  return DEVICE_ID.test(value) ? value : null;
+      ? firstString((req.body as { deviceId?: unknown }).deviceId)
+      : "";
+  const queryDevice = firstString(req.query?.deviceId);
+  for (const candidate of [header, bodyDevice, queryDevice]) {
+    if (DEVICE_ID.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+function deviceFrom(req: Request): string | null {
+  return deviceIdFromRequest(req);
 }
 
 function accountIdFrom(res: Response): string | undefined {
@@ -314,7 +342,8 @@ export async function redeemInvite(
   const code = matchInvite(presented, codes);
   const seenAt = new Date(now);
   const existing = await BetaSignup.findOne({ deviceId }).lean();
-  if (existing && code && existing.code === code) {
+  const stored = existing && matchInvite(existing.code, codes);
+  if (existing && code && stored === code) {
     const accountId = accountIdFrom(res);
     const update: { $max: { lastActiveAt: Date }; $set?: { accountId: string } } = {
       $max: { lastActiveAt: seenAt },
@@ -328,23 +357,14 @@ export async function redeemInvite(
     return { status: 429, body: { error: "Too many invite attempts. Wait a moment and try again." } };
   }
   if (!code) return { status: 401, body: { error: "That invite code is not recognized." } };
-  const accountId = accountIdFrom(res);
-  await BetaSignup.updateOne(
-    { deviceId },
-    {
-      $setOnInsert: {
-        deviceId,
-        code,
-        lastActiveAt: seenAt,
-        ...(accountId ? { accountId } : {}),
-      },
-    },
-    { upsert: true }
-  );
-  if (accountId) {
-    await BetaSignup.updateOne({ deviceId, accountId: { $exists: false } }, { $set: { accountId } });
+  if (stored) {
+    await BetaSignup.updateOne({ deviceId }, { $max: { lastActiveAt: seenAt } });
+    return { status: 200, body: { ok: true, required: true } };
   }
-  await BetaSignup.updateOne({ deviceId }, { $max: { lastActiveAt: seenAt } });
+  const accountId = accountIdFrom(res);
+  const set: { code: string; lastActiveAt: Date; accountId?: string } = { code, lastActiveAt: seenAt };
+  if (accountId) set.accountId = accountId;
+  await BetaSignup.updateOne({ deviceId }, { $set: set, $setOnInsert: { deviceId } }, { upsert: true });
   return { status: 200, body: { ok: true, required: true } };
 }
 

@@ -4960,7 +4960,9 @@ function startSync() {
   const token = shareState.shareToken;
   if (typeof EventSource === "function") {
     try {
-      const source = new EventSource(apiUrl(`/api/lists/${encodeURIComponent(token)}/events`));
+      const source = new EventSource(
+        apiUrl(`/api/lists/${encodeURIComponent(token)}/events?deviceId=${encodeURIComponent(deviceId())}`)
+      );
       if (generation !== syncGeneration) {
         source.close();
         return;
@@ -8171,6 +8173,18 @@ async function loadStoreScope() {
 }
 
 async function boot() {
+  const pending = window.__ggInviteGate;
+  const allowed = pending ? await pending : true;
+  if (!allowed) {
+    document.addEventListener(
+      "gg-beta-unlocked",
+      () => {
+        void boot();
+      },
+      { once: true }
+    );
+    return;
+  }
   try {
     await loadStoreScope();
     adoptSessionFromUrl();

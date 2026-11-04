@@ -229,6 +229,7 @@ describe("Add tab at 390px on Chrome", { timeout: 60_000, skip: chrome ? false :
       await page.evaluateOnNewDocument(
         new Function(`
           localStorage.setItem("gg-onboarding-done", "1");
+          localStorage.setItem("gg-beta-code", "preview");
           localStorage.setItem("gg-theme", "dark");
           localStorage.setItem("gg-zip", "45103");
           localStorage.setItem("gg-step", "add");
