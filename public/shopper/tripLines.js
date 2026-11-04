@@ -1,8 +1,10 @@
 /**
- * One walking row per product. Review and In-store both use this so a
- * retailer title and its shorter twin (two Head & Shoulders) are one line.
+ * One walking row per product. Starts from Review's dedupeReviewLines, then
+ * collapses a retailer title and its shorter twin (two Head & Shoulders).
  * Different sizes and different products stay separate. Quantities add.
  */
+
+import { dedupeReviewLines } from "./reviewList.js";
 
 const PACKAGING = new Set([
   "shampoo",
@@ -84,7 +86,8 @@ function sameLine(left, right) {
  */
 export function dedupeTripLines(items, checks = {}) {
   const out = [];
-  for (const item of items || []) {
+  const reviewed = dedupeReviewLines(items, (item) => String(item?.name || item?.query || ""));
+  for (const item of reviewed) {
     if (!item) continue;
     const prior = out.findIndex((row) => sameLine(row, item));
     if (prior < 0) {
@@ -107,6 +110,15 @@ export function dedupeTripLines(items, checks = {}) {
       upc: kept.upc || item.upc,
       productId: kept.productId || item.productId,
     };
+  }
+  for (const row of out) {
+    const lineIds = [...new Set([
+      ...(row.lineIds || []),
+      ...(items || []).filter((item) => item && sameLine(row, item)).map((item) => item.lineId),
+    ].filter(Boolean))];
+    const checkedId = lineIds.find((id) => checks?.[id]);
+    row.lineIds = lineIds;
+    if (checkedId) row.lineId = checkedId;
   }
   return out;
 }

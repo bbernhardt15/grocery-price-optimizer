@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { isChromeIos } from "../../public/shopper/chromeIos.js";
 import { inStoreRoute, LAYOUT_NOTE } from "../../public/shopper/inStore.js";
+import { dedupeReviewLines } from "../../public/shopper/reviewList.js";
 import { dedupeTripLines, dedupeTripStores, inStoreSendHtml } from "../../public/shopper/tripLines.js";
 import { armHandoff, createReturnWatch, dismissReturnChoice, MIN_AWAY_MS, returnPromptDecision } from "../../public/shopper/returnPrompt.js";
 import { allowTabChange, armClickShield, clickShielded, createTabGuard, noteTabInteraction, settleTabBoot } from "../../public/shopper/tabGuard.js";
@@ -104,6 +105,15 @@ describe("tenth phone test", () => {
 
   it("in-store checklist drops send actions and duplicate Head & Shoulders", () => {
     assert.equal(inStoreSendHtml(), "");
+    const tripLines = readFileSync(new URL("../../public/shopper/tripLines.js", import.meta.url), "utf8");
+    assert.match(tripLines, /dedupeReviewLines/);
+    assert.equal(dedupeReviewLines(
+      [
+        { lineId: "a", name: "Head & Shoulders Classic Clean", upc: "190000000001", quantity: 1 },
+        { lineId: "b", name: "Head & Shoulders Classic Clean Shampoo", upc: "190000000001", quantity: 1 },
+      ],
+      (item) => String(item.name)
+    ).length, 1);
     const lines = dedupeTripLines(
       [
         { lineId: "a", name: "Head & Shoulders Classic Clean Shampoo", brand: "Head & Shoulders", size: "12.5 oz", quantity: 1, department: "Personal Care" },
