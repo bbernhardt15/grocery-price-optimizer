@@ -62,7 +62,7 @@
       <ul>
         <li>Your ZIP code.</li>
         <li>Coupons you type in (the store, the item, dollars or percent off, and an optional date) and a reminder that you clipped coupons for a trip. We do not see coupons you clip on a store’s own site. When you are signed in, the coupons you typed are saved with your list.</li>
-        <li>My list, until you share it: the items you checked, including the name, brand, size, and quantity, plus any price-alert setting on those items.</li>
+        <li>Shopping list, until you share it: the items you checked, including the name, brand, size, and quantity, plus any price-alert setting on those items.</li>
         <li>Whether you allow substitutes in the trip plan.</li>
         <li>Whether you turned on price alerts for the list.</li>
         <li>Your theme: light, dark, or match this device.</li>
@@ -111,14 +111,14 @@
 
       <h2>Shared lists</h2>
       <p>
-        My list starts on this device. When you tap Share list, Grocery Gitter stores a copy on the server so
+        Shopping list starts on this device. When you tap Share list, Grocery Gitter stores a copy on the server so
         someone with the link can open it.
       </p>
       <p>That copy includes:</p>
       <ul>
         <li>Each item: the name, and when we have them the brand, size, quantity, catalog id, and whether it is checked. An item someone removes is kept as a deletion marker so the other phones can catch up. A list holds up to 100 items, and up to 100 of those markers.</li>
         <li>An optional display name, up to 40 characters, on an item you add or check, if you typed one under “Your name on this list.” If you leave that blank, no name is stored.</li>
-        <li>A title. If you do not set one, it is “Shopping list.”</li>
+        <li>A title. If you do not set one, it is “My list.”</li>
         <li>Whether the link is editable or view-only.</li>
         <li>Timestamps for the list and for each item.</li>
         <li>SHA-256 hashes of the share secret and of the owner secret. The raw secrets are not stored. They stay in this browser and in the link you send. When a link is replaced, the server also keeps up to 10 earlier share hashes so the old link can be recognized and refused.</li>
@@ -272,7 +272,7 @@
 
       <h2>Delete my data</h2>
       <p>
-        Open Settings. It is at the top of the screen, at the bottom of My list, and in the page footer.
+        Open Settings. It is at the top of the screen, at the bottom of Shopping list, and in the page footer.
         Choose Delete my data and type DELETE. With no account, the request is for this
         device: the random id stored here, the owner secret if you created a shared list on this device, and
         the Kroger cookie if this browser has one. If you are signed in, the same request also deletes the

@@ -42,6 +42,7 @@
     <link rel="stylesheet" href="/shopper/beta.css?v=beta-1" />
     <link rel="stylesheet" href="/shopper/onboardingPolish.css?v=retest-10" />
     <link rel="stylesheet" href="/shopper/addTabPolish.css?v=add-10" />
+    <link rel="stylesheet" href="/shopper/phoneRetest11.css?v=retest-11" />
   </head>
   <body data-step="add">
     <a class="skip" href="#catalog">Skip to products</a>
@@ -52,17 +53,16 @@
           <span class="menu-glyph" aria-hidden="true">☰</span>
           <span id="menu-badge" class="menu-dot" hidden></span>
         </button>
-        <button type="button" id="brand-home" class="brand brand-home" aria-label="Home">
+        <button type="button" id="brand-home" class="brand brand-home" aria-label="Grocery Gitter home">
           <span class="brand-mark" aria-hidden="true">G</span>
-          <div>
-            <p class="brand-kicker">Grocery Gitter</p>
-            <p class="brand-title" id="brand-title">Add items</p>
-          </div>
+          <span class="brand-copy">
+            <span class="brand-word">Grocery Gitter</span>
+            <span class="brand-title" id="brand-title">Add items</span>
+          </span>
         </button>
-        <button type="button" id="brand-home-proxy" class="brand-home-proxy" popover="manual" aria-label="Home">G</button>
         <div class="top-actions">
           <button id="list-toggle" type="button" class="list-toggle" aria-controls="list-panel" aria-expanded="false">
-            My list
+            Shopping list
             <span id="list-count" class="count-pill">0</span>
           </button>
           <button type="button" id="add-items" class="primary add-items">Add items</button>
@@ -266,18 +266,22 @@
           </footer>
         </main>
 
-        <aside id="list-panel" class="list-panel" aria-label="My list">
+        <aside id="list-panel" class="list-panel" aria-label="Shopping list">
           <div class="list-head">
-            <h2>My list</h2>
+            <div>
+              <h2>Shopping list</h2>
+              <p id="shopping-list-note" class="muted shopping-list-note">The list for this trip.</p>
+            </div>
             <button type="button" class="text-btn" id="list-close">Close</button>
           </div>
           <label class="check-row list-alert-toggle">
-            <input id="list-alerts" type="checkbox" aria-describedby="list-alerts-benefit" />
-            <span>Alert me when prices on this list drop</span>
+            <input id="list-alerts" type="checkbox" disabled aria-describedby="list-alerts-benefit" />
+            <span id="list-alerts-label">Alert me when prices on this list drop</span>
             <span class="alert-state" data-off>Off</span>
             <span class="alert-state" data-on>On</span>
           </label>
-          <p id="list-alerts-benefit" class="muted">We'll notify you when something on your list gets cheaper.</p>
+          <p id="list-alerts-benefit" class="muted">Coming soon</p>
+          <p id="list-alerts-channel" class="muted">Delivery is a push notification on this phone. Grocery Gitter does not email price alerts.</p>
           <p class="muted sub-note">Compares the best price across stores with the price when you saved each item. Watch one item on its own, or set a target under today's price.</p>
           <div id="list-empty" class="empty-state">
             <h3>Your list is empty</h3>
@@ -335,9 +339,9 @@
 
       <footer id="bottom-dock" class="bottom-dock">
         <nav id="step-bar" class="step-bar" aria-label="Shopping steps">
-          <button type="button" data-flow="add" aria-current="step" aria-label="Add items">Add</button>
-          <button type="button" data-flow="plan" aria-label="Review the split">Review</button>
-          <button type="button" data-flow="shop" aria-label="In the store">In-store</button>
+          <button type="button" data-flow="add" aria-current="step" aria-label="Build"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h7v2H4v-2zM17 14h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg><span>Build</span></button>
+          <button type="button" data-flow="plan" aria-label="Review"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 4h6v7H5V4zm8 0h6v4h-6V4zM5 13h6v7H5v-7zm8-3h6v10h-6V10z"/></svg><span>Review</span></button>
+          <button type="button" data-flow="shop" aria-label="In-store"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 9l1.2-4h13.6L20 9H4zm0 2h16v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8z"/></svg><span>In-store</span></button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">
@@ -372,7 +376,7 @@
         </div>
         <div id="alerts-empty" class="empty-state">
           <h3>No price alerts</h3>
-          <p>No drops yet. Turn on alerts for My list and we’ll watch the saved prices.</p>
+          <p>No drops yet. Price drops on your shopping list show up here.</p>
           <button type="button" class="primary" data-empty-action="enable-alerts">Turn on list alerts</button>
         </div>
         <ul id="alerts-list" class="alert-list"></ul>
@@ -510,11 +514,14 @@
     <dialog id="cart-ready" class="sheet handoff-sheet" aria-labelledby="cart-ready-title">
       <form class="sheet-body" id="cart-ready-form">
         <h2 id="cart-ready-title">Your cart is ready</h2>
-        <p id="cart-ready-body">Finish checkout in the store app or site.</p>
-        <div class="onboard-actions">
+        <p id="cart-ready-body"></p>
+        <div id="cart-ready-sent" hidden></div>
+        <p id="cart-ready-note" class="kroger-finish-note" hidden>After you check out at Kroger, switch back to this Grocery Gitter tab and tap Finished.</p>
+        <div class="onboard-actions cart-ready-actions">
+          <a id="cart-ready-open" class="kroger-cart-btn" href="https://www.kroger.com/cart" rel="noopener" hidden>Open Kroger cart</a>
+          <button type="button" class="ghost" id="cart-ready-checked" hidden>I checked out</button>
           <button type="button" class="ghost" id="cart-ready-retry" hidden>Retry</button>
           <button type="button" class="ghost" id="cart-ready-trip">Back to my trip</button>
-          <button type="submit" class="primary" id="cart-ready-back">Back to Grocery Gitter</button>
         </div>
       </form>
     </dialog>

@@ -1,7 +1,14 @@
 /**
  * The G mark is home. It closes whatever sheet is open, then shows Add.
- * A proxy sits in the top layer while a modal sheet has made the header inert.
+ * The mark stays in the header flow, with the Grocery Gitter wordmark.
+ * Sheets get the same row inside the sheet, never a floating proxy.
  */
+
+export const WORDMARK = "Grocery Gitter";
+
+export function sheetBrandHtml() {
+  return `<button type="button" class="sheet-brand" data-sheet-home aria-label="Grocery Gitter home"><span class="brand-mark" aria-hidden="true">G</span><span class="brand-word">${WORDMARK}</span></button>`;
+}
 
 /**
  * @param {string[] | null | undefined} openDialogIds
@@ -14,9 +21,9 @@ export function homeTransition(openDialogIds) {
   };
 }
 
-/** @param {number} openDialogCount */
-export function homeProxyShouldShow(openDialogCount) {
-  return Number(openDialogCount) > 0;
+/** A floating G is never shown. The count is ignored on purpose. */
+export function homeProxyShouldShow(_openDialogCount) {
+  return false;
 }
 
 /**

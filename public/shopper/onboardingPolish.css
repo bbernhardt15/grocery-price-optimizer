@@ -157,26 +157,48 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone.drop-hero input {
 .summary-row .rule-pill,
 .learned-row .rule-pill,
 .rule-pill {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   margin: 6px 0 0;
-  padding: 4px 10px 4px 8px;
-  border-radius: 999px;
+  padding: 6px 12px;
+  border-radius: 16px;
   background: var(--accent);
   color: var(--accent-ink);
   font-weight: 750;
-  width: fit-content;
+  width: auto;
   max-width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
 }
-.rule-pill-check { font-weight: 750; }
+.rule-pill-check { flex: none; font-weight: 750; }
+.rule-pill-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
 .rule-pill-brands {
   font-weight: 650;
   background: var(--surface);
   color: var(--ink);
   border-radius: 999px;
   padding: 2px 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 :root[data-resolved="dark"] .summary-row .rule-pill,
 :root[data-resolved="dark"] .learned-row .rule-pill,

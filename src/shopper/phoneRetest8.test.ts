@@ -23,7 +23,7 @@ const importer = readFileSync(new URL("../../public/shopper/import.js", import.m
 
 describe("eighth phone test", () => {
   it("bumps the shell cache to v32", () => {
-    assert.match(sw, /grocery-gitter-shell-v38/);
+    assert.match(sw, /grocery-gitter-shell-v39/);
   });
 
   it("derives ZIP from device coordinates and labels a coarse fix", () => {
@@ -179,7 +179,8 @@ describe("eighth phone test", () => {
     assert.equal(guess[0].groups[0].label, "Bakery");
     assert.equal(krogerAisleLabel({ aisleLocations: [{ description: "Aisle 4" }] }), "Aisle 4");
     assert.equal(krogerAisleLabel({ aisleLocations: [{ number: "9" }] }), "Aisle 9");
-    assert.match(html, /aria-label="In the store">In-store</);
+    assert.match(html, /aria-label="In-store"/);
+    assert.match(html, />In-store</);
     assert.equal(planBarCopy({ step: "shop", itemCount: 4, left: 1 }).button, "Clear checked");
     assert.match(app, /inStoreRoute/);
     assert.match(html, /Clear trip/);

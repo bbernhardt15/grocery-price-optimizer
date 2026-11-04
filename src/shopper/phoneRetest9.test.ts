@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v38", () => {
-    assert.match(sw, /grocery-gitter-shell-v38/);
+  it("bumps the shell cache to v39", () => {
+    assert.match(sw, /grocery-gitter-shell-v39/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -88,9 +88,9 @@ describe("ninth phone test", () => {
     ]);
     assert.equal(rows[0].label, "U by Kotex Tampons x6");
     assert.equal(rows[0].quantity, 1);
-    assert.equal(rows[0].selected, true);
+    assert.equal(rows[0].selected, false);
     assert.equal(rows[1].selected, false);
-    assert.equal(tripAddTotal(rows), 2);
+    assert.equal(tripAddTotal(rows), 0);
     assert.match(profileUi, /finish\(Date\.now\(\)\)/);
     assert.match(profileUi, /data-trip-pick/);
   });

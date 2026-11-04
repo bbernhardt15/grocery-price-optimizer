@@ -5,6 +5,7 @@
  */
 
 import { stapleById } from "./stapleFamilies.js";
+import { readCardTitle } from "./receiptReading.js";
 
 export const CART_READY = new Set(["Kroger", "Walmart"]);
 
@@ -157,7 +158,7 @@ export function readCardHtml(card) {
   const ratio = Math.max(0, Math.min(1, Number(card?.ratio) || 0));
   const stage = card?.message ? `<p class="read-stage">${escapeText(card.message)}</p>` : "";
   return `<article class="read-card" data-read-card="${escapeText(card?.index)}" data-state="${escapeText(status)}">
-    <h3>${escapeText(foundLabel(card?.name, card?.found))}</h3>
+    <h3>${escapeText(readCardTitle(card, foundLabel))}</h3>
     ${stage}
     <progress max="1" value="${ratio}"></progress>
     ${waiting}
