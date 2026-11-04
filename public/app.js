@@ -646,6 +646,7 @@ function showTripValue() {
   const host = $("trip-value-body");
   const dialog = $("trip-value");
   if (!view?.stores?.length || !host || !dialog) return;
+  betaEvent("trip_completed");
   const lines = view.stores.flatMap((store) => store.items || []);
   const comparison = singleStoreSavings(lines);
   const profile = getUserProfile(localStorage);
@@ -1145,6 +1146,14 @@ function calmPlanError(message) {
   return text;
 }
 
+function betaEvent(name) {
+  try {
+    document.dispatchEvent(new CustomEvent("gg-beta-event", { detail: name }));
+  } catch {
+    /* product counters are optional */
+  }
+}
+
 function friendlyCartError(message) {
   const text = String(message || "").trim();
   if (!text || /invalid response|upstream|authorize\.json|^\{|products request failed|locations request failed/i.test(text)) {
@@ -1161,6 +1170,7 @@ function applyKrogerReturn(parsed) {
   if (parsed.kind === "added") {
     const saved = readKrogerTrip(localStorage);
     toast(krogerAddedConfirmation(parsed.message, saved?.itemCount), 5000);
+    betaEvent("kroger_cart_sent");
   }
   try {
     localStorage.setItem(ONBOARDING_KEY, "1");
@@ -3888,6 +3898,7 @@ async function planTrip({ stay = false, trigger = null } = {}) {
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     renderTrip(body);
+    betaEvent("plan_built");
     if (body.partial) {
       ensurePlanRetry(PLAN_PARTIAL_NOTE);
       toast(PLAN_PARTIAL_NOTE, 4200);
@@ -4025,6 +4036,7 @@ async function startKroger(storeName, button) {
     }
     if (body.status === "added" || body.krogerCartUrl) {
       rememberKrogerConnected();
+      betaEvent("kroger_cart_sent");
       openCartReady("Kroger", { summary: body.summary || "" });
       return;
     }
@@ -4909,6 +4921,7 @@ document.addEventListener("click", (event) => {
     }
     haptic();
     maybeAskAccount("cart", () => {
+      betaEvent("walmart_opened");
       markWalmartHandoff();
       openStoreHandoff(url, "Walmart", "cart");
       window.scrollTo(0, scrollY);
@@ -7576,12 +7589,15 @@ async function postImport(path, body, onProgress) {
   });
   const type = response.headers.get("content-type") || "";
   if (type.includes("ndjson")) {
-    return readNdjsonResponse(response, onProgress);
+    const streamed = await readNdjsonResponse(response, onProgress);
+    if (response.ok && path === "/api/import/receipt") betaEvent("receipt_imported");
+    return streamed;
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok && !payload?.receipt && !payload?.lines) {
     throw new Error(payload?.error || "We couldn't read that.");
   }
+  if (path === "/api/import/receipt" && (response.ok || payload?.receipt || payload?.lines)) betaEvent("receipt_imported");
   return payload;
 }
 

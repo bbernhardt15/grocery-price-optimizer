@@ -18,6 +18,7 @@ import billingRouter from "./routes/billing";
 import { attachAccount } from "./auth/middleware";
 import deleteMyDataRouter from "./routes/deleteMyData";
 import importListRouter from "./routes/importList";
+import betaRouter from "./routes/beta";
 import { IMPORT_MESSAGES } from "./import/messages";
 
 initSentry();
@@ -149,6 +150,26 @@ app.get("/api", (_req, res) => {
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "POST /api/import/text":
         "Parses a pasted list into catalog matches. Photo, voice, and suggestions stay off until IMPORT_VISION_PROVIDER / IMPORT_SPEECH_PROVIDER / IMPORT_AI_PROVIDER and a key are set. See docs/IMPORT.md.",
+      "GET /api/health/ready":
+        "Mongo is connected. 503 when it is not. No secrets.",
+      "GET /api/beta/gate":
+        "Whether BETA_INVITE_CODES is set. required is false when the variable is unset, and the body never lists the codes.",
+      "POST /api/beta/invite":
+        "Checks one invite code for this device and records the code used. 200 with required false when the gate is off.",
+      "POST /api/beta/feedback":
+        "Stores a 1 to 5 rating and a note for this device. Rate limited. No receipt text.",
+      "POST /api/beta/events":
+        "Increments one privacy-friendly product counter. No account id is stored.",
+      "POST /api/beta/client-errors":
+        "Throttled client error log. Also sent to Sentry when SENTRY_DSN is set.",
+      "GET /api/admin/beta/feedback":
+        "Newest feedback first. Requires Authorization: Bearer $GG_ADMIN_TOKEN (or ADMIN_TOKEN, or x-admin-token).",
+      "GET /api/admin/beta/feedback.csv":
+        "The same feedback as a CSV download. Same admin token.",
+      "GET /api/admin/beta/signups":
+        "Signup counts per invite code. No device ids or emails.",
+      "GET /api/admin/beta/events":
+        "Product counter totals. Same admin token.",
       "GET /api/observability":
         "Crash-reporting config for the website and the native shells. enabled is false when SENTRY_DSN is unset, and the body then has no DSN. The auth token is never returned.",
     },
@@ -173,6 +194,7 @@ app.use("/api", priceAlertsRouter);
 app.use("/api", sharedListsRouter);
 app.use("/api", deleteMyDataRouter);
 app.use("/api", importListRouter);
+app.use("/api", betaRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));

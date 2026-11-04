@@ -58,10 +58,19 @@ export function mountWelcome(deps) {
   }
 
   function writeFlag() {
+    let already = false;
     try {
+      already = onboardingDone(readFlag());
       localStorage.setItem(ONBOARDING_KEY, "1");
     } catch {
       /* private browsing */
+    }
+    if (!already) {
+      try {
+        document.dispatchEvent(new CustomEvent("gg-beta-event", { detail: "onboarding_completed" }));
+      } catch {
+        /* product counters are optional */
+      }
     }
   }
 
