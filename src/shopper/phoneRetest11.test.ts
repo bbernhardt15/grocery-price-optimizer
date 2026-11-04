@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v40", () => {
-    assert.match(sw, /grocery-gitter-shell-v41/);
+  it("bumps the shell cache to v42", () => {
+    assert.match(sw, /grocery-gitter-shell-v42/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {

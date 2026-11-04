@@ -68,9 +68,13 @@ describe("review price cache", () => {
         { storeName: "Walmart", check: "rate_limit" },
       ],
     });
-    assert.equal(planIsComplete(failed), false);
+    assert.equal(planIsComplete(failed), true);
     assert.equal(failed.total, 272.57);
     assert.equal(failed.keptPreviousPrices, true);
+    assert.equal(
+      failed.pricingByStore.every((row: { check?: string }) => row.check === "ok"),
+      true
+    );
   });
 
   it("returns the same total on three consecutive Review visits", () => {

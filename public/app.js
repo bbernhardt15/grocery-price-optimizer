@@ -170,7 +170,12 @@ import { alertDeliveryState } from "./shopper/alertDelivery.js";
 import { completionHook, finishCheckedOut, sentItemsHtml } from "./shopper/krogerReady.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "./shopper/inStoreShare.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
-import { mergeKeptStorePrices, planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
+import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
+import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml } from "./shopper/reviewStable.js";
+import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
+import { applyInStoreScroll, inStoreSkeletonHtml } from "./shopper/inStoreEntry.js";
+import { cartCouponCallout } from "./shopper/cartCouponNote.js";
+import { krogerSendPatch } from "./shopper/krogerSendProgress.js";
 import {
   adoptReviewResult,
   clearPlanCache,
@@ -1325,6 +1330,10 @@ function paintKrogerConnected(connected) {
   const line = $("settings-kroger");
   const connect = $("settings-kroger-connect");
   const ready = $("settings-kroger-ready");
+  const settingsSend = $("settings-kroger-send");
+  if (ready && settingsSend && !ready.querySelector("[data-coupon-callout]")) {
+    settingsSend.insertAdjacentHTML("beforebegin", cartCouponCallout("Kroger", couponPageFor("Kroger")));
+  }
   if (on) {
     if (line) line.textContent = "Kroger connected";
     if (connect) connect.hidden = true;
@@ -1345,8 +1354,10 @@ function rememberKrogerConnected() {
 
 function krogerBannerHtml() {
   if (!krogerConnectedNow()) return "";
+  const note = cartCouponCallout("Kroger", couponPageFor("Kroger"));
   return `<section class="kroger-card" data-kroger-banner>
     <h2>Kroger connected</h2>
+    ${note}
     <button type="button" class="primary" data-kroger-send>Send to Kroger cart</button>
     <a href="${KROGER_CART_URL}" data-kroger-cart rel="noopener">Open Kroger cart</a>
   </section>`;
@@ -1534,16 +1545,19 @@ function finishKrogerReturn(parsed) {
   toast(parsed.message, 6500);
 }
 
-function showKrogerLeaveNote(button) {
-  let line = document.getElementById("kroger-leave-note");
-  if (!line && button?.parentElement) {
-    line = document.createElement("p");
-    line.id = "kroger-leave-note";
-    line.className = "muted";
-    button.parentElement.insertBefore(line, button);
-  }
-  if (line) line.textContent = KROGER_LEAVE_NOTE;
+function showKrogerLeaveNote(_button) {
   toast(KROGER_LEAVE_NOTE, 6000);
+}
+
+function paintKrogerSend(button, phase) {
+  if (!(button instanceof HTMLElement)) return;
+  const patch = krogerSendPatch(phase, { connected: krogerConnectedNow() });
+  button.textContent = patch.text;
+  button.disabled = patch.disabled;
+  if (patch.busy) button.setAttribute("aria-busy", "true");
+  else button.removeAttribute("aria-busy");
+  button.setAttribute("aria-label", patch.ariaLabel);
+  button.classList.remove("is-busy");
 }
 
 function rememberKrogerHandoff(itemCount) {
@@ -2079,7 +2093,8 @@ function renderEstimate() {
   listBar.dataset.state = meter.status;
   const catalog = catalogTripEstimate([...list.values()]);
   const planned = currentTrip();
-  const plannedTotal = planned?.stores?.length && Number(planned.total) > 0 ? planned.total : null;
+  const settledFigures = planIsComplete(lastOptimize) && planned?.stores?.length ? cartCardFigures(planned.stores) : null;
+  const plannedTotal = settledFigures && settledFigures.total > 0 ? settledFigures.total : planned?.stores?.length && Number(planned.total) > 0 ? planned.total : null;
   let shownTotal = plannedTotal == null ? meter.splitTotal : plannedTotal;
   if (!(Number(shownTotal) > 0) && catalog.total > 0) shownTotal = catalog.total;
   estimateTotalEl.textContent = Number(shownTotal) > 0 ? money(shownTotal) : "";
@@ -3037,6 +3052,10 @@ function listSignature() {
 
 let replanTimer = 0;
 let plannedSignature = "";
+let reviewSignature = "";
+let pinTabTop = false;
+let quietRetryAttempt = 0;
+const reviewTotals = createDisplayedTotal();
 let planStartedAt = 0;
 let planTicker = 0;
 const missingSwapProducts = new Map();
@@ -3382,21 +3401,45 @@ function addOwnCoupon(button) {
 }
 
 function renderTrip(payload, options = {}) {
-  const names = listEntries().map((entry) => entry.name);
+  const kept = Boolean(payload?.keptPreviousPrices);
+  const complete = planIsComplete(payload);
+  if (!complete && !options.force) {
+    if (flowStep === "shop") {
+      if (!planIsComplete(lastOptimize)) renderShop();
+    } else paintReviewLoading();
+    return;
+  }
+  const signature = listSignature();
+  const figures = cartCardFigures(dedupeStores(payload?.stores || []));
+  const published = reviewTotals.publish(signature, figures.total, { complete: true, force: Boolean(options.force) });
+  const total = published == null ? figures.total : published;
+  const sameTotal = planIsComplete(lastOptimize) && reviewSignature === signature && Math.abs(Number(lastOptimize.total) - total) < 0.009;
+  if (!options.force && sameTotal && (options.fromCache || kept)) {
+    if (flowStep === "shop") renderShop();
+    else if (!tripEl?.querySelector("[data-review-shell]")) paintTrip();
+    else {
+      paintPlanBar();
+      settleEntryScroll();
+    }
+    return;
+  }
   const unavailable = genuineUnfound(payload?.unavailable, payload?.pricingByStore);
-  const stores = dedupeStores(mergeKeptStorePrices(lastOptimize?.stores, payload?.stores, names, unavailable));
   lastOptimize = {
     ...payload,
+    partial: false,
+    pendingStores: [],
+    keptPreviousPrices: kept,
     unavailable,
     toFindInStore: toFindRecords(unavailable),
-    stores: stores.length ? stores : payload?.stores || [],
+    stores: figures.stores.length ? figures.stores : payload?.stores || [],
+    total,
   };
-  if (lastOptimize.stores?.length) {
-    lastOptimize.total = Math.round(lastOptimize.stores.reduce((sum, store) => sum + (Number(store.subtotal) || 0), 0) * 100) / 100;
-  }
+  reviewSignature = signature;
   if (!options.keepEdits) {
-    plannedSignature = listSignature();
+    plannedSignature = signature;
     tripEdits = { lockedStore: null, moves: {} };
+  } else if (!plannedSignature) {
+    plannedSignature = signature;
   }
   rememberTrip();
   publishTripState();
@@ -3588,6 +3631,8 @@ function reviewStoreArticle(store, couponSummary, coupons) {
   const countLabel = count === 1 ? "1 item" : `${count} items`;
   const mark = handoffMark(store);
   const action = withCheckoutLabel(primaryAction(store), reviewCheckoutLabel(store));
+  const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
+  const callout = cartCouponCallout(store.storeName, page);
   const walmartNote =
     store.handoff?.action?.type === "walmart_cart"
       ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
@@ -3596,8 +3641,9 @@ function reviewStoreArticle(store, couponSummary, coupons) {
     name: store.storeName,
     countLabel,
     total,
+    minHeight: reviewCardMinPx(store.storeName),
     markHtml: `<span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>`,
-    actionHtml: `${action}${walmartNote}`,
+    actionHtml: `${callout}${action}${walmartNote}`,
     itemsHtml: reviewItemRows(store.items || []),
     swapsHtml: reviewSwapLines(store),
     couponsHtml,
@@ -3614,14 +3660,78 @@ function planStatusNow() {
   );
 }
 
+function scrollPageTop() {
+  applyInStoreScroll(
+    (x, y) => window.scrollTo(x, y),
+    (fn) => requestAnimationFrame(fn)
+  );
+}
+
+function settleEntryScroll(extra = false) {
+  if (extra && flowStep === "shop") {
+    scrollPageTop();
+    return;
+  }
+  if (!pinTabTop) return;
+  if (flowStep !== "plan" && flowStep !== "shop") return;
+  pinTabTop = false;
+  scrollPageTop();
+}
+
+function paintReviewLoading(status) {
+  if (!tripEl || flowStep !== "plan") return;
+  const existing = tripEl.querySelector("[data-review-stable='loading']");
+  if (existing) {
+    const line = existing.querySelector(".review-loading-status");
+    if (status && line) line.textContent = status;
+    paintPlanBar();
+    settleEntryScroll();
+    return;
+  }
+  tripEl.innerHTML = `${krogerBannerHtml()}${reviewLoadingHtml(selectedStoreNames(), status)}`;
+  paintPlanBar();
+  settleEntryScroll();
+}
+
+function settledReviewPayload(signature, zip, force = false) {
+  const cachedPlan = readPlanCache(localStorage);
+  if (shouldReusePlan({ cache: cachedPlan, signature, zip, now: Date.now(), force })) {
+    return { payload: cachedPlan.payload, savedAt: cachedPlan.savedAt, source: "cache" };
+  }
+  if (!force && planIsComplete(lastOptimize) && reviewSignature === signature) {
+    return { payload: lastOptimize, savedAt: lastOptimize.pricedAt, source: "memory" };
+  }
+  return null;
+}
+
+function reuseSettledReview() {
+  const signature = listSignature();
+  const zip = normalizeZip(zipEl.value);
+  const hit = settledReviewPayload(signature, zip, false);
+  if (!hit) return false;
+  const shell = tripEl?.querySelector("[data-review-shell]");
+  const shown = shell?.getAttribute("data-total");
+  if (hit.source === "memory" && shell && shown != null && Math.abs(Number(shown) - Number(lastOptimize?.total)) < 0.009) {
+    paintPlanBar();
+    settleEntryScroll();
+    return true;
+  }
+  renderTrip(
+    { ...hit.payload, pricedAt: hit.payload.pricedAt || hit.savedAt || Date.now() },
+    { keepEdits: true, fromCache: true }
+  );
+  return true;
+}
+
 function paintPlanningStatus() {
+  if (tripEl?.querySelector("[data-review-stable]")) return;
   const html = planStatusNow();
   const host = document.getElementById("plan-status-block");
   if (host) {
     host.outerHTML = html;
     return;
   }
-  if (tripEl && planning) tripEl.insertAdjacentHTML("afterbegin", html);
+  if (tripEl && planning && flowStep !== "plan") tripEl.insertAdjacentHTML("afterbegin", html);
 }
 
 function selectReviewMode(mode) {
@@ -3651,27 +3761,29 @@ function selectReviewMode(mode) {
 }
 
 function paintTrip() {
-  const scrollY = window.scrollY || 0;
-  const keepPlace = () => {
+  const finish = () => {
     paintPlanBar();
-    if (scrollY > 0) {
-      window.scrollTo(0, scrollY);
-      requestAnimationFrame(() => window.scrollTo(0, scrollY));
-    }
+    settleEntryScroll();
   };
   const view = currentTrip();
   const state = reviewState();
-  if (!view?.stores?.length) {
+  const ready = reviewHeadlineReady(lastOptimize);
+  if (!ready) {
     if (!list.size) {
       tripEl.innerHTML = `${krogerBannerHtml()}${emptyStateMarkup(emptyState("list"), escapeHtml)}`;
-    } else if (planning) {
-      tripEl.innerHTML = `${krogerBannerHtml()}${planStatusNow()}`;
-    } else if (!lastOptimize) {
-      tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted">Review the split to price this list.</p>`;
-    } else {
-      tripEl.innerHTML = `${krogerBannerHtml()}${planStatusNow()}`;
+      finish();
+      return;
     }
-    keepPlace();
+    if (!planning && !lastOptimize) {
+      tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted">Review the split to price this list.</p>`;
+      finish();
+      return;
+    }
+    paintReviewLoading();
+    return;
+  }
+  if (!view?.stores?.length) {
+    paintReviewLoading();
     return;
   }
   const plans = state?.plans;
@@ -3681,6 +3793,10 @@ function paintTrip() {
   const customStores = mode === "custom" ? view.stores : [];
   const lines = bestStores.flatMap((store) => store.items || []);
   const card = savingsCard(singleStoreSavings(lines));
+  const figures = cartCardFigures(bestStores);
+  if (card.lines?.length) {
+    card.lines = card.lines.map((line) => (line.label === "This plan" ? { ...line, value: priceFigure(figures.total) } : line));
+  }
   if (plans) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
@@ -3690,7 +3806,7 @@ function paintTrip() {
   syncStepVisibility();
   if (tripStoreEmpty(lastOptimize)) {
     tripEl.innerHTML = emptyStateMarkup(emptyState("stores"), escapeHtml);
-    keepPlace();
+    finish();
     return;
   }
   const lineItems = (card.lines || [])
@@ -3715,12 +3831,16 @@ function paintTrip() {
   const panel = (name, stores, hidden) =>
     `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}</div></div>`;
   const noteSets = coverageNotesFor(plans, lastOptimize?.pricingByStore);
-  const coverage = [...noteSets.unchecked, ...noteSets.missing].map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
+  const visibleNotes = coverageVisible([...noteSets.unchecked, ...noteSets.missing], {
+    settled: ready,
+    kept: Boolean(lastOptimize?.keptPreviousPrices),
+  });
+  const coverage = visibleNotes.map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
   const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
   const nudge = mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = lastOptimize?.unavailable || [];
   const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
-  const progress = planning ? planStatusNow() : "";
+  const progress = "";
   const singleStores = plans?.single ? presentPlan(plans.single.stores) : [];
   const shown = mode === "custom" ? customStores : mode === "single" ? singleStores : mode === "fewer" ? fewerStores : bestStores;
   const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
@@ -3736,7 +3856,7 @@ function paintTrip() {
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
-    <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}">
+    <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}" data-total="${escapeHtml(String(figures.total))}">
     ${reviewHead}
     <section class="savings-card">
       <p class="savings-kicker">We'll handle the math.</p>
@@ -3792,7 +3912,7 @@ function paintTrip() {
     };
   }
   void fillMissingSuggestions();
-  keepPlace();
+  finish();
 }
 
 async function fillMissingSuggestions() {
@@ -4310,11 +4430,16 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   });
   const signature = listSignature();
   const cachedPlan = readPlanCache(localStorage);
-  if (shouldReusePlan({ cache: cachedPlan, signature, zip, now: Date.now(), force })) {
+  const settled = settledReviewPayload(signature, zip, force);
+  if (settled) {
     setBusy(trigger, false);
     setBusy(document.querySelector('[data-flow="plan"]'), false);
     plannedSignature = signature;
-    renderTrip({ ...cachedPlan.payload, pricedAt: cachedPlan.payload.pricedAt || cachedPlan.savedAt }, { keepEdits: true, fromCache: true });
+    reviewSignature = signature;
+    renderTrip(
+      { ...settled.payload, pricedAt: settled.payload.pricedAt || settled.savedAt || Date.now() },
+      { keepEdits: true, fromCache: true, force }
+    );
     paintPlanBar();
     return "ok";
   }
@@ -4332,7 +4457,8 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   planBtn.disabled = false;
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
-  paintPlanNow();
+  if (flowStep === "plan") paintReviewLoading();
+  else if (flowStep === "shop" && !planIsComplete(lastOptimize)) renderShop();
   paintPlanBar();
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
@@ -4364,42 +4490,52 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
           total: Number(status.total) || planProgress[name]?.total || list.size,
         };
       }
-      paintPlanningStatus();
-    }, (partial) => {
-      if (planIsComplete(lastOptimize) || planIsComplete(readPlanCache(localStorage)?.payload)) return;
-      renderTrip(adoptReviewResult(lastOptimize, partial), { keepEdits: true });
+      if (!tripEl?.querySelector("[data-review-stable]")) paintPlanningStatus();
+    }, () => {
+      if (flowStep === "plan" && !planIsComplete(lastOptimize)) paintReviewLoading();
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     const previousPlan =
       cachedPlan && cachedPlan.signature === signature && planIsComplete(cachedPlan.payload)
         ? cachedPlan.payload
-        : plannedSignature === signature
+        : reviewSignature === signature && planIsComplete(lastOptimize)
           ? lastOptimize
           : null;
     const adopted = adoptReviewResult(previousPlan, body, Date.now());
-    if (previousPlan && planIsComplete(previousPlan) && !planIsComplete(body)) {
-      toast("Couldn't check right now. Showing the last prices.");
+    const held = Boolean(previousPlan && planIsComplete(previousPlan) && !planIsComplete(body));
+    const retry = quietRetryPlan({
+      attempt: quietRetryAttempt,
+      hasSettled: held || planIsComplete(adopted),
+      incomingComplete: planIsComplete(body),
+    });
+    if (!planIsComplete(adopted)) {
+      if (retry.retry) {
+        quietRetryAttempt += 1;
+        window.setTimeout(() => {
+          if (planIsComplete(lastOptimize) || planIsComplete(readPlanCache(localStorage)?.payload)) return;
+          void planTrip({ stay: true, quiet: true });
+        }, retry.delayMs || 1600);
+      }
+      if (flowStep === "plan") paintReviewLoading(retry.retry ? undefined : REVIEW_GAVE_UP_STATUS);
+      return result;
     }
-    renderTrip(adopted);
-    if (planIsComplete(adopted)) {
+    quietRetryAttempt = 0;
+    renderTrip(adopted, { keepEdits: true, force });
+    if (planIsComplete(lastOptimize)) {
       writePlanCache(localStorage, {
         signature: listSignature(),
         zip,
-        payload: adopted,
-        savedAt: adopted.pricedAt || Date.now(),
+        payload: lastOptimize,
+        savedAt: lastOptimize.pricedAt || Date.now(),
       });
     }
     betaEvent("plan_built");
-    if (body.partial && !planIsComplete(adopted)) {
-      ensurePlanRetry(PLAN_PARTIAL_NOTE);
-      toast(PLAN_PARTIAL_NOTE, 4200);
-    }
     rememberListAsUsuals();
     openList(false);
     void instacartTask.then(() => {
       if (planAbort && planAbort !== controller) return;
       if (flowStep === "shop") renderShop();
-      else if (flowStep === "plan") paintTrip();
+      else if (flowStep === "plan" && !tripEl?.querySelector("[data-review-shell]")) paintTrip();
     });
   } catch (error) {
     if (planAbort !== controller) return "replaced";
@@ -4418,14 +4554,30 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
         : error instanceof Error
           ? calmPlanError(error.message)
           : "Could not plan the trip.";
-    if (!lastOptimize && !list.size) {
+    const heldError = planIsComplete(lastOptimize);
+    const retry = quietRetryPlan({
+      attempt: quietRetryAttempt,
+      hasSettled: heldError,
+      incomingComplete: false,
+    });
+    if (retry.retry && !heldError) {
+      quietRetryAttempt += 1;
+      window.setTimeout(() => {
+        if (planIsComplete(lastOptimize)) return;
+        void planTrip({ stay: true, quiet: true });
+      }, retry.delayMs || 1600);
+      if (flowStep === "plan") paintReviewLoading();
+    } else if (!heldError && flowStep === "plan") {
+      paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+    } else if (!heldError && !lastOptimize && !list.size) {
       const state = emptyState(kind || "network");
       tripEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
-    } else if (!lastOptimize) {
-      paintLocalPreview(message);
+      ensurePlanRetry(message);
+      toast(message);
+    } else if (!heldError) {
+      ensurePlanRetry(message);
+      toast(timedOut ? PLAN_PARTIAL_NOTE : message);
     }
-    ensurePlanRetry(message);
-    toast(timedOut ? PLAN_PARTIAL_NOTE : message);
   } finally {
     if (planAbort === controller) {
       planning = false;
@@ -4493,11 +4645,8 @@ async function openInstacart(button) {
 async function startKroger(storeName, button) {
   const store = currentTrip()?.stores?.find((entry) => entry.storeName === storeName);
   if (!store) return;
-    const label = button.textContent;
-    button.disabled = true;
-    button.textContent = krogerConnectedNow() ? "Sending with your saved Kroger sign-in…" : "Connecting to Kroger…";
-    button.setAttribute("aria-busy", "true");
-    setBusy(button, true);
+    paintKrogerSend(button, "sending");
+    if (krogerConnectedNow()) button.setAttribute("aria-label", "Sending with your saved Kroger sign-in…");
     try {
     const response = await apiFetch("/api/kroger/cart/start", {
       method: "POST",
@@ -4542,10 +4691,7 @@ async function startKroger(storeName, button) {
       retry: () => void startKroger(storeName, button),
     });
   } finally {
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    if (button.isConnected && /Kroger sign-in|Connecting to Kroger/.test(button.textContent || "")) button.textContent = label;
-    setBusy(button, false);
+    if (button?.isConnected) paintKrogerSend(button, "idle");
   }
 }
 
@@ -7099,6 +7245,7 @@ function showStep(step, reason = "user") {
   tabGuard = decision.state;
   if (!decision.allow) return;
   hidePullStatus();
+  const priorStep = flowStep;
   flowStep = readFlowStep(step);
   try {
     localStorage.setItem(STEP_KEY, flowStep);
@@ -7111,16 +7258,34 @@ function showStep(step, reason = "user") {
     $("filters-open")?.setAttribute("aria-expanded", "false");
     document.querySelector(".list-panel")?.classList.remove("open");
   }
+  if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
-    paintPlanNow();
-    if (list.size) {
+    if (!list.size) paintPlanNow();
+    else if (!reuseSettledReview()) {
       const tab = document.querySelector('[data-flow="plan"]');
       setBusy(tab, true);
+      paintReviewLoading();
       void planTrip({ stay: true, trigger: tab });
     }
   }
   if (flowStep === "shop") {
-    if (!lastOptimize) loadCachedTrip();
+    if (!planIsComplete(lastOptimize)) {
+      const hit = settledReviewPayload(listSignature(), normalizeZip(zipEl?.value || ""), false);
+      if (hit) {
+        const figures = cartCardFigures(hit.payload.stores || []);
+        lastOptimize = {
+          ...hit.payload,
+          stores: figures.stores,
+          total: figures.total,
+          partial: false,
+          pendingStores: [],
+          pricedAt: hit.payload.pricedAt || hit.savedAt || Date.now(),
+        };
+        reviewSignature = listSignature();
+        plannedSignature = reviewSignature;
+        reviewTotals.publish(reviewSignature, figures.total, { complete: true });
+      } else if (!lastOptimize) loadCachedTrip();
+    }
     renderShop();
     void engageWake();
   } else {
@@ -7135,7 +7300,8 @@ function paintPlanBar() {
   const view = currentTrip();
   const progressStores = flowStep === "shop" && view?.stores ? dedupeTripStores(view.stores, mergedTripChecks(view.stores)) : view?.stores || [];
   const progress = view ? shopProgress(progressStores, mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
-  const total = view?.stores?.length ? view.total : lastBarTotal;
+  const settledFigures = planIsComplete(lastOptimize) && view?.stores?.length ? cartCardFigures(view.stores) : null;
+  const total = settledFigures ? settledFigures.total : view?.stores?.length ? view.total : lastBarTotal;
   const copy = planBarCopy({
     step: flowStep,
     itemCount: flowStep === "shop" && progress.total ? progress.total : count,
@@ -7179,15 +7345,17 @@ function paintPlanBar() {
 function renderShop() {
   const shop = $("shop");
   if (!shop) return;
+  const replacingSkeleton = Boolean(shop.querySelector("[data-shop-skel]"));
   const view = currentTrip();
-  if (!view?.stores?.length) {
+  const waiting = Boolean(planning && !planIsComplete(lastOptimize));
+  if (!view?.stores?.length || waiting) {
     const backPrompt = showReturnBanner
       ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
       : "";
     const body = !list.size
       ? emptyStateMarkup(emptyState("shop"), escapeHtml)
       : planning || lastOptimize
-        ? `<p class="muted">Updating the plan…</p><div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`
+        ? inStoreSkeletonHtml(list.size)
         : emptyStateMarkup(
             {
               title: "No trip yet",
@@ -7199,6 +7367,10 @@ function renderShop() {
           );
     shop.innerHTML = `${backPrompt}${body}`;
     paintPlanBar();
+    if (pinTabTop || replacingSkeleton) {
+      pinTabTop = false;
+      scrollPageTop();
+    }
     return;
   }
   const checks = mergedTripChecks(view.stores);
@@ -7287,6 +7459,10 @@ function renderShop() {
     ${html}
   `;
   paintPlanBar();
+  if (pinTabTop || replacingSkeleton) {
+    pinTabTop = false;
+    scrollPageTop();
+  }
 }
 
 function paintShopChrome() {
