@@ -1,5 +1,7 @@
+import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
 import { isGroceryUpc, krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
+import { SharedList } from "../models/SharedList";
 import { Product } from "../models/Product";
 import { utcDay } from "./budget";
 import { ingestConfig } from "./config";
@@ -11,7 +13,9 @@ import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer } from "./m
  * departments, then lower-match aisles. General merchandise is not looked
  * up. A miss keeps the next GTIN variant eligible immediately. After the
  * last variant misses, the master waits out the cooldown and is tried
- * again. A 503 is a short hold, not a miss. Nothing is deleted.
+ * again. A 503 is not a miss. After the retries are exhausted the row waits out
+ * the same cooldown, so a poison id is not sampled again the next day.
+ * Nothing is deleted.
  */
 const GROCERY_DEPARTMENTS = [
   "dairy-eggs",
@@ -34,8 +38,12 @@ const STAPLE_DEPARTMENTS = [...GROCERY_DEPARTMENTS, ...LOW_MATCH_DEPARTMENTS] as
 /** Household rows Kroger actually stocks. The rest of that aisle is general merchandise. */
 const KROGER_HOUSEHOLD = new Set(["Paper", "Cleaning", "Laundry"]);
 
-/** A server error is not a miss. Hold the row for a day, then try again. */
-const LOOKUP_ERROR_HOLD_MS = 86_400_000;
+/**
+ * A server error is not a miss. An isolated failure waits out the match
+ * retry window. Callers pass a shorter hold when the products API is down
+ * so one outage does not freeze the whole queue for two weeks.
+ */
+export const LOOKUP_OUTAGE_HOLD_MS = 60 * 60_000;
 
 const BATCH = 30;
 
@@ -171,9 +179,75 @@ function dueClauses(side: Side, now: Date): Record<string, unknown>[] {
   ];
 }
 
+function rememberCatalogId(add: (key: string | undefined) => void, value: unknown): void {
+  if (typeof value !== "string") {
+    return;
+  }
+  const raw = value.trim();
+  if (!raw || raw.startsWith("local:") || raw.length > 80) {
+    return;
+  }
+  const body = raw.startsWith("upc:") ? raw.slice(4).trim() : raw;
+  if (!body || body.startsWith("local:")) {
+    return;
+  }
+  if (!/^\d{6,14}$/.test(body)) {
+    return;
+  }
+  add(upcKey(body) ?? body);
+}
+
+function rememberCatalogTree(add: (key: string | undefined) => void, value: unknown, depth = 0): void {
+  if (!value || typeof value !== "object" || depth > 8) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      rememberCatalogTree(add, entry, depth + 1);
+    }
+    return;
+  }
+  const row = value as Record<string, unknown>;
+  if (row.cleared === true) {
+    return;
+  }
+  rememberCatalogId(add, row.catalogId);
+  for (const child of Object.values(row)) {
+    if (child && typeof child === "object") {
+      rememberCatalogTree(add, child, depth + 1);
+    }
+  }
+}
+
+function rememberPastTripNames(add: (text: string | undefined) => void, value: unknown): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  for (const trip of value) {
+    if (!trip || typeof trip !== "object") {
+      continue;
+    }
+    const stores = (trip as { stores?: unknown }).stores;
+    if (!Array.isArray(stores)) {
+      continue;
+    }
+    for (const store of stores) {
+      const items = store && typeof store === "object" ? (store as { items?: unknown }).items : undefined;
+      if (!Array.isArray(items)) {
+        continue;
+      }
+      for (const item of items) {
+        if (item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string") {
+          add((item as { name: string }).name);
+        }
+      }
+    }
+  }
+}
+
 async function loadDemand(now: Date): Promise<DemandSets> {
   const since = new Date(now.getTime() - CATALOG_DEMAND_DAYS * 86_400_000);
-  const [rows, products] = await Promise.all([
+  const [rows, products, saved, shared] = await Promise.all([
     CatalogDemand.find({ lastSeenAt: { $gte: since } })
       .sort({ hits: -1, lastSeenAt: -1 })
       .limit(80)
@@ -184,6 +258,16 @@ async function loadDemand(now: Date): Promise<DemandSets> {
       .limit(80)
       .select("upc name")
       .lean<Array<{ upc?: string; name?: string }>>(),
+    SavedList.find()
+      .sort({ updatedAt: -1 })
+      .limit(40)
+      .select("items starterBook pastTrips")
+      .lean<Array<{ items?: Array<{ id?: string; itemId?: string; name?: string }>; starterBook?: unknown; pastTrips?: unknown }>>(),
+    SharedList.find({ revokedAt: null })
+      .sort({ updatedAt: -1 })
+      .limit(40)
+      .select("items")
+      .lean<Array<{ items?: Array<{ catalogId?: string; name?: string; deleted?: boolean }> }>>(),
   ]);
   const listKeys: string[] = [];
   const searchKeys: string[] = [];
@@ -219,6 +303,25 @@ async function loadDemand(now: Date): Promise<DemandSets> {
     addKey(searchKeys, upcKey(product.upc) ?? undefined);
     addName(searchNames, product.name);
   }
+  const addListId = (value: unknown) => rememberCatalogId((key) => addKey(listKeys, key), value);
+  for (const list of saved) {
+    for (const item of list.items ?? []) {
+      addListId(item.id);
+      addListId(item.itemId);
+      addName(listNames, item.name);
+    }
+    rememberCatalogTree((key) => addKey(listKeys, key), list.starterBook);
+    rememberPastTripNames((name) => addName(listNames, name), list.pastTrips);
+  }
+  for (const list of shared) {
+    for (const item of list.items ?? []) {
+      if (item.deleted) {
+        continue;
+      }
+      addListId(item.catalogId);
+      addName(listNames, item.name);
+    }
+  }
   return { listKeys, searchKeys, listNames, searchNames };
 }
 
@@ -232,6 +335,10 @@ async function rankRows(rows: CandidateRow[]): Promise<CandidateRow[]> {
   ]);
   const byKey = new Map(counts.map((row) => [row._id, row.n]));
   return [...rows].sort((a, b) => {
+    const upc = Number(isGroceryUpc(b.upc)) - Number(isGroceryUpc(a.upc));
+    if (upc !== 0) {
+      return upc;
+    }
     const staple = stapleRank(a.departmentId) - stapleRank(b.departmentId);
     if (staple !== 0) {
       return staple;
@@ -395,9 +502,10 @@ export async function nextKrogerLookup(now: Date): Promise<{ key: string; name: 
 }
 
 /** Skip a row after a server error. Does not count as a hit or a miss. */
-export async function holdLookup(side: Side, key: string, now: Date): Promise<void> {
+export async function holdLookup(side: Side, key: string, now: Date, holdMs?: number): Promise<void> {
   const field = side === "walmart" ? "matchWalmartHoldUntil" : "matchKrogerHoldUntil";
-  await CatalogMaster.updateOne({ key }, { $set: { [field]: new Date(now.getTime() + LOOKUP_ERROR_HOLD_MS) } });
+  const ms = holdMs ?? retryMs();
+  await CatalogMaster.updateOne({ key }, { $set: { [field]: new Date(now.getTime() + ms) } });
 }
 
 export async function markLookupResult(
@@ -570,12 +678,31 @@ export async function countLookupQueue(side: Side, now = new Date()): Promise<nu
   return CatalogMaster.countDocuments({ $and: dueClauses(side, now) });
 }
 
+/** Masters already tried, still missing the other store, and inside the retry window. */
+async function countCooldowns(side: Side, now: Date): Promise<number> {
+  const tried = side === "walmart" ? "matchWalmartAt" : "matchKrogerAt";
+  const has = side === "walmart" ? "krogerProductId" : "walmartItemId";
+  const missing = side === "walmart" ? "walmartItemId" : "krogerProductId";
+  const cutoff = new Date(now.getTime() - retryMs());
+  return CatalogMaster.countDocuments({
+    key: { $not: /^local:/ },
+    [has]: { $type: "string", $ne: "" },
+    [tried]: { $gt: cutoff },
+    $or: [{ [missing]: { $exists: false } }, { [missing]: null }, { [missing]: "" }],
+  });
+}
+
+async function countHolds(side: Side, now: Date): Promise<number> {
+  const hold = side === "walmart" ? "matchWalmartHoldUntil" : "matchKrogerHoldUntil";
+  return CatalogMaster.countDocuments({ [hold]: { $gt: now } });
+}
+
 export async function matchProgress(now = new Date()) {
   const config = ingestConfig();
   const day = utcDay(now);
   const start = new Date(`${day}T00:00:00.000Z`);
   const end = new Date(start.getTime() + 86_400_000);
-  const [walmart, kroger, mergedToday, ledger] = await Promise.all([
+  const [walmart, kroger, mergedToday, ledger, walmartCooldowns, krogerCooldowns, walmartHolds, krogerHolds] = await Promise.all([
     countLookupQueue("walmart", now),
     countLookupQueue("kroger", now),
     CatalogMaster.countDocuments({ mergedAt: { $gte: start, $lt: end } }),
@@ -586,6 +713,10 @@ export async function matchProgress(now = new Date()) {
       krogerHits?: number;
       krogerByDepartment?: Record<string, { attempts?: number; hits?: number }>;
     } | null>(),
+    countCooldowns("walmart", now),
+    countCooldowns("kroger", now),
+    countHolds("walmart", now),
+    countHolds("kroger", now),
   ]);
   const walmartAttempts = ledger?.walmartAttempts ?? 0;
   const walmartHits = ledger?.walmartHits ?? 0;
@@ -608,7 +739,11 @@ export async function matchProgress(now = new Date()) {
       krogerAttempts,
       krogerHits,
       krogerByDepartment,
+      walmartMisses: Math.max(0, walmartAttempts - walmartHits),
+      krogerMisses: Math.max(0, krogerAttempts - krogerHits),
     },
+    cooldowns: { walmart: walmartCooldowns, kroger: krogerCooldowns },
+    holds: { walmart: walmartHolds, kroger: krogerHolds },
     mergedToday,
     lookupShare: config.matchLookupShare,
     retryDays: config.matchRetryDays,

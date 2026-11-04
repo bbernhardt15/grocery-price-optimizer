@@ -310,11 +310,26 @@ export function walmartLookupCodes(upc: string | undefined | null): string[] {
 }
 
 /**
+ * Id to send as `filter.productId`.
+ * A value that is already 13 digits is the stored Kroger id. Running it
+ * through {@link krogerProductIdForLookup} again drops a last digit that
+ * only accidentally passes the GTIN check, and Kroger then looks up a
+ * different product. Shorter and longer codes are normalized once.
+ */
+export function krogerRequestId(upc: string | undefined | null): string | null {
+  const digits = upc?.replace(/\D/g, "") ?? "";
+  if (digits.length === 13) {
+    return digits;
+  }
+  return krogerProductIdForLookup(upc);
+}
+
+/**
  * The one Kroger product id to ask for. Extra 12- and 14-digit pads were
  * rejected with PRODUCT-4111-400. A miss falls back to a name search.
  */
 export function krogerLookupCodes(upc: string | undefined | null): string[] {
-  const primary = krogerProductIdForLookup(upc);
+  const primary = krogerRequestId(upc);
   return primary ? [primary] : [];
 }
 

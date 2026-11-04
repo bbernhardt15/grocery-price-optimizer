@@ -174,6 +174,8 @@ export function utcDay(now: Date): string {
 export type BudgetStore = {
   tryConsume(provider: string, limit: number, now: Date): Promise<boolean>;
   used(provider: string, now: Date): Promise<number>;
+  /** Give back one charge. Used when a 5xx is retried so the failure does not spend the day. */
+  refund(provider: string, now: Date): Promise<void>;
 };
 
 export class MemoryBudgetStore implements BudgetStore {
@@ -191,6 +193,16 @@ export class MemoryBudgetStore implements BudgetStore {
 
   async used(provider: string, now: Date): Promise<number> {
     return this.counts.get(`${provider}:${utcDay(now)}`) ?? 0;
+  }
+
+  async refund(provider: string, now: Date): Promise<void> {
+    const key = `${provider}:${utcDay(now)}`;
+    const used = this.counts.get(key) ?? 0;
+    if (used <= 1) {
+      this.counts.delete(key);
+      return;
+    }
+    this.counts.set(key, used - 1);
   }
 }
 
@@ -219,6 +231,11 @@ export class RateGate {
   /** When the next call is allowed. Persist this on the checkpoint. */
   nextAllowedAt(): number {
     return this.nextAt;
+  }
+
+  /** Return the charge from the last take. The pacing gap stays, so a retry still waits. */
+  async refund(): Promise<void> {
+    await this.options.store.refund(this.options.provider, new Date(this.options.now()));
   }
 
   async take(): Promise<"ok" | "budget"> {
@@ -274,6 +291,10 @@ export class MongoBudgetStore implements BudgetStore {
       ).lean<{ calls?: number } | null>();
       return Boolean(again);
     }
+  }
+
+  async refund(provider: string, now: Date): Promise<void> {
+    await IngestBudget.updateOne({ provider, day: utcDay(now), calls: { $gt: 0 } }, { $inc: { calls: -1 } });
   }
 
   async used(provider: string, now: Date): Promise<number> {

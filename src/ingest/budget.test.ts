@@ -229,4 +229,17 @@ describe("ingest throttle", () => {
     assert.equal(utcDay(next), "2026-09-26");
     assert.equal(await store.tryConsume("kroger", 1, next), true);
   });
+
+  it("refunds a charge so a 5xx can be retried without spending the day", async () => {
+    const store = new MemoryBudgetStore();
+    const now = new Date("2026-11-04T12:00:00.000Z");
+    assert.equal(await store.tryConsume("kroger", 1, now), true);
+    assert.equal(await store.used("kroger", now), 1);
+    await store.refund("kroger", now);
+    assert.equal(await store.used("kroger", now), 0);
+    assert.equal(await store.tryConsume("kroger", 1, now), true);
+    await store.refund("kroger", now);
+    await store.refund("kroger", now);
+    assert.equal(await store.used("kroger", now), 0);
+  });
 });

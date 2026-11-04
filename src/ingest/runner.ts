@@ -28,8 +28,8 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
-import { finishLookups, holdLookup, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
-import { finishRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
+import { LOOKUP_OUTAGE_HOLD_MS, finishLookups, holdLookup, nextKrogerLookups, nextWalmartLookups, type LookupPick } from "./crossLookup";
+import { finishRefresh, holdRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
 import { IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { markStaleCatalog, upsertCatalogRecords } from "./upsert";
@@ -116,6 +116,10 @@ export type KrogerCheckpoint = {
   /** Name search still owed after filter.productId missed. Not a discovery error. */
   termFallback?: KrogerTermFallback;
   nextAllowedAt?: string;
+  /** Products API 5xx streak. A success clears it. */
+  serverStrikes?: number;
+  /** Do not call the products API again until this time. The failed calls were refunded. */
+  serverCooldownUntil?: string;
   cycleStartedAt: string;
 };
 
@@ -221,6 +225,8 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     splitBrand: typeof record.splitBrand === "string" ? record.splitBrand : undefined,
     matchAttempts: typeof record.matchAttempts === "number" ? record.matchAttempts : 0,
     matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
+    serverStrikes: typeof record.serverStrikes === "number" ? record.serverStrikes : 0,
+    serverCooldownUntil: typeof record.serverCooldownUntil === "string" ? record.serverCooldownUntil : undefined,
     termFallback: readKrogerTermFallback(record.termFallback),
   };
 }
@@ -351,10 +357,14 @@ function gateFor(
   return new RateGate({ provider, dailyBudget: budget, minIntervalMs, store, now, sleep, initialNextAt });
 }
 
-/** Ledger consume and the run-counter increment live in this one call. */
+/**
+ * Ledger consume and the run-counter increment live in this one call.
+ * A 5xx is refunded and not counted. The caller retries it with backoff.
+ */
 async function spendCall<T>(gate: RateGate, run: () => Promise<T>, count: () => void, stamp: () => void): Promise<T | "budget"> {
   try {
-    const value = await chargeCall(gate, run, count);
+    const value = await chargeCall(gate, run, () => undefined);
+    count();
     stamp();
     return value;
   } catch (error) {
@@ -362,6 +372,11 @@ async function spendCall<T>(gate: RateGate, run: () => Promise<T>, count: () => 
       return "budget";
     }
     stamp();
+    if (retryClass(error) === "server") {
+      await gate.refund();
+    } else {
+      count();
+    }
     throw error;
   }
 }
@@ -932,6 +947,27 @@ async function trackedZips(config: IngestConfig): Promise<string[]> {
   return zips.slice(0, config.seedZips.length + config.shopperZipLimit);
 }
 
+/**
+ * Cross-store match asks the first resolved grocery store, not whichever ZIP
+ * the crawl cursor is on. A city with a thin banner was marking national
+ * UPCs as misses.
+ */
+function krogerMatchLocation(cp: KrogerCheckpoint): string | undefined {
+  for (const location of cp.locations) {
+    const id = location.locationId?.trim();
+    if (id) {
+      return id;
+    }
+  }
+  return undefined;
+}
+
+function noteKrogerProductSuccess(cp: KrogerCheckpoint): void {
+  cp.attempts = 0;
+  cp.serverStrikes = 0;
+  delete cp.serverCooldownUntil;
+}
+
 export async function stepKroger(options: {
   client: KrogerCatalogClient;
   maxCalls: number;
@@ -1014,6 +1050,35 @@ export async function stepKroger(options: {
     }
   };
 
+  /** 503/504 are retried and refunded. Only a kept response counts as a call. */
+  async function callKrogerProduct<T>(run: () => Promise<T>): Promise<T | "budget"> {
+    const tries = 3;
+    let last: unknown;
+    for (let attempt = 0; attempt < tries; attempt += 1) {
+      try {
+        return await spendCall(
+          productGate,
+          run,
+          () => {
+            calls += 1;
+          },
+          stampProductPace
+        );
+      } catch (error) {
+        last = error;
+        if (retryClass(error) !== "server" || attempt + 1 >= tries) {
+          throw error;
+        }
+        await sleep(backoffDelayMs(attempt));
+      }
+    }
+    throw last;
+  }
+
+  function lookupRoom(): boolean {
+    return lookupsDone < lookupBudget && calls < options.maxCalls;
+  }
+
   async function markKrogerLookupMiss(pick: LookupPick): Promise<void> {
     const finished = await finishLookups("kroger", [pick], nowFn(), { forceMiss: true });
     cp.matchAttempts += finished.attempts;
@@ -1036,14 +1101,7 @@ export async function stepKroger(options: {
       return "stop";
     }
     try {
-      const charged = await spendCall(
-        productGate,
-        () => lookupTerm(term, pending.locationId),
-        () => {
-          calls += 1;
-        },
-        stampProductPace
-      );
+      const charged = await callKrogerProduct(() => lookupTerm(term, pending.locationId));
       if (charged === "budget") {
         cp.termFallback = pending;
         paused = "budget";
@@ -1061,7 +1119,7 @@ export async function stepKroger(options: {
         const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn(), { forceMiss: true });
         cp.matchAttempts += finished.attempts;
       }
-      cp.attempts = 0;
+      noteKrogerProductSuccess(cp);
       delete cp.termFallback;
       await persist("running", { clearError: true });
       return "done";
@@ -1076,7 +1134,8 @@ export async function stepKroger(options: {
         return "done";
       }
       if (kind === "server") {
-        await holdLookup("kroger", pending.key, nowFn());
+        const isolated = (cp.serverStrikes ?? 0) === 0;
+        await holdLookup("kroger", pending.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS);
       }
       cp.termFallback = pending;
       const outcome = await failKroger(cp, error, sleep, nowFn(), { request: "products", term, lookup: true });
@@ -1089,12 +1148,9 @@ export async function stepKroger(options: {
   }
 
   while (calls < options.maxCalls) {
-    if (cp.termFallback && options.client.lookupProductId) {
-      const outcome = await runKrogerTerm(cp.termFallback);
-      if (outcome === "stop") {
-        break;
-      }
-      continue;
+    if (epochMs(cp.serverCooldownUntil) > nowFn().getTime()) {
+      paused = "server";
+      break;
     }
     const turn = nextTickTurn({
       refreshFirst,
@@ -1108,12 +1164,20 @@ export async function stepKroger(options: {
       discoveryBudget: split.discovery,
     });
     if (turn === "lookup") {
+      if (cp.termFallback && options.client.lookupProductId) {
+        lookupsDone += 1;
+        const outcome = await runKrogerTerm(cp.termFallback);
+        if (outcome === "stop") {
+          break;
+        }
+        continue;
+      }
       const [picked] = await nextKrogerLookups(nowFn(), 1);
       if (!picked) {
         lookupExhausted = true;
         continue;
       } else {
-        const locationId = cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        const locationId = krogerMatchLocation(cp);
         const pending: KrogerTermFallback = {
           key: picked.key,
           name: picked.name,
@@ -1121,25 +1185,39 @@ export async function stepKroger(options: {
           ...(picked.upc ? { upc: picked.upc } : {}),
           ...(locationId ? { locationId } : {}),
         };
+        const followMiss = async (): Promise<boolean> => {
+          if (!lookupRoom()) {
+            cp.termFallback = pending;
+            await persist("running", { clearError: true });
+            return false;
+          }
+          lookupsDone += 1;
+          const outcome = await runKrogerTerm(pending);
+          return outcome === "stop";
+        };
         lookupsDone += 1;
         try {
-          const charged = await spendCall(
-            productGate,
-            () => options.client.lookupProductId!(picked.code, locationId),
-            () => {
-              calls += 1;
-            },
-            stampProductPace
-          );
+          const charged = await callKrogerProduct(() => options.client.lookupProductId!(picked.code, locationId));
           if (charged === "budget") {
             paused = "budget";
             await persist("paused", { lastError: "Kroger daily budget reached" });
             break;
           }
-          const bound = bindKrogerLookupRecords(charged.records, picked, "id");
+          let records = charged.records;
+          if (records.length === 0 && locationId && lookupRoom()) {
+            lookupsDone += 1;
+            const national = await callKrogerProduct(() => options.client.lookupProductId!(picked.code));
+            if (national === "budget") {
+              paused = "budget";
+              await persist("paused", { lastError: "Kroger daily budget reached" });
+              break;
+            }
+            records = national.records;
+            delete pending.locationId;
+          }
+          const bound = bindKrogerLookupRecords(records, picked, "id");
           if (bound.length === 0) {
-            const outcome = await runKrogerTerm(pending);
-            if (outcome === "stop") {
+            if (await followMiss()) {
               break;
             }
           } else {
@@ -1148,27 +1226,27 @@ export async function stepKroger(options: {
             const finished = await finishLookups("kroger", [picked], nowFn());
             cp.matchAttempts += finished.attempts;
             cp.matchHits += finished.hits;
-            cp.attempts = 0;
+            noteKrogerProductSuccess(cp);
             delete cp.termFallback;
             await persist("running", { clearError: true });
           }
         } catch (error) {
           const kind = retryClass(error);
           if (krogerClientMiss(error)) {
-            const outcome = await runKrogerTerm(pending);
-            if (outcome === "stop") {
+            if (await followMiss()) {
               break;
             }
           } else if (kind === "fatal") {
             const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true });
             cp.matchAttempts += finished.attempts;
-            cp.attempts = 0;
+            noteKrogerProductSuccess(cp);
             await persist("running", {
               error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code }, nowFn()),
             });
           } else {
             if (kind === "server") {
-              await holdLookup("kroger", picked.key, nowFn());
+              const isolated = (cp.serverStrikes ?? 0) === 0;
+              await holdLookup("kroger", picked.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS);
             }
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",
@@ -1191,22 +1269,10 @@ export async function stepKroger(options: {
         refreshExhausted = true;
         continue;
       } else {
-        const locationId = picked.locationId || cp.locations[cp.locationIndex]?.locationId || cp.locations[0]?.locationId;
+        const locationId = picked.locationId || krogerMatchLocation(cp);
         refreshesDone += 1;
         try {
-          const charged = await spendCall(
-            productGate,
-            () => options.client.lookupProductId!(picked.code, locationId),
-            () => {
-              calls += 1;
-            },
-            () => {
-              const nextAt = productGate.nextAllowedAt();
-              if (nextAt > 0) {
-                cp.nextAllowedAt = new Date(nextAt).toISOString();
-              }
-            }
-          );
+          const charged = await callKrogerProduct(() => options.client.lookupProductId!(picked.code, locationId));
           if (charged === "budget") {
             paused = "budget";
             await persist("paused", { lastError: "Kroger daily budget reached" });
@@ -1219,21 +1285,24 @@ export async function stepKroger(options: {
             refreshed = saved.offers;
           }
           await finishRefresh([picked], nowFn(), refreshed);
-          cp.attempts = 0;
+          noteKrogerProductSuccess(cp);
           await persist("running", { clearError: true });
         } catch (error) {
           const kind = retryClass(error);
           if (krogerClientMiss(error)) {
             await finishRefresh([picked], nowFn(), 0);
-            cp.attempts = 0;
+            noteKrogerProductSuccess(cp);
             await persist("running", { clearError: true });
           } else if (kind === "fatal" || cp.attempts >= 2) {
             await finishRefresh([picked], nowFn(), 0);
-            cp.attempts = 0;
+            noteKrogerProductSuccess(cp);
             await persist("running", {
               error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code, refresh: true }, nowFn()),
             });
           } else {
+            if (kind === "server") {
+              await holdRefresh([picked], nowFn());
+            }
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",
               productId: picked.code,
@@ -1417,28 +1486,17 @@ export async function stepKroger(options: {
       continue;
     }
     try {
-      const charged = await spendCall(
-        productGate,
-        () =>
-          options.client.page({
-            term,
-            locationId: location.locationId,
-            start: cp.start,
-            limit: config.krogerPageLimit,
-            ...(brand ? { brand } : {}),
-            departmentId: query.term.departmentId,
-            subcategory: query.term.subcategory,
-            zip: location.zip,
-          }),
-        () => {
-          calls += 1;
-        },
-        () => {
-          const nextAt = productGate.nextAllowedAt();
-          if (nextAt > 0) {
-            cp.nextAllowedAt = new Date(nextAt).toISOString();
-          }
-        }
+      const charged = await callKrogerProduct(() =>
+        options.client.page({
+          term,
+          locationId: location.locationId,
+          start: cp.start,
+          limit: config.krogerPageLimit,
+          ...(brand ? { brand } : {}),
+          departmentId: query.term.departmentId,
+          subcategory: query.term.subcategory,
+          zip: location.zip,
+        })
       );
       if (charged === "budget") {
         paused = "budget";
@@ -1458,7 +1516,7 @@ export async function stepKroger(options: {
         cp.pageIndex,
         config.krogerMaxPagesPerTerm
       );
-      cp.attempts = 0;
+      noteKrogerProductSuccess(cp);
       cp.clientErrorStreak = 0;
       if (advance.kind === "page" && advance.start !== null) {
         cp.start = advance.start;
@@ -1586,6 +1644,11 @@ async function failKroger(
 ): Promise<{ checkpoint: KrogerCheckpoint; paused: string | null; status: string; error: IngestErrorDetail; stop: boolean }> {
   const detail = ingestErrorDetail("kroger", error, params, now);
   const kind = retryClass(error);
+  if (kind === "server") {
+    cp.serverStrikes = (cp.serverStrikes ?? 0) + 1;
+    const delay = backoffDelayMs(cp.serverStrikes, 2_000, 15 * 60_000);
+    cp.serverCooldownUntil = new Date(now.getTime() + delay).toISOString();
+  }
   if (kind === "fatal" || cp.attempts + 1 >= MAX_ATTEMPTS) {
     skipKrogerQuery(cp);
     return { checkpoint: cp, paused: kind === "fatal" ? null : kind, status: "running", error: detail, stop: false };

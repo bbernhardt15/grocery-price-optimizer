@@ -1,5 +1,5 @@
 import { krogerAisleLabel } from "./catalog/krogerAisle";
-import { krogerProductIdForLookup } from "./catalog/normalize";
+import { krogerProductIdForLookup, krogerRequestId } from "./catalog/normalize";
 import { krogerStartParam } from "./ingest/krogerTerms";
 import { readKrogerStore, rememberKrogerStore } from "./krogerLocationCache";
 import { buildKrogerSearchTerm, shorterKrogerSearchTerm } from "./krogerSearchTerm";
@@ -628,7 +628,7 @@ export class KrogerService {
     productId: string,
     locationId?: string
   ): Promise<{ products: CatalogProduct[]; returned: number }> {
-    const id = krogerProductIdForLookup(productId) ?? "";
+    const id = krogerRequestId(productId) ?? "";
     if (!/^\d{13}$/.test(id)) {
       return { products: [], returned: 0 };
     }
