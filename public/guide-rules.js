@@ -16,8 +16,8 @@ var MOMENT_RANK = {
   welcome: 1
 };
 var RUNNING_LOW_STAPLES = ["Milk", "Eggs", "Bread"];
-var WELCOME_LINE = "What do you need this week?";
-var BEFORE_REVIEW_LINE = "Ready for Review?";
+var WELCOME_LINE = "Hey. What are we picking up this week?";
+var BEFORE_REVIEW_LINE = "Want me to check which stores are cheaper?";
 var SIMILAR_LINE = "Want me to look for a similar brand?";
 function emptyGuideSettings() {
   return { enabled: true, dismissals: 0 };
@@ -128,7 +128,7 @@ function receiptLine(count) {
   return `I found ${n} ${noun}. Want me to start with the ones you buy most?`;
 }
 function runningLowLine(names) {
-  return `Anything running low? ${names.join(", ")}?`;
+  return `Looks like you might be low on ${names.join(", ")}. Want me to add them?`;
 }
 function reviewLine(unfound) {
   const name = unfound.find(Boolean);

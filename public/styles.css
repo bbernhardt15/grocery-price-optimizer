@@ -572,12 +572,23 @@ dialog.shelf-sheet .sheet-body {
 .list-panel {
   display: none; background: var(--surface); border: 1px solid var(--line); border-radius: 20px 20px 0 0;
 }
+.list-backdrop {
+  position: fixed; inset: 0; z-index: 8; background: rgba(16, 18, 16, 0.72);
+}
+.list-backdrop[hidden] { display: none !important; }
 .list-panel.open {
   display: flex; flex-direction: column; gap: 10px; position: fixed; z-index: 9;
-  left: 0; right: 0; bottom: var(--keyboard, 0px);
-  max-height: min(88dvh, calc(100dvh - var(--keyboard, 0px) - var(--safe-top) - 12px)); overflow: auto;
+  left: 0; right: 0; top: 12px; bottom: var(--keyboard, 0px);
+  max-height: none; height: auto; overflow: auto; overflow-anchor: none;
+  border-radius: 20px 20px 0 0; background: var(--bg);
   padding: 16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left)); box-shadow: var(--shadow);
 }
+.list-section { list-style: none; margin: 4px 0 0; padding: 0; }
+.list-section-title {
+  margin: 10px 0 0; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+}
+#estimate-note, #meter-caption { min-height: 2.6em; }
+.sub-toggle { min-height: 44px; }
 .list-head { display: flex; justify-content: space-between; align-items: center; }
 .list-head h2, .trip h2 { font-family: var(--display); margin: 0; }
 .list-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -1231,22 +1242,34 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 .pick-actions { display: flex; flex-direction: column; gap: 6px; }
 .pick-actions .primary, .pick-actions .ghost { width: 100%; }
 .danger { color: var(--sale); }
-dialog.list-sheet {
+dialog.list-sheet:not([open]) { display: none !important; }
+dialog.list-sheet[open] {
   width: min(520px, calc(100% - 16px));
-  max-height: calc(100dvh - var(--safe-top) - var(--bar-h) - 12px);
-  margin: auto auto var(--bar-h);
+  max-height: calc(100dvh - var(--safe-top) - 12px);
+  margin: auto auto 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
+  border-radius: 20px 20px 0 0;
 }
 dialog.list-sheet .sheet-body {
   max-height: none;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   padding: 16px 16px 12px;
+}
+html:has(dialog.list-sheet[open]),
+body:has(dialog.list-sheet[open]) {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 dialog.list-sheet .slot-list,
 dialog.list-sheet .pick-results {
@@ -1336,6 +1359,7 @@ dialog.profile-onboard #profile-stage {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   padding-bottom: 12px;
 }
 dialog.profile-onboard .profile-actions {
@@ -1537,6 +1561,7 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
 .rule-list { display: flex; flex-direction: column; gap: 8px; }
 .rule-choice { width: 100%; text-align: left; }
 .rule-never { align-self: flex-start; }
+.rule-saved { min-height: 1.25em; margin: 0; color: var(--accent); font-weight: 750; }
 .read-stage { margin: 0; font-weight: 700; }
 .import-hit-list { display: flex; flex-direction: column; gap: 8px; }
 .import-search-row {
@@ -1897,7 +1922,19 @@ body[data-browse="open"] #past-trips-home,
 body[data-browse="open"] #shelf-entry { display: none !important; }
 #browse-panel { background: var(--bg); position: relative; z-index: 2; }
 @media (max-width: 1099px) {
-  dialog.list-sheet[open], dialog.shelf-sheet[open] {
+  dialog.list-sheet[open] {
+    position: fixed; left: 0; right: 0; bottom: 0; top: 12px; width: 100%; max-width: none;
+    height: calc(100dvh - 12px); max-height: calc(100dvh - 12px); margin: 0; border: 0;
+    border-radius: 20px 20px 0 0; background: var(--bg); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  dialog.list-sheet[open] .sheet-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+  dialog.shelf-sheet[open] {
     position: fixed; inset: 0; width: 100%; max-width: none; height: 100%;
     max-height: none; margin: 0; border: 0; border-radius: 0; background: var(--bg);
   }

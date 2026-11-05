@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v44", () => {
-    assert.match(sw, /grocery-gitter-shell-v44/);
+  it("bumps the shell cache to v45", () => {
+    assert.match(sw, /grocery-gitter-shell-v45/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
@@ -147,9 +147,9 @@ describe("tenth phone test onboarding", () => {
     assert.match(beat, /id="read-beat-skip"/);
     assert.match(beat, /animation-duration: 2\.5s/);
     assert.match(beat, /read-ring-fill/);
-    assert.match(profileUi, /readBeatHtml/);
-    assert.match(profileUi, /READ_BEAT_MS/);
-    assert.match(profileUi, /read-beat-continue/);
+    assert.doesNotMatch(profileUi, /Reading your orders/);
+    assert.doesNotMatch(profileUi, /readBeatHtml/);
+    assert.match(profileUi, /holdThenLearned/);
   });
 
   it("shows the chosen brand rule on the card", () => {

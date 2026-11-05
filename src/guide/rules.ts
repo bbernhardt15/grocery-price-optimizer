@@ -90,8 +90,8 @@ export type GuideFrame = {
   hidden: boolean;
 };
 
-const WELCOME_LINE = "What do you need this week?";
-const BEFORE_REVIEW_LINE = "Ready for Review?";
+const WELCOME_LINE = "Hey. What are we picking up this week?";
+const BEFORE_REVIEW_LINE = "Want me to check which stores are cheaper?";
 const SIMILAR_LINE = "Want me to look for a similar brand?";
 
 export function emptyGuideSettings(): GuideSettings {
@@ -229,7 +229,7 @@ export function receiptLine(count: number): string {
 }
 
 export function runningLowLine(names: string[]): string {
-  return `Anything running low? ${names.join(", ")}?`;
+  return `Looks like you might be low on ${names.join(", ")}. Want me to add them?`;
 }
 
 export function reviewLine(unfound: string[]): string {

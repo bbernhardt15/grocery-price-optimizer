@@ -172,6 +172,7 @@ import { rankSearchResults } from "./shopper/searchRank.js";
 import { completionHook, finishCheckedOut, sentItemsHtml } from "./shopper/krogerReady.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "./shopper/inStoreShare.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
+import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
@@ -184,6 +185,7 @@ import {
   coverageNotesFor,
   genuineUnfound,
   planIsComplete,
+  planIsShowable,
   pricesUpdatedLabel,
   readPlanCache,
   shouldReusePlan,
@@ -534,6 +536,7 @@ let unreadAlerts = 0;
 let priceAlerts = [];
 let alertsLoadError = "";
 let pushPublicKey = "";
+let alertsPushOn = false;
 /** @type {Array<Record<string, any>>} */
 let suggestions = [];
 /** Query the current suggestion rows belong to. */
@@ -2095,7 +2098,7 @@ function renderEstimate() {
   listBar.dataset.state = meter.status;
   const catalog = catalogTripEstimate([...list.values()]);
   const planned = currentTrip();
-  const settledFigures = planIsComplete(lastOptimize) && planned?.stores?.length ? cartCardFigures(planned.stores) : null;
+  const settledFigures = planReady(lastOptimize) && planned?.stores?.length ? cartCardFigures(planned.stores) : null;
   const plannedTotal = settledFigures && settledFigures.total > 0 ? settledFigures.total : planned?.stores?.length && Number(planned.total) > 0 ? planned.total : null;
   let shownTotal = plannedTotal == null ? meter.splitTotal : plannedTotal;
   if (!(Number(shownTotal) > 0) && catalog.total > 0) shownTotal = catalog.total;
@@ -2141,8 +2144,18 @@ function savingsBlock(total, subject) {
 
 function renderListRows() {
   const locked = listIsLocked();
-  listItemsEl.innerHTML = [...list.values()]
-    .map((entry) => {
+  const groups = groupListEntries([...list.values()]);
+  listItemsEl.innerHTML = groups
+    .map((group) => {
+      const rows = group.entries
+        .map((entry) => listRowHtml(entry, locked))
+        .join("");
+      return `<li class="list-section" role="presentation"><h3 class="list-section-title">${escapeHtml(group.section)}</h3></li>${rows}`;
+    })
+    .join("");
+}
+
+function listRowHtml(entry, locked) {
       const watched = itemWatched(Boolean(listAlertsEl?.checked), entry.watch || "inherit");
       const targetValue = entry.targetPrice ? String(entry.targetPrice) : "";
       const credit = attributionLine(entry);
@@ -2180,8 +2193,6 @@ function renderListRows() {
           ${locked ? "" : listRemoveHtml(itemId, heading.title, escapeHtml)}
         </div>
       </li>`;
-    })
-    .join("");
 }
 
 function setQuantity(id, quantity) {
@@ -2932,6 +2943,8 @@ async function loadSuggestions(text) {
 
 function openList(open) {
   listPanel.classList.toggle("open", open);
+  const backdrop = document.getElementById("list-backdrop");
+  if (backdrop) backdrop.hidden = !open;
   $("list-toggle").setAttribute("aria-expanded", String(open));
   if (open && window.matchMedia("(max-width: 1099px)").matches) {
     listPanel.querySelector("h2")?.focus();
@@ -3422,12 +3435,16 @@ function addOwnCoupon(button) {
   paintTrip();
 }
 
+function planReady(payload) {
+  return planIsComplete(payload) || planIsShowable(payload);
+}
+
 function renderTrip(payload, options = {}) {
   const kept = Boolean(payload?.keptPreviousPrices);
-  const complete = planIsComplete(payload);
+  const complete = planReady(payload);
   if (!complete && !options.force) {
     if (flowStep === "shop") {
-      if (!planIsComplete(lastOptimize)) renderShop();
+      if (!planReady(lastOptimize)) renderShop();
     } else paintReviewLoading();
     return;
   }
@@ -3435,7 +3452,7 @@ function renderTrip(payload, options = {}) {
   const figures = cartCardFigures(dedupeStores(payload?.stores || []));
   const published = reviewTotals.publish(signature, figures.total, { complete: true, force: Boolean(options.force) });
   const total = published == null ? figures.total : published;
-  const sameTotal = planIsComplete(lastOptimize) && reviewSignature === signature && Math.abs(Number(lastOptimize.total) - total) < 0.009;
+  const sameTotal = planReady(lastOptimize) && reviewSignature === signature && Math.abs(Number(lastOptimize.total) - total) < 0.009;
   if (!options.force && sameTotal && (options.fromCache || kept)) {
     if (flowStep === "shop") renderShop();
     else if (!tripEl?.querySelector("[data-review-shell]")) paintTrip();
@@ -4480,7 +4497,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
   if (flowStep === "plan") paintReviewLoading();
-  else if (flowStep === "shop" && !planIsComplete(lastOptimize)) renderShop();
+  else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
@@ -4514,7 +4531,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       }
       if (!tripEl?.querySelector("[data-review-stable]")) paintPlanningStatus();
     }, () => {
-      if (flowStep === "plan" && !planIsComplete(lastOptimize)) paintReviewLoading();
+      if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     const previousPlan =
@@ -4530,7 +4547,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       hasSettled: held || planIsComplete(adopted),
       incomingComplete: planIsComplete(body),
     });
-    if (!planIsComplete(adopted)) {
+    if (!planReady(adopted)) {
       if (retry.retry) {
         quietRetryAttempt += 1;
         window.setTimeout(() => {
@@ -4543,7 +4560,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     }
     quietRetryAttempt = 0;
     renderTrip(adopted, { keepEdits: true, force });
-    if (planIsComplete(lastOptimize)) {
+    if (planReady(lastOptimize)) {
       writePlanCache(localStorage, {
         signature: listSignature(),
         zip,
@@ -4853,6 +4870,7 @@ async function hydrateSharedProducts() {
   const ids = [...new Set([...list.values()].map((entry) => entry.product?.id).filter(Boolean))];
   await Promise.all(
     ids.map(async (id) => {
+      if (String(id).startsWith("custom:")) return;
       const known = productsById.get(id);
       if (known?.offers?.length) return;
       try {
@@ -5140,7 +5158,7 @@ function renderShareChrome() {
   const shared = Boolean(shareState?.shareToken);
   const owner = Boolean(shared && (shareState.role === "owner" || readOwned()?.shareToken === shareState.shareToken));
   if (!shared) {
-    status.textContent = "Share a link so someone else can shop this list with you.";
+    status.textContent = "Share sends the item names and quantities on this list. Prices stay on your phone.";
   } else if (shareState.revoked) {
     status.textContent = owner ? "This link is off. Share again to make a new one." : "This link was turned off.";
   } else if (shareState.mode === "view") {
@@ -5156,6 +5174,15 @@ function renderShareChrome() {
   if (ownBtn) ownBtn.hidden = !(localStorage.getItem(PERSONAL_KEY) && shared && !owner);
   shareBtn.disabled = shareBusy;
   shareBtn.textContent = shareState?.revoked && owner ? "Share again" : SHARE_BUTTON_LABEL;
+  const confirm = $("share-confirm");
+  if (confirm) confirm.hidden = !shared || Boolean(shareState?.revoked);
+  const note = $("share-confirm-note");
+  if (note && shared && !shareState?.revoked) {
+    note.textContent =
+      shareState?.mode === "view"
+        ? "They can look at this list. Only you can change it. Prices stay on your phone."
+        : "This link shares the item names and quantities. Anyone with it can open the list. Prices stay on your phone.";
+  }
   const shareEmpty = $("share-empty");
   if (shareEmpty) {
     if (shareProblem && !shared) {
@@ -5168,6 +5195,20 @@ function renderShareChrome() {
     }
   }
   paintListEmpty();
+}
+
+function showShareConfirmation(url) {
+  const box = $("share-confirm");
+  const link = $("share-link");
+  const note = $("share-confirm-note");
+  if (link) link.textContent = url;
+  if (box) box.hidden = false;
+  if (note) {
+    const viewOnly = shareState?.mode === "view";
+    note.textContent = viewOnly
+      ? "Link copied when you tap Copy link. They can look at this list. Only you can change it."
+      : "This link shares the item names and quantities. Anyone with it can open the list. Prices stay on your phone.";
+  }
 }
 
 async function onShareClick() {
@@ -5186,6 +5227,7 @@ async function onShareClick() {
     }
     if (!token) return;
     const url = sharePageUrl(token, { apiOrigin: apiOrigin(), locationHref: window.location.href });
+    showShareConfirmation(url);
     try {
       const how = await deliverShare(
         {
@@ -5279,6 +5321,10 @@ async function restoreList() {
     saved.map(async (row) => {
       if (!row?.id && !row?.itemId) return;
       const id = row.id || row.itemId;
+      if (String(id).startsWith("custom:")) {
+        if (row.name) rememberLocalRow(row);
+        return;
+      }
       try {
         const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`));
         const body = await response.json().catch(() => ({}));
@@ -6195,6 +6241,16 @@ $("share-btn")?.addEventListener("click", () => {
     void onShareClick();
   });
 });
+$("share-copy")?.addEventListener("click", async () => {
+  const url = $("share-link")?.textContent || "";
+  if (!url) return;
+  try {
+    await copyText(url);
+    toast("Link copied.");
+  } catch {
+    toast("Could not copy the link.");
+  }
+});
 $("share-viewonly")?.addEventListener("click", () => {
   if (!shareState) return;
   void postSettings({ mode: shareState.mode === "view" ? "edit" : "view" });
@@ -6208,8 +6264,12 @@ $("display-name")?.addEventListener("change", () => {
   localStorage.setItem(NAME_KEY, readDisplayName());
 });
 allowSubsEl.addEventListener("change", () => {
+  const top = listPanel?.scrollTop || 0;
+  const y = window.scrollY || 0;
   localStorage.setItem(SUBS_KEY, allowSubsEl.checked ? "1" : "0");
   renderEstimate();
+  if (listPanel) listPanel.scrollTop = top;
+  window.scrollTo(0, y);
 });
 listAlertsEl?.addEventListener("change", () => {
   void onListAlertsChanged();
@@ -6434,7 +6494,11 @@ function paintAlertList() {
   if (priceAlerts.length === 0) {
     fillEmpty(
       alertsEmptyEl,
-      alertsEmptyChoice({ billing: billingStatus, alertsOn: Boolean(listAlertsEl?.checked) })
+      alertsEmptyChoice({
+        billing: billingStatus,
+        alertsOn: Boolean(listAlertsEl?.checked),
+        push: alertsPushOn,
+      })
     );
   }
   alertsListEl.innerHTML = priceAlerts
@@ -6512,6 +6576,7 @@ function urlBase64ToUint8Array(value) {
 
 function applyAlertDelivery(status) {
   const state = alertDeliveryState(status);
+  alertsPushOn = Boolean(state.visible);
   const block = $("list-alert-block");
   const panel = document.querySelector(".list-panel");
   if (block) block.hidden = !state.visible;
@@ -7284,6 +7349,10 @@ function showStep(step, reason = "user") {
     document.querySelector(".filters")?.classList.remove("open");
     $("filters-open")?.setAttribute("aria-expanded", "false");
     document.querySelector(".list-panel")?.classList.remove("open");
+    document.getElementById("list-backdrop")?.setAttribute("hidden", "");
+    const lists = document.getElementById("list-sheet");
+    if (lists?.open) lists.close();
+    if (lists) lists.innerHTML = "";
   }
   if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
@@ -7296,7 +7365,7 @@ function showStep(step, reason = "user") {
     }
   }
   if (flowStep === "shop") {
-    if (!planIsComplete(lastOptimize)) {
+    if (!planReady(lastOptimize)) {
       const hit = settledReviewPayload(listSignature(), normalizeZip(zipEl?.value || ""), false);
       if (hit) {
         const figures = cartCardFigures(hit.payload.stores || []);
@@ -7327,7 +7396,7 @@ function paintPlanBar() {
   const view = currentTrip();
   const progressStores = flowStep === "shop" && view?.stores ? dedupeTripStores(view.stores, mergedTripChecks(view.stores)) : view?.stores || [];
   const progress = view ? shopProgress(progressStores, mergedTripChecks(view.stores)) : { left: count, complete: false, total: 0 };
-  const settledFigures = planIsComplete(lastOptimize) && view?.stores?.length ? cartCardFigures(view.stores) : null;
+  const settledFigures = planReady(lastOptimize) && view?.stores?.length ? cartCardFigures(view.stores) : null;
   const total = settledFigures ? settledFigures.total : view?.stores?.length ? view.total : lastBarTotal;
   const copy = planBarCopy({
     step: flowStep,
@@ -7374,7 +7443,7 @@ function renderShop() {
   if (!shop) return;
   const replacingSkeleton = Boolean(shop.querySelector("[data-shop-skel]"));
   const view = currentTrip();
-  const waiting = Boolean(planning && !planIsComplete(lastOptimize));
+  const waiting = Boolean(planning && !planReady(lastOptimize));
   if (!view?.stores?.length || waiting) {
     const backPrompt = showReturnBanner
       ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
@@ -7908,7 +7977,7 @@ async function addStarter(id) {
 
 async function resolveUsual(row) {
   if (row.catalogId && productsById.get(row.catalogId)) return productsById.get(row.catalogId);
-  if (row.catalogId) {
+  if (row.catalogId && !String(row.catalogId).startsWith("custom:")) {
     try {
       const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`));
       const body = await response.json().catch(() => ({}));
@@ -8568,7 +8637,10 @@ profileUi = mountProfileOnboarding({
     const rows = lines || [];
     let added = 0;
     for (const line of rows) {
-      const name = [line.brand, line.name].filter(Boolean).join(" ").trim();
+      const brand = String(line.brand || "").trim();
+      const itemName = String(line.name || "").trim();
+      const name =
+        brand && itemName && !itemName.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${itemName}` : itemName || brand;
       if (!name) continue;
       const qty = Math.max(1, Math.min(99, Math.floor(Number(line.quantity) || 1)));
       addProduct(customCatalogProduct(name), qty, { quiet: true, skipAsk: true });

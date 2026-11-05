@@ -16,9 +16,9 @@ const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8"
 
 describe("shopping list sheet", () => {
   it("states the purpose, one Share button, and what a swap changes", () => {
-    assert.match(SHOPPING_LIST_PURPOSE, /Edit quantities/);
+    assert.match(SHOPPING_LIST_PURPOSE, /Change a quantity/);
     assert.match(html, /id="shopping-list-note"/);
-    assert.match(html, /Edit quantities, remove what you don't need, and share this trip's list/);
+    assert.match(html, /Change a quantity, take something off, or send this list to whoever is shopping with you/);
     assert.equal(SHARE_BUTTON_LABEL, "Share");
     assert.match(html, /id="share-btn"[^>]*>Share</);
     assert.equal(SUB_SWAP_LABEL, "OK to swap for similar items");

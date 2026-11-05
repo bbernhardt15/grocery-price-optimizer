@@ -1,0 +1,38 @@
+Kroger
+Order Number: 6150091827364501928
+Pickup location
+4145 Ferguson Road
+Cincinnati, OH 45245
+(513) 555-0199
+jane.shopper@example.com
+Loyalty card: 4812345678901234
+
+Kroger Vitamin D Whole Milk, 1 gal
+Qty: 1
+$3.19
+UPC: 00011110000017
+
+Kroger Large Eggs Grade A, 12 Count
+Qty: 1
+$2.99
+UPC: 00011110000024
+
+Dave's Killer Bread, 21 oz
+Qty: 1
+$5.99
+UPC: 00011110000031
+
+Fresh Bananas
+Qty: 1
+$0.69
+UPC: 00011110000048
+
+Barilla Spaghetti, 16 oz
+Qty: 1
+$1.67
+UPC: 00011110000055
+
+Kroger Ground Beef 80/20, 1 lb
+Qty: 1
+$5.49
+UPC: 00011110000062

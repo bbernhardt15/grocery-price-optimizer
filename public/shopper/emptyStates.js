@@ -71,9 +71,15 @@ export const EMPTY_STATES = {
 /**
  * Alerts stay a normal empty state until billing is enforced and this plan
  * cannot turn them on. A missing status fails open, matching the server.
- * @param {{ billing?: { enforced?: boolean, pro?: boolean, limits?: { priceAlerts?: boolean } } | null, alertsOn?: boolean }} [options]
+ * @param {{ billing?: { enforced?: boolean, pro?: boolean, limits?: { priceAlerts?: boolean } } | null, alertsOn?: boolean, push?: boolean }} [options]
  */
 export function alertsEmptyChoice(options = {}) {
+  if (options.push === false) {
+    return {
+      title: "No price alerts",
+      body: "Price drops show up here when notifications are set up for this phone.",
+    };
+  }
   if (options.alertsOn) return emptyState("alertsOn");
   const billing = options.billing;
   const enforced = Boolean(billing?.enforced);

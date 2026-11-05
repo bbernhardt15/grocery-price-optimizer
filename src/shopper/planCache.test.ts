@@ -7,6 +7,7 @@ import {
   createReviewSession,
   genuineUnfound,
   planIsComplete,
+  planIsShowable,
   pricesUpdatedLabel,
   shouldReusePlan,
   writePlanCache,
@@ -43,6 +44,17 @@ function completePlan(total = 272.57) {
 }
 
 describe("review price cache", () => {
+  it("shows a plan that already has prices when a store check timed out", () => {
+    const priced = {
+      partial: true,
+      pricingByStore: [{ storeName: "Walmart", check: "timeout" }],
+      stores: [{ storeName: "Kroger", items: [{ name: "Milk", price: 2.99, quantity: 1 }] }],
+    };
+    assert.equal(planIsComplete(priced), false);
+    assert.equal(planIsShowable(priced), true);
+    assert.equal(planIsShowable({ stores: [{ items: [{ price: 0 }] }] }), false);
+  });
+
   it("keeps previous prices when a recompute is partial or a store fails", () => {
     const previous = completePlan();
     const partial = {

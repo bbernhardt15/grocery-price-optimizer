@@ -3,6 +3,7 @@
  * The picture is resized, read, and dropped. It is not a meal planner.
  */
 
+import { whenInviteAllowsApp } from "./beta.js";
 import { parseNeedItems, resolveNeedList } from "./categoryPreference.js";
 import { imageBlobs } from "./receiptImages.js";
 import { mapPool } from "./receiptImport.js";
@@ -324,7 +325,7 @@ export function mountShelfScan(deps) {
 
   function paintEntry() {
     openButton.hidden = !photo;
-    if (offNote) offNote.hidden = photo;
+    if (offNote) offNote.hidden = true;
   }
 
   function show(which) {
@@ -483,7 +484,9 @@ export function mountShelfScan(deps) {
 
   async function loadStatus() {
     try {
+      await whenInviteAllowsApp();
       const response = await fetch(apiUrl("/api/import/status"));
+      if (response.status === 401) return;
       if (response.ok) {
         const body = await response.json();
         photo = Boolean(body.shelf ?? body.photo);

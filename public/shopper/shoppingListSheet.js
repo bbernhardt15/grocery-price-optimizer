@@ -3,7 +3,7 @@
  * The switch is shown only when the server can actually send a push.
  */
 
-export const SHOPPING_LIST_PURPOSE = "Edit quantities, remove what you don't need, and share this trip's list.";
+export const SHOPPING_LIST_PURPOSE = "Change a quantity, take something off, or send this list to whoever is shopping with you.";
 export const SUB_SWAP_LABEL = "OK to swap for similar items";
 export const SUB_SWAP_NOTE = "If a store is missing an item, the plan can use a similar product there instead of adding another stop.";
 export const SHARE_BUTTON_LABEL = "Share";

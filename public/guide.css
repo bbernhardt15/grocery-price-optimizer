@@ -13,7 +13,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: start;
+  align-items: center;
   padding: 16px 14px 14px;
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -31,13 +31,13 @@
 }
 
 body:has(#gitter-guide:not([hidden])) .body {
-  padding-bottom: calc(var(--bar-h) + 196px);
+  padding-bottom: calc(var(--bar-h) + 16px);
 }
 
 .gitter-guide-avatar {
   width: 40px;
   height: 40px;
-  margin-top: 18px;
+  margin-top: 0;
   border-radius: 12px;
   display: grid;
   place-items: center;

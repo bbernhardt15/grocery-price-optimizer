@@ -196,7 +196,7 @@ describe("shelf scan list rules", () => {
     assert.match(html, /Fridge and pantry scan needs photo reading/);
     assert.match(app, /mountShelfScan/);
     assert.match(app, /addFromPreferences/);
-    assert.match(sw, /grocery-gitter-shell-v44/);
+    assert.match(sw, /grocery-gitter-shell-v45/);
     assert.match(client, /capture="environment"/);
     assert.match(client, /accept="image\/\*" multiple/);
     assert.match(client, /imageBlobs/);

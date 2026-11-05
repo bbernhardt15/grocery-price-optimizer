@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v44", () => {
-    assert.match(sw, /grocery-gitter-shell-v44/);
+  it("bumps the shell cache to v45", () => {
+    assert.match(sw, /grocery-gitter-shell-v45/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -65,7 +65,7 @@ describe("eleventh phone test", () => {
   });
 
   it("names the trip list Shopping list and hides a price alert switch the server cannot send", () => {
-    assert.match(SHOPPING_LIST_NOTE, /share this trip's list/);
+    assert.match(SHOPPING_LIST_NOTE, /whoever is shopping with you/);
     assert.match(html, /<h2>Shopping list<\/h2>/);
     assert.match(html, /id="shopping-list-note"/);
     assert.match(html, /id="list-alert-block"[^>]*hidden/);

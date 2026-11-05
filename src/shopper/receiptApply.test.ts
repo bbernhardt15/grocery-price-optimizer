@@ -49,7 +49,8 @@ describe("receipt preferences", () => {
     assert.match(app, /\/api\/import\/receipt/);
     assert.match(app, /askCategory\?\.\(/);
     assert.match(ui, /Here's what we learned/);
-    assert.match(ui, /Confirm/);
+    assert.match(ui, /Continue/);
+    assert.doesNotMatch(ui, /learned \? "Confirm"/);
     assert.match(ui, /Read my receipts/);
     assert.match(ui, /file-chip/);
     assert.equal(app.includes("localStorage.setItem(\"gg-receipt"), false);

@@ -531,6 +531,8 @@ describe("beta tester routes", { concurrency: false }, () => {
 
   it("rejects app API calls without a current invite code and leaves the public pages open", async () => {
     assert.equal(betaGateOpen("GET", "/api/health/ready"), true);
+    assert.equal(betaGateOpen("GET", "/api/observability"), true);
+    assert.equal(betaGateOpen("GET", "/api/catalog/placeholder.svg"), true);
     assert.equal(betaGateOpen("GET", "/api/beta/gate"), true);
     assert.equal(betaGateOpen("POST", "/api/beta/invite"), true);
     assert.equal(betaGateOpen("GET", "/privacy"), true);

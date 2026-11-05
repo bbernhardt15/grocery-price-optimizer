@@ -36,7 +36,6 @@ import { syncTripAddBar } from "./tripActionBar.js";
 import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
 import { readCountLine } from "./receiptHold.js";
-import { READ_BEAT_MS, readBeatHtml } from "./receiptBeat.js";
 import { orderTitle, readLiveHtml, storeChoiceHtml, foundLabel } from "./intakePresent.js";
 import { readCardTitle } from "./receiptReading.js";
 import { captureRuleScroll, restoreRuleScroll, revealInside } from "./ruleScroll.js";
@@ -334,7 +333,7 @@ export function mountProfileOnboarding(deps = {}) {
       dialog.dataset.dir = motion;
     }
     if (top) top.hidden = welcome;
-    if (title) title.textContent = tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : reading ? "Reading your orders" : step.title;
+    if (title) title.textContent = tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : step.title;
     if (hint) {
       const hintText = tripChoice
         ? "Pick the lines to shop, or start empty."
@@ -352,7 +351,7 @@ export function mountProfileOnboarding(deps = {}) {
     const readingReady = reading && !readingBusy && !beatMarkup && learnedViewReady({ ...importGate, revealed: true }) && (learnedRows.length > 0 || receiptLines.length > 0);
     if (next) {
       next.hidden = tripChoice || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
-      next.textContent = returnTo ? "Save" : learned ? "Confirm" : reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
+      next.textContent = returnTo ? "Save" : learned || reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     }
     if (skip) {
       skip.hidden = welcome;
@@ -981,6 +980,7 @@ export function mountProfileOnboarding(deps = {}) {
         editing: editingFamily === family,
         brands: brandChoices(row),
         pending: !brandShelves[row.family],
+        saved: Boolean(options.saved),
       });
     });
     if (options.reveal) {
@@ -997,7 +997,6 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function holdThenLearned() {
-    const token = ++beatToken;
     const count = readItemCount();
     const line = readCountLine(count);
     for (const card of readCards) {
@@ -1005,24 +1004,8 @@ export function mountProfileOnboarding(deps = {}) {
       card.message = line;
       card.status = card.status === "reading" ? "done" : card.status;
     }
-    if (!importGate.revealed && !importGate.parsing && !importGate.grouping) {
-      beatMarkup = readBeatHtml(count);
-      receiptPhase = "reading";
-      render();
-      const title = $("profile-title");
-      if (title && !title.textContent) title.textContent = "Reading your orders";
-      resetStageScroll();
-    }
-    await new Promise((resolve) => {
-      const timer = window.setTimeout(resolve, READ_BEAT_MS);
-      skipBeat = () => {
-        window.clearTimeout(timer);
-        skipBeat = null;
-        resolve();
-      };
-    });
-    skipBeat = null;
-    if (token !== beatToken || importGate.parsing || importGate.grouping) return;
+    beatMarkup = "";
+    if (importGate.parsing || importGate.grouping) return;
     importGate = { parsing: false, grouping: false, revealed: true };
     showLearned();
   }
@@ -1605,9 +1588,23 @@ export function mountProfileOnboarding(deps = {}) {
         brands: mode === "cheapestPicks" ? picked : mode === "brand" ? picked.slice(0, 1) : undefined,
       });
       if (next === learnedRows) return;
+      const stage = $("profile-stage");
+      const sheet = document.querySelector("#profile-onboard .sheet-body");
+      const savedScroll = captureRuleScroll({
+        stage: stage instanceof HTMLElement ? stage.scrollTop : 0,
+        sheet: sheet instanceof HTMLElement ? sheet.scrollTop : 0,
+        page: window.scrollY || 0,
+      });
       learnedRows = next;
-      editingFamily = "";
-      paintLearnedCard(family);
+      paintLearnedCard(family, { saved: true });
+      restoreRuleScroll(
+        {
+          stage,
+          sheet,
+          scrollTo: (y) => window.scrollTo(0, y),
+        },
+        savedScroll
+      );
       return;
     }
     if (target.dataset.lineRemove != null && target.dataset.lineRemove !== "") {

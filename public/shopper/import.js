@@ -3,6 +3,7 @@
  * share, or speech. Matching stays on our catalog. Tiles do not show prices.
  */
 
+import { whenInviteAllowsApp } from "./beta.js";
 import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { shortProductTitle } from "./familyTile.js";
@@ -207,7 +208,8 @@ export function mountImport(deps) {
         <textarea id="import-paste" class="import-paste" placeholder="Milk, bread, eggs…"></textarea>
         <button type="submit" class="primary" id="import-find">Find these items</button>
         <div class="import-tools">
-          <button type="button" class="ghost" id="import-photo">Photo or screenshot</button>
+          <button type="button" class="ghost" id="import-photo" hidden>Photo or screenshot</button>
+          <p id="import-photo-note" class="import-lead" hidden>Photo import needs photo reading, which isn't set up on this server. Paste a list, or upload a PDF or a text file.</p>
           <button type="button" class="ghost" id="import-file">Upload a list</button>
           <button type="button" class="ghost" id="import-link-toggle">Paste a link</button>
         </div>
@@ -325,13 +327,25 @@ export function mountImport(deps) {
     return payload;
   }
 
+  function paintPhoto() {
+    const button = $("import-photo");
+    const note = $("import-photo-note");
+    const known = status.known === true;
+    const on = known && Boolean(status.photo);
+    if (button) button.hidden = !on;
+    if (note) note.hidden = !(known && !status.photo);
+  }
+
   async function loadStatus() {
     try {
+      await whenInviteAllowsApp();
       const response = await fetch(apiUrl("/api/import/status"));
-      if (response.ok) status = await response.json();
+      if (response.status === 401) return;
+      if (response.ok) status = { ...(await response.json()), known: true };
     } catch {
       /* paste still works */
     }
+    paintPhoto();
     deps.onStatus?.(status);
   }
 
@@ -654,8 +668,15 @@ export function mountImport(deps) {
   }
 
   async function runPhoto(file) {
+    if (!status.known) await loadStatus();
     if (!status.photo) {
-      setStatus("Photo import isn't switched on yet. Paste the text instead.", "error");
+      paintPhoto();
+      setStatus(
+        status.known
+          ? "Photo import needs photo reading, which isn't set up on this server. Paste the list, or upload a PDF or a text file."
+          : "Enter your invite code to import a photo.",
+        "error"
+      );
       show("home");
       return;
     }

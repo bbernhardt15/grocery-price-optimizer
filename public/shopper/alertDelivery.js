@@ -9,7 +9,7 @@ export const ALERTS_COMING_SOON = "Coming soon";
 export const ALERT_CHANNEL_NOTE =
   "Delivery is a push notification on this phone. Grocery Gitter does not email price alerts.";
 export const SHOPPING_LIST_NAME = "Shopping list";
-export const SHOPPING_LIST_NOTE = "Edit quantities, remove what you don't need, and share this trip's list.";
+export const SHOPPING_LIST_NOTE = "Change a quantity, take something off, or send this list to whoever is shopping with you.";
 
 /**
  * A missing VAPID key hides the control. A disabled switch reads as broken.

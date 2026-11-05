@@ -25,6 +25,16 @@ export function planIsComplete(payload) {
   if (Array.isArray(payload.pendingStores) && payload.pendingStores.length > 0) return false;
   const checks = Array.isArray(payload.pricingByStore) ? payload.pricingByStore : [];
   if (checks.some((row) => row?.check && row.check !== "ok")) return false;
+  return planIsShowable(payload);
+}
+
+/**
+ * A finished plan the shopper can read. A store that timed out does not
+ * hide prices that already came back.
+ * @param {object | null | undefined} payload
+ */
+export function planIsShowable(payload) {
+  if (!payload || typeof payload !== "object") return false;
   const items = (payload.stores || []).flatMap((store) => store?.items || []);
   return items.some((item) => Number(item?.price) > 0);
 }
@@ -52,7 +62,7 @@ export function readPlanCache(storage) {
  * @param {{ setItem?: (key: string, value: string) => void } | null | undefined} storage
  */
 export function writePlanCache(storage, entry) {
-  if (!storage?.setItem || !entry?.payload || !planIsComplete(entry.payload)) return false;
+  if (!storage?.setItem || !entry?.payload || !(planIsComplete(entry.payload) || planIsShowable(entry.payload))) return false;
   const savedAt = Number(entry.savedAt) || Date.now();
   storage.setItem(
     PLAN_CACHE_KEY,
@@ -77,7 +87,7 @@ export function clearPlanCache(storage) {
 export function shouldReusePlan(input = {}) {
   if (input.force) return false;
   const cache = input.cache;
-  if (!cache?.payload || !planIsComplete(cache.payload)) return false;
+  if (!cache?.payload || !(planIsComplete(cache.payload) || planIsShowable(cache.payload))) return false;
   if (String(cache.signature || "") !== String(input.signature || "")) return false;
   if (zipOf(cache.zip) !== zipOf(input.zip)) return false;
   const at = Number(cache.savedAt) || 0;

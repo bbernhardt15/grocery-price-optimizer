@@ -133,7 +133,7 @@ export function learnedCardInnerHtml(row, options = {}) {
   const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
   const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
   const pending = Boolean(options.pending);
-  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending }) : "";
+  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending, saved: Boolean(options.saved) }) : "";
   return `<div class="learned-copy">
           <h3>${escapeText(row?.label || row?.family)}</h3>
           ${learnedRulePillHtml(row)}
@@ -169,6 +169,7 @@ function learnedPickerHtml(row, brands, options = {}) {
       </div>
     </fieldset>
     <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
+    <p class="rule-saved" data-rule-saved aria-live="polite">${options.saved ? "Saved" : ""}</p>
   </div>`;
 }
 
