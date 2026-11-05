@@ -176,7 +176,7 @@ import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
-import { applyInStoreScroll, inStoreSkeletonHtml } from "./shopper/inStoreEntry.js";
+import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
 import { krogerSendPatch } from "./shopper/krogerSendProgress.js";
 import {
@@ -184,6 +184,7 @@ import {
   clearPlanCache,
   coverageNotesFor,
   genuineUnfound,
+  planHasDisplay,
   planIsComplete,
   planIsShowable,
   pricesUpdatedLabel,
@@ -216,6 +217,7 @@ import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
+import { chooseDisplayedPlan, listDisplayPlan } from "./shopper/planFallback.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 import { mountGuide, namesMatch as guideNamesMatch } from "./guide.js";
 
@@ -1487,6 +1489,12 @@ function applyKrogerReturn(parsed) {
   }
   if (!listReady) {
     pendingKrogerReturn = parsed;
+    // The callback can arrive while boot is still fetching. Land on Review
+    // (or In-store) immediately so a slow list restore cannot leave Build up.
+    const saved = readKrogerTrip(localStorage);
+    releasePageForTaps(new Set(["cart-ready", "handoff-return"]));
+    if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
+    showStep(saved?.step || parsed.step || "plan", "handoff");
     return;
   }
   finishKrogerReturn(parsed);
@@ -3437,7 +3445,7 @@ function addOwnCoupon(button) {
 }
 
 function planReady(payload) {
-  return planIsComplete(payload) || planIsShowable(payload);
+  return planIsComplete(payload) || planIsShowable(payload) || planHasDisplay(payload);
 }
 
 function renderTrip(payload, options = {}) {
@@ -3738,7 +3746,7 @@ function settledReviewPayload(signature, zip, force = false) {
   if (shouldReusePlan({ cache: cachedPlan, signature, zip, now: Date.now(), force })) {
     return { payload: cachedPlan.payload, savedAt: cachedPlan.savedAt, source: "cache" };
   }
-  if (!force && planIsComplete(lastOptimize) && reviewSignature === signature) {
+  if (!force && reviewSignature === signature && planReady(lastOptimize)) {
     return { payload: lastOptimize, savedAt: lastOptimize.pricedAt, source: "memory" };
   }
   return null;
@@ -3805,7 +3813,10 @@ function paintTrip() {
     paintPlanBar();
     settleEntryScroll();
   };
-  const view = currentTrip();
+  let view = currentTrip();
+  if (!view?.stores?.length && (planHasDisplay(lastOptimize) || planIsShowable(lastOptimize))) {
+    view = { stores: lastOptimize.stores || [], total: lastOptimize.total };
+  }
   const state = reviewState();
   const ready = reviewHeadlineReady(lastOptimize);
   if (!ready) {
@@ -3828,9 +3839,10 @@ function paintTrip() {
   }
   const plans = state?.plans;
   const mode = state?.mode || "spread";
-  const bestStores = presentPlan(plans?.best?.stores || view.stores);
   const fewerStores = plans?.fewer ? presentPlan(plans.fewer.stores) : [];
   const customStores = mode === "custom" ? view.stores : [];
+  const plannedBest = plans?.best?.stores;
+  const bestStores = presentPlan(plannedBest?.length ? plannedBest : view.stores);
   const lines = bestStores.flatMap((store) => store.items || []);
   const card = savingsCard(singleStoreSavings(lines));
   const figures = cartCardFigures(bestStores);
@@ -4416,6 +4428,25 @@ async function readPlanBody(response, onStatus, onPartial) {
   return finalBody || {};
 }
 
+function commitDisplayedPlan(payload, { zip } = {}) {
+  if (!payload) return false;
+  quietRetryAttempt = 0;
+  renderTrip(payload, { keepEdits: true, force: true });
+  if (!planReady(lastOptimize)) return false;
+  writePlanCache(localStorage, {
+    signature: listSignature(),
+    zip,
+    payload: lastOptimize,
+    savedAt: lastOptimize.pricedAt || Date.now(),
+  });
+  if (flowStep === "shop") renderShop();
+  return true;
+}
+
+function listPlanFallback() {
+  return listDisplayPlan([...list.values()], selectedStoreNames());
+}
+
 async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
@@ -4497,7 +4528,9 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   planBtn.disabled = false;
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
-  if (flowStep === "plan") paintReviewLoading();
+  const preview = !planReady(lastOptimize) ? listPlanFallback() : null;
+  if (preview) renderTrip(preview, { keepEdits: true, force: true });
+  else if (flowStep === "plan") paintReviewLoading();
   else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
@@ -4509,6 +4542,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       instacartEnabled = false;
     });
   let result = "ok";
+  let streamedPlan = null;
   try {
     const response = await fetchWithTimeout(
       fetch,
@@ -4531,52 +4565,52 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
         };
       }
       if (!tripEl?.querySelector("[data-review-stable]")) paintPlanningStatus();
-    }, () => {
+    }, (result) => {
+      if (planIsShowable(result) || planHasDisplay(result)) streamedPlan = result;
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
     const previousPlan =
-      cachedPlan && cachedPlan.signature === signature && planIsComplete(cachedPlan.payload)
+      cachedPlan && cachedPlan.signature === signature && planReady(cachedPlan.payload)
         ? cachedPlan.payload
-        : reviewSignature === signature && planIsComplete(lastOptimize)
+        : reviewSignature === signature && planReady(lastOptimize)
           ? lastOptimize
           : null;
     const adopted = adoptReviewResult(previousPlan, body, Date.now());
-    const held = Boolean(previousPlan && planIsComplete(previousPlan) && !planIsComplete(body));
-    const retry = quietRetryPlan({
-      attempt: quietRetryAttempt,
-      hasSettled: held || planIsComplete(adopted),
-      incomingComplete: planIsComplete(body),
-    });
-    if (!planReady(adopted)) {
-      if (retry.retry) {
-        quietRetryAttempt += 1;
-        window.setTimeout(() => {
-          if (planIsComplete(lastOptimize) || planIsComplete(readPlanCache(localStorage)?.payload)) return;
-          void planTrip({ stay: true, quiet: true });
-        }, retry.delayMs || 1600);
-      }
-      if (flowStep === "plan") paintReviewLoading(retry.retry ? undefined : REVIEW_GAVE_UP_STATUS);
+    const chosen = chooseDisplayedPlan(adopted, streamedPlan, Date.now());
+    if (chosen && commitDisplayedPlan(chosen, { zip })) {
+      betaEvent("plan_built");
+      rememberListAsUsuals();
+      openList(false);
+      void instacartTask.then(() => {
+        if (planAbort && planAbort !== controller) return;
+        if (flowStep === "shop") renderShop();
+        else if (flowStep === "plan" && !tripEl?.querySelector("[data-review-shell]")) paintTrip();
+      });
       return result;
     }
-    quietRetryAttempt = 0;
-    renderTrip(adopted, { keepEdits: true, force });
-    if (planReady(lastOptimize)) {
-      writePlanCache(localStorage, {
-        signature: listSignature(),
-        zip,
-        payload: lastOptimize,
-        savedAt: lastOptimize.pricedAt || Date.now(),
-      });
-    }
-    betaEvent("plan_built");
-    rememberListAsUsuals();
-    openList(false);
-    void instacartTask.then(() => {
-      if (planAbort && planAbort !== controller) return;
-      if (flowStep === "shop") renderShop();
-      else if (flowStep === "plan" && !tripEl?.querySelector("[data-review-shell]")) paintTrip();
+    const held = Boolean(previousPlan && planReady(previousPlan));
+    const retry = quietRetryPlan({
+      attempt: quietRetryAttempt,
+      hasSettled: held,
+      incomingComplete: planIsComplete(body) || planIsShowable(body),
     });
+    if (retry.retry) {
+      quietRetryAttempt += 1;
+      window.setTimeout(() => {
+        if (planReady(lastOptimize)) return;
+        void planTrip({ stay: true, quiet: true });
+      }, retry.delayMs || 1600);
+      if (flowStep === "plan") paintReviewLoading();
+      return result;
+    }
+    if (commitDisplayedPlan(listPlanFallback(), { zip })) {
+      rememberListAsUsuals();
+      openList(false);
+      return result;
+    }
+    if (flowStep === "plan") paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+    return result;
   } catch (error) {
     if (planAbort !== controller) return "replaced";
     result = "fail";
@@ -4586,6 +4620,17 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       return "fail";
     }
     const timedOut = planTimedOut(error);
+    const recovered = chooseDisplayedPlan(planReady(lastOptimize) ? lastOptimize : null, streamedPlan);
+    if (recovered && commitDisplayedPlan(recovered, { zip })) {
+      if (timedOut) toast(PLAN_PARTIAL_NOTE);
+      rememberListAsUsuals();
+      return "ok";
+    }
+    if (commitDisplayedPlan(listPlanFallback(), { zip })) {
+      if (timedOut) toast(PLAN_PARTIAL_NOTE);
+      rememberListAsUsuals();
+      return "ok";
+    }
     const kind = timedOut ? null : networkKind(error, navigator.onLine);
     const message = timedOut
       ? PLAN_PARTIAL_NOTE
@@ -4603,11 +4648,11 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     if (retry.retry && !heldError) {
       quietRetryAttempt += 1;
       window.setTimeout(() => {
-        if (planIsComplete(lastOptimize)) return;
+        if (planReady(lastOptimize)) return;
         void planTrip({ stay: true, quiet: true });
       }, retry.delayMs || 1600);
-      if (flowStep === "plan") paintReviewLoading();
-    } else if (!heldError && flowStep === "plan") {
+      if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
+    } else if (!heldError && flowStep === "plan" && !planReady(lastOptimize)) {
       paintReviewLoading(REVIEW_GAVE_UP_STATUS);
     } else if (!heldError && !lastOptimize && !list.size) {
       const state = emptyState(kind || "network");
@@ -7443,32 +7488,30 @@ function paintPlanBar() {
   guide?.sync?.();
 }
 
+function listShopHtml() {
+  const rows = [...list.values()]
+    .map((entry) => {
+      const name = entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "Item";
+      const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
+      return `<div class="shop-line"><div class="shop-row"><span class="shop-copy"><span class="shop-name">${escapeHtml(qty)}</span><span class="shop-where">Your list</span></span></div></div>`;
+    })
+    .join("");
+  const count = list.size === 1 ? "1 item" : `${list.size} items`;
+  return `<section class="shop-store" data-walking-list="1"><h2>Your list</h2><p class="muted">${escapeHtml(count)}. Review the split to sort these by store.</p>${rows}</section>`;
+}
+
 function renderShop() {
   const shop = $("shop");
   if (!shop) return;
-  const replacingSkeleton = Boolean(shop.querySelector("[data-shop-skel]"));
   const view = currentTrip();
-  const waiting = Boolean(planning && !planReady(lastOptimize));
-  if (!view?.stores?.length || waiting) {
+  if (!view?.stores?.length) {
     const backPrompt = showReturnBanner
       ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
       : "";
-    const body = !list.size
-      ? emptyStateMarkup(emptyState("shop"), escapeHtml)
-      : planning || lastOptimize
-        ? inStoreSkeletonHtml(list.size)
-        : emptyStateMarkup(
-            {
-              title: "No trip yet",
-              body: "Review the split and we'll sort this list by store.",
-              action: "Review the split",
-              actionId: "review",
-            },
-            escapeHtml
-          );
+    const body = list.size ? listShopHtml() : emptyStateMarkup(emptyState("shop"), escapeHtml);
     shop.innerHTML = `${backPrompt}${body}`;
     paintPlanBar();
-    if (pinTabTop || replacingSkeleton) {
+    if (pinTabTop) {
       pinTabTop = false;
       scrollPageTop();
     }
@@ -7560,7 +7603,7 @@ function renderShop() {
     ${html}
   `;
   paintPlanBar();
-  if (pinTabTop || replacingSkeleton) {
+  if (pinTabTop) {
     pinTabTop = false;
     scrollPageTop();
   }
@@ -8269,8 +8312,10 @@ async function boot() {
     await bootApp();
   } finally {
     if (!landedFromKroger) {
-      if (shouldPromptProfile(localStorage)) profileUi?.open();
-      else welcome.maybeAutoOpen();
+      const profileDialog = document.getElementById("profile-onboard");
+      if (shouldPromptProfile(localStorage)) {
+        if (!profileDialog?.open) profileUi?.open();
+      } else welcome.maybeAutoOpen();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
@@ -8653,7 +8698,6 @@ profileUi = mountProfileOnboarding({
     }
     showStep("add");
     renderEstimate();
-    openList(true);
     toast(added === 1 ? "Added 1 item." : added ? `Added ${added} items.` : "Nothing new to add.");
   },
   readReceipts: async ({ text, files, onProgress } = {}) => {

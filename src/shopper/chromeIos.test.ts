@@ -27,7 +27,7 @@ const DESKTOP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537
 
 describe("Chrome on iPhone", () => {
   it("recognizes CriOS and ignores a home-screen install", () => {
-    assert.match(sw, /grocery-gitter-shell-v46/);
+    assert.match(sw, /grocery-gitter-shell-v47/);
     assert.match(app, /openStoreHandoff/);
     assert.match(app, /applySharedHandoff/);
     assert.match(app, /handoffBridgePath/);
@@ -91,7 +91,8 @@ describe("Chrome on iPhone", () => {
     assert.equal(keyboard.keyboard, 424);
     assert.equal(keyboard.toolbar, 0);
     const tall = viewportInsets({ innerHeight: 844, visualHeight: 500, offsetTop: 0, focused: false });
-    assert.equal(tall.keyboard, 344);
+    assert.equal(tall.keyboard, 0);
+    assert.equal(tall.toolbar, 96);
   });
 
   it("streams a plan once a screenful of a store is priced", () => {

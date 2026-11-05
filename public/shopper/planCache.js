@@ -39,6 +39,16 @@ export function planIsShowable(payload) {
   return items.some((item) => Number(item?.price) > 0);
 }
 
+/** Items the shopper can read after a check ends, even when every price is still missing. */
+export function planHasDisplay(payload) {
+  if (!payload?.displaySettled) return false;
+  return (payload.stores || []).some((store) => (store?.items || []).length > 0);
+}
+
+function planCanKeep(payload) {
+  return planIsComplete(payload) || planIsShowable(payload) || planHasDisplay(payload);
+}
+
 /**
  * @param {{ getItem?: (key: string) => string | null } | null | undefined} storage
  */
@@ -62,7 +72,7 @@ export function readPlanCache(storage) {
  * @param {{ setItem?: (key: string, value: string) => void } | null | undefined} storage
  */
 export function writePlanCache(storage, entry) {
-  if (!storage?.setItem || !entry?.payload || !(planIsComplete(entry.payload) || planIsShowable(entry.payload))) return false;
+  if (!storage?.setItem || !entry?.payload || !planCanKeep(entry.payload)) return false;
   const savedAt = Number(entry.savedAt) || Date.now();
   storage.setItem(
     PLAN_CACHE_KEY,
@@ -70,7 +80,13 @@ export function writePlanCache(storage, entry) {
       signature: String(entry.signature || ""),
       zip: zipOf(entry.zip),
       savedAt,
-      payload: { ...entry.payload, pricedAt: entry.payload.pricedAt || savedAt, partial: false },
+      payload: {
+        ...entry.payload,
+        pricedAt: entry.payload.pricedAt || savedAt,
+        partial: false,
+        pendingStores: [],
+        displaySettled: true,
+      },
     })
   );
   return true;
@@ -87,7 +103,7 @@ export function clearPlanCache(storage) {
 export function shouldReusePlan(input = {}) {
   if (input.force) return false;
   const cache = input.cache;
-  if (!cache?.payload || !(planIsComplete(cache.payload) || planIsShowable(cache.payload))) return false;
+  if (!cache?.payload || !planCanKeep(cache.payload)) return false;
   if (String(cache.signature || "") !== String(input.signature || "")) return false;
   if (zipOf(cache.zip) !== zipOf(input.zip)) return false;
   const at = Number(cache.savedAt) || 0;
@@ -116,7 +132,7 @@ export function adoptReviewResult(previous, incoming, now = Date.now()) {
       keptPreviousPrices: true,
     };
   }
-  if (!nextComplete && previous?.stores?.length) {
+  if (!nextComplete && planIsShowable(previous) && previous?.stores?.length) {
     const prevCount = (previous.stores || []).reduce((sum, store) => sum + (store.items || []).length, 0);
     const nextCount = (incoming.stores || []).reduce((sum, store) => sum + (store.items || []).length, 0);
     if (nextCount < prevCount) return { ...previous, keptPreviousPrices: true };

@@ -6,24 +6,26 @@ var GUIDE_LABEL = "Gitter guide";
 var DISMISS_LABEL = "Dismiss guide";
 var TURN_OFF_LABEL = "Turn off guide";
 var REPLIES_LABEL = "Replies";
-var MOMENTS = ["welcome", "receipt", "running-low", "before-review", "review-next", "trip-saved"];
+var MOMENTS = ["welcome", "receipt", "running-low", "before-review", "keep-building", "review-next", "trip-saved"];
 var MOMENT_RANK = {
   "trip-saved": 6,
   receipt: 5,
   "review-next": 4,
   "running-low": 3,
   "before-review": 2,
+  "keep-building": 2,
   welcome: 1
 };
 var RUNNING_LOW_STAPLES = ["Milk", "Eggs", "Bread"];
 var WELCOME_LINE = "Hey. What are we picking up this week?";
 var BEFORE_REVIEW_LINE = "Want me to check which stores are cheaper?";
+var KEEP_BUILDING_LINE = "Add anything else you need. Review checks which stores are cheaper when you're ready.";
 var SIMILAR_LINE = "Want me to look for a similar brand?";
 function emptyGuideSettings() {
   return { enabled: true, dismissals: 0 };
 }
 function createGuideSession() {
-  return { shown: {}, receipt: null, trip: null };
+  return { shown: {}, declined: {}, receipt: null, trip: null };
 }
 function guideIsOff(settings) {
   if (!settings) return false;
@@ -76,6 +78,16 @@ function setGuideEnabled(settings, on) {
 function noteShown(session, moment) {
   if (session.shown[moment]) return session;
   return { ...session, shown: { ...session.shown, [moment]: true } };
+}
+function noteDeclined(session, moment) {
+  const id = String(moment || "");
+  if (!MOMENTS.includes(id)) return session;
+  const key = id;
+  return {
+    ...session,
+    shown: { ...session.shown, [key]: true },
+    declined: { ...session.declined || {}, [key]: true }
+  };
 }
 function noteReceipt(session, payload) {
   const lines = linesFromReceipt(payload);
@@ -342,6 +354,19 @@ function decideGuide(input = {}) {
       ]
     };
   }
+  const declined = session.declined || {};
+  const passed = MOMENTS.some((id) => declined[id]);
+  if (step === "build" && itemCount > 0 && passed && !session.shown["keep-building"]) {
+    return {
+      moment: "keep-building",
+      line: KEEP_BUILDING_LINE,
+      chips: [
+        { id: "add", label: "Add an item", action: "focus-ask" },
+        { id: "review", label: "Review", action: "review" },
+        { id: "enough", label: "That's enough", action: "close-guide" }
+      ]
+    };
+  }
   if (step === "build" && itemCount === 0 && !session.shown.welcome) {
     return {
       moment: "welcome",
@@ -456,6 +481,7 @@ export {
   momentStillFits,
   namesMatch,
   normalizeName,
+  noteDeclined,
   noteReceipt,
   noteShown,
   noteTrip,

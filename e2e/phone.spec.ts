@@ -61,9 +61,13 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   const net = watch(page);
   await unlock(page);
   await page.getByRole("button", { name: "Get started" }).click();
-  await page.locator("#profile-zip").fill("45202");
-  await page.locator("#profile-zip-done").click();
+  const zip = page.locator("#profile-zip");
+  await expect(zip).toBeVisible();
+  const zipScrollBefore = await page.evaluate(() => window.scrollY);
+  await zip.pressSequentially("45202");
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - zipScrollBefore)).toBeLessThan(2);
+  await page.locator("#profile-zip-done").click();
   await shot(page, "02-stores");
   await page.locator("#profile-next").click();
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
@@ -78,11 +82,16 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   const sheet = page.locator("#profile-onboard");
   await page.locator("[data-learned-change]").first().click();
   await expect(page.locator(".rule-choice", { hasText: "Store brand" })).toBeVisible();
+  const ruleButton = page.locator(".rule-choice", { hasText: "Store brand" });
   const beforeRule = await sheet.boundingBox();
+  const ruleBoxBefore = await ruleButton.boundingBox();
   const scrollBefore = await page.evaluate(() => window.scrollY);
   const stageBefore = await stage.evaluate((el) => el.scrollTop);
-  await page.locator(".rule-choice", { hasText: "Store brand" }).evaluate((el) => (el as HTMLButtonElement).click());
-  await expect(page.locator("[data-rule-saved]").first()).toHaveText("Saved");
+  await ruleButton.evaluate((el) => (el as HTMLButtonElement).click());
+  await expect(ruleButton).toHaveAttribute("aria-pressed", "true");
+  await expect(ruleButton.locator("[data-rule-saved]")).toHaveText("Saved");
+  const ruleBoxAfter = await ruleButton.boundingBox();
+  expect(Math.abs((ruleBoxAfter?.y || 0) - (ruleBoxBefore?.y || 0))).toBeLessThan(8);
   await expect(page.getByRole("button", { name: "Confirm" })).toHaveCount(0);
   const afterRule = await sheet.boundingBox();
   const scrollAfter = await page.evaluate(() => window.scrollY);
@@ -95,6 +104,8 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await page.getByRole("button", { name: "Select all" }).click();
   await expect(page.locator("#learned-add-trip").first()).toBeEnabled();
   await page.locator("#learned-add-trip").first().click();
+  await expect(page.locator("#list-panel")).not.toHaveClass(/open/);
+  await page.locator("#list-toggle").evaluate((el) => (el as HTMLButtonElement).click());
   await expect(page.locator("#list-panel")).toHaveClass(/open/);
   await expect(page.locator(".list-section-title").first()).toBeVisible();
   await expect(page.locator(".list-row").first()).toBeVisible();
@@ -161,11 +172,24 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await shot(page, "05-instore");
 
   await page.locator('[data-flow="add"]').click();
+  await page.route("**/api/import/photo", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    })
+  );
   await page.locator("#browse-toggle").click();
   await page.locator("#ask-import").click();
-  await expect(page.locator("#import-photo")).toBeHidden();
+  await expect(page.locator("#import-photo")).toBeVisible();
   await expect(page.locator("#import-photo-note")).toContainText("isn't set up");
   await expect(page.locator("#import-photo-note")).not.toContainText("isn't switched on yet");
+  await page.locator("#import-photo-input").setInputFiles({
+    name: "kids.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("not-a-receipt"),
+  });
+  await expect(page.locator("#import-status")).toContainText(/No grocery items in that photo/i);
   await page.locator("#import-paste").fill("Whole Milk\nLarge Eggs");
   await page.locator("#import-find").click();
   await expect(page.locator("#import-status")).not.toContainText("isn't switched on");
