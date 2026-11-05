@@ -1336,10 +1336,8 @@ export function mountProfileOnboarding(deps = {}) {
       render({ deferStores: true });
       focusTitle();
       const nextDraft = draft;
-      const paint = () => {
-        persist(nextDraft);
-        paintStoreList();
-      };
+      persist(nextDraft);
+      const paint = () => paintStoreList();
       if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(paint));
       else setTimeout(paint, 0);
       return;

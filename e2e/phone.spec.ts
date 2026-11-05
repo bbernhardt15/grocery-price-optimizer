@@ -61,8 +61,10 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   const net = watch(page);
   await unlock(page);
   await page.getByRole("button", { name: "Get started" }).click();
+  const zip = page.locator("#profile-zip");
+  await expect(zip).toBeVisible();
   const zipScrollBefore = await page.evaluate(() => window.scrollY);
-  await page.locator("#profile-zip").pressSequentially("45202");
+  await zip.pressSequentially("45202");
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
   expect(Math.abs((await page.evaluate(() => window.scrollY)) - zipScrollBefore)).toBeLessThan(2);
   await page.locator("#profile-zip-done").click();

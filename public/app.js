@@ -8312,8 +8312,10 @@ async function boot() {
     await bootApp();
   } finally {
     if (!landedFromKroger) {
-      if (shouldPromptProfile(localStorage)) profileUi?.open();
-      else welcome.maybeAutoOpen();
+      const profileDialog = document.getElementById("profile-onboard");
+      if (shouldPromptProfile(localStorage)) {
+        if (!profileDialog?.open) profileUi?.open();
+      } else welcome.maybeAutoOpen();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
