@@ -1489,6 +1489,12 @@ function applyKrogerReturn(parsed) {
   }
   if (!listReady) {
     pendingKrogerReturn = parsed;
+    // The callback can arrive while boot is still fetching. Land on Review
+    // (or In-store) immediately so a slow list restore cannot leave Build up.
+    const saved = readKrogerTrip(localStorage);
+    releasePageForTaps(new Set(["cart-ready", "handoff-return"]));
+    if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
+    showStep(saved?.step || parsed.step || "plan", "handoff");
     return;
   }
   finishKrogerReturn(parsed);
