@@ -76,7 +76,7 @@ describe("Gitter guide rules", () => {
       const prompt = decideGuide({ ...view({ step }), settings: emptyGuideSettings(), session: createGuideSession() });
       assert.ok(prompt);
       assert.equal(prompt.moment, "welcome");
-      assert.equal(prompt.line, "What do you need this week?");
+      assert.equal(prompt.line, "Hey. What are we picking up this week?");
       assert.deepEqual(
         prompt.chips.map((chip) => chip.label),
         ["Say or type my list", "Use my usuals", "Upload a receipt"]
@@ -149,7 +149,7 @@ describe("Gitter guide rules", () => {
     assert.ok(prompt);
     assert.equal(prompt.moment, "running-low");
     assert.equal(prompt.line, runningLowLine(["Eggs", "Bread", "Bananas"]));
-    assert.equal(prompt.line, "Anything running low? Eggs, Bread, Bananas?");
+    assert.equal(prompt.line, "Looks like you might be low on Eggs, Bread, Bananas. Want me to add them?");
     assert.equal(prompt.chips.length, 3);
     assert.deepEqual(
       prompt.chips.map((chip) => chip.action),
@@ -172,7 +172,7 @@ describe("Gitter guide rules", () => {
     });
     assert.ok(prompt);
     assert.equal(prompt.moment, "before-review");
-    assert.equal(prompt.line, "Ready for Review?");
+    assert.equal(prompt.line, "Want me to check which stores are cheaper?");
     assert.deepEqual(
       prompt.chips.map((chip) => chip.label),
       ["Review", "Not yet"]
@@ -304,7 +304,7 @@ describe("Gitter guide rules", () => {
     assert.equal(withItems?.moment, "before-review");
     const low = decideGuide({ ...view({ itemCount: 1, listNames: ["Yogurt"] }), settings, session });
     assert.equal(low?.moment, "running-low");
-    assert.equal(low?.line, "Anything running low? Milk, Eggs, Bread?");
+    assert.equal(low?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
     const receipt = noteReceipt(session, { lines: [{ name: "Yogurt", quantity: 1 }] });
     assert.equal(decideGuide({ ...view(), settings, session: receipt })?.moment, "receipt");
     assert.equal(decideGuide({ ...view(), settings, session: noteShown(receipt, "receipt") }), null);
@@ -342,7 +342,7 @@ describe("Gitter guide rules", () => {
       settings,
       session,
       view: view({ itemCount: 2, listNames: ["Milk"] }),
-      current: { moment: "welcome", line: "What do you need this week?", chips: [] },
+      current: { moment: "welcome", line: "Hey. What are we picking up this week?", chips: [] },
       holding: true,
     });
     assert.equal(held.defer, true);
@@ -360,7 +360,7 @@ describe("Gitter guide rules", () => {
       settings,
       session,
       view: view(),
-      current: { moment: "welcome", line: "What do you need this week?", chips: [] },
+      current: { moment: "welcome", line: "Hey. What are we picking up this week?", chips: [] },
       fieldFocused: true,
     });
     assert.equal(typing.hidden, true);
@@ -426,7 +426,7 @@ describe("Gitter guide rules", () => {
     assert.match(guide, /data-guide-off/);
     const card = guideCardHtml({
       moment: "welcome",
-      line: "What do you need this week?",
+      line: "Hey. What are we picking up this week?",
       chips: [{ id: "say", label: "Say or type my list", action: "focus-ask" }],
     });
     assert.match(card, new RegExp(`aria-label="${GUIDE_LABEL}"`));

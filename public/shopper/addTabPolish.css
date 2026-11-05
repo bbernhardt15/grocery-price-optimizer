@@ -205,6 +205,10 @@
   overflow: auto;
   flex: 1 1 auto;
   min-height: 0;
+  max-height: 46dvh;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 .theme-check {
   display: grid;
@@ -315,7 +319,8 @@
 
 @media (max-width: 1099px) {
   dialog.list-sheet .theme-sheet {
-    max-height: 100%;
+    max-height: none;
+    min-height: 0;
     padding-bottom: calc(16px + var(--safe-bottom));
   }
 }

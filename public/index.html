@@ -279,11 +279,12 @@
           </footer>
         </main>
 
+        <div id="list-backdrop" class="list-backdrop" hidden></div>
         <aside id="list-panel" class="list-panel" data-alerts="off" aria-label="Shopping list">
           <div class="list-head">
             <div>
               <h2>Shopping list</h2>
-              <p id="shopping-list-note" class="muted shopping-list-note">Edit quantities, remove what you don't need, and share this trip's list.</p>
+              <p id="shopping-list-note" class="muted shopping-list-note">Change a quantity, take something off, or send this list to whoever is shopping with you.</p>
             </div>
             <button type="button" class="text-btn" id="list-close">Close</button>
           </div>
@@ -308,7 +309,12 @@
               <h3>No shared lists</h3>
               <p id="share-empty-body">Share a link so someone else can shop this list with you.</p>
             </div>
-            <p id="share-status" class="muted">Share a link so someone else can shop this list with you.</p>
+            <p id="share-status" class="muted">Share sends the item names and quantities on this list. Prices stay on your phone.</p>
+            <div id="share-confirm" class="share-confirm" hidden>
+              <p id="share-confirm-note">This link shares the item names and quantities. Anyone with it can open the list. Prices stay on your phone.</p>
+              <p id="share-link" class="share-link"></p>
+              <button type="button" id="share-copy" class="ghost">Copy link</button>
+            </div>
             <div class="share-actions">
               <button type="button" id="share-btn" class="primary" aria-describedby="share-status">Share</button>
               <button type="button" id="share-viewonly" class="ghost" hidden>Make view-only</button>

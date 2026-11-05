@@ -447,6 +447,7 @@ export async function resolveCatalogProducts(
           return;
         }
 
+        if (Date.now() < budget.deadlineAt) {
         acc.configured = true;
         acc.attempted = true;
         try {
@@ -471,6 +472,7 @@ export async function resolveCatalogProducts(
           console.warn(
             `Weekly-ad ${storeName} pricing failed for "${line.name}": ${message}`
           );
+        }
         }
       } else if (flipp?.isConfigured() && !zip) {
         acc.configured = true;
@@ -522,6 +524,10 @@ export async function resolveCatalogProducts(
         acc.seedHits += 1;
         source = "seed";
       }
+      if (source !== "miss") {
+        acc.uncheckedItems = acc.uncheckedItems.filter((name) => name !== line.name);
+        if (acc.uncheckedItems.length === 0) acc.check = undefined;
+      }
       } finally {
         const elapsed = Date.now() - started;
         storeMs.set(storeName, (storeMs.get(storeName) || 0) + elapsed);
@@ -572,9 +578,9 @@ export async function resolveCatalogProducts(
   }
   async function priceWorker(): Promise<void> {
     while (cursor < jobs.length) {
-      if (Date.now() >= budget.deadlineAt) return;
       const job = jobs[cursor];
       cursor += 1;
+      if (!job) return;
       await job.run();
     }
   }

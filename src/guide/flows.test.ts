@@ -75,7 +75,7 @@ describe("Gitter guide moments on the real flows", () => {
     const seen = view({ itemCount: 2, listNames: ["Bananas", "Coffee"], usuals: [] });
     const shown = afterSheet(createGuideSession(), seen);
     assert.equal(shown.current?.moment, "running-low");
-    assert.equal(shown.current?.line, "Anything running low? Milk, Eggs, Bread?");
+    assert.equal(shown.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
     assert.deepEqual(runningLowSuggestions([], seen.listNames), ["Milk", "Eggs", "Bread"]);
     assert.deepEqual(
       shown.current?.chips.map((chip) => chip.action),
@@ -91,7 +91,7 @@ describe("Gitter guide moments on the real flows", () => {
     });
     const shown = afterSheet(createGuideSession(), seen);
     assert.equal(shown.current?.moment, "running-low");
-    assert.equal(shown.current?.line, "Anything running low? Milk, Eggs, Bread?");
+    assert.equal(shown.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
     const kept = presentGuide({ settings, session: shown.session, view: seen, current: shown.current });
     assert.equal(kept.current?.moment, "running-low");
     assert.equal(decideGuide({ ...seen, settings, session: kept.session })?.moment, "before-review");
@@ -110,7 +110,7 @@ describe("Gitter guide moments on the real flows", () => {
     session = first.session;
     const dismissed = presentGuide({ settings, session, view: seen, current: null });
     assert.equal(dismissed.current?.moment, "running-low");
-    assert.equal(dismissed.current?.line, "Anything running low? Milk, Eggs, Bread?");
+    assert.equal(dismissed.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
     const still = presentGuide({ settings, session: dismissed.session, view: seen, current: dismissed.current });
     assert.equal(still.current?.moment, "running-low");
     assert.notEqual(still.current?.moment, "before-review");
@@ -121,7 +121,7 @@ describe("Gitter guide moments on the real flows", () => {
     const lowSkipped = noteShown(createGuideSession(), "running-low");
     const review = presentGuide({ settings, session: lowSkipped, view: seen, current: null });
     assert.equal(review.current?.moment, "before-review");
-    assert.equal(review.current?.line, "Ready for Review?");
+    assert.equal(review.current?.line, "Want me to check which stores are cheaper?");
     assert.deepEqual(
       review.current?.chips.map((chip) => chip.label),
       ["Review", "Not yet"]

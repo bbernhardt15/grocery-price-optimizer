@@ -177,7 +177,7 @@ export function fetchInitWithDevice(input, init = {}, deviceId) {
     input.headers.forEach((value, key) => headers.set(key, value));
   }
   new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
-  if (deviceId && !headers.has("x-device-id")) headers.set("x-device-id", deviceId);
+  if (deviceId) headers.set("x-device-id", deviceId);
   return { ...init, headers };
 }
 
@@ -321,9 +321,22 @@ let appAllowed = false;
 let gateCheck = null;
 
 export function whenInviteAllowsApp() {
-  if (appAllowed) return Promise.resolve(true);
-  if (!gateCheck) gateCheck = checkInviteGate();
-  return gateCheck;
+  if (typeof window !== "undefined" && window.__ggInviteGate) return window.__ggInviteGate;
+  const promise = (async () => {
+    if (appAllowed) return true;
+    if (!gateCheck) gateCheck = checkInviteGate();
+    const ok = await gateCheck;
+    if (ok || appAllowed) return true;
+    return new Promise((resolve) => {
+      if (appAllowed) {
+        resolve(true);
+        return;
+      }
+      document.addEventListener("gg-beta-unlocked", () => resolve(true), { once: true });
+    });
+  })();
+  if (typeof window !== "undefined") window.__ggInviteGate = promise;
+  return promise;
 }
 
 function allowApp() {
@@ -366,10 +379,26 @@ function installApiDeviceHeader() {
   if (typeof window === "undefined" || window.__ggDeviceFetch || typeof window.fetch !== "function") return;
   const original = window.fetch.bind(window);
   window.__ggDeviceFetch = true;
-  window.fetch = (input, init) => {
+  window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? String(input) : input?.url || "";
     if (!isShopperApi(url, window)) return original(input, init);
-    return original(input, fetchInitWithDevice(input, init, deviceId(memoryStorage())));
+    const response = await original(input, fetchInitWithDevice(input, init, deviceId(memoryStorage())));
+    if (response.status === 401) {
+      const body = await response.clone().json().catch(() => ({}));
+      const message = String(body?.error || "");
+      if (message === "Enter your invite code." || message === "Send this device's id.") {
+        clearInvite(memoryStorage());
+        appAllowed = false;
+        gateCheck = null;
+        if (typeof window !== "undefined") {
+          window.__ggInviteGate = new Promise((resolve) => {
+            document.addEventListener("gg-beta-unlocked", () => resolve(true), { once: true });
+          });
+        }
+        showGate(true);
+      }
+    }
+    return response;
   };
 }
 
@@ -510,6 +539,7 @@ function mountEvents() {
 }
 
 export function mountBeta() {
+  if (typeof document !== "undefined" && document.getElementById("beta-gate")) return;
   installApiDeviceHeader();
   keepGateOnTop();
   mountErrorToast();

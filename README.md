@@ -771,6 +771,8 @@ Cheapest picks with this catalog: milk at Kroger ($2.89), bread at Walmart ($1.2
 | --- | --- |
 | `npm run dev` | Build the browser crash reporter, then start the TypeScript watch server (`tsx`) |
 | `npm test` | Unit tests for the optimizer and scraper |
+| `npm run e2e` | Playwright phone pass against the real server. See `docs/QA_CHECKLIST.md`. |
+| `npm run smoke -- <url> <code>` | Post-deploy check: gate, health, a priced plan, and in-store rows |
 | `npm run scrape -- "milk"` | Puppeteer grocery search → JSON |
 | `npm run seed` | Insert 10 mock products into local MongoDB |
 | `npm run build` | Compile the API to `dist/`, copy the Flipp merchant config, and bundle crash reporting (Railway). Does not build iOS or Android. |
