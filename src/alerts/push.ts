@@ -25,6 +25,16 @@ export type WebPushSender = (
 
 const nativeTransports: NativePushTransport[] = [];
 let webPushSender: WebPushSender | null = null;
+const recordedTestPushes: string[] = [];
+
+/** Test servers record a title here. Production sends do not call this. */
+export function noteTestPush(title: string): void {
+  recordedTestPushes.push(title);
+}
+
+export function recordedTestPushTitles(): string[] {
+  return recordedTestPushes.slice();
+}
 
 export function registerNativePushTransport(transport: NativePushTransport): void {
   nativeTransports.push(transport);
@@ -153,6 +163,28 @@ async function deliverOne(alert: PriceAlertDoc, subscriptions: PushSubscriptionD
     return "pending";
   }
   return "skipped";
+}
+
+/**
+ * One test notification to this device's stored Web Push subscriptions.
+ * No-ops when the VAPID keys are unset. The private key is never included.
+ */
+export async function sendTestPush(deviceId: string): Promise<{ sent: number }> {
+  if (!webPushConfigured()) return { sent: 0 };
+  const subscriptions = await PushSubscription.find({ deviceId, channel: "web" }).lean<PushSubscriptionDoc[]>();
+  const payload = JSON.stringify({
+    title: "Price drop: Test item",
+    body: "Test notification",
+    url: "/?alerts=1",
+  });
+  const send = webPushSender ?? defaultWebPushSender;
+  let sent = 0;
+  for (const sub of subscriptions) {
+    if (!sub.endpoint || !sub.p256dh || !sub.auth) continue;
+    await send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload);
+    sent += 1;
+  }
+  return { sent };
 }
 
 /** Send alerts that are still pending. No-ops when Web Push keys are unset and no native transport is registered. */

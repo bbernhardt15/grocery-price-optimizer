@@ -176,6 +176,71 @@ describe("import routes", () => {
     assert.equal(calls.length, 0);
   });
 
+  it("reads a digital order and a paper receipt when only OPENAI_API_KEY is set", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const status = await fetch(`${origin}/api/import/status`);
+    assert.equal(status.headers.get("cache-control"), "no-store");
+    const statusBody = (await status.json()) as { photo: boolean };
+    assert.equal(statusBody.photo, true);
+
+    const digitalMarker = Buffer.from("digital-order-marker").toString("base64");
+    const paperMarker = Buffer.from("paper-receipt-marker").toString("base64");
+    const failMarker = Buffer.from("vision-fail-marker").toString("base64");
+    const paperText = ["KROGER #412", "MILK GALLON                 3.29", "EGGS 18CT                   4.99", "BREAD                       3.49", "SUBTOTAL                   11.77"].join("\n");
+    const digital = JSON.stringify({
+      text: "Organic Whole Milk, 1 gal\n1.0 x $3.49\nUPC:0001111040101\nLarge Eggs, 12 ct\n1.0 x $2.19\nUPC:0001111040102",
+      items: [
+        { name: "Organic Whole Milk", quantity: 1, upc: "0001111040101" },
+        { name: "Large Eggs", quantity: 1, upc: "0001111040102" },
+      ],
+    });
+    setImportRuntime({
+      lookup: async () => ["8.8.8.8"],
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        const raw = typeof init?.body === "string" ? init.body : "";
+        if (raw.includes(failMarker)) return jsonResponse({ error: { message: "overloaded" } }, 503);
+        if (raw.includes(paperMarker)) return jsonResponse({ choices: [{ message: { content: paperText } }] });
+        return jsonResponse({ choices: [{ message: { content: digital } }] });
+      },
+    });
+
+    const digitalRes = await post("/api/import/photo", { imageBase64: digitalMarker, mimeType: "image/jpeg" }, "device-photo-digital");
+    assert.equal(digitalRes.status, 200);
+    const digitalBody = (await digitalRes.json()) as {
+      items: Array<{ name: string }>;
+      receipt?: { paper?: boolean };
+    };
+    assert.ok(digitalBody.items.some((item) => /organic whole milk/i.test(item.name)));
+    assert.ok(digitalBody.items.some((item) => /large eggs/i.test(item.name)));
+    assert.equal(digitalBody.receipt?.paper, false);
+    assert.equal(JSON.stringify(digitalBody).includes("isn't switched on"), false);
+
+    const paperRes = await post("/api/import/photo", { imageBase64: paperMarker, mimeType: "image/jpeg" }, "device-photo-paper");
+    assert.equal(paperRes.status, 200);
+    const paperBody = (await paperRes.json()) as {
+      items?: Array<{ name: string }>;
+      lines?: Array<{ name: string }>;
+      paper?: boolean;
+      paperNote?: string;
+      receipt?: { paper?: boolean; paperNote?: string };
+    };
+    const note = paperBody.receipt?.paperNote || paperBody.paperNote || "";
+    assert.match(note, /shortened/);
+    const names = [...(paperBody.items || []), ...(paperBody.lines || [])].map((item) => item.name).join(" ");
+    assert.match(names, /milk/i);
+    assert.equal(/isn't switched on/i.test(JSON.stringify(paperBody)), false);
+
+    const failRes = await post("/api/import/photo", { imageBase64: failMarker, mimeType: "image/jpeg" }, "device-photo-fail");
+    assert.equal(failRes.status, 502);
+    const failBody = (await failRes.json()) as { error: string };
+    assert.match(failBody.error, /didn't answer/i);
+    assert.equal(/isn't switched on/i.test(failBody.error), false);
+    assert.equal(logs.some((line) => line.includes("test-key")), false);
+  });
+
   it("reads a photo and a voice memo when a key is set, without logging them", async () => {
     process.env.OPENAI_API_KEY = "test-key";
     process.env.IMPORT_AI_PROVIDER = "off";

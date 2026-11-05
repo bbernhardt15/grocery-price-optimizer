@@ -22,10 +22,28 @@ delete process.env.IMPORT_OPENAI_API_KEY;
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.IMPORT_ANTHROPIC_API_KEY;
 delete process.env.IMPORT_VISION_PROVIDER;
+delete process.env.IMPORT_AI_PROVIDER;
+delete process.env.IMPORT_SPEECH_PROVIDER;
+delete process.env.VAPID_PUBLIC_KEY;
+delete process.env.VAPID_PRIVATE_KEY;
+delete process.env.VAPID_SUBJECT;
 delete process.env.MONGO_URL;
 delete process.env.MONGODB_URI;
 
+const features = process.env.E2E_FEATURES === "1";
+if (features) {
+  process.env.OPENAI_API_KEY = "test-key";
+}
+
 async function main(): Promise<void> {
+if (features) {
+  const webpush = await import("web-push");
+  const api = webpush.default ?? webpush;
+  const keys = api.generateVAPIDKeys();
+  process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+  process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+}
+
 const { connectDatabase } = await import("../src/db.ts");
 const { default: app } = await import("../src/app.ts");
 const { Product } = await import("../src/models/Product.ts");
@@ -70,6 +88,44 @@ const rows = [...names].flatMap((name) => {
   }));
 });
 if (rows.length) await Product.insertMany(rows);
+
+if (features) {
+  const { setImportRuntime } = await import("../src/import/runtime.ts");
+  const { noteTestPush, setWebPushSender } = await import("../src/alerts/push.ts");
+  let visionCalls = 0;
+  const paperText = ["KROGER #412", "MILK GALLON                 3.29", "EGGS 18CT                   4.99", "BREAD                       3.49", "SUBTOTAL                   11.77"].join("\n");
+  const digital = JSON.stringify({
+    text: "Organic Whole Milk, 1 gal\n1.0 x $3.49\nUPC:0001111040101\nLarge Eggs, 12 ct\n1.0 x $2.19\nUPC:0001111040102",
+    items: [
+      { name: "Organic Whole Milk", quantity: 1, upc: "0001111040101" },
+      { name: "Large Eggs", quantity: 1, upc: "0001111040102" },
+    ],
+  });
+  setWebPushSender(async (_subscription, payload) => {
+    const parsed = JSON.parse(payload) as { title?: string };
+    noteTestPush(String(parsed.title || ""));
+  });
+  setImportRuntime({
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (!String(url).includes("api.openai.com")) {
+        return new Response("unexpected", { status: 500 });
+      }
+      visionCalls += 1;
+      if (visionCalls >= 3) {
+        return new Response(JSON.stringify({ error: { message: "overloaded" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const content = visionCalls === 2 ? paperText : digital;
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+}
 
 const port = Number(process.env.PORT) || 4173;
 const server = createServer(app);
