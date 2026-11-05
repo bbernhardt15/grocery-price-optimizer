@@ -208,7 +208,7 @@ export function mountImport(deps) {
         <textarea id="import-paste" class="import-paste" placeholder="Milk, bread, eggs…"></textarea>
         <button type="submit" class="primary" id="import-find">Find these items</button>
         <div class="import-tools">
-          <button type="button" class="ghost" id="import-photo" hidden>Photo or screenshot</button>
+          <button type="button" class="ghost" id="import-photo">Photo or screenshot</button>
           <p id="import-photo-note" class="import-lead" hidden>Photo import needs photo reading, which isn't set up on this server. Paste a list, or upload a PDF or a text file.</p>
           <button type="button" class="ghost" id="import-file">Upload a list</button>
           <button type="button" class="ghost" id="import-link-toggle">Paste a link</button>
@@ -332,8 +332,7 @@ export function mountImport(deps) {
     const button = $("import-photo");
     const note = $("import-photo-note");
     const known = status.known === true;
-    const on = known && Boolean(status.photo);
-    if (button) button.hidden = !on;
+    if (button) button.hidden = false;
     if (note) note.hidden = !(known && !status.photo);
   }
 
@@ -682,15 +681,8 @@ export function mountImport(deps) {
   }
 
   async function runPhoto(file) {
-    await loadStatus();
-    if (!status.photo) {
-      paintPhoto();
-      setStatus(
-        status.known
-          ? "Photo import needs photo reading, which isn't set up on this server. Paste the list, or upload a PDF or a text file."
-          : "Enter your invite code to import a photo.",
-        "error"
-      );
+    if (!file) {
+      setStatus("Choose a photo first.", "error");
       show("home");
       return;
     }
@@ -698,12 +690,14 @@ export function mountImport(deps) {
     setImportBusy(true);
     show("home");
     try {
+      await loadStatus();
       const { imageBlobs } = await import("./receiptImages.js");
       const prepared = await imageBlobs(file);
       let merged = null;
       for (const blob of prepared) {
         if (blob.size > 4_000_000) {
           setStatus("That file is too large. Try a smaller screenshot or paste the text.", "error");
+          show("home");
           return;
         }
         const imageBase64 = await blobToBase64(blob);
@@ -713,11 +707,19 @@ export function mountImport(deps) {
       }
       review = prepareReview(merged);
       const found = review?.found ?? 0;
-      const total = review?.total ?? 0;
-      setStatus(total ? `Found ${found} of ${total}.` : "Done.", "done");
+      const total = review?.total ?? review?.items?.length ?? 0;
+      if (!total) {
+        review = null;
+        setStatus("No grocery items in that photo. Try a receipt, a shopping list, or paste the text.", "error");
+        show("home");
+        return;
+      }
+      setStatus(`Found ${found} of ${total}.`, "done");
       renderReview();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "That photo didn't open. Try a screenshot, or paste the text.", "error");
+      review = null;
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message || "That photo didn't open. Try a screenshot, or paste the text.", "error");
       show("home");
     } finally {
       setImportBusy(false);
@@ -795,8 +797,18 @@ export function mountImport(deps) {
     return Ctor ? new Ctor() : null;
   }
 
+  function withMicTimeout(promise, ms) {
+    let timer = 0;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error("mic-timeout")), ms);
+      }),
+    ]).finally(() => window.clearTimeout(timer));
+  }
+
   async function startRecording() {
-    setStatus("");
+    setStatus("Starting the microphone…", "busy");
     const plugin = nativePlugin();
     if (plugin) {
       try {
@@ -878,7 +890,7 @@ export function mountImport(deps) {
     if ((status.speech || serverFirst) && canRecord) {
       let stream = null;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await withMicTimeout(navigator.mediaDevices.getUserMedia({ audio: true }), 8000);
         const mime = recorderMime((type) => MediaRecorder.isTypeSupported(type));
         const mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
         const chunks = [];
@@ -891,12 +903,16 @@ export function mountImport(deps) {
         releaseMicrophone({ stream });
         if (!recognizer || serverFirst) {
           const denied = error && (error.name === "NotAllowedError" || error.name === "SecurityError");
+          const timedOut = error instanceof Error && error.message === "mic-timeout";
           setStatus(
             denied
               ? "The microphone is off. You can allow it in your browser settings, or paste the list instead."
-              : "Voice import isn't switched on yet. Type or paste your list instead.",
+              : timedOut
+                ? "The microphone didn't start. Try again, or paste the list."
+                : "Voice import isn't switched on yet. Type or paste your list instead.",
             "error"
           );
+          show("home");
           return;
         }
       }
@@ -975,9 +991,16 @@ export function mountImport(deps) {
     };
     recording = session;
     show("listen");
+    setStatus("");
     stopTimer = window.setTimeout(() => {
       void stopRecording(false);
     }, 60_000);
+    window.setTimeout(() => {
+      if (recording !== session) return;
+      const spoke = Boolean(heard.trim()) || Boolean(recorder?.chunks?.some((chunk) => chunk?.size > 0));
+      if (spoke) return;
+      void stopRecording(false);
+    }, 12_000);
   }
 
   async function stopRecording(cancel) {

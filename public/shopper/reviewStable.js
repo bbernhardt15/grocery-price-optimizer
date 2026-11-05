@@ -4,7 +4,7 @@
  * until every store has resolved, so it cannot swap mid-scroll.
  */
 
-import { planIsComplete } from "./planCache.js";
+import { planHasDisplay, planIsComplete, planIsShowable } from "./planCache.js";
 
 export const REVIEW_CARD_MIN_PX = 148;
 /** Room for the coupon callout and the cart button on a phone width. */
@@ -120,6 +120,6 @@ export function reviewLoadingHtml(storeNames, status = REVIEW_LOADING_STATUS) {
  */
 export function reviewHeadlineReady(payload) {
   if (!payload || payload.partial) return false;
-  if (Array.isArray(payload.pendingStores) && payload.pendingStores.length > 0) return false;
-  return planIsComplete(payload);
+  // A store that timed out must not hide prices that already came back.
+  return planIsComplete(payload) || planIsShowable(payload) || planHasDisplay(payload);
 }

@@ -151,8 +151,11 @@ export function safeHandoffUrl(value, ownOrigin) {
  */
 export function viewportInsets(input = {}) {
   const overlap = keyboardOverlap(input.innerHeight, input.visualHeight, input.offsetTop);
-  if (input.focused || overlap >= 140) return { keyboard: overlap, toolbar: 0 };
-  return { keyboard: 0, toolbar: overlap };
+  // A focused field is the keyboard. An unfocused short viewport is Chrome's
+  // own toolbar. Treating that gap as a keyboard lifts the tab bar and leaves
+  // a large empty band on the Build screen.
+  if (input.focused) return { keyboard: overlap, toolbar: 0 };
+  return { keyboard: 0, toolbar: Math.min(overlap, 96) };
 }
 
 /**

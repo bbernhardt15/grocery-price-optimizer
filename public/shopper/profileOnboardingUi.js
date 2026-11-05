@@ -521,8 +521,6 @@ export function mountProfileOnboarding(deps = {}) {
         if (hint) hint.hidden = !String(zipInput.value || "").trim();
         paintStoreList();
         syncZipContinue();
-        const list = $("profile-store-list");
-        if (five && list) list.scrollIntoView({ block: "start", behavior: "smooth" });
       };
       zipInput.addEventListener("focus", () => syncZipContinue());
       zipInput.addEventListener("blur", () => syncZipContinue());
@@ -579,7 +577,6 @@ export function mountProfileOnboarding(deps = {}) {
             field?.blur();
             paintStoreList();
             syncZipContinue();
-            $("profile-store-list")?.scrollIntoView({ block: "start", behavior: "smooth" });
           } catch (error) {
             deps.toast?.(error instanceof Error ? error.message : "Couldn't use location. Type a ZIP.");
           } finally {
@@ -1499,7 +1496,6 @@ export function mountProfileOnboarding(deps = {}) {
       if (hint) hint.hidden = false;
       paintStoreList();
       syncZipContinue();
-      $("profile-store-list")?.scrollIntoView({ block: "start", behavior: "smooth" });
       return;
     }
     if (target.dataset.tripQtyStep) {

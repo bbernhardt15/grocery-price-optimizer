@@ -156,10 +156,10 @@ function learnedPickerHtml(row, brands, options = {}) {
   const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
   const rule = (mode, label) => {
     const on = mode === "brand" ? row?.mode === "brand" : row?.mode === mode;
-    return `<button type="button" class="rule-choice" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
+    const saved = on && options.saved ? `<span class="rule-saved" data-rule-saved>Saved</span>` : "";
+    return `<button type="button" class="rule-choice" data-learned-mode="${mode}" data-learned-family="${family}" aria-pressed="${on ? "true" : "false"}"><span class="rule-label">${label}</span>${saved}</button>`;
   };
   return `<div class="learned-picker" data-editor="${family}">
-    ${names}
     <fieldset class="rule-group"><legend>Rule</legend>
       <div class="rule-list" role="radiogroup" aria-label="Rule">
         ${rule("brand", "Name brand")}
@@ -169,7 +169,7 @@ function learnedPickerHtml(row, brands, options = {}) {
       </div>
     </fieldset>
     <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
-    <p class="rule-saved" data-rule-saved aria-live="polite">${options.saved ? "Saved" : ""}</p>
+    ${names}
   </div>`;
 }
 

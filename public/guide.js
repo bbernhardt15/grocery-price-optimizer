@@ -17,7 +17,9 @@ import {
   importReceiptUrl,
   receiptLinesFromImportBody,
   namesMatch,
+  noteDeclined,
   noteReceipt as rememberReceipt,
+  noteShown,
   noteTrip as rememberTrip,
   presentGuide,
   readGuideSettings,
@@ -262,7 +264,21 @@ export function mountGuide(deps = {}) {
       names,
       url: button.getAttribute("data-guide-url") || "",
       label: button.textContent || "",
+      moment: current?.moment || host.dataset.moment || "",
     };
+    if (action === "later") {
+      session = noteDeclined(session, detail.moment);
+      current = null;
+      deps.onAction?.(action, detail);
+      sync();
+      return;
+    }
+    if (action === "close-guide") {
+      session = noteShown(session, detail.moment || "keep-building");
+      current = null;
+      host.hidden = true;
+      return;
+    }
     current = null;
     host.hidden = true;
     deps.onAction?.(action, detail);

@@ -18,7 +18,7 @@ export const DISMISS_LABEL = "Dismiss guide";
 export const TURN_OFF_LABEL = "Turn off guide";
 export const REPLIES_LABEL = "Replies";
 
-export const MOMENTS = ["welcome", "receipt", "running-low", "before-review", "review-next", "trip-saved"] as const;
+export const MOMENTS = ["welcome", "receipt", "running-low", "before-review", "keep-building", "review-next", "trip-saved"] as const;
 
 export type Moment = (typeof MOMENTS)[number];
 
@@ -29,6 +29,7 @@ export const MOMENT_RANK: Record<Moment, number> = {
   "review-next": 4,
   "running-low": 3,
   "before-review": 2,
+  "keep-building": 2,
   welcome: 1,
 };
 
@@ -62,6 +63,7 @@ export type GuideSettings = {
 
 export type GuideSession = {
   shown: Partial<Record<Moment, boolean>>;
+  declined?: Partial<Record<Moment, boolean>>;
   receipt: { count: number; lines: ReceiptLine[] } | null;
   trip: { saved: number; savedToPastTrips?: boolean; items?: ReceiptLine[] } | null;
 };
@@ -92,6 +94,7 @@ export type GuideFrame = {
 
 const WELCOME_LINE = "Hey. What are we picking up this week?";
 const BEFORE_REVIEW_LINE = "Want me to check which stores are cheaper?";
+const KEEP_BUILDING_LINE = "Add anything else you need. Review checks which stores are cheaper when you're ready.";
 const SIMILAR_LINE = "Want me to look for a similar brand?";
 
 export function emptyGuideSettings(): GuideSettings {
@@ -99,7 +102,7 @@ export function emptyGuideSettings(): GuideSettings {
 }
 
 export function createGuideSession(): GuideSession {
-  return { shown: {}, receipt: null, trip: null };
+  return { shown: {}, declined: {}, receipt: null, trip: null };
 }
 
 export function guideIsOff(settings: GuideSettings | null | undefined): boolean {
@@ -164,6 +167,18 @@ export function setGuideEnabled(settings: GuideSettings | null | undefined, on: 
 export function noteShown(session: GuideSession, moment: Moment): GuideSession {
   if (session.shown[moment]) return session;
   return { ...session, shown: { ...session.shown, [moment]: true } };
+}
+
+/** A terminal chip ("Not yet", "Not this time") spends that moment and asks for a follow-up. */
+export function noteDeclined(session: GuideSession, moment: unknown): GuideSession {
+  const id = String(moment || "");
+  if (!MOMENTS.includes(id as Moment)) return session;
+  const key = id as Moment;
+  return {
+    ...session,
+    shown: { ...session.shown, [key]: true },
+    declined: { ...(session.declined || {}), [key]: true },
+  };
 }
 
 export function noteReceipt(session: GuideSession, payload: unknown): GuideSession {
@@ -477,6 +492,20 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
       chips: [
         { id: "review", label: "Review", action: "review" },
         { id: "later", label: "Not yet", action: "later" },
+      ],
+    };
+  }
+
+  const declined = session.declined || {};
+  const passed = MOMENTS.some((id) => declined[id]);
+  if (step === "build" && itemCount > 0 && passed && !session.shown["keep-building"]) {
+    return {
+      moment: "keep-building",
+      line: KEEP_BUILDING_LINE,
+      chips: [
+        { id: "add", label: "Add an item", action: "focus-ask" },
+        { id: "review", label: "Review", action: "review" },
+        { id: "enough", label: "That's enough", action: "close-guide" },
       ],
     };
   }

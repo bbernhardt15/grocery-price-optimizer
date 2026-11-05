@@ -70,9 +70,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v46", () => {
-    assert.equal(SHELL_CACHE, "v46");
-    assert.match(sw, /grocery-gitter-shell-v46/);
+  it("bumps the shell cache to v47", () => {
+    assert.equal(SHELL_CACHE, "v47");
+    assert.match(sw, /grocery-gitter-shell-v47/);
   });
 
   it("keeps Review card heights stable and withholds the headline while prices load", () => {
@@ -113,6 +113,7 @@ describe("twelfth phone test, Review and In-store", () => {
     assert.match(reviewSkeletonHtml(["Kroger"]), /data-review-skel="Kroger"[^>]*min-height:256px;height:256px/);
     assert.match(reviewSkeletonHtml(["Walmart"]), /data-review-skel="Walmart"[^>]*min-height:304px;height:304px/);
     assert.equal(reviewHeadlineReady(streamed(265.89)), false);
+    assert.equal(reviewHeadlineReady({ ...streamed(12), partial: false, pendingStores: [] }), true);
     assert.equal(reviewHeadlineReady(settled229()), true);
     assert.match(css, /overflow-anchor:\s*auto/);
     assert.match(css, /animation:\s*none/);
@@ -211,7 +212,8 @@ describe("twelfth phone test, Review and In-store", () => {
       [0, 0],
     ]);
     assert.match(app, /applyInStoreScroll/);
-    assert.match(app, /inStoreSkeletonHtml/);
+    assert.match(app, /listShopHtml/);
+    assert.doesNotMatch(app, /No trip yet/);
     assert.match(app, /pinTabTop/);
     assert.doesNotMatch(app, /Updating the plan/);
     assert.match(css, /\.shop-skel-row \{[\s\S]*min-height:\s*64px/);

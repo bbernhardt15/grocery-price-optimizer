@@ -1,10 +1,14 @@
 /* Review tab: plan cards, missing items, customize rows, store checkout.
    Loading and loaded cards share a min-height. Nothing here animates
    its height, and the scroll anchor stays on the section. */
-body[data-step="plan"] #trip,
-body[data-step="shop"] #shop {
+body[data-step="plan"] #trip {
   animation: none;
   overflow-anchor: auto;
+}
+body[data-step="shop"] #shop {
+  animation: none;
+  overflow-anchor: none;
+  touch-action: pan-y;
 }
 .review-stable,
 .review-head-slot,

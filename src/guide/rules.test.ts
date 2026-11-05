@@ -21,6 +21,7 @@ import {
   linesFromReceipt,
   namesMatch,
   clearTripNote,
+  noteDeclined,
   noteReceipt,
   noteShown,
   noteTrip,
@@ -178,6 +179,31 @@ describe("Gitter guide rules", () => {
       ["Review", "Not yet"]
     );
     assert.equal(prompt.chips[0].action, "review");
+  });
+
+  it("follows Not yet with another prompt instead of a dead thread", () => {
+    const settings = emptyGuideSettings();
+    const base = {
+      ...view({
+        itemCount: 2,
+        listNames: ["Milk", "Eggs"],
+      }),
+      settings,
+    };
+    const asked = decideGuide({ ...base, session: noteShown(createGuideSession(), "running-low") });
+    assert.equal(asked?.moment, "before-review");
+    const declined = noteDeclined(createGuideSession(), "before-review");
+    const next = decideGuide({ ...base, session: { ...declined, shown: { ...declined.shown, "running-low": true } } });
+    assert.equal(next?.moment, "keep-building");
+    assert.match(next?.line || "", /Add anything else/);
+    assert.ok(next?.chips.some((chip) => chip.action === "review"));
+    assert.equal(next?.chips.some((chip) => chip.action === "later"), false);
+    const closed = decideGuide({
+      ...base,
+      session: noteShown(declined, "keep-building"),
+    });
+    assert.notEqual(closed?.moment, "before-review");
+    assert.notEqual(closed?.moment, "keep-building");
   });
 
   it("on Review, uses the unfound search links and stays quiet while the savings card is up", () => {
