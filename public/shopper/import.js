@@ -303,6 +303,7 @@ export function mountImport(deps) {
     if (!dialog.open) dialog.showModal();
     const title = $("import-title");
     title?.focus();
+    void loadStatus();
   }
 
   function close() {
@@ -339,11 +340,16 @@ export function mountImport(deps) {
   async function loadStatus() {
     try {
       await whenInviteAllowsApp();
-      const response = await fetch(apiUrl("/api/import/status"));
-      if (response.status === 401) return;
-      if (response.ok) status = { ...(await response.json()), known: true };
+      const response = await fetch(apiUrl("/api/import/status"), { cache: "no-store" });
+      if (!response.ok) {
+        if (response.status === 401) status = { photo: false, speech: false, ask: false };
+        paintPhoto();
+        deps.onStatus?.(status);
+        return;
+      }
+      status = { ...(await response.json()), known: true };
     } catch {
-      /* paste still works */
+      /* the next time the sheet opens, ask again */
     }
     paintPhoto();
     deps.onStatus?.(status);
@@ -489,14 +495,22 @@ export function mountImport(deps) {
     return deps.offerDiets?.() ? `<p class="diet-note"><button type="button" class="text-btn" data-add-diets>Add allergies or diets</button></p>` : "";
   }
 
+  function paperNoteHtml() {
+    const receipt = review?.receipt?.paper ? review.receipt : review?.paper ? review : null;
+    const note = receipt ? String(receipt.paperNote || "").trim() : "";
+    if (!note) return "";
+    return `<p class="import-note" data-paper-note role="status">${escapeHtml(note)}</p>`;
+  }
+
   function reviewLead() {
     const idea = review?.idea;
-    if (!idea) return `${dietNote()}<p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>`;
+    const paper = paperNoteHtml();
+    if (!idea) return `${paper}${dietNote()}<p class="import-count" aria-live="polite">${escapeHtml(foundLabel(review.found, review.total))}</p>`;
     const noun = review.items.length === 1 ? "item" : "items";
     const count = idea.namedPeople
       ? `${review.items.length} ${noun} for ${idea.people} people`
       : `${review.items.length} ${noun}`;
-    return `${dietNote()}<p class="import-idea-lead">${escapeHtml(idea.blurb)}</p><p class="import-count" aria-live="polite">${escapeHtml(count)}</p>`;
+    return `${paper}${dietNote()}<p class="import-idea-lead">${escapeHtml(idea.blurb)}</p><p class="import-count" aria-live="polite">${escapeHtml(count)}</p>`;
   }
 
   function renderReview() {
@@ -668,7 +682,7 @@ export function mountImport(deps) {
   }
 
   async function runPhoto(file) {
-    if (!status.known) await loadStatus();
+    await loadStatus();
     if (!status.photo) {
       paintPhoto();
       setStatus(
@@ -1339,6 +1353,10 @@ export function mountImport(deps) {
   if (empty) new MutationObserver(() => paintEmpty()).observe(empty, { childList: true, attributes: true, subtree: true });
   const progress = document.getElementById("onboard-progress");
   if (progress) new MutationObserver(syncOnboarding).observe(progress, { childList: true, characterData: true, subtree: true });
+  document.addEventListener("gg-beta-unlocked", () => {
+    status = { photo: false, speech: false, ask: false };
+    void loadStatus();
+  });
   void loadStatus();
   void consumeShare();
   return { open, find, speak };

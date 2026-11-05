@@ -2946,6 +2946,7 @@ function openList(open) {
   const backdrop = document.getElementById("list-backdrop");
   if (backdrop) backdrop.hidden = !open;
   $("list-toggle").setAttribute("aria-expanded", String(open));
+  if (open) void loadPushStatus();
   if (open && window.matchMedia("(max-width: 1099px)").matches) {
     listPanel.querySelector("h2")?.focus();
   }
@@ -6607,7 +6608,7 @@ async function onListAlertsChanged() {
 async function loadPushStatus() {
   const row = $("push-row");
   try {
-    const response = await fetch(apiUrl("/api/price-alerts/status"));
+    const response = await fetch(apiUrl("/api/price-alerts/status"), { cache: "no-store" });
     if (!response.ok) {
       applyAlertDelivery(null);
       if (row) row.hidden = true;
@@ -6624,6 +6625,10 @@ async function loadPushStatus() {
     if (row) row.hidden = true;
   }
 }
+
+document.addEventListener("gg-beta-unlocked", () => {
+  void loadPushStatus();
+});
 
 async function enablePush() {
   const note = $("push-note");
@@ -8654,7 +8659,7 @@ profileUi = mountProfileOnboarding({
   readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;
     try {
-      const status = await fetch(apiUrl("/api/import/status"));
+      const status = await fetch(apiUrl("/api/import/status"), { cache: "no-store" });
       if (status.ok) photo = Boolean((await status.json()).photo);
     } catch {
       photo = false;

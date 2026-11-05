@@ -35,6 +35,7 @@ function deviceFrom(value: unknown, res: Response): string | null {
 
 router.get("/price-alerts/status", (_req, res) => {
   const config = vapidConfig();
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     webPush: {
       enabled: config != null,

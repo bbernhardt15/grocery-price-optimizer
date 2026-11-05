@@ -8,7 +8,7 @@ import app from "../app";
 import { detectPriceDrops } from "./detect";
 import { PriceAlert, PriceWatch, PushSubscription } from "./models";
 import { parseWatchBody } from "./watchInput";
-import { clearNativePushTransports, registerNativePushTransport, setWebPushSender } from "./push";
+import { clearNativePushTransports, registerNativePushTransport, sendTestPush, setWebPushSender } from "./push";
 import { CatalogOffer, IngestCheckpoint } from "../ingest/models";
 import { runIngestTick } from "../ingest/runner";
 
@@ -252,6 +252,44 @@ describe("price drop alerts", { concurrency: false }, () => {
       }),
     });
     assert.equal(subscribed.status, 503);
+  });
+
+  it("turns push on from the two VAPID keys and sends a test only to that device", async () => {
+    await reset();
+    delete process.env.VAPID_SUBJECT;
+    process.env.VAPID_PUBLIC_KEY = "test-public-key";
+    process.env.VAPID_PRIVATE_KEY = "test-private-key";
+    const status = await fetch(`${origin}/api/price-alerts/status`);
+    assert.equal(status.headers.get("cache-control"), "no-store");
+    const body = (await status.json()) as { webPush: { enabled: boolean; publicKey?: string } };
+    assert.equal(body.webPush.enabled, true);
+    assert.equal(body.webPush.publicKey, "test-public-key");
+    assert.equal(JSON.stringify(body).includes("test-private-key"), false);
+    const sent: string[] = [];
+    setWebPushSender(async (subscription, payload) => {
+      sent.push(subscription.endpoint);
+      assert.equal(payload.includes("test-private-key"), false);
+      assert.equal(payload.includes("test-public-key"), false);
+    });
+    await PushSubscription.create({
+      deviceId: DEVICE,
+      channel: "web",
+      endpoint: "https://push.example/this-device",
+      p256dh: "key",
+      auth: "auth",
+      platform: "web",
+    });
+    await PushSubscription.create({
+      deviceId: "device-other-02",
+      channel: "web",
+      endpoint: "https://push.example/other-device",
+      p256dh: "key",
+      auth: "auth",
+      platform: "web",
+    });
+    const result = await sendTestPush(DEVICE);
+    assert.equal(result.sent, 1);
+    assert.deepEqual(sent, ["https://push.example/this-device"]);
   });
 
   it("sends one web push for a drop and does not send it again", async () => {

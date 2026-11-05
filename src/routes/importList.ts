@@ -251,6 +251,7 @@ router.get("/admin/vision", async (req, res) => {
 
 router.get("/import/status", (_req, res) => {
   const config = importConfig();
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     paste: true,
     file: true,

@@ -22,6 +22,7 @@ import importListRouter from "./routes/importList";
 import betaRouter from "./routes/beta";
 import { enforceBetaInvite } from "./beta/gate";
 import { IMPORT_MESSAGES } from "./import/messages";
+import { recordedTestPushTitles, sendTestPush } from "./alerts/push";
 
 initSentry();
 
@@ -153,7 +154,7 @@ app.get("/api", (_req, res) => {
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "POST /api/import/text":
-        "Parses a pasted list into catalog matches. Photo, voice, and suggestions stay off until IMPORT_VISION_PROVIDER / IMPORT_SPEECH_PROVIDER / IMPORT_AI_PROVIDER and a key are set. See docs/IMPORT.md.",
+        "Parses a pasted list into catalog matches. OPENAI_API_KEY alone turns on photo reading, voice transcription, and suggestions. IMPORT_VISION_PROVIDER, IMPORT_SPEECH_PROVIDER, and IMPORT_AI_PROVIDER are optional overrides. See docs/IMPORT.md.",
       "GET /api/health/ready":
         "Mongo is connected. 503 when it is not. No secrets.",
       "GET /api/beta/gate":
@@ -217,6 +218,24 @@ app.use(
     },
   })
 );
+
+if (process.env.E2E_FEATURES === "1") {
+  app.post("/api/e2e/push-test", (req, res) => {
+    const deviceId = String(req.header("x-device-id") || "");
+    void sendTestPush(deviceId)
+      .then((result) => {
+        res.setHeader("Cache-Control", "no-store");
+        res.json(result);
+      })
+      .catch(() => {
+        if (!res.headersSent) res.status(500).json({ error: "Test notification failed." });
+      });
+  });
+  app.get("/api/e2e/push-log", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ sent: recordedTestPushTitles().map((title) => ({ title })) });
+  });
+}
 
 app.use((req, res) => {
   if (req.path.startsWith("/api")) {
