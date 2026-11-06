@@ -65,7 +65,7 @@ test("fourteenth walkthrough keeps Review, In-store, chat, photo, and Build spac
   }
   await guide.getByRole("button", { name: "Not yet" }).click();
   await expect(guide).toContainText(/Add anything else/);
-  await expect(guide.getByRole("button", { name: "Review" })).toBeVisible();
+  await expect(guide.getByRole("button", { name: "Check store prices" })).toBeVisible();
 
   await page.route("**/api/optimize-list", async (route) => {
     const partial = {

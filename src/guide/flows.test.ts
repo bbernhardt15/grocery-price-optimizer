@@ -51,8 +51,8 @@ describe("Gitter guide moments on the real flows", () => {
     assert.equal(receiptLinesFromPayload(payload).length, 59);
     const session = noteReceipt(createGuideSession(), payload);
     const seen = view({
-      itemCount: 59,
-      listNames: lines.map((line) => line.name),
+      itemCount: 0,
+      listNames: [],
       usuals: [
         { name: "Whole Milk", times: 9 },
         { name: "Large Eggs", times: 4 },
@@ -61,37 +61,33 @@ describe("Gitter guide moments on the real flows", () => {
     const shown = afterSheet(session, seen);
     assert.equal(shown.current?.moment, "receipt");
     assert.equal(shown.current?.line, receiptLine(59));
-    assert.equal(shown.current?.line, "I found 59 items. Want me to start with the ones you buy most?");
-    assert.deepEqual(
-      shown.current?.chips.map((chip) => chip.label),
-      ["Pick for me", "Let me choose"]
-    );
+    assert.equal(shown.current?.chips.at(-1)?.label, "Add selected");
+    const already = view({ itemCount: 59, listNames: lines.map((line) => line.name) });
+    assert.notEqual(afterSheet(session, already).current?.moment, "receipt");
     const again = presentGuide({ settings, session: shown.session, view: seen, current: shown.current });
     assert.equal(again.current?.moment, "receipt");
     assert.equal(again.session, shown.session);
   });
 
-  it("after the Add items sheet closes, asks what is running low", () => {
+  it("after the Add items sheet closes, does not invent staples without a purchase", () => {
     const seen = view({ itemCount: 2, listNames: ["Bananas", "Coffee"], usuals: [] });
     const shown = afterSheet(createGuideSession(), seen);
-    assert.equal(shown.current?.moment, "running-low");
-    assert.equal(shown.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
-    assert.deepEqual(runningLowSuggestions([], seen.listNames), ["Milk", "Eggs", "Bread"]);
-    assert.deepEqual(
-      shown.current?.chips.map((chip) => chip.action),
-      ["add-usual", "add-usual", "add-usual"]
-    );
+    assert.equal(shown.current?.moment, "before-review");
+    assert.deepEqual(runningLowSuggestions([], seen.listNames), []);
   });
 
-  it("after voice dictate adds items, suggests staples that are not on the list", () => {
+  it("after voice dictate adds items, suggests only bought usuals that are off the list", () => {
     const seen = view({
       itemCount: 1,
       listNames: ["Yogurt"],
-      usuals: [{ name: "Yogurt", times: 2 }],
+      usuals: [
+        { name: "Yogurt", times: 2 },
+        { name: "Eggs", times: 3 },
+      ],
     });
     const shown = afterSheet(createGuideSession(), seen);
     assert.equal(shown.current?.moment, "running-low");
-    assert.equal(shown.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
+    assert.equal(shown.current?.line, "Looks like you might be low on Eggs. Want me to add Eggs?");
     const kept = presentGuide({ settings, session: shown.session, view: seen, current: shown.current });
     assert.equal(kept.current?.moment, "running-low");
     assert.equal(decideGuide({ ...seen, settings, session: kept.session })?.moment, "before-review");
@@ -117,15 +113,19 @@ describe("Gitter guide moments on the real flows", () => {
     let session = noteReceipt(createGuideSession(), { lines });
     const seen = view({ itemCount: 2, listNames: ["Bananas", "Chicken"] });
     const first = afterSheet(session, seen);
-    assert.equal(first.current?.moment, "receipt");
-    assert.equal(first.current?.line, "I found 2 items. Want me to start with the ones you buy most?");
+    assert.notEqual(first.current?.moment, "receipt");
+    assert.equal(first.current?.moment, "before-review");
     session = first.session;
     const dismissed = presentGuide({ settings, session, view: seen, current: null });
-    assert.equal(dismissed.current?.moment, "running-low");
-    assert.equal(dismissed.current?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
-    const still = presentGuide({ settings, session: dismissed.session, view: seen, current: dismissed.current });
-    assert.equal(still.current?.moment, "running-low");
-    assert.notEqual(still.current?.moment, "before-review");
+    assert.equal(dismissed.current, null);
+    const declined = presentGuide({
+      settings,
+      session: { ...session, declined: { "before-review": true }, shown: { ...session.shown, "before-review": true } },
+      view: seen,
+      current: null,
+    });
+    assert.equal(declined.current?.moment, "keep-building");
+    assert.equal(declined.current?.chips.find((chip) => chip.action === "review")?.label, "Check store prices");
   });
 
   it("shows Review only after the running-low card is done, and each moment once", () => {

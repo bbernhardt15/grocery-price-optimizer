@@ -88,6 +88,23 @@ export function tripTotalLabel(total, selectedCount) {
  * @param {number} scrollHeight
  * @param {number} [slack]
  */
+/**
+ * A scroll that ends on Select all must not change the checkboxes.
+ * A still finger, after the list has stopped, is a real tap.
+ * @param {boolean} moved
+ * @param {number} scrolledAt
+ * @param {number} now
+ * @param {number} [windowMs]
+ */
+export function tripSelectFromScroll(moved, scrolledAt, now, windowMs = 450) {
+  if (moved) return false;
+  const at = Number(scrolledAt) || 0;
+  const clock = Number(now) || 0;
+  const window = Math.max(0, Number(windowMs) || 0);
+  if (at && clock >= at && clock - at < window) return false;
+  return true;
+}
+
 export function jumpHidden(scrollTop, clientHeight, scrollHeight, slack = 24) {
   const height = Number(scrollHeight) || 0;
   const view = Number(clientHeight) || 0;

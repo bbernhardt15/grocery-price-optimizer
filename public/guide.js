@@ -255,6 +255,24 @@ export function mountGuide(deps = {}) {
     }
     const action = button.getAttribute("data-guide-action");
     if (!action) return;
+    if (action === "toggle-pick") {
+      const on = button.getAttribute("aria-pressed") === "true";
+      button.setAttribute("aria-pressed", on ? "false" : "true");
+      return;
+    }
+    if (action === "commit-picks") {
+      const names = [...host.querySelectorAll("[data-guide-action='toggle-pick'][aria-pressed='true']")]
+        .map((chip) => chip.getAttribute("data-guide-name") || "")
+        .map((name) => name.trim())
+        .filter(Boolean);
+      if (!names.length) return;
+      const moment = current?.moment || host.dataset.moment || "";
+      if (moment) session = noteShown(session, moment);
+      current = null;
+      host.hidden = true;
+      deps.onAction?.("commit-picks", { names, moment });
+      return;
+    }
     const names = String(button.getAttribute("data-guide-names") || "")
       .split("\n")
       .map((name) => name.trim())
@@ -346,6 +364,13 @@ export function mountGuide(deps = {}) {
     noteReceipt(payload) {
       session = rememberReceipt(session, payload);
       sync();
+    },
+    holdAfterReturn() {
+      for (const moment of ["receipt", "running-low", "before-review", "keep-building"]) {
+        session = noteShown(session, moment);
+      }
+      current = null;
+      host.hidden = true;
     },
     noteTrip(saved) {
       session = rememberTrip(session, saved);

@@ -354,6 +354,11 @@ function applySharedHandoff() {
   if (!record || record.at <= appliedHandoffAt) return;
   appliedHandoffAt = record.at;
   rehydrateTrip();
+  if (record.kind === "cart") {
+    const saved = readKrogerTrip(localStorage);
+    showStep(saved?.step && saved.step !== "add" ? saved.step : "plan", "handoff");
+    guide?.holdAfterReturn?.();
+  }
 }
 
 /* Phone test 10. The finish sheet, tab changes, and handoff restore
@@ -423,7 +428,9 @@ function maybeShowReturnPrompt(source) {
 
 function chooseBootStep() {
   const handoff = readHandoffTrip(localStorage);
+  const kroger = readKrogerTrip(localStorage);
   return bootTab({
+    krogerStep: kroger?.step || "",
     handoffStep: handoff?.step,
     hasHandoff: Boolean(handoff && (handoff.items?.length || handoff.plan)),
     storedStep: localStorage.getItem(STEP_KEY),
@@ -1414,8 +1421,12 @@ function openCartReady(storeName, { error = "", retry = null, summary = "", item
   const store = storeName || "store";
   const ready = !error && /kroger/i.test(store);
   const names = (items || []).map((item) => String(item || "").trim()).filter(Boolean);
-  if (title) title.textContent = error ? `Couldn't send to ${store}` : "Your cart is ready";
-  if (body) body.textContent = error ? friendlyCartError(error) : summary || "Your cart is ready.";
+  if (title) title.textContent = error ? `Couldn't send to ${store}` : summary || "Your cart is ready";
+  if (body) {
+    body.textContent = error
+      ? friendlyCartError(error)
+      : "Stay here to send another store. Open the store cart when you want to check out.";
+  }
   if (sent) {
     sent.hidden = !(ready && names.length);
     sent.innerHTML = ready ? sentItemsHtml(names) : "";
@@ -1496,7 +1507,7 @@ function applyKrogerReturn(parsed) {
     const saved = readKrogerTrip(localStorage);
     releasePageForTaps(new Set(["cart-ready", "handoff-return"]));
     if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
-    showStep(saved?.step || parsed.step || "plan", "handoff");
+    showStep(saved?.step === "shop" ? "shop" : "plan", "handoff");
     return;
   }
   finishKrogerReturn(parsed);
@@ -1518,7 +1529,9 @@ function finishKrogerReturn(parsed) {
   } else if (!lastOptimize) {
     loadCachedTrip();
   }
-  showStep(saved?.step || parsed.step || "plan", "handoff");
+  const landing = saved?.step === "shop" ? "shop" : "plan";
+  showStep(landing, "handoff");
+  guide?.holdAfterReturn?.();
   const openingSheet = parsed.kind === "added" || parsed.kind === "error";
   const y = scrollRestoreOffset(saved?.scroll, window.scrollY || 0, { sheetOpen: openingSheet, touching: false });
   if (y != null) window.scrollTo(0, y);
@@ -2615,6 +2628,7 @@ function syncChipHint() {
 }
 
 function bindKeyboardInset() {
+  let last = "";
   const apply = () => {
     const viewport = window.visualViewport;
     const focused = document.activeElement instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
@@ -2626,13 +2640,15 @@ function bindKeyboardInset() {
           focused,
         })
       : { keyboard: 0, toolbar: 0 };
+    const next = `${insets.keyboard}|${insets.toolbar}|${viewport ? Math.round(viewport.height) : 0}`;
+    if (next === last) return;
+    last = next;
     document.documentElement.style.setProperty("--keyboard", `${insets.keyboard}px`);
     document.documentElement.style.setProperty("--browser-bottom", `${insets.toolbar}px`);
     if (viewport) document.documentElement.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
   };
   apply();
   window.visualViewport?.addEventListener("resize", apply);
-  window.visualViewport?.addEventListener("scroll", apply);
   document.addEventListener("focusin", apply);
   document.addEventListener("focusout", apply);
 }
@@ -2683,9 +2699,19 @@ function searchRankContext(text) {
   return { query: queryText, family: familyFromQuery(queryText), preferences, usuals, history };
 }
 
+let catalogGeneration = 0;
+
+function discontinuedTitle(product) {
+  const text = [product?.name, product?.familyName, product?.catalogName, product?.brand].filter(Boolean).join(" ");
+  return /discontinued/i.test(text);
+}
+
 async function loadPage(reset) {
-  if (loading) return;
+  if (loading && !reset) return;
   if (!reset && !nextCursor) return;
+  const generation = (catalogGeneration += 1);
+  const requestedDepartment = activeDepartment;
+  const requestedQuery = query;
   loading = true;
   if (reset) {
     if (flowStep === "add" && !gridEl.querySelector(".card")) skeletons();
@@ -2704,7 +2730,8 @@ async function loadPage(reset) {
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
-    const items = rankSearchResults(body.items ?? [], searchRankContext(query));
+    if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
+    const items = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
     if (reset) showProfileWarning(viewed.warning);
@@ -2744,6 +2771,7 @@ async function loadPage(reset) {
       showCatalogError(hardWarnings.join(" "));
     }
   } catch (error) {
+    if (generation !== catalogGeneration) return;
     const kind = networkKind(error, navigator.onLine);
     if (reset && kind) {
       showCatalogError("");
@@ -2755,6 +2783,7 @@ async function loadPage(reset) {
       if (reset) gridEl.innerHTML = "";
     }
   } finally {
+    if (generation !== catalogGeneration) return;
     loading = false;
     syncStepVisibility();
     if (reset && nextCursor && sentinelEl.getBoundingClientRect().top < window.innerHeight + 40) {
@@ -2965,6 +2994,7 @@ function openList(open) {
 function openFilters(open) {
   $("filters").classList.toggle("open", open);
   $("filters-open").setAttribute("aria-expanded", String(open));
+  document.body.dataset.refine = open ? "1" : "";
   paintRefine();
   if (open) $("sort")?.focus();
 }
@@ -3720,7 +3750,7 @@ function reviewStoreArticle(store, couponSummary, coupons) {
     name: store.storeName,
     countLabel,
     total,
-    minHeight: reviewCardMinPx(store.storeName),
+    minHeight: 0,
     markHtml: `<span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>`,
     actionHtml: `${callout}${action}${walmartNote}`,
     itemsHtml: reviewItemRows(store.items || []),
@@ -3885,7 +3915,15 @@ function paintTrip() {
   } else if (card.lines?.length) {
     card.lines = card.lines.filter((line) => line.label !== "This plan" || !/^\$0\.00$/.test(String(line.value || "")));
   }
-  if (plans) card.saved = savingsVersusBaseline(plans);
+  const checksOpen =
+    (lastOptimize?.pendingStores || []).length > 0 ||
+    (lastOptimize?.pricingByStore || []).some((row) => row?.check && row.check !== "ok");
+  if (checksOpen) {
+    card.title = "Checking store prices";
+    card.lines = [];
+    card.saved = "";
+    card.note = "";
+  } else if (plans) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -3910,7 +3948,9 @@ function paintTrip() {
     : fewerDelta > 0.009
       ? `+${priceFigure(fewerDelta)} for ${fewerGap} fewer stop${fewerGap === 1 ? "" : "s"} · more than the best price`
       : fewerDeltaText(plans.fewer, plans.best);
-  const choiceHtml = !showFewer
+  const choiceHtml = checksOpen
+    ? ""
+    : !showFewer
     ? `<section class="plan-choice plan-choice-single" aria-label="Best price"><p><strong>Best price</strong></p><p>${escapeHtml(bestLine)}</p></section>`
     : `<section class="plan-choice" role="group" aria-label="Lowest price or fewer stores">
         <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Best price<span>${escapeHtml(bestDetail)}</span></button>
@@ -7452,6 +7492,7 @@ function showStep(step, reason = "user") {
   }
   syncStepVisibility();
   if (flowStep !== "add") {
+    document.getElementById("import-dialog")?.close();
     document.querySelector(".filters")?.classList.remove("open");
     $("filters-open")?.setAttribute("aria-expanded", "false");
     document.querySelector(".list-panel")?.classList.remove("open");
@@ -8883,8 +8924,19 @@ function onGuideAction(action, detail = {}) {
   if (action === "later") return;
   if (action === "focus-ask") {
     showStep("add");
+    document.getElementById("import-dialog")?.close();
     window.scrollTo(0, 0);
-    importer?.open?.("home");
+    openBrowse();
+    const search = document.getElementById("search");
+    if (search instanceof HTMLElement) search.focus();
+    return;
+  }
+  if (action === "commit-picks") {
+    const names = (detail.names || []).filter((name) => name && !guideNameOnList(name));
+    for (const name of names) addProduct(customCatalogProduct(name), 1, { quiet: true, skipAsk: true, source: "guide" });
+    showStep("add");
+    if (!names.length) toast("Choose at least one item.");
+    else toast(names.length === 1 ? "Added 1 item." : `Added ${names.length} items.`);
     return;
   }
   if (action === "use-usuals") {
@@ -8906,11 +8958,7 @@ function onGuideAction(action, detail = {}) {
     return;
   }
   if (action === "pick-receipt") {
-    const names = (detail.names || []).filter((name) => name && !guideNameOnList(name));
-    for (const name of names) addProduct(customCatalogProduct(name), 1, { quiet: true, skipAsk: true, source: "import" });
-    showStep("add");
-    if (!names.length) toast("Those are already on your list.");
-    else toast(names.length === 1 ? "Added 1 item you buy most." : `Added ${names.length} items you buy most.`);
+    toast("Choose the items on the card, then tap Add selected.");
     return;
   }
   if (action === "add-usual") {

@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v48", () => {
-    assert.match(sw, /grocery-gitter-shell-v48/);
+  it("bumps the shell cache to v49", () => {
+    assert.match(sw, /grocery-gitter-shell-v49/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -201,6 +201,24 @@ describe("ninth phone test", () => {
     assert.equal(route[0].groups[0].label, "Aisle 12");
     assert.equal(route[0].note, "");
     assert.equal(route[1].note, LAYOUT_NOTE);
+    assert.equal(route[1].groups[0].label, "Bakery");
+    const mixed = inStoreRoute(
+      [
+        {
+          storeName: "Walmart",
+          items: [
+            { lineId: "pasta", name: "Pasta", department: "Pantry" },
+            { lineId: "soap", name: "Soap", department: "Personal Care" },
+          ],
+        },
+      ],
+      {}
+    );
+    assert.deepEqual(
+      mixed[0].groups.map((group) => group.label),
+      ["Pantry", "Personal Care"]
+    );
+    assert.equal(mixed[0].groups.some((group) => group.label === "Center store"), false);
     assert.match(app, /shopChecked/);
     assert.match(css, /#toast-action/);
     assert.match(css, /background: #fffdfb; color: #1c1917/);

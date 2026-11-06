@@ -111,14 +111,14 @@ describe("Gitter guide rules", () => {
     });
     assert.ok(prompt);
     assert.equal(prompt.moment, "receipt");
-    assert.equal(prompt.line, "I found 59 items. Want me to start with the ones you buy most?");
+    assert.equal(prompt.line, "I found 59 items that are not on your list yet. Choose any, then add them.");
     assert.equal(receiptLine(59), prompt.line);
-    assert.equal(receiptLine(1), "I found 1 item. Want me to start with the ones you buy most?");
-    assert.deepEqual(
-      prompt.chips.map((chip) => chip.label),
-      ["Pick for me", "Let me choose"]
-    );
-    assert.deepEqual(prompt.chips[0].names?.slice(0, 2), ["Whole Milk", "Large Eggs"]);
+    assert.equal(receiptLine(1), "I found 1 item that is not on your list yet. Choose any, then add them.");
+    assert.equal(prompt.chips.at(-1)?.label, "Add selected");
+    assert.equal(prompt.chips.at(-1)?.action, "commit-picks");
+    assert.ok(prompt.chips.some((chip) => chip.label === "Whole Milk" && chip.action === "toggle-pick"));
+    assert.ok(prompt.chips.some((chip) => chip.label === "Large Eggs" && chip.action === "toggle-pick"));
+    assert.equal(prompt.chips.some((chip) => chip.action === "pick-receipt"), false);
     assert.deepEqual(
       receiptPicks(
         [
@@ -152,10 +152,10 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, runningLowLine(["Eggs", "Bread", "Bananas"]));
     assert.equal(prompt.line, "Looks like you might be low on Eggs, Bread, Bananas. Want me to add them?");
     assert.equal(runningLowLine(["Milk"]), "Looks like you might be low on Milk. Want me to add Milk?");
-    assert.equal(prompt.chips.length, 3);
+    assert.equal(prompt.chips.length, 4);
     assert.deepEqual(
       prompt.chips.map((chip) => chip.action),
-      ["add-usual", "add-usual", "add-usual"]
+      ["toggle-pick", "toggle-pick", "toggle-pick", "commit-picks"]
     );
     assert.equal(namesMatch("egg", "eggplant"), false);
     assert.equal(namesMatch("milk", "whole milk"), true);
@@ -329,9 +329,14 @@ describe("Gitter guide rules", () => {
       session,
     });
     assert.equal(withItems?.moment, "before-review");
-    const low = decideGuide({ ...view({ itemCount: 1, listNames: ["Yogurt"] }), settings, session });
+    const low = decideGuide({
+      ...view({ itemCount: 1, listNames: ["Yogurt"], usuals: [{ name: "Eggs", times: 2 }] }),
+      settings,
+      session,
+    });
     assert.equal(low?.moment, "running-low");
-    assert.equal(low?.line, "Looks like you might be low on Milk, Eggs, Bread. Want me to add them?");
+    assert.match(low?.line || "", /Eggs/);
+    assert.equal(decideGuide({ ...view({ itemCount: 1, listNames: ["Yogurt"] }), settings, session })?.moment, "before-review");
     const receipt = noteReceipt(session, { lines: [{ name: "Yogurt", quantity: 1 }] });
     assert.equal(decideGuide({ ...view(), settings, session: receipt })?.moment, "receipt");
     assert.equal(decideGuide({ ...view(), settings, session: noteShown(receipt, "receipt") }), null);
@@ -410,7 +415,7 @@ describe("Gitter guide rules", () => {
       { name: "Whole Milk", quantity: 1 },
     ]);
     assert.equal(receiptLinesFromImportBody("application/json", JSON.stringify({ items: [{ name: "Bread" }] })).length, 0);
-    assert.equal(runningLowSuggestions([], ["Whole Milk"])[0], "Eggs");
+    assert.deepEqual(runningLowSuggestions([], ["Whole Milk"]), []);
     const lines = linesFromReceipt({
       receipt: { lines: [{ name: "Milk", quantity: 2 }] },
       items: [{ name: "Other", quantity: 1 }],
