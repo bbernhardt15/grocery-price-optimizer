@@ -92,7 +92,32 @@ body[data-step="plan"] .savings-card {
 .plan-status-line { margin: 0; font-weight: 750; }
 .plan-savings-line { margin: 0 0 8px; font-weight: 750; color: var(--accent); }
 .coverage-note { margin: 0 0 8px; color: var(--muted); font-weight: 650; }
+.review-store-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 52px;
+}
+.review-store-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  white-space: nowrap;
+  font-weight: 750;
+}
 .review-store-main { display: flex; flex-direction: column; gap: 8px; }
+.missing-kicker {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 750;
+}
+body[data-step="plan"] .savings-lines { min-height: 52px; }
+body[data-step="plan"] .plan-choice { min-height: 72px; }
 .review-checkout { margin: 0; }
 .review-checkout .handoff-btn { min-height: 48px; }
 .missing-fold {

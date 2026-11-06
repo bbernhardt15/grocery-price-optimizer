@@ -92,9 +92,19 @@ function noteDeclined(session, moment) {
 function noteReceipt(session, payload) {
   const lines = linesFromReceipt(payload);
   if (!lines.length) return session;
-  const prior = session.receipt?.lines || [];
+  const record = asRecord(payload);
+  const prompt = record?.prompt !== false;
+  const taught = session.receipt?.taught === true;
+  const prior = prompt && taught ? [] : session.receipt?.lines || [];
   const next = [...prior, ...lines].slice(0, 80);
-  return { ...session, receipt: { count: next.length, lines: next } };
+  const shown = { ...session.shown };
+  if (prompt) delete shown.receipt;
+  else shown.receipt = true;
+  return {
+    ...session,
+    shown,
+    receipt: { count: next.length, lines: next, taught: prompt ? false : true }
+  };
 }
 function noteTrip(session, saved) {
   const row = asRecord(saved);
@@ -140,7 +150,9 @@ function receiptLine(count) {
   return `I found ${n} ${noun}. Want me to start with the ones you buy most?`;
 }
 function runningLowLine(names) {
-  return `Looks like you might be low on ${names.join(", ")}. Want me to add them?`;
+  const list = (names || []).map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (list.length === 1) return `Looks like you might be low on ${list[0]}. Want me to add ${list[0]}?`;
+  return `Looks like you might be low on ${list.join(", ")}. Want me to add them?`;
 }
 function reviewLine(unfound) {
   const name = unfound.find(Boolean);

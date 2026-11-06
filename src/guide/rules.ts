@@ -64,7 +64,7 @@ export type GuideSettings = {
 export type GuideSession = {
   shown: Partial<Record<Moment, boolean>>;
   declined?: Partial<Record<Moment, boolean>>;
-  receipt: { count: number; lines: ReceiptLine[] } | null;
+  receipt: { count: number; lines: ReceiptLine[]; taught?: boolean } | null;
   trip: { saved: number; savedToPastTrips?: boolean; items?: ReceiptLine[] } | null;
 };
 
@@ -184,9 +184,21 @@ export function noteDeclined(session: GuideSession, moment: unknown): GuideSessi
 export function noteReceipt(session: GuideSession, payload: unknown): GuideSession {
   const lines = linesFromReceipt(payload);
   if (!lines.length) return session;
-  const prior = session.receipt?.lines || [];
+  const record = asRecord(payload);
+  // Teaching a first receipt (onboarding) must not ask "start with what you buy most".
+  // A later order, with prompt left on, can ask. After teaching, that next order starts clean.
+  const prompt = record?.prompt !== false;
+  const taught = session.receipt?.taught === true;
+  const prior = prompt && taught ? [] : session.receipt?.lines || [];
   const next = [...prior, ...lines].slice(0, 80);
-  return { ...session, receipt: { count: next.length, lines: next } };
+  const shown = { ...session.shown };
+  if (prompt) delete shown.receipt;
+  else shown.receipt = true;
+  return {
+    ...session,
+    shown,
+    receipt: { count: next.length, lines: next, taught: prompt ? false : true },
+  };
 }
 
 export function noteTrip(session: GuideSession, saved: unknown): GuideSession {
@@ -244,7 +256,9 @@ export function receiptLine(count: number): string {
 }
 
 export function runningLowLine(names: string[]): string {
-  return `Looks like you might be low on ${names.join(", ")}. Want me to add them?`;
+  const list = (names || []).map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (list.length === 1) return `Looks like you might be low on ${list[0]}. Want me to add ${list[0]}?`;
+  return `Looks like you might be low on ${list.join(", ")}. Want me to add them?`;
 }
 
 export function reviewLine(unfound: string[]): string {

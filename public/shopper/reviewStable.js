@@ -4,7 +4,7 @@
  * until every store has resolved, so it cannot swap mid-scroll.
  */
 
-import { planHasDisplay, planIsComplete, planIsShowable } from "./planCache.js";
+import { planIsShowable } from "./planCache.js";
 
 export const REVIEW_CARD_MIN_PX = 148;
 /** Room for the coupon callout and the cart button on a phone width. */
@@ -119,7 +119,27 @@ export function reviewLoadingHtml(storeNames, status = REVIEW_LOADING_STATUS) {
  * @param {object | null | undefined} payload
  */
 export function reviewHeadlineReady(payload) {
+  // A still-streaming body is not the headline. The caller marks a priced
+  // partial as displayed first. An unpriced $0 shell is not a headline.
   if (!payload || payload.partial) return false;
-  // A store that timed out must not hide prices that already came back.
-  return planIsComplete(payload) || planIsShowable(payload) || planHasDisplay(payload);
+  return planIsShowable(payload);
+}
+
+/** Skeleton slots for stores that have not answered yet. An empty list stays empty. */
+export function reviewPendingCardsHtml(names) {
+  const list = [];
+  const seen = new Set();
+  for (const name of names || []) {
+    const label = clean(name);
+    const key = storeKey(label);
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    list.push(label);
+  }
+  return list
+    .map((name) => {
+      const minHeight = reviewCardMinPx(name);
+      return `<article class="review-skel-card" data-review-pending="${escapeText(name)}" style="min-height:${minHeight}px;height:${minHeight}px" aria-hidden="true"><span class="review-skel-line"></span><span class="review-skel-line"></span><span class="review-skel-line"></span></article>`;
+    })
+    .join("");
 }

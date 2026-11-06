@@ -6,6 +6,7 @@
 import { whenInviteAllowsApp } from "./beta.js";
 import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
+import { armSheetHistory } from "./sheetHistory.js";
 import { shortProductTitle } from "./familyTile.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
@@ -248,6 +249,7 @@ export function mountImport(deps) {
       <p id="import-status" class="import-status" role="status"></p>
     </form>`;
   document.body.appendChild(dialog);
+  const sheetHistory = armSheetHistory(dialog);
   dialog.addEventListener("close", () => {
     releaseAfterLastSheet(document);
   });
@@ -300,7 +302,9 @@ export function mountImport(deps) {
 
   function open(which) {
     show(which || "home");
+    dialog.dataset.layout = "full";
     if (!dialog.open) dialog.showModal();
+    sheetHistory.push();
     const title = $("import-title");
     title?.focus();
     void loadStatus();

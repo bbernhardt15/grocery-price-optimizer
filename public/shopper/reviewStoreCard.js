@@ -46,6 +46,10 @@ export function reviewStoreCardHtml(card) {
   const minHeight = Math.max(0, Math.floor(Number(card.minHeight) || 0));
   const style = minHeight ? ` style="min-height:${minHeight}px"` : "";
   return `<article class="calm-store review-store" data-store="${escapeText(card.name)}"${style}>
+    <header class="review-store-head">
+      <h3 class="store-fold-name">${escapeText(card.name)}</h3>
+      <p class="review-store-meta"><span>${escapeText(card.countLabel)}</span>${total}</p>
+    </header>
     <div class="review-store-main">
       <details class="store-fold">
         <summary>

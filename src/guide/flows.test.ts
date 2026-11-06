@@ -97,6 +97,18 @@ describe("Gitter guide moments on the real flows", () => {
     assert.equal(decideGuide({ ...seen, settings, session: kept.session })?.moment, "before-review");
   });
 
+  it("does not ask to start with usuals right after the teaching receipt", () => {
+    const lines = [
+      { name: "Bananas", quantity: 1 },
+      { name: "Chicken", quantity: 1 },
+    ];
+    const session = noteReceipt(createGuideSession(), { lines, prompt: false });
+    const seen = view({ itemCount: 2, listNames: ["Bananas", "Chicken"] });
+    const shown = afterSheet(session, seen);
+    assert.notEqual(shown.current?.moment, "receipt");
+    assert.doesNotMatch(shown.current?.line || "", /buy most/);
+  });
+
   it("after Select all and Add to trip, shows one moment and does not stack the next", () => {
     const lines = [
       { name: "Bananas", quantity: 1 },

@@ -56,8 +56,8 @@ export function toFindRecords(names) {
 }
 
 function linkHtml(link, name, escapeHtml) {
-  if (!link?.url) return "";
-  return `<a class="text-btn" href="${escapeHtml(link.url)}" data-external-link="${escapeHtml(link.url)}">${escapeHtml(link.label)}<span class="sr-only"> for ${escapeHtml(name)}</span></a>`;
+  if (!link?.label) return "";
+  return `<button type="button" class="text-btn" data-match-search="${escapeHtml(name)}" data-match-store="${escapeHtml(link.label)}">${escapeHtml(link.label)}<span class="sr-only"> for ${escapeHtml(name)}</span></button>`;
 }
 
 /**
@@ -78,8 +78,9 @@ export function unfoundSectionHtml(names, escapeHtml = escapeText) {
     .join("");
   const heading = list.length === 1 ? "1 item to find in store" : `${list.length} items to find in store`;
   return `<section class="missing-fold" data-unfound="1">
+    <p class="missing-kicker">Shop in store</p>
     <h3>${escapeHtml(heading)}</h3>
-    <p class="missing-line">These didn't match a product we can price. Search the store, or find them on the shelf. They are not in a cart.</p>
+    <p class="missing-line">These didn't match a product we can price. Shop for them in the store, or pick a match here. They are not in a cart.</p>
     <ul class="missing-list">${rows}</ul>
     <button type="button" class="ghost" data-copy-unfound="1">Copy list of unfound items</button>
   </section>`;

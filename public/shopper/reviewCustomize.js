@@ -19,7 +19,23 @@ function escapeText(value) {
     .replace(/"/g, "&quot;");
 }
 
-function otherOffers(item) {
+function offerAmount(offer) {
+  const price = Number(offer?.price ?? offer?.unitPrice ?? offer?.salePrice);
+  if (Number.isFinite(price) && price >= 0) return price;
+  const total = Number(offer?.itemTotal);
+  return Number.isFinite(total) && total >= 0 ? total : NaN;
+}
+
+function sameLine(left, right) {
+  const idA = clean(left?.lineId);
+  const idB = clean(right?.lineId);
+  if (idA && idB && idA === idB) return true;
+  const nameA = clean(left?.name || left?.query).toLowerCase();
+  const nameB = clean(right?.name || right?.query).toLowerCase();
+  return Boolean(nameA && nameA === nameB);
+}
+
+function otherOffers(item, siblings) {
   const here = normalizeStoreKey(item?.storeName);
   const map = new Map();
   const add = (storeName, price) => {
@@ -30,7 +46,12 @@ function otherOffers(item) {
     const prev = map.get(key);
     if (!prev || amount < prev.price) map.set(key, { storeName: name, price: amount });
   };
-  for (const offer of item?.offers || []) add(offer.storeName, offer.price);
+  for (const offer of item?.offers || []) add(offer.storeName, offerAmount(offer));
+  for (const other of siblings || []) {
+    if (!other || other === item || !sameLine(item, other)) continue;
+    add(other.storeName, unitPrice(other));
+    for (const offer of other.offers || []) add(offer.storeName, offerAmount(offer));
+  }
   return [...map.values()].sort((a, b) => a.price - b.price || a.storeName.localeCompare(b.storeName));
 }
 
@@ -38,10 +59,10 @@ function otherOffers(item) {
  * @param {object} item
  * @param {string} [title]
  */
-export function customizeChoice(item, title) {
+export function customizeChoice(item, title, siblings) {
   const currentUnit = unitPrice(item);
-  if (!Number.isFinite(currentUnit) || !clean(item?.lineId)) return null;
-  const alt = otherOffers(item)[0];
+  if (!Number.isFinite(currentUnit)) return null;
+  const alt = otherOffers(item, siblings)[0];
   if (!alt) return null;
   const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
   const currentTotal = roundMoney(currentUnit * qty);
@@ -82,17 +103,21 @@ export function gitterSavedLine(rows) {
  * @param {(item: object) => string} titleOf
  */
 export function customizeRowsHtml(items, titleOf) {
-  const rows = (items || []).map((item) => customizeChoice(item, titleOf?.(item))).filter(Boolean);
+  const list = items || [];
+  const rows = list.map((item) => customizeChoice(item, titleOf?.(item), list)).filter(Boolean);
   if (!rows.length) return `<p class="muted">${escapeText(gitterSavedLine([]))}</p>`;
   const body = rows
-    .map(
-      (row) => `<div class="customize-row" data-customize-line="${escapeText(row.lineId)}">
+    .map((row) => {
+      const swap = row.lineId
+        ? `<button type="button" class="ghost customize-switch" data-review-switch="${escapeText(row.lineId)}" data-review-store="${escapeText(row.switchStore)}">${escapeText(row.switchText)}</button>`
+        : "";
+      return `<div class="customize-row" data-customize-line="${escapeText(row.lineId)}">
         <p class="customize-item">${escapeText(row.title)}</p>
         <p class="customize-now">${escapeText(row.currentText)}</p>
-        <button type="button" class="ghost customize-switch" data-review-switch="${escapeText(row.lineId)}" data-review-store="${escapeText(row.switchStore)}">${escapeText(row.switchText)}</button>
+        ${swap}
         <p class="customize-save">${escapeText(row.saveText)}</p>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
   return `${body}<p class="customize-total">${escapeText(gitterSavedLine(rows))}</p>`;
 }
