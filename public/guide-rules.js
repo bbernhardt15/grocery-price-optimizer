@@ -146,8 +146,8 @@ function formatDollars(amount) {
 }
 function receiptLine(count) {
   const n = Math.max(0, Math.floor(count));
-  const noun = n === 1 ? "item" : "items";
-  return `I found ${n} ${noun}. Want me to start with the ones you buy most?`;
+  const noun = n === 1 ? "item that is" : "items that are";
+  return `I found ${n} ${noun} not on your list yet. Choose any, then add them.`;
 }
 function runningLowLine(names) {
   const list = (names || []).map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -259,13 +259,7 @@ function receiptPicks(lines, usuals, limit = 8) {
 }
 function runningLowSuggestions(usuals, listNames, limit = 3) {
   const cap = Math.max(1, Math.min(3, Math.floor(limit) || 3));
-  const names = runningLowUsuals(usuals, listNames, cap);
-  for (const staple of RUNNING_LOW_STAPLES) {
-    if (names.length >= cap) break;
-    if (onList(staple, listNames) || names.some((have) => namesMatch(have, staple))) continue;
-    names.push(staple);
-  }
-  return names;
+  return runningLowUsuals(usuals, listNames, cap);
 }
 function runningLowUsuals(usuals, listNames, limit = 3) {
   const ranked = (usuals || []).filter((row) => String(row?.name || "").trim() && !onList(row.name, listNames)).slice().sort((a, b) => (Number(b.times) || 0) - (Number(a.times) || 0) || a.name.localeCompare(b.name));
@@ -308,15 +302,18 @@ function decideGuide(input = {}) {
     };
   }
   if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
-    const picks = receiptPicks(session.receipt.lines, usuals);
-    return {
-      moment: "receipt",
-      line: receiptLine(session.receipt.count),
-      chips: [
-        { id: "pick", label: "Pick for me", action: "pick-receipt", names: picks },
-        { id: "choose", label: "Let me choose", action: "later" }
-      ]
-    };
+    const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
+    const picks = receiptPicks(offList, usuals, 6);
+    if (picks.length) {
+      return {
+        moment: "receipt",
+        line: receiptLine(offList.length),
+        chips: [
+          ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
+          { id: "add", label: "Add selected", action: "commit-picks" }
+        ]
+      };
+    }
   }
   if (step === "review" && !session.shown["review-next"] && String(input.pricesLabel || "").trim() && unfound.length) {
     const search = input.search;
@@ -352,7 +349,10 @@ function decideGuide(input = {}) {
       return {
         moment: "running-low",
         line: runningLowLine(names),
-        chips: names.map((name) => ({ id: `usual:${normalizeName(name)}`, label: name, action: "add-usual", name }))
+        chips: [
+          ...names.map((name) => ({ id: `usual:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
+          { id: "add", label: "Add selected", action: "commit-picks" }
+        ]
       };
     }
   }
@@ -374,8 +374,8 @@ function decideGuide(input = {}) {
       line: KEEP_BUILDING_LINE,
       chips: [
         { id: "add", label: "Add an item", action: "focus-ask" },
-        { id: "review", label: "Review", action: "review" },
-        { id: "enough", label: "That's enough", action: "close-guide" }
+        { id: "review", label: "Check store prices", action: "review" },
+        { id: "enough", label: "Hide tips", action: "close-guide" }
       ]
     };
   }

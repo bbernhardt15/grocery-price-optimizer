@@ -46,7 +46,6 @@ export function allowTabChange(state, reason) {
     return { state: noteTabInteraction(current), allow: true };
   }
   if (reason === "handoff") {
-    if (current.interacted) return { state: current, allow: false };
     return { state: { ...current, restored: true }, allow: true };
   }
   if (current.interacted || current.restored) {

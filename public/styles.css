@@ -484,12 +484,14 @@ a.text-btn:hover { background: var(--accent-soft); }
   display: none; flex-direction: column; gap: 10px;
 }
 .filters.open {
-  display: flex; position: fixed; z-index: 9; left: 0; right: 0; bottom: var(--keyboard, 0px);
-  max-height: min(86dvh, calc(100dvh - var(--keyboard, 0px) - var(--safe-top) - 12px));
-  overflow: auto; background: var(--surface);
+  display: flex; position: fixed; z-index: 30; left: 0; right: 0; bottom: var(--bar-h);
+  max-height: calc(100dvh - var(--bar-h) - var(--safe-top) - 12px);
+  overflow: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch;
+  background: var(--surface);
   border-radius: 20px 20px 0 0; padding: 16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
   box-shadow: var(--shadow);
 }
+body[data-refine="1"] { overflow: hidden; }
 .filters label, .check-row { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
 .check-row { flex-direction: row; align-items: center; min-height: 44px; color: var(--ink); }
 .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

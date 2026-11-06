@@ -25,6 +25,11 @@ export function aisleIsKnown(item) {
   return /^aisle\b/i.test(String(item?.aisle || ""));
 }
 
+function departmentLabel(item) {
+  const name = String(item?.department || "").replace(/\s+/g, " ").trim();
+  return name || "Other";
+}
+
 function walkBucket(department) {
   const name = String(department || "Other");
   return WALK_ORDER.find((row) => row.departments.includes(name)) || WALK_ORDER[WALK_ORDER.length - 1];
@@ -59,17 +64,33 @@ export function inStoreRoute(stores, checks = {}) {
       if (known) {
         const sorted = [...open].sort((a, b) => String(a.aisle || "zzz").localeCompare(String(b.aisle || "zzz"), undefined, { numeric: true }) || String(a.name || "").localeCompare(String(b.name || "")));
         for (const item of sorted) {
-          const label = aisleIsKnown(item) ? String(item.aisle || "Aisle") : walkBucket(item.department).label;
+          const label = aisleIsKnown(item) ? String(item.aisle || "Aisle") : departmentLabel(item);
           const last = groups[groups.length - 1];
           if (last && last.label === label) last.items.push(item);
           else groups.push({ label, items: [item] });
         }
       } else {
+        const byDept = new Map();
+        for (const item of open) {
+          const label = departmentLabel(item);
+          if (!byDept.has(label)) byDept.set(label, []);
+          byDept.get(label).push(item);
+        }
+        const ordered = [];
         for (const bucket of WALK_ORDER) {
-          const items = open
-            .filter((item) => walkBucket(item.department).id === bucket.id)
+          for (const name of bucket.departments) {
+            if (byDept.has(name)) ordered.push(name);
+          }
+        }
+        for (const label of byDept.keys()) {
+          if (!ordered.includes(label)) ordered.push(label);
+        }
+        for (const label of ordered) {
+          const items = byDept
+            .get(label)
+            .slice()
             .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-          if (items.length) groups.push({ label: bucket.label, items });
+          if (items.length) groups.push({ label, items });
         }
       }
       let number = 0;

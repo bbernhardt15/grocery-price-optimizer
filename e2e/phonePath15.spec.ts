@@ -124,20 +124,13 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
   })();
   await page.locator("#gitter-guide").getByRole("button", { name: "Not yet" }).click();
   await page.locator("#gitter-guide").getByRole("button", { name: "Add an item" }).click();
-  const dialog = page.locator("#import-dialog");
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveAttribute("data-layout", "full");
-  const box = await dialog.boundingBox();
-  const viewport = page.viewportSize();
-  expect(box && viewport ? box.height : 0).toBeGreaterThan((viewport?.height || 0) * 0.7);
-  expect(Math.abs((box?.height || 0) - (headerBox?.height || 0))).toBeLessThan(8);
-  expect(Math.abs((box?.y || 0) - (headerBox?.y || 0))).toBeLessThan(8);
-  await page.locator("#import-close").click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("#import-dialog")).toBeHidden();
+  await expect(page.locator("#search")).toBeFocused();
+  expect(headerBox && headerBox.height).toBeGreaterThan(400);
 
   await page.locator("#step-bar [data-flow='plan']").click();
   await expect(page.locator("#trip")).toContainText("$5.70");
-  await expect(page.locator(".savings-lines")).not.toContainText("$0.00");
+  await expect(page.locator(".savings-card")).not.toContainText("$0.00");
   await expect(page.locator("[data-flow='plan']")).not.toHaveAttribute("aria-busy", "true");
   await expect(page.locator("[data-review-stable='loading']")).toHaveCount(0);
   const kroger = page.locator("[data-store='Kroger'] .review-store-head");

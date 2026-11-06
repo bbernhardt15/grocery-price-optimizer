@@ -70,9 +70,15 @@ export function returnScreenCopy(store, kind) {
       body: `Coupon clipping stays on ${name}. Switch back to your Grocery Gitter tab when you are done.`,
     };
   }
+  if (kind === "cart") {
+    return {
+      title: `${name} cart updated`,
+      body: `Those items are in your ${name} cart. Stay in Grocery Gitter to send another store, or open ${name} when you are ready to check out.`,
+    };
+  }
   return {
     title: "Return to Grocery Gitter",
-    body: `Your ${name} trip is in the other Grocery Gitter tab.`,
+    body: `Your ${name} trip is still in Grocery Gitter.`,
   };
 }
 

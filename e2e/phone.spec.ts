@@ -197,7 +197,7 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await page.locator("#import-close").click();
 
   await page.locator("#menu-open").click();
-  await page.locator("#menu-settings").click();
+  await page.locator("#settings-open").click();
   const theme = page.locator("#settings-theme");
   const themeBefore = await theme.innerText();
   await theme.click();

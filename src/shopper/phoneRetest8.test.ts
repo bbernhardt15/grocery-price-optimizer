@@ -23,7 +23,7 @@ const importer = readFileSync(new URL("../../public/shopper/import.js", import.m
 
 describe("eighth phone test", () => {
   it("bumps the shell cache to v32", () => {
-    assert.match(sw, /grocery-gitter-shell-v48/);
+    assert.match(sw, /grocery-gitter-shell-v49/);
   });
 
   it("derives ZIP from device coordinates and labels a coarse fix", () => {
@@ -128,7 +128,7 @@ describe("eighth phone test", () => {
     };
     saveKrogerTrip(storage, { step: "plan", itemCount: 3 });
     assert.equal(readKrogerTrip(storage)?.step, "plan");
-    assert.match(app, /saved\?\.step \|\| parsed\.step/);
+    assert.match(app, /saved\?\.step === "shop" \? "shop" : "plan"/);
     assert.match(app, /Did you finish at/);
     assert.match(html, /id="store-return"/);
     assert.match(app, /Sending with your saved Kroger sign-in/);

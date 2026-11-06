@@ -71,7 +71,12 @@ body[data-step="plan"] .savings-card {
   align-items: flex-start;
   gap: 4px;
   margin: 0 0 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
 }
+.cart-coupon-lead { font-size: 1.05rem; }
 .cart-coupon-lead { margin: 0; font-weight: 750; }
 .cart-coupon-honest { margin: 0; color: var(--muted); }
 .cart-coupon-link { min-height: 44px; display: inline-flex; align-items: center; font-weight: 750; }

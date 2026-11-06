@@ -14,7 +14,7 @@ import { foundLabel } from "../../public/shopper/intakePresent.js";
 import { readCardHtml } from "../../public/shopper/intakePresent.js";
 import { learnedRulePillHtml } from "../../public/shopper/learnedRule.js";
 import { captureRuleScroll, restoreRuleScroll, revealDelta } from "../../public/shopper/ruleScroll.js";
-import { buildTripAddList, EMPTY_TRIP_TOTAL, tripAddHtml, tripAddStatus } from "../../public/shopper/tripAdd.js";
+import { buildTripAddList, EMPTY_TRIP_TOTAL, tripAddHtml, tripAddStatus, tripSelectFromScroll } from "../../public/shopper/tripAdd.js";
 import { pullAllowed, releaseAfterLastSheet, releaseScrollLock } from "../../public/shopper/sheetScroll.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "../../public/shopper/inStoreShare.js";
 import { notInCartSection } from "../../public/shopper/unfoundItems.js";
@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v48", () => {
-    assert.match(sw, /grocery-gitter-shell-v48/);
+  it("bumps the shell cache to v49", () => {
+    assert.match(sw, /grocery-gitter-shell-v49/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -125,6 +125,9 @@ describe("eleventh phone test", () => {
       { usualFamilies: ["milk", "bananas"] }
     );
     assert.equal(rows.every((row) => row.selected === false), true);
+    assert.equal(tripSelectFromScroll(true, 0, 1_000), false);
+    assert.equal(tripSelectFromScroll(false, 1_000, 1_200), false);
+    assert.equal(tripSelectFromScroll(false, 1_000, 2_000), true);
     assert.equal(tripAddStatus(0, 0).label, EMPTY_TRIP_TOTAL);
     assert.equal(tripAddStatus(0, 0).canAdd, false);
     assert.equal(tripAddStatus(4, 1).canAdd, true);

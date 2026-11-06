@@ -45,7 +45,7 @@ import { adStoresVisible, mergeSavedStores, visibleStoreNames } from "./storeSco
 import { suggestZipChoices } from "./zipSuggest.js";
 import { fieldZip, ZIP_PLACEHOLDER } from "./zipField.js";
 import { installChainColors } from "./chainColors.js";
-import { jumpHidden, tripAddStatus } from "./tripAdd.js";
+import { jumpHidden, tripAddStatus, tripSelectFromScroll } from "./tripAdd.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -1512,6 +1512,7 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.dataset.tripAll) {
+      if (!tripSelectFromScroll(tripPointer.moved, 0, Date.now())) return;
       const on = target.dataset.tripAll === "all";
       for (const box of document.querySelectorAll("[data-trip-pick]")) {
         if (box instanceof HTMLInputElement) box.checked = on;
@@ -1802,8 +1803,28 @@ export function mountProfileOnboarding(deps = {}) {
     }
   });
 
-  $("profile-stage")?.addEventListener("scroll", () => syncTripJump(), { passive: true });
-  dialog.addEventListener("scroll", () => syncTripJump(), { passive: true, capture: true });
+  let tripScrollAt = 0;
+  let tripPointer = { x: 0, y: 0, moved: false };
+  const markTripScroll = () => {
+    tripScrollAt = Date.now();
+    syncTripJump();
+  };
+  $("profile-stage")?.addEventListener("scroll", markTripScroll, { passive: true });
+  dialog.addEventListener("scroll", markTripScroll, { passive: true, capture: true });
+  dialog.addEventListener(
+    "pointerdown",
+    (event) => {
+      tripPointer = { x: event.clientX, y: event.clientY, moved: false };
+    },
+    true
+  );
+  dialog.addEventListener(
+    "pointermove",
+    (event) => {
+      if (Math.hypot(event.clientX - tripPointer.x, event.clientY - tripPointer.y) > 10) tripPointer.moved = true;
+    },
+    true
+  );
   $("profile-stage")?.addEventListener("change", (event) => {
     const box = event.target;
     if (!(box instanceof HTMLInputElement) || box.dataset.tripPick == null) return;

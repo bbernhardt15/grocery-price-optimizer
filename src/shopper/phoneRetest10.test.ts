@@ -93,13 +93,13 @@ describe("tenth phone test", () => {
     assert.equal(clickShielded(guard, 1_000 + 100), true);
     assert.equal(allowTabChange(guard, "restore").allow, false);
     assert.equal(allowTabChange(guard, "boot").allow, false);
-    assert.equal(allowTabChange(guard, "handoff").allow, false);
+    assert.equal(allowTabChange(guard, "handoff").allow, true);
     assert.equal(allowTabChange(guard, "user").allow, true);
     assert.equal(allowTabChange(settleTabBoot(createTabGuard()), "restore").allow, false);
     assert.match(sliceFn(app, "rehydrateTrip", "listenForTripTabs"), /flowStep === "plan"/);
     assert.doesNotMatch(sliceFn(app, "rehydrateTrip", "listenForTripTabs"), /flowStep = step/);
     assert.match(sliceFn(app, "showStep", "paintPlanBar"), /allowTabChange/);
-    assert.match(app, /showStep\(saved\?\.step \|\| parsed\.step \|\| "plan", "handoff"\)/);
+    assert.match(app, /showStep\(landing, "handoff"\)/);
     assert.match(app, /showStep\("shop", "restore"\)/);
   });
 
