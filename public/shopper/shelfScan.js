@@ -4,6 +4,7 @@
  */
 
 import { whenInviteAllowsApp } from "./beta.js";
+import { armSheetHistory } from "./sheetHistory.js";
 import { parseNeedItems, resolveNeedList } from "./categoryPreference.js";
 import { imageBlobs } from "./receiptImages.js";
 import { mapPool } from "./receiptImport.js";
@@ -317,6 +318,7 @@ export function mountShelfScan(deps) {
       <input id="shelf-library" type="file" accept="image/*" multiple hidden />
     </div>`;
   document.body.appendChild(dialog);
+  const sheetHistory = armSheetHistory(dialog);
   const home = dialog.querySelector("#shelf-home");
   const results = dialog.querySelector("#shelf-results");
   const progress = dialog.querySelector("#shelf-progress");
@@ -419,6 +421,7 @@ export function mountShelfScan(deps) {
     show("home");
     showProgress("", 0, false);
     if (!dialog.open) dialog.showModal();
+    sheetHistory.push();
     title?.focus();
   }
 

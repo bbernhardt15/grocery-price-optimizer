@@ -174,7 +174,7 @@ import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreL
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
-import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml } from "./shopper/reviewStable.js";
+import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
@@ -194,6 +194,7 @@ import {
 } from "./shopper/planCache.js";
 import { savingsNudge, savingsNudgeHtml } from "./shopper/savingsNudge.js";
 import { notInCartSection, toFindRecords, unfoundCopyText, unfoundSearchLinks, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
+import { mountMatchSheet } from "./shopper/matchSheet.js";
 import { CLEAR_TRIP_EVENT, COMPLETE_TRIP_EVENT, FINISH_TRIP_UNDO_MS } from "./shopper/tripActions.js";
 import { clearCompletedTrip, readCompletedAt, restoreWouldResurrect, writeCompletedTrip } from "./shopper/tripCompletion.js";
 import { mergeSavedStores, setShowAdStores, visibleStoreNames } from "./shopper/storeScope.js";
@@ -511,6 +512,7 @@ let query = "";
 let browseOpen = false;
 let importer = null;
 let guide = null;
+let matchSheet = null;
 let profileUi = null;
 let myProducts = null;
 let alwaysPrompt = null;
@@ -3445,24 +3447,52 @@ function addOwnCoupon(button) {
 }
 
 function planReady(payload) {
-  return planIsComplete(payload) || planIsShowable(payload) || planHasDisplay(payload);
+  return planIsShowable(payload);
+}
+
+function clearPlanTabBusy() {
+  setBusy(document.querySelector('[data-flow="plan"]'), false);
+}
+
+function pendingReviewNames(payload, stores) {
+  if (!planning) return [];
+  const have = new Set((stores || []).map((store) => String(store?.storeName || "").trim().toLowerCase()).filter(Boolean));
+  const names = [];
+  const push = (name) => {
+    const label = String(name || "").trim();
+    const key = label.toLowerCase();
+    if (!label || have.has(key) || names.some((row) => row.toLowerCase() === key)) return;
+    names.push(label);
+  };
+  for (const name of payload?.pendingStores || []) push(name);
+  for (const row of payload?.pricingByStore || []) {
+    if (row?.check && row.check !== "ok") push(row.storeName);
+  }
+  return names;
 }
 
 function renderTrip(payload, options = {}) {
   const kept = Boolean(payload?.keptPreviousPrices);
-  const complete = planReady(payload);
-  if (!complete && !options.force) {
+  const showable = planIsShowable(payload);
+  if (!showable) {
     if (flowStep === "shop") {
       if (!planReady(lastOptimize)) renderShop();
-    } else paintReviewLoading();
+    } else if (flowStep === "plan") paintReviewLoading(planning ? REVIEW_LOADING_STATUS : REVIEW_GAVE_UP_STATUS);
+    if (!planning) clearPlanTabBusy();
     return;
   }
   const signature = listSignature();
   const figures = cartCardFigures(dedupeStores(payload?.stores || []));
-  const published = reviewTotals.publish(signature, figures.total, { complete: true, force: Boolean(options.force) });
+  if (!(Number(figures.total) > 0)) {
+    if (flowStep === "plan") paintReviewLoading(planning ? REVIEW_LOADING_STATUS : REVIEW_GAVE_UP_STATUS);
+    if (!planning) clearPlanTabBusy();
+    return;
+  }
+  const published = reviewTotals.publish(signature, figures.total, { complete: true, force: Boolean(options.force) || !(Number(lastOptimize?.total) > 0) });
   const total = published == null ? figures.total : published;
   const sameTotal = planReady(lastOptimize) && reviewSignature === signature && Math.abs(Number(lastOptimize.total) - total) < 0.009;
   if (!options.force && sameTotal && (options.fromCache || kept)) {
+    clearPlanTabBusy();
     if (flowStep === "shop") renderShop();
     else if (!tripEl?.querySelector("[data-review-shell]")) paintTrip();
     else {
@@ -3475,7 +3505,7 @@ function renderTrip(payload, options = {}) {
   lastOptimize = {
     ...payload,
     partial: false,
-    pendingStores: [],
+    pendingStores: planning ? payload?.pendingStores || [] : [],
     keptPreviousPrices: kept,
     unavailable,
     toFindInStore: toFindRecords(unavailable),
@@ -3491,6 +3521,7 @@ function renderTrip(payload, options = {}) {
   }
   rememberTrip();
   publishTripState();
+  clearPlanTabBusy();
   if (flowStep === "shop") renderShop();
   else paintTrip();
 }
@@ -3814,7 +3845,7 @@ function paintTrip() {
     settleEntryScroll();
   };
   let view = currentTrip();
-  if (!view?.stores?.length && (planHasDisplay(lastOptimize) || planIsShowable(lastOptimize))) {
+  if (!view?.stores?.length && planIsShowable(lastOptimize)) {
     view = { stores: lastOptimize.stores || [], total: lastOptimize.total };
   }
   const state = reviewState();
@@ -3827,12 +3858,15 @@ function paintTrip() {
     }
     if (!planning && !lastOptimize) {
       tripEl.innerHTML = `${krogerBannerHtml()}<p class="muted">Review the split to price this list.</p>`;
+      clearPlanTabBusy();
       finish();
       return;
     }
-    paintReviewLoading();
+    paintReviewLoading(planning ? REVIEW_LOADING_STATUS : REVIEW_GAVE_UP_STATUS);
+    if (!planning) clearPlanTabBusy();
     return;
   }
+  clearPlanTabBusy();
   if (!view?.stores?.length) {
     paintReviewLoading();
     return;
@@ -3846,8 +3880,10 @@ function paintTrip() {
   const lines = bestStores.flatMap((store) => store.items || []);
   const card = savingsCard(singleStoreSavings(lines));
   const figures = cartCardFigures(bestStores);
-  if (card.lines?.length) {
+  if (card.lines?.length && Number(figures.total) > 0) {
     card.lines = card.lines.map((line) => (line.label === "This plan" ? { ...line, value: priceFigure(figures.total) } : line));
+  } else if (card.lines?.length) {
+    card.lines = card.lines.filter((line) => line.label !== "This plan" || !/^\$0\.00$/.test(String(line.value || "")));
   }
   if (plans) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
@@ -3880,14 +3916,24 @@ function paintTrip() {
         <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Best price<span>${escapeHtml(bestDetail)}</span></button>
         <button type="button" data-plan-mode="fewer" aria-pressed="${mode === "fewer" ? "true" : "false"}">Fewer stores<span>${escapeHtml(formatPlanDetail(plans.fewer))} · ${escapeHtml(fewerExtra)}</span></button>
       </section>`;
-  const panel = (name, stores, hidden) =>
-    `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}</div></div>`;
+  const panel = (name, stores, hidden) => {
+    const pending = !hidden && planning ? reviewPendingCardsHtml(pendingReviewNames(lastOptimize, stores)) : "";
+    return `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}${pending}</div></div>`;
+  };
   const noteSets = coverageNotesFor(plans, lastOptimize?.pricingByStore);
   const visibleNotes = coverageVisible([...noteSets.unchecked, ...noteSets.missing], {
     settled: ready,
     kept: Boolean(lastOptimize?.keptPreviousPrices),
   });
-  const coverage = visibleNotes.map((note) => `<p class="coverage-note">${escapeHtml(note.text)}</p>`).join("");
+  const coverage = visibleNotes
+    .map((note) => {
+      const raw = String(note.text || "");
+      const retry = /retry/i.test(raw);
+      const sentence = raw.replace(/,?\s*retry\.?$/i, ".").replace(/\.\.$/, ".");
+      const button = retry ? ` <button type="button" class="text-btn" data-plan-retry="1">Retry</button>` : "";
+      return `<p class="coverage-note"><span>${escapeHtml(sentence)}</span>${button}</p>`;
+    })
+    .join("");
   const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
   const nudge = mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = lastOptimize?.unavailable || [];
@@ -4529,7 +4575,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
   const preview = !planReady(lastOptimize) ? listPlanFallback() : null;
-  if (preview) renderTrip(preview, { keepEdits: true, force: true });
+  if (preview && planIsShowable(preview)) renderTrip(preview, { keepEdits: true, force: true });
   else if (flowStep === "plan") paintReviewLoading();
   else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
@@ -4567,6 +4613,12 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       if (!tripEl?.querySelector("[data-review-stable]")) paintPlanningStatus();
     }, (result) => {
       if (planIsShowable(result) || planHasDisplay(result)) streamedPlan = result;
+      const shown = chooseDisplayedPlan(null, result, Date.now());
+      if (shown && planIsShowable(shown)) {
+        if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
+        if (commitDisplayedPlan(shown, { zip })) clearPlanTabBusy();
+        return;
+      }
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     });
     if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
@@ -5710,10 +5762,14 @@ document.addEventListener("click", (event) => {
     if (select instanceof HTMLElement) select.focus();
     return;
   }
-  const notHere = target.closest("[data-not-here]");
-  if (notHere) {
-    const choices = notHere.closest(".shop-line")?.querySelector(".swap-choices");
-    if (choices) choices.hidden = !choices.hidden;
+  const planRetry = target.closest("[data-plan-retry]");
+  if (planRetry) {
+    void planTrip({ stay: true, force: true, trigger: planRetry });
+    return;
+  }
+  const matchSearch = target.closest("[data-match-search]");
+  if (matchSearch) {
+    matchSheet?.open?.(matchSearch.getAttribute("data-match-search") || "");
     return;
   }
   const shopSwap = target.closest("[data-shop-swap]");
@@ -7544,9 +7600,6 @@ function renderShop() {
               })
               .join("")}</div>`
           : "";
-        const notHere = choices.length
-          ? `<button type="button" class="ghost" data-not-here="${escapeHtml(item.lineId || "")}">Not here</button>`
-          : "";
         const search = usesStoreReadyList(section.storeName) ? readySearchAnchor(section.storeName, withListFamily(item)) : "";
         const number = item.routeNumber ? `<span class="route-num">${item.routeNumber}</span>` : "";
         const where = aisleIsKnown(item) ? String(item.aisle || "") : String(item.department || "Store");
@@ -7559,7 +7612,6 @@ function renderShop() {
           </label>
           ${search}
           ${favoriteSwap ? `<p class="swap-quiet">${escapeHtml(favoriteSwap.text)}</p>` : ""}
-          ${notHere}
           ${swap}
         </div>`;
       };
@@ -8831,9 +8883,8 @@ function onGuideAction(action, detail = {}) {
   if (action === "later") return;
   if (action === "focus-ask") {
     showStep("add");
+    window.scrollTo(0, 0);
     importer?.open?.("home");
-    const paste = document.getElementById("import-paste");
-    if (paste instanceof HTMLElement) paste.focus();
     return;
   }
   if (action === "use-usuals") {
@@ -8875,7 +8926,7 @@ function onGuideAction(action, detail = {}) {
   if (action === "open-search") {
     const fold = document.querySelector("[data-unfound]");
     if (fold instanceof HTMLElement) fold.scrollIntoView({ block: "nearest" });
-    if (detail.url) void openExternal(detail.url);
+    matchSheet?.open?.(detail.name || "");
     return;
   }
   if (action === "save-list") {
@@ -8902,6 +8953,19 @@ guide = mountGuide({
   storage: localStorage,
   getState: guideView,
   onAction: onGuideAction,
+});
+
+matchSheet = mountMatchSheet({
+  apiUrl,
+  onPick(product, name) {
+    addProduct(product, 1, { quiet: false, source: "match", skipAsk: true });
+    const wanted = String(name || "").trim().toLowerCase();
+    if (wanted && Array.isArray(lastOptimize?.unavailable)) {
+      lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
+      if (flowStep === "plan") paintTrip();
+    }
+    toast("Added that match.");
+  },
 });
 
 importer = mountImport({

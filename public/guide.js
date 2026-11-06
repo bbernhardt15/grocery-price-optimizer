@@ -83,7 +83,8 @@ function installReceiptWatch(win, note) {
       const type = copy.headers?.get?.("content-type") || "";
       const body = await copy.text();
       const lines = receiptLinesFromImportBody(type, body);
-      if (lines.length) note({ lines });
+      const teaching = Boolean(win.document?.getElementById("profile-onboard")?.open);
+      if (lines.length) note(teaching ? { lines, prompt: false } : { lines });
     } catch {
       /* the original response is unchanged */
     }

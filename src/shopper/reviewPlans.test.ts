@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { customizeChoice, gitterSavedLine } from "../../public/shopper/reviewCustomize.js";
+import { customizeChoice, customizeRowsHtml, gitterSavedLine } from "../../public/shopper/reviewCustomize.js";
 import { dedupeReviewLines } from "../../public/shopper/reviewList.js";
 import { missingAccordionHtml, missingHeading, rankSwapSuggestions } from "../../public/shopper/reviewMissing.js";
 import { estimatePlanSeconds, planStatusHtml, planStatusModel } from "../../public/shopper/reviewProgress.js";
@@ -283,6 +283,33 @@ describe("review customize", () => {
     assert.equal(choice?.saveText, "You save $7.36 buying this at Kroger");
     assert.equal(gitterSavedLine([choice]), "Gitter saved you $7.36 vs the other store");
     assert.match(app, /customizeRowsHtml/);
+    const jammers = customizeChoice(
+      {
+        name: "Kool-Aid Jammers",
+        storeName: "Kroger",
+        price: 2.5,
+        quantity: 1,
+        offers: [
+          { storeName: "Kroger", price: 2.5 },
+          { storeName: "Walmart", price: 3.4 },
+        ],
+      },
+      "Kool-Aid Jammers"
+    );
+    assert.equal(jammers?.saveText, "You save $0.90 buying this at Kroger");
+    const html = customizeRowsHtml([
+      {
+        name: "Kool-Aid Jammers",
+        storeName: "Kroger",
+        price: 2.5,
+        quantity: 1,
+        offers: [
+          { storeName: "Kroger", price: 2.5 },
+          { storeName: "Walmart", price: 3.4 },
+        ],
+      },
+    ]);
+    assert.match(html, /You save \$0\.90/);
   });
 });
 

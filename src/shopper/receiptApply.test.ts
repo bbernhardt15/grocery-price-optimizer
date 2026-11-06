@@ -71,6 +71,13 @@ describe("receipt preferences", () => {
     });
     const row = open.slice(open.indexOf('data-learned-row="laundry-detergent"'), open.indexOf('data-learned-row="dish-soap"'));
     assert.match(row, /data-learned-mode="storeBrand"/);
+    const storeOnly = learnedSummaryHtml([{ family: "pasta", label: "Pasta", mode: "storeBrand", brand: "", nameBrand: "Barilla" }], {
+      editingFamily: "pasta",
+      brandsByFamily: { pasta: ["Barilla", "Ronzoni"] },
+    });
+    assert.match(storeOnly, /Store brand only/);
+    assert.equal(storeOnly.includes("brand-pick"), false);
+    assert.match(storeOnly, /data-learned-mode="brand"/);
     assert.match(row, /data-learned-mode="cheapest"/);
     assert.match(row, /data-learned-mode="never"/);
     assert.match(row, /data-learned-brand="Tide"/);
@@ -98,6 +105,10 @@ describe("receipt preferences", () => {
     assert.equal(changed.length, rows.length);
     assert.equal(changed[0].mode, "storeBrand");
     assert.equal(changed[0].brand, "");
+    assert.equal(changed[0].nameBrand, "Tide");
+    const restored = applyLearnedChoice(changed, { family: "laundry-detergent", mode: "brand", brand: changed[0].nameBrand });
+    assert.equal(restored[0].mode, "brand");
+    assert.equal(restored[0].brand, "Tide");
     assert.equal(changed[1].brand, "Dawn");
     assert.equal(changed[1], rows[1]);
     const named = applyLearnedChoice(rows, { family: "dish-soap", mode: "brand", brand: "Palmolive" });

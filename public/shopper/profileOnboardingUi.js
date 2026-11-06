@@ -29,15 +29,14 @@ import { brandKey, displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
-import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml } from "./receiptCopy.js";
+import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml, rememberedNameBrand } from "./receiptCopy.js";
 import { importStageHtml, learnedViewReady } from "./learnedGate.js";
 import { commitLearnedCard } from "./learnedStable.js";
 import { syncTripAddBar } from "./tripActionBar.js";
 import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
-import { readCountLine } from "./receiptHold.js";
-import { orderTitle, readLiveHtml, storeChoiceHtml, foundLabel } from "./intakePresent.js";
-import { readCardTitle } from "./receiptReading.js";
+import { orderTitle, readLiveHtml, readingPhaseText, storeChoiceHtml, foundLabel } from "./intakePresent.js";
+import { READING_RECEIPT, readCardTitle } from "./receiptReading.js";
 import { captureRuleScroll, restoreRuleScroll, revealInside } from "./ruleScroll.js";
 import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
@@ -110,6 +109,10 @@ export function mountProfileOnboarding(deps = {}) {
   /** Parsing and brand grouping must both finish before the learned screen exists. */
   let importGate = { parsing: false, grouping: false, revealed: false };
   let beatMarkup = "";
+  /** Families whose rule button should keep Saved. */
+  const savedRules = new Set();
+  let readTick = 0;
+  let readTimer = 0;
   /** @type {(() => void) | null} */
   let dietDone = null;
 
@@ -243,6 +246,7 @@ export function mountProfileOnboarding(deps = {}) {
           editingFamily,
           brandsByFamily,
           pendingFamilies,
+          savedFamilies: savedRules,
         })}`;
       }
       return receiptUploadHtml();
@@ -338,7 +342,7 @@ export function mountProfileOnboarding(deps = {}) {
       const hintText = tripChoice
         ? "Pick the lines to shop, or start empty."
         : learned
-          ? "This teaches the brands you buy. Your trip stays empty until you add them."
+          ? ""
           : reading
             ? "We'll handle the math."
             : step.hint;
@@ -723,7 +727,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     brandShelves[family] = tiles || [];
     if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
-      paintLearnedCard(family);
+      paintLearnedCard(family, { saved: savedRules.has(family) });
     }
   }
 
@@ -892,7 +896,39 @@ export function mountProfileOnboarding(deps = {}) {
     }
   }
 
+  function stopReadTicker() {
+    if (readTimer) window.clearInterval(readTimer);
+    readTimer = 0;
+  }
+
+  function startReadTicker() {
+    stopReadTicker();
+    readTick = 0;
+    readTimer = window.setInterval(() => {
+      if (receiptPhase !== "reading") {
+        stopReadTicker();
+        return;
+      }
+      readTick += 1;
+      for (const card of readCards) {
+        if (card.status === "reading") patchReadCard(card);
+      }
+    }, 2200);
+  }
+
   function applyReadProgress(event) {
+    if (event?.stage === "grouping" || event?.stage === "matching") {
+      for (const card of readCards) {
+        if (card.status === "error") continue;
+        const found = Math.max(card.found || 0, (card.items || []).length);
+        card.status = "reading";
+        card.hideItems = true;
+        card.message = found ? `Matching brands…` : "Matching brands…";
+        card.ratio = Math.max(Number(card.ratio) || 0, Number(event.ratio) || 0.9);
+        patchReadCard(card);
+      }
+      if (!Number.isFinite(Number(event?.fileIndex))) return;
+    }
     if (!event || !Number.isFinite(Number(event.fileIndex))) return;
     const card = readCards.find((row) => row.index === Number(event.fileIndex));
     if (!card) return;
@@ -911,36 +947,50 @@ export function mountProfileOnboarding(deps = {}) {
       card.status = "error";
       card.error = event.error || event.message || "Couldn't read that file.";
       card.ratio = 1;
+      card.hideItems = false;
     } else if (event.status === "done") {
-      card.status = "done";
+      // Stay on the reading card. The learned screen is the next paint.
+      card.status = "reading";
+      card.hideItems = true;
       card.ratio = 1;
+      const found = Math.max(card.found || 0, (card.items || []).length);
+      card.message = found ? "Matching brands…" : "Matching brands…";
     }
+    card.tick = readTick;
     patchReadCard(card);
   }
 
   function patchReadCard(card) {
+    card.tick = readTick;
     const node = document.querySelector(`[data-read-card="${card.index}"]`);
     if (!node || card.status === "error") {
       const stage = $("profile-stage");
-      if (stage && receiptPhase === "reading") stage.innerHTML = readLiveHtml(readCards);
+      if (stage && receiptPhase === "reading") stage.innerHTML = readLiveHtml(readCards.map((row) => ({ ...row, tick: readTick })));
       return;
     }
     node.dataset.state = card.status;
     const title = node.querySelector("h3");
-    if (title) title.textContent = readCardTitle(card, foundLabel);
+    const reading = card.status === "reading" || card.status === "pending";
+    if (title) title.textContent = reading ? READING_RECEIPT : readCardTitle(card, foundLabel);
+    const phase = readingPhaseText(card, readTick);
     let stage = node.querySelector(".read-stage");
-    if (card.message) {
+    if (phase) {
       if (!stage) {
         stage = document.createElement("p");
         stage.className = "read-stage";
+        stage.setAttribute("data-read-phase", "1");
         title?.insertAdjacentElement("afterend", stage);
       }
-      stage.textContent = card.message;
+      stage.textContent = phase;
     }
     const meter = node.querySelector("progress");
-    if (meter) meter.value = String(card.ratio);
+    if (meter) {
+      const ratio = Math.max(0, Math.min(1, Number(card.ratio) || 0));
+      if (ratio > 0) meter.value = String(ratio);
+      else meter.removeAttribute("value");
+    }
     const list = node.querySelector(".read-items");
-    if (list) {
+    if (list && !card.hideItems) {
       const have = list.children.length;
       for (const name of card.items.slice(have)) {
         const item = document.createElement("li");
@@ -949,11 +999,12 @@ export function mountProfileOnboarding(deps = {}) {
         list.appendChild(item);
       }
     }
-    if (card.items.length) node.querySelector(".read-skel")?.remove();
+    if (card.items.length || phase) node.querySelector(".read-skel")?.remove();
   }
 
   function showLearned() {
     if (!learnedViewReady(importGate)) return;
+    stopReadTicker();
     beatMarkup = "";
     receiptPhase = "learned";
     motion = "forward";
@@ -987,20 +1038,7 @@ export function mountProfileOnboarding(deps = {}) {
     return card;
   }
 
-  function readItemCount() {
-    const fromLines = receiptLines.length;
-    if (fromLines) return fromLines;
-    return readCards.reduce((sum, card) => sum + Math.max(card.found || 0, (card.items || []).length), 0);
-  }
-
   async function holdThenLearned() {
-    const count = readItemCount();
-    const line = readCountLine(count);
-    for (const card of readCards) {
-      if (card.status === "error") continue;
-      card.message = line;
-      card.status = card.status === "reading" ? "done" : card.status;
-    }
     beatMarkup = "";
     if (importGate.parsing || importGate.grouping) return;
     importGate = { parsing: false, grouping: false, revealed: true };
@@ -1069,6 +1107,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (!readCards.length) return;
     beatToken += 1;
     beatMarkup = "";
+    startReadTicker();
     learnedRows = [];
     receiptLines = [];
     importGate = { parsing: true, grouping: false, revealed: false };
@@ -1573,15 +1612,17 @@ export function mountProfileOnboarding(deps = {}) {
       const family = target.dataset.learnedFamily || "";
       const row = learnedRows.find((item) => item.family === family);
       const picked = row?.brands?.length ? row.brands : row?.brand ? [row.brand] : [];
-      let mode = target.dataset.learnedMode;
-      if (mode === "brand" && picked.length > 1) mode = "cheapestPicks";
+      const mode = target.dataset.learnedMode;
+      const remembered = rememberedNameBrand(row) || picked[0] || brandChoices(row)[0] || "";
       const next = applyLearnedChoice(learnedRows, {
         family,
         mode,
-        brand: target.dataset.learnedBrand || row?.brand || picked[0] || "",
-        brands: mode === "cheapestPicks" ? picked : mode === "brand" ? picked.slice(0, 1) : undefined,
+        brand: mode === "brand" ? remembered : target.dataset.learnedBrand || row?.brand || picked[0] || "",
+        brands: mode === "cheapestPicks" ? picked : mode === "brand" ? (remembered ? [remembered] : []) : undefined,
+        allowEmpty: mode === "brand",
       });
       if (next === learnedRows) return;
+      savedRules.add(family);
       const stage = $("profile-stage");
       const sheet = document.querySelector("#profile-onboard .sheet-body");
       const savedScroll = captureRuleScroll({

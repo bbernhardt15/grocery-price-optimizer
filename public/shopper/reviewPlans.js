@@ -355,7 +355,7 @@ export function buildReviewPlans(stores) {
 
 export function formatPlanDetail(plan) {
   if (!plan) return "";
-  const figure = Number.isFinite(plan.total) ? formatMoney(plan.total) : "";
+  const figure = Number.isFinite(plan.total) && plan.total > 0 ? formatMoney(plan.total) : "";
   return [joinStoreNames(plan.stores), stopPhrase(plan.stops), figure].filter(Boolean).join(" · ");
 }
 

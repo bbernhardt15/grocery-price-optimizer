@@ -61,7 +61,7 @@ const LEARNED_MODES = new Set(["brand", "storeBrand", "cheapest", "cheapestPicks
  * Change one row. A click with no family, or a mode we don't know,
  * returns the same list. It never clears the other rows.
  * @param {object[]} rows
- * @param {{ family?: string, mode?: string, brand?: string }} choice
+ * @param {{ family?: string, mode?: string, brand?: string, brands?: string[], allowEmpty?: boolean }} choice
  */
 export function applyLearnedChoice(rows, choice) {
   const list = Array.isArray(rows) ? rows : [];
@@ -74,14 +74,23 @@ export function applyLearnedChoice(rows, choice) {
     : brand
       ? [brand]
       : [];
-  if (mode === "brand" && !brand) return list;
+  if (mode === "brand" && !brand && !choice?.allowEmpty) return list;
   if (mode === "cheapestPicks" && !brands.length) return list;
   return list.map((row) => {
     if (row?.family !== family) return row;
-    if (mode === "brand") return { ...row, mode: "brand", brand, brands: [brand] };
-    if (mode === "cheapestPicks") return { ...row, mode, brand: brands[0] || "", brands };
-    return { ...row, mode, brand: "", brands: row.brands || [] };
+    const remembered = String(row?.nameBrand || row?.brand || "").replace(/\s+/g, " ").trim();
+    if (mode === "brand") {
+      const named = brand || remembered;
+      return { ...row, mode: "brand", brand: named, brands: named ? [named] : [], nameBrand: named };
+    }
+    if (mode === "cheapestPicks") return { ...row, mode, brand: brands[0] || "", brands, nameBrand: remembered };
+    return { ...row, mode, brand: "", brands: row.brands || [], nameBrand: remembered };
   });
+}
+
+/** The name brand to restore after Store brand or Cheapest overall. */
+export function rememberedNameBrand(row) {
+  return String(row?.nameBrand || row?.brand || "").replace(/\s+/g, " ").trim();
 }
 
 export function receiptUploadHtml() {
@@ -151,7 +160,9 @@ function learnedPickerHtml(row, brands, options = {}) {
   const selected = new Set(
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
-  const names = brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "" });
+  const storeOnly = row?.mode === "storeBrand";
+  const names = storeOnly ? "" : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "" });
+  const storeNote = storeOnly ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>` : "";
   const pickedCount = selected.size;
   const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
   const rule = (mode, label) => {
@@ -169,6 +180,7 @@ function learnedPickerHtml(row, brands, options = {}) {
       </div>
     </fieldset>
     <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
+    ${storeNote}
     ${names}
   </div>`;
 }
@@ -193,6 +205,7 @@ export function learnedSummaryHtml(learned, options = {}) {
             editing: Boolean(editing && editing === row.family),
             brands: brandsByFamily[row.family] || [],
             pending,
+            saved: Boolean(options.savedFamilies?.has?.(row.family)),
           });
           return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}" tabindex="-1">${inner}</section>`;
         })

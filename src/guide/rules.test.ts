@@ -151,6 +151,7 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.moment, "running-low");
     assert.equal(prompt.line, runningLowLine(["Eggs", "Bread", "Bananas"]));
     assert.equal(prompt.line, "Looks like you might be low on Eggs, Bread, Bananas. Want me to add them?");
+    assert.equal(runningLowLine(["Milk"]), "Looks like you might be low on Milk. Want me to add Milk?");
     assert.equal(prompt.chips.length, 3);
     assert.deepEqual(
       prompt.chips.map((chip) => chip.action),

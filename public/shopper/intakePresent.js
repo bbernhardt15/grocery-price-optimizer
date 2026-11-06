@@ -5,7 +5,7 @@
  */
 
 import { stapleById } from "./stapleFamilies.js";
-import { readCardTitle } from "./receiptReading.js";
+import { READING_RECEIPT, readCardTitle } from "./receiptReading.js";
 
 export const CART_READY = new Set(["Kroger", "Walmart"]);
 
@@ -146,21 +146,46 @@ export function storeChoiceHtml(names, options = {}) {
     .join("");
 }
 
+/**
+ * Activity under the reading title. The count lives here so the card
+ * does not turn into a finished "N items found" screen before the learned view.
+ * @param {object | null | undefined} card
+ * @param {number} [tick]
+ */
+export function readingPhaseText(card, tick = 0) {
+  const message = String(card?.message || "").trim();
+  const named = (card?.items || []).map((name) => String(name || "").trim()).filter(Boolean).length;
+  const found = Math.max(0, Math.floor(Number(card?.found) || 0), named);
+  const count = found > 0 ? foundLabel(card?.name, found) : "";
+  if (/match/i.test(message)) return count ? `${count}. Matching brands…` : "Matching brands…";
+  if (message && !/^reading your receipt/i.test(message)) return message;
+  if (count) return count;
+  const fillers = ["Looking for item names…", "Still reading…", "Working through the receipt…"];
+  const step = Math.floor(Number(tick) || 0);
+  if (step > 0) return fillers[(step - 1) % fillers.length];
+  return "";
+}
+
 export function readCardHtml(card) {
   const status = card?.status || "reading";
-  const items = (card?.items || []).map((name) => `<li class="read-item">${escapeText(name)}</li>`).join("");
-  const waiting = status === "reading" && !(card?.items || []).length
+  const hideItems = Boolean(card?.hideItems);
+  const items = hideItems ? "" : (card?.items || []).map((name) => `<li class="read-item">${escapeText(name)}</li>`).join("");
+  const phase = readingPhaseText(card, card?.tick);
+  const waiting = status === "reading" && !(card?.items || []).length && !phase
     ? `<div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`
     : "";
   const error = status === "error"
     ? `<p class="read-error">${escapeText(card?.error || "Couldn't read that file.")}</p><button type="button" class="ghost" data-read-retry="${escapeText(card?.index)}">Retry</button>`
     : "";
   const ratio = Math.max(0, Math.min(1, Number(card?.ratio) || 0));
-  const stage = card?.message ? `<p class="read-stage">${escapeText(card.message)}</p>` : "";
+  const ratioLabel = String(Math.round(ratio * 1000) / 1000);
+  const meter = ratio > 0 ? `<progress max="1" value="${ratioLabel}"></progress>` : `<progress max="1"></progress>`;
+  const title = status === "reading" || status === "pending" ? READING_RECEIPT : readCardTitle(card, foundLabel);
+  const stage = phase ? `<p class="read-stage" data-read-phase="1">${escapeText(phase)}</p>` : "";
   return `<article class="read-card" data-read-card="${escapeText(card?.index)}" data-state="${escapeText(status)}">
-    <h3>${escapeText(readCardTitle(card, foundLabel))}</h3>
+    <h3>${escapeText(title)}</h3>
     ${stage}
-    <progress max="1" value="${ratio}"></progress>
+    ${meter}
     ${waiting}
     <ul class="read-items">${items}</ul>
     ${error}
