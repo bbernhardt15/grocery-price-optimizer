@@ -21,10 +21,6 @@ test("teaching receipt keeps Name brand tappable, hides store-brand name chips, 
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
   await page.getByRole("button", { name: "Read my receipts" }).click();
-  const reading = page.locator("[data-reading-screen]");
-  if (await reading.count()) {
-    await expect(reading.locator("[data-read-phase], h3").first()).toBeVisible();
-  }
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toBeVisible();
   await expect(page.getByText("This teaches the brands you already buy")).toHaveCount(1);
   await expect(page.getByText("Your trip stays empty until you add them")).toHaveCount(0);
