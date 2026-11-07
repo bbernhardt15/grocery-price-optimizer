@@ -359,9 +359,16 @@ test("an intentional scroll during refresh is kept, including when the request f
   });
   await page.locator("#step-bar [data-flow='shop']").click();
   await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
+  await expect(page.locator("[data-review-refresh]")).toHaveCount(0);
   await page.waitForTimeout(700);
   expect(await page.evaluate(() => window.scrollY)).toBeLessThan(40);
+  expect(await page.locator("[data-review-refresh]").count()).toBe(0);
   releaseTab();
+  await expect(page.locator("[data-review-refresh]")).toHaveCount(0);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
+  await expect(page.locator("#trip")).toContainText("Review line 1");
+  await expect(page.locator("[data-review-refresh]")).toHaveCount(0);
 });
 
 test("a late aisle response cannot change the next page cursor", async ({ page }) => {

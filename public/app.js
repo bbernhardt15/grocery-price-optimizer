@@ -4859,7 +4859,10 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     /* the priced list stays. Refresh must not swap in the short loading shell. */
   }
   else if (flowStep === "plan") paintReviewLoading();
-  else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
+  else {
+    clearReviewRefresh();
+    if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
+  }
   paintPlanBar();
   const scrollGuardId = anchorScroll == null ? 0 : beginRefreshScrollGuard(anchorScroll);
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
@@ -5001,6 +5004,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   } finally {
     releaseRefreshScrollGuard(scrollGuardId);
     if (planAbort === controller) {
+      clearReviewRefresh();
       planning = false;
       window.clearInterval(planTicker);
       planTicker = 0;
@@ -7785,7 +7789,10 @@ function showStep(step, reason = "user") {
     if (lists) lists.innerHTML = "";
   }
   if (priorStep !== flowStep) {
-    if (priorStep === "plan" && flowStep !== "plan") releaseRefreshScrollGuard(refreshAnchorWatch);
+    if (priorStep === "plan" && flowStep !== "plan") {
+      releaseRefreshScrollGuard(refreshAnchorWatch);
+      clearReviewRefresh();
+    }
     if (priorStep === "plan" || flowStep === "plan") clearTripFloor();
     if (priorStep === "add" || flowStep === "add") clearShelfFloor();
   }
