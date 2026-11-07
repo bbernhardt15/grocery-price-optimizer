@@ -201,6 +201,169 @@ test("Refresh keeps the Review list and scroll until the new prices arrive", asy
   expect(returned.scrollHeight).toBeLessThan(returned.children + 1400);
 });
 
+test("an intentional scroll during refresh is kept, including when the request fails", async ({ page }) => {
+  let releaseHold = () => {};
+  let releaseError = () => {};
+  let releaseAgain = () => {};
+  let releaseTab = () => {};
+  const hold = new Promise<void>((resolve) => {
+    releaseHold = resolve;
+  });
+  const errorGate = new Promise<void>((resolve) => {
+    releaseError = resolve;
+  });
+  const again = new Promise<void>((resolve) => {
+    releaseAgain = resolve;
+  });
+  const tabGate = new Promise<void>((resolve) => {
+    releaseTab = resolve;
+  });
+  let calls = 0;
+  let mode: "hold" | "error" | "again" | "tab" = "hold";
+  const plan = {
+    total: 80,
+    partial: false,
+    pendingStores: [],
+    pricingByStore: [
+      { storeName: "Kroger", check: "ok" },
+      { storeName: "Walmart", check: "ok" },
+    ],
+    stores: [
+      {
+        storeName: "Kroger",
+        subtotal: 80,
+        items: Array.from({ length: 40 }, (_, index) => ({
+          lineId: `line-${index}`,
+          name: `Review line ${index + 1}`,
+          price: 2,
+          quantity: 1,
+          itemTotal: 2,
+          storeName: "Kroger",
+          department: "Pantry",
+        })),
+      },
+    ],
+  };
+  await page.route("**/sw.js", (route) => route.abort());
+  await page.route("**/api/optimize-list", async (route) => {
+    calls += 1;
+    if (calls === 1) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan) });
+      return;
+    }
+    if (mode === "error") {
+      await errorGate;
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "nope" }) });
+      return;
+    }
+    if (mode === "again") await again;
+    else if (mode === "tab") await tabGate;
+    else await hold;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan) });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify(
+        Array.from({ length: 40 }, (_, index) => ({
+          id: `custom:line-${index}`,
+          itemId: `custom:line-${index}`,
+          name: `Review line ${index + 1}`,
+          quantity: 1,
+        }))
+      )
+    );
+  });
+  await unlock(page);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  const fold = page.locator("#trip details.store-fold");
+  await fold.evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  const start = await page.locator("#trip [data-review-line='line-4']").evaluate((node) => {
+    const top = node.getBoundingClientRect().top + window.scrollY - 160;
+    window.scrollTo(0, Math.max(0, top));
+    return window.scrollY;
+  });
+  expect(start).toBeGreaterThan(80);
+
+  const jumped = await page.evaluate(() => {
+    document.getElementById("plan-refresh")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    window.scrollTo(0, 0);
+    return window.scrollY;
+  });
+  expect(jumped).toBe(0);
+  await expect.poll(async () => page.evaluate(() => window.scrollY)).toBe(start);
+
+  const moved = await page.evaluate((from) => {
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true }));
+    const next = from + 320;
+    window.scrollTo(0, next);
+    return window.scrollY;
+  }, start);
+  expect(moved).toBeGreaterThan(start + 200);
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.scrollY)).toBe(moved);
+  const seen = await page.evaluate(() => {
+    const line = [...document.querySelectorAll("[data-review-line]")].find((node) => {
+      const top = node.getBoundingClientRect().top;
+      return top >= 48 && top < window.innerHeight * 0.72;
+    });
+    return { id: line?.getAttribute("data-review-line") || "", top: line?.getBoundingClientRect().top || 0 };
+  });
+  expect(seen.id).not.toBe("");
+  releaseHold();
+  await expect(page.locator(`[data-review-line='${seen.id}']`)).toBeAttached();
+  await expect.poll(async () => page.evaluate((target) => Math.abs(window.scrollY - target), moved)).toBeLessThan(48);
+  const landed = await page.evaluate((id) => {
+    const line = document.querySelector(`[data-review-line="${id}"]`);
+    return { y: window.scrollY, top: line?.getBoundingClientRect().top || 0, min: document.getElementById("trip")?.style.minHeight || "" };
+  }, seen.id);
+  expect(Math.abs(landed.y - moved)).toBeLessThan(48);
+  expect(Math.abs(landed.top - seen.top)).toBeLessThan(48);
+  expect(landed.min).toBe("");
+
+  mode = "error";
+  const beforeError = await page.evaluate(() => window.scrollY);
+  const duringError = await page.evaluate((from) => {
+    document.getElementById("plan-refresh")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    window.scrollTo(0, from + 160);
+    return window.scrollY;
+  }, beforeError);
+  expect(duringError).toBeGreaterThan(beforeError + 80);
+  releaseError();
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.scrollY)).toBe(duringError);
+  expect(await page.evaluate(() => document.getElementById("trip")?.style.minHeight || "")).toBe("");
+
+  mode = "again";
+  const duringAgain = await page.evaluate((from) => {
+    document.getElementById("plan-refresh")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.documentElement.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    window.scrollTo(0, from + 120);
+    document.getElementById("plan-refresh")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return window.scrollY;
+  }, duringError);
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.scrollY)).toBe(duringAgain);
+  releaseAgain();
+  await page.waitForTimeout(300);
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - duringAgain)).toBeLessThan(48);
+
+  mode = "tab";
+  await page.evaluate(() => {
+    document.getElementById("plan-refresh")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await page.locator("#step-bar [data-flow='shop']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(40);
+  releaseTab();
+});
+
 test("a late aisle response cannot change the next page cursor", async ({ page }) => {
   let releaseProduce = () => {};
   const produceHeld = new Promise<void>((resolve) => {

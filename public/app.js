@@ -4000,6 +4000,61 @@ function selectReviewMode(mode) {
 
 let refreshAnchorWatch = 0;
 
+function releaseRefreshScrollGuard(watchId) {
+  if (watchId && watchId === refreshAnchorWatch) refreshAnchorWatch += 1;
+}
+
+/**
+ * A refresh can focus its button and the browser scrolls that control into view.
+ * Correct that jump until the shopper actually scrolls. A wheel, touch, key, or
+ * pointer gesture ends the correction immediately and keeps the new position.
+ */
+function beginRefreshScrollGuard(startY) {
+  const watchId = ++refreshAnchorWatch;
+  let handedToUser = false;
+  const detach = () => {
+    window.removeEventListener("wheel", onUser, true);
+    window.removeEventListener("touchstart", onUser, true);
+    window.removeEventListener("touchmove", onUser, true);
+    window.removeEventListener("pointerdown", onPointer, true);
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const finishUser = () => {
+    if (handedToUser || watchId !== refreshAnchorWatch) return;
+    handedToUser = true;
+    refreshAnchorWatch += 1;
+    detach();
+  };
+  const onUser = () => finishUser();
+  const onPointer = (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("#plan-refresh")) return;
+    finishUser();
+  };
+  const onKey = (event) => {
+    const key = event.key;
+    if (key !== " " && key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(key)) return;
+    finishUser();
+  };
+  window.addEventListener("wheel", onUser, { capture: true, passive: true });
+  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
+  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
+  const until = performance.now() + 500;
+  const watch = () => {
+    if (handedToUser || watchId !== refreshAnchorWatch) {
+      detach();
+      return;
+    }
+    if (Math.abs(window.scrollY - startY) > 1) window.scrollTo(0, startY);
+    if (performance.now() < until) requestAnimationFrame(watch);
+    else detach();
+  };
+  watch();
+  return watchId;
+}
+
 function clearTripFloor() {
   if (tripEl) tripEl.style.minHeight = "";
 }
@@ -4718,10 +4773,6 @@ function listPlanFallback() {
 
 async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   const anchorScroll = stay && force ? window.scrollY : null;
-  const keepAnchor = () => {
-    if (anchorScroll == null || Math.abs(window.scrollY - anchorScroll) <= 1) return;
-    window.scrollTo(0, anchorScroll);
-  };
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -4810,16 +4861,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   else if (flowStep === "plan") paintReviewLoading();
   else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
-  if (anchorScroll != null) {
-    const watchId = ++refreshAnchorWatch;
-    const until = performance.now() + 500;
-    const watch = () => {
-      if (watchId !== refreshAnchorWatch) return;
-      keepAnchor();
-      if (performance.now() < until) requestAnimationFrame(watch);
-    };
-    watch();
-  }
+  const scrollGuardId = anchorScroll == null ? 0 : beginRefreshScrollGuard(anchorScroll);
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
     .then((status) => {
@@ -4957,6 +4999,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       toast(timedOut ? PLAN_PARTIAL_NOTE : message);
     }
   } finally {
+    releaseRefreshScrollGuard(scrollGuardId);
     if (planAbort === controller) {
       planning = false;
       window.clearInterval(planTicker);
@@ -7742,6 +7785,7 @@ function showStep(step, reason = "user") {
     if (lists) lists.innerHTML = "";
   }
   if (priorStep !== flowStep) {
+    if (priorStep === "plan" && flowStep !== "plan") releaseRefreshScrollGuard(refreshAnchorWatch);
     if (priorStep === "plan" || flowStep === "plan") clearTripFloor();
     if (priorStep === "add" || flowStep === "add") clearShelfFloor();
   }
