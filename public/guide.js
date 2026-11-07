@@ -158,7 +158,7 @@ export function mountGuide(deps = {}) {
     const same = host.dataset.moment === prompt.moment && !host.hidden;
     host.hidden = false;
     host.dataset.moment = prompt.moment;
-    if (chipsEl) chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");
+    if (chipsEl && !same) chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");
     if (liveEl && !same) liveEl.textContent = prompt.line || "";
     if (!same) typeLine(prompt.line || "");
   }
@@ -251,6 +251,7 @@ export function mountGuide(deps = {}) {
       persist(setGuideEnabled(settings, false));
       current = null;
       host.hidden = true;
+      deps.onQuiet?.();
       return;
     }
     const action = button.getAttribute("data-guide-action");

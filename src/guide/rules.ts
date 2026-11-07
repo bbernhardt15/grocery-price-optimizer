@@ -65,7 +65,7 @@ export type GuideSession = {
   shown: Partial<Record<Moment, boolean>>;
   declined?: Partial<Record<Moment, boolean>>;
   receipt: { count: number; lines: ReceiptLine[]; taught?: boolean } | null;
-  trip: { saved: number; savedToPastTrips?: boolean; items?: ReceiptLine[] } | null;
+  trip: { saved: number; total?: number; savedToPastTrips?: boolean; items?: ReceiptLine[] } | null;
 };
 
 export type GuideView = {
@@ -204,11 +204,23 @@ export function noteReceipt(session: GuideSession, payload: unknown): GuideSessi
 export function noteTrip(session: GuideSession, saved: unknown): GuideSession {
   const row = asRecord(saved);
   const value = Number(row ? row.saved : saved);
+  const total = Number(row ? row.total : NaN);
   const items = row ? readLines(row.items).slice(0, 40) : [];
+  // A finished trip must not immediately ask about the receipt, usuals, or a new list.
+  const shown = {
+    ...session.shown,
+    receipt: true,
+    welcome: true,
+    "before-review": true,
+    "running-low": true,
+    "keep-building": true,
+  };
   return {
     ...session,
+    shown,
     trip: {
       saved: Number.isFinite(value) ? roundDollars(Math.max(0, value)) : 0,
+      total: Number.isFinite(total) && total > 0 ? roundDollars(total) : 0,
       savedToPastTrips: row?.savedToPastTrips === true,
       items,
     },
@@ -219,6 +231,11 @@ export function noteTrip(session: GuideSession, saved: unknown): GuideSession {
 export function clearTripNote(session: GuideSession): GuideSession {
   const shown = { ...session.shown };
   delete shown["trip-saved"];
+  delete shown.welcome;
+  delete shown.receipt;
+  delete shown["before-review"];
+  delete shown["running-low"];
+  delete shown["keep-building"];
   return { ...session, trip: null, shown };
 }
 
@@ -267,8 +284,14 @@ export function reviewLine(unfound: string[]): string {
   return SIMILAR_LINE;
 }
 
-export function tripLine(saved: number): string {
-  return `Nice, you saved ${formatDollars(saved)}. Save this Shopping list for next time?`;
+export function tripLine(saved: number, total?: number): string {
+  const amount = Number(saved);
+  const estimate = Number(total);
+  const estimateText = Number.isFinite(estimate) && estimate > 0.009 ? ` Estimated ${formatDollars(estimate)}.` : "";
+  if (!(amount > 0.009)) {
+    return estimateText ? `Trip saved.${estimateText} Shop it again from Past trips.` : "Trip saved. Shop it again from Past trips.";
+  }
+  return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }
 
 export function linesFromReceipt(payload: unknown): ReceiptLine[] {
@@ -369,13 +392,15 @@ export function receiptPicks(lines: ReceiptLine[], usuals: Usual[] | undefined, 
     const usual = (usuals || []).find((row) => namesMatch(row.name, line.name));
     return { name: line.name, quantity: line.quantity || 1, times: Math.max(0, Math.floor(Number(usual?.times) || 0)) };
   });
-  const frequent = ranked.filter((row) => row.times > 0);
-  const pool = (frequent.length ? frequent : ranked).slice();
+  const pool = ranked.slice();
   pool.sort((a, b) => b.times - a.times || b.quantity - a.quantity || a.name.localeCompare(b.name));
   const names: string[] = [];
+  const seen = new Set<string>();
   const cap = Math.max(1, Math.min(12, Math.floor(limit) || 8));
   for (const row of pool) {
-    if (!row.name || names.some((name) => namesMatch(name, row.name))) continue;
+    const key = normalizeName(row.name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     names.push(row.name);
     if (names.length >= cap) break;
   }
@@ -433,7 +458,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
     const names = (session.trip.items || []).map((item) => item.name).filter(Boolean);
     return {
       moment: "trip-saved",
-      line: tripLine(session.trip.saved),
+      line: tripLine(session.trip.saved, session.trip.total),
       chips: [
         { id: "save", label: "Save Shopping list", action: "save-list", names },
         { id: "skip", label: "Not this time", action: "later" },
@@ -447,7 +472,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
     if (picks.length) {
       return {
         moment: "receipt",
-        line: receiptLine(offList.length),
+        line: receiptLine(picks.length),
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           { id: "add", label: "Add selected", action: "commit-picks" },

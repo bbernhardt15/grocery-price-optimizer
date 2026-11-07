@@ -212,7 +212,7 @@ import {
   viewportInsets,
   writeHandoffResult,
 } from "./shopper/chromeIos.js";
-import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
+import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, storeEstimateCents, tripReceipt } from "./shopper/pastTrips.js";
 import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
@@ -859,7 +859,7 @@ function showTripValue() {
     id: tripFingerprint(view.stores) || `trip-${Date.now()}`,
     at: Date.now(),
     stores: view.stores,
-    total: view.total,
+    total: estimatedTripTotal(view),
     savedCents: Math.round((Number(summary.savedVsSingle) || 0) * 100),
   });
   savePastTrip(localStorage, receipt);
@@ -957,6 +957,26 @@ function openClearTrip() {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+let completedListSave = null;
+
+function listRowsForSave() {
+  return [...list.values()]
+    .map((entry) => ({
+      name: entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "",
+      brand: entry.product?.brand || "",
+      catalogId: String(entry.product?.id || ""),
+      quantity: entry.quantity || 1,
+    }))
+    .filter((row) => row.name);
+}
+
+function estimatedTripTotal(view) {
+  const stated = Number(view?.total);
+  if (Number.isFinite(stated) && stated > 0) return Math.round(stated * 100) / 100;
+  const cents = (view?.stores || []).reduce((sum, store) => sum + storeEstimateCents(store), 0);
+  return Math.round(cents) / 100;
+}
+
 function finishCurrentTrip() {
   const view = currentTrip();
   if (!view?.stores?.length) {
@@ -967,21 +987,23 @@ function finishCurrentTrip() {
   const comparison = singleStoreSavings(lines);
   const profile = getUserProfile(localStorage);
   const usualStore = profile.savings?.usualStore || profile.shopStores?.[0] || comparison.singleStore?.storeName || "";
-  const saved = Math.max(0, Number(comparison.savings) || 0);
+  const realized = comparison.singleStore && Number(comparison.savings) > 0.009 ? Number(comparison.savings) : 0;
   const fingerprint = tripFingerprint(view.stores);
   const seenKey = "gg-savings-fingerprint";
-  if (saved > 0 && localStorage.getItem(seenKey) !== fingerprint) {
-    const next = addLifetimeSavings(profile, saved);
+  if (realized > 0 && localStorage.getItem(seenKey) !== fingerprint) {
+    const next = addLifetimeSavings(profile, realized);
     saveUserProfile(localStorage, { ...profile, savings: { ...next, usualStore: usualStore || next.usualStore } });
     localStorage.setItem(seenKey, fingerprint);
     scheduleAccountSync();
   }
+  const estimated = estimatedTripTotal(view);
+  completedListSave = listRowsForSave();
   const receipt = tripReceipt({
     id: fingerprint || `trip-${Date.now()}`,
     at: Date.now(),
     stores: view.stores,
-    total: view.total,
-    savedCents: Math.round(saved * 100),
+    total: estimated,
+    savedCents: Math.round(realized * 100),
   });
   savePastTrip(localStorage, receipt);
   scheduleAccountSync();
@@ -997,7 +1019,8 @@ function finishCurrentTrip() {
   };
   const at = writeCompletedTrip(localStorage, Date.now());
   guide?.noteTrip?.({
-    saved,
+    saved: realized,
+    total: estimated,
     savedToPastTrips: true,
     items: lines.map((item) => ({
       name: item.name || item.familyName || "",
@@ -1487,20 +1510,27 @@ function friendlyCartError(message) {
 }
 
 let pendingKrogerReturn = null;
+let profileConnectResume = false;
 
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
+  let marker = "";
   try {
-    if (sessionStorage.getItem("gg-profile-connect") === "place") {
-      sessionStorage.removeItem("gg-profile-connect");
-      landedFromKroger = true;
-      if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
-      toast(parsed.message || "Back from Kroger. Kroger may still ask you to sign in at checkout.");
-      profileUi?.resumeAfterConnect?.();
-      return;
-    }
+    marker = sessionStorage.getItem("gg-profile-connect") || "";
+    if (marker) sessionStorage.removeItem("gg-profile-connect");
   } catch {
     /* private browsing */
+  }
+  if (marker === "connected" && parsed.kind === "connected") {
+    profileConnectResume = true;
+    rememberKrogerConnected();
+    toast(parsed.message || "Kroger connected. Kroger may still ask you to sign in at checkout.");
+    profileUi?.resumeAfterConnect?.();
+    return;
+  }
+  if (marker === "connected" && parsed.kind !== "added") {
+    toast(parsed.kind === "error" ? parsed.message || "Kroger sign-in was cancelled." : "Kroger sign-in was not finished.");
+    return;
   }
   landedFromKroger = true;
   if (parsed.kind === "added") {
@@ -1672,7 +1702,14 @@ let finishOnReturn = false;
 
 function consumeKrogerReturn() {
   const parsed = parseKrogerReturn(window.location.search);
-  if (!parsed) return;
+  if (!parsed) {
+    try {
+      sessionStorage.removeItem("gg-profile-connect");
+    } catch {
+      /* private browsing */
+    }
+    return;
+  }
   const params = new URLSearchParams(window.location.search);
   finishOnReturn = params.get("checkedOut") === "1";
   params.delete("kroger");
@@ -1685,6 +1722,7 @@ function consumeKrogerReturn() {
   const kind = parsed.kind === "added" ? "cart" : "store";
   const shared = publishHandoff("Kroger", kind, { phase: "returned", message: parsed.message });
   applyKrogerReturn(parsed);
+  if (profileConnectResume) return;
   const copy = returnScreenCopy("Kroger", kind);
   showHandoffReturn(copy.title, copy.body);
   if (shared.plan.tryClose && callbackCanClose(window.opener)) window.close();
@@ -2726,8 +2764,8 @@ async function loadPage(reset) {
   const requestedDepartment = activeDepartment;
   const requestedQuery = query;
   loading = true;
-  if (reset) {
-    if (flowStep === "add" && !gridEl.querySelector(".card")) skeletons();
+    if (reset) {
+    if (flowStep === "add" && !gridEl.querySelector(".card") && !gridEl.querySelector(".shelf-loading")) skeletons();
     nextCursor = null;
   }
   showCatalogError("");
@@ -2752,6 +2790,7 @@ async function loadPage(reset) {
       ? `<p class="swap-quiet">Your ${escapeHtml(familyLabel(viewed.resolved.family) || "usual")}. <button type="button" class="linkish" data-pref-change="${escapeHtml(viewed.resolved.family)}">Change</button></p>`
       : "";
     const html = viewed.items.map(cardHtml).join("");
+    if (reset) gridEl.style.minHeight = "";
     gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
     if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
@@ -2814,7 +2853,22 @@ function selectDepartment(id) {
   renderDepartments();
   syncBrowse();
   const chip = document.querySelector(`[data-dept="${CSS.escape(id)}"]`);
-  chip?.scrollIntoView({ inline: "center", block: "nearest" });
+  const scroller = chip?.closest(".dept-scroller");
+  if (chip instanceof HTMLElement && scroller instanceof HTMLElement) {
+    const left = chip.offsetLeft - (scroller.clientWidth - chip.offsetWidth) / 2;
+    scroller.scrollTo({ left: Math.max(0, left) });
+  }
+  if (gridEl) {
+    const height = Math.max(gridEl.offsetHeight, 720);
+    gridEl.style.minHeight = `${height}px`;
+    gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
+    if (resultCountEl) resultCountEl.textContent = "Loading…";
+  }
+  const chips = document.querySelector(".dept-scroller");
+  if (chips instanceof HTMLElement) {
+    const top = chips.getBoundingClientRect().top + window.scrollY - 8;
+    window.scrollTo(0, Math.max(0, top));
+  }
   void loadPage(true);
 }
 
@@ -6038,8 +6092,7 @@ document.addEventListener("change", (event) => {
     document.querySelectorAll(`[data-ready-line="${CSS.escape(line)}"]`).forEach((row) => {
       row.classList.toggle("is-done", on);
     });
-    if (flowStep === "shop") renderShop();
-    else paintShopChrome();
+    paintShopChrome();
     haptic();
   }
 });
@@ -7753,6 +7806,8 @@ function renderShop() {
   const backPrompt = showReturnBanner
     ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
     : "";
+  const keepScroll = !pinTabTop;
+  const scrollY = keepScroll ? window.scrollY : 0;
   shop.innerHTML = `
     ${backPrompt}
     <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button> <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button></p>
@@ -7767,6 +7822,8 @@ function renderShop() {
   if (pinTabTop) {
     pinTabTop = false;
     scrollPageTop();
+  } else if (keepScroll) {
+    window.scrollTo(0, scrollY);
   }
 }
 
@@ -8469,10 +8526,13 @@ async function boot() {
     consumeKrogerReturn();
     paintKrogerConnected(krogerConnectedNow());
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
-    if (!landedFromKroger && shouldPromptProfile(localStorage)) profileUi?.open();
+    if (!landedFromKroger && !profileConnectResume && shouldPromptProfile(localStorage)) profileUi?.open();
     await bootApp();
   } finally {
-    if (!landedFromKroger) {
+    if (profileConnectResume) {
+      const profileDialog = document.getElementById("profile-onboard");
+      if (!profileDialog?.open) profileUi?.resumeAfterConnect?.();
+    } else if (!landedFromKroger) {
       const profileDialog = document.getElementById("profile-onboard");
       if (shouldPromptProfile(localStorage)) {
         if (!profileDialog?.open) profileUi?.open();
@@ -9047,15 +9107,9 @@ function onGuideAction(action, detail = {}) {
     return;
   }
   if (action === "save-list") {
-    const fromList = [...list.values()]
-      .map((entry) => ({
-        name: entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "",
-        brand: entry.product?.brand || "",
-        catalogId: entry.product?.id || "",
-        quantity: entry.quantity || 1,
-      }))
-      .filter((row) => row.name);
-    const items = fromList.length ? fromList : (detail.names || []).map((name) => ({ name, brand: "", catalogId: "", quantity: 1 }));
+    const captured = completedListSave;
+    completedListSave = null;
+    const items = captured?.length ? captured : listRowsForSave();
     if (!items.length) {
       toast("Nothing on the list to save yet.");
       return;
@@ -9070,6 +9124,9 @@ guide = mountGuide({
   storage: localStorage,
   getState: guideView,
   onAction: onGuideAction,
+  onQuiet() {
+    importer?.stopListening?.();
+  },
 });
 
 matchSheet = mountMatchSheet({

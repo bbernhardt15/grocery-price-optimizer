@@ -29,7 +29,7 @@ export default defineConfig({
     },
     {
       name: "phone-webkit",
-      testMatch: /phoneFlow\.spec\.ts/,
+      testMatch: /phoneFlow.*\.spec\.ts/,
       use: {
         browserName: "webkit",
         viewport: { width: 390, height: 844 },

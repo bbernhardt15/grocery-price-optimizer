@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v50", () => {
-    assert.match(sw, /grocery-gitter-shell-v50/);
+  it("bumps the shell cache to v51", () => {
+    assert.match(sw, /grocery-gitter-shell-v51/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {

@@ -109,11 +109,22 @@ function noteReceipt(session, payload) {
 function noteTrip(session, saved) {
   const row = asRecord(saved);
   const value = Number(row ? row.saved : saved);
+  const total = Number(row ? row.total : NaN);
   const items = row ? readLines(row.items).slice(0, 40) : [];
+  const shown = {
+    ...session.shown,
+    receipt: true,
+    welcome: true,
+    "before-review": true,
+    "running-low": true,
+    "keep-building": true
+  };
   return {
     ...session,
+    shown,
     trip: {
       saved: Number.isFinite(value) ? roundDollars(Math.max(0, value)) : 0,
+      total: Number.isFinite(total) && total > 0 ? roundDollars(total) : 0,
       savedToPastTrips: row?.savedToPastTrips === true,
       items
     }
@@ -122,6 +133,11 @@ function noteTrip(session, saved) {
 function clearTripNote(session) {
   const shown = { ...session.shown };
   delete shown["trip-saved"];
+  delete shown.welcome;
+  delete shown.receipt;
+  delete shown["before-review"];
+  delete shown["running-low"];
+  delete shown["keep-building"];
   return { ...session, trip: null, shown };
 }
 function normalizeName(value) {
@@ -159,8 +175,14 @@ function reviewLine(unfound) {
   if (name) return `I couldn't find ${name}. ${SIMILAR_LINE}`;
   return SIMILAR_LINE;
 }
-function tripLine(saved) {
-  return `Nice, you saved ${formatDollars(saved)}. Save this Shopping list for next time?`;
+function tripLine(saved, total) {
+  const amount = Number(saved);
+  const estimate = Number(total);
+  const estimateText = Number.isFinite(estimate) && estimate > 9e-3 ? ` Estimated ${formatDollars(estimate)}.` : "";
+  if (!(amount > 9e-3)) {
+    return estimateText ? `Trip saved.${estimateText} Shop it again from Past trips.` : "Trip saved. Shop it again from Past trips.";
+  }
+  return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }
 function linesFromReceipt(payload) {
   if (Array.isArray(payload)) return readLines(payload);
@@ -245,13 +267,15 @@ function receiptPicks(lines, usuals, limit = 8) {
     const usual = (usuals || []).find((row) => namesMatch(row.name, line.name));
     return { name: line.name, quantity: line.quantity || 1, times: Math.max(0, Math.floor(Number(usual?.times) || 0)) };
   });
-  const frequent = ranked.filter((row) => row.times > 0);
-  const pool = (frequent.length ? frequent : ranked).slice();
+  const pool = ranked.slice();
   pool.sort((a, b) => b.times - a.times || b.quantity - a.quantity || a.name.localeCompare(b.name));
   const names = [];
+  const seen = /* @__PURE__ */ new Set();
   const cap = Math.max(1, Math.min(12, Math.floor(limit) || 8));
   for (const row of pool) {
-    if (!row.name || names.some((name) => namesMatch(name, row.name))) continue;
+    const key = normalizeName(row.name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     names.push(row.name);
     if (names.length >= cap) break;
   }
@@ -294,7 +318,7 @@ function decideGuide(input = {}) {
     const names = (session.trip.items || []).map((item) => item.name).filter(Boolean);
     return {
       moment: "trip-saved",
-      line: tripLine(session.trip.saved),
+      line: tripLine(session.trip.saved, session.trip.total),
       chips: [
         { id: "save", label: "Save Shopping list", action: "save-list", names },
         { id: "skip", label: "Not this time", action: "later" }
@@ -307,7 +331,7 @@ function decideGuide(input = {}) {
     if (picks.length) {
       return {
         moment: "receipt",
-        line: receiptLine(offList.length),
+        line: receiptLine(picks.length),
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           { id: "add", label: "Add selected", action: "commit-picks" }

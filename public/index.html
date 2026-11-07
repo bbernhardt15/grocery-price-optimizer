@@ -117,20 +117,28 @@
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="drawer-profile" type="button" class="ghost">Edit my taste profile</button>
           <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
-          <nav class="menu-nav" aria-label="Menu">
-            <button type="button" id="menu-home">Home</button>
-            <button type="button" id="menu-past">Past trips</button>
-            <button type="button" id="menu-brands">My brands and preferences</button>
-            <button type="button" id="menu-zip" hidden>Edit ZIP and stores</button>
-            <button type="button" id="menu-new-trip">Start a new trip</button>
-            <button type="button" id="menu-settings" hidden>Settings</button>
-            <button type="button" id="menu-feedback" hidden>Send feedback</button>
-            <button type="button" id="menu-redo">Redo setup</button>
-          </nav>
+          <details class="drawer-fold" open>
+            <summary>This trip</summary>
+            <nav class="menu-nav" aria-label="Menu">
+              <button type="button" id="menu-home">Home</button>
+              <button type="button" id="menu-past">Past trips</button>
+              <button type="button" id="menu-new-trip">Start a new trip</button>
+            </nav>
+          </details>
+          <details class="drawer-fold">
+            <summary>Preferences</summary>
+            <nav class="menu-nav" aria-label="Preferences">
+              <button type="button" id="menu-brands">My brands and preferences</button>
+              <button type="button" id="menu-zip" hidden>Edit ZIP and stores</button>
+              <button type="button" id="menu-settings" hidden>Settings</button>
+              <button type="button" id="menu-redo">Redo setup</button>
+            </nav>
+          </details>
           <details class="drawer-fold" id="menu-help">
             <summary id="help-title">Help</summary>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
             <nav class="drawer-links" aria-label="About">
+              <button type="button" id="menu-feedback" hidden>Send feedback</button>
               <button type="button" id="help-feedback" class="text-btn">Send feedback</button>
               <a id="help-privacy" href="/privacy">Privacy</a>
               <a id="help-terms" href="/terms">Terms</a>

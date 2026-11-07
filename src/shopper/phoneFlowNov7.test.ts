@@ -4,6 +4,7 @@ import { frequencyLine } from "../../public/shopper/intakePresent.js";
 import { savingsClaimAllowed } from "../../public/shopper/planFallback.js";
 import { receiptBackPhase, receiptReadCurrent } from "../../public/shopper/receiptNav.js";
 import { storeConnectCopy } from "../../public/shopper/storeConnect.js";
+import { readPastTrips, savePastTrip, storeEstimateCents, tripReceipt } from "../../public/shopper/pastTrips.js";
 import { joinBrandName } from "../../public/shopper/tripAdd.js";
 
 describe("receipt back and a late parse", () => {
@@ -51,6 +52,49 @@ describe("savings claims", () => {
       }),
       true
     );
+  });
+});
+
+describe("priced trip snapshot", () => {
+  it("keeps line prices when the store subtotal was not copied", () => {
+    assert.equal(storeEstimateCents({ items: [{ name: "Milk", price: 3.2, quantity: 2, itemTotal: 6.4 }] }), 640);
+    const receipt = tripReceipt({
+      total: 0,
+      savedCents: 0,
+      stores: [
+        {
+          storeName: "Kroger",
+          items: [
+            { name: "Milk", price: 3.2, quantity: 1, itemTotal: 3.2 },
+            { name: "Eggs", price: 2.5, quantity: 2, itemTotal: 5 },
+          ],
+        },
+      ],
+    });
+    assert.equal(receipt.totalCents, 820);
+    assert.equal(receipt.savedCents, 0);
+    assert.equal(receipt.stores[0].items.length, 2);
+    const storage = {
+      value: "",
+      getItem() {
+        return this.value;
+      },
+      setItem(_key: string, value: string) {
+        this.value = value;
+      },
+    };
+    const priced = tripReceipt({
+      total: 48.2,
+      savedCents: 0,
+      stores: [{ storeName: "Kroger", subtotal: 48.2, items: [{ name: "Milk", quantity: 1 }] }],
+    });
+    assert.equal(priced.totalCents, 4820);
+    assert.equal(tripReceipt(priced).totalCents, 4820);
+    assert.equal(tripReceipt(priced).stores[0].totalCents, 4820);
+    savePastTrip(storage, priced);
+    const round = readPastTrips(storage);
+    assert.equal(round[0].totalCents, 4820);
+    assert.equal(round[0].stores[0].items[0].name, "Milk");
   });
 });
 

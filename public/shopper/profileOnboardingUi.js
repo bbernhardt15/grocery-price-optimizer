@@ -534,11 +534,16 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function connectStoresNow() {
+    const zip = readZip();
+    if (!zip) return;
     const place = readPlace();
     if (place) draft.shopStores = place.stores;
-    draft = persist(draft);
+    draft = persist({
+      ...draft,
+      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "place", updatedAt: Date.now() },
+    });
     try {
-      sessionStorage.setItem(PROFILE_CONNECT_KEY, "place");
+      sessionStorage.setItem(PROFILE_CONNECT_KEY, "connected");
     } catch {
       /* private browsing */
     }
@@ -546,11 +551,21 @@ export function mountProfileOnboarding(deps = {}) {
       const response = await fetch("/api/kroger/connect", { method: "POST", headers: { Accept: "application/json" } });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.authorizeUrl) {
+        try {
+          sessionStorage.removeItem(PROFILE_CONNECT_KEY);
+        } catch {
+          /* private browsing */
+        }
         deps.toast?.(body.error || "Kroger sign-in isn't available. You can do this at checkout.");
         return;
       }
       window.location.assign(body.authorizeUrl);
     } catch {
+      try {
+        sessionStorage.removeItem(PROFILE_CONNECT_KEY);
+      } catch {
+        /* private browsing */
+      }
       deps.toast?.("Couldn't open Kroger sign-in. You can do this at checkout.");
     }
   }

@@ -1386,5 +1386,12 @@ export function mountImport(deps) {
   });
   void loadStatus();
   void consumeShare();
-  return { open, find, speak };
+  return {
+    open,
+    find,
+    speak,
+    stopListening() {
+      void stopRecording(true);
+    },
+  };
 }
