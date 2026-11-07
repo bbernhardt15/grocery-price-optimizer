@@ -3998,6 +3998,8 @@ function selectReviewMode(mode) {
   haptic();
 }
 
+let refreshAnchorWatch = 0;
+
 function clearTripFloor() {
   if (tripEl) tripEl.style.minHeight = "";
 }
@@ -4034,6 +4036,7 @@ function placeReviewAnchor(snapshot) {
 }
 
 function restoreReviewScroll(snapshot) {
+  refreshAnchorWatch += 1;
   if (!snapshot || !tripEl) return;
   for (const name of snapshot.openStores) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
@@ -4714,6 +4717,11 @@ function listPlanFallback() {
 }
 
 async function planTrip({ stay = false, trigger = null, force = false } = {}) {
+  const anchorScroll = stay && force ? window.scrollY : null;
+  const keepAnchor = () => {
+    if (anchorScroll == null || Math.abs(window.scrollY - anchorScroll) <= 1) return;
+    window.scrollTo(0, anchorScroll);
+  };
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -4802,6 +4810,16 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   else if (flowStep === "plan") paintReviewLoading();
   else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
+  if (anchorScroll != null) {
+    const watchId = ++refreshAnchorWatch;
+    const until = performance.now() + 500;
+    const watch = () => {
+      if (watchId !== refreshAnchorWatch) return;
+      keepAnchor();
+      if (performance.now() < until) requestAnimationFrame(watch);
+    };
+    watch();
+  }
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
     .then((status) => {
