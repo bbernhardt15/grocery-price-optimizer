@@ -28,6 +28,7 @@ import {
   presentGuide,
   readGuideSettings,
   receiptLine,
+  revealReceiptPicks,
   receiptLinesFromImportBody,
   receiptLinesFromPayload,
   receiptPicks,
@@ -111,7 +112,19 @@ describe("Gitter guide rules", () => {
     });
     assert.ok(prompt);
     assert.equal(prompt.moment, "receipt");
-    assert.equal(prompt.line, receiptLine(6));
+    assert.equal(prompt.line, receiptLine(6, 59));
+    assert.equal(prompt.chips.some((chip) => chip.action === "show-rest"), true);
+    const revealed = decideGuide({
+      ...view(),
+      settings: emptyGuideSettings(),
+      session: revealReceiptPicks(session),
+      usuals: [
+        { name: "Large Eggs", times: 2 },
+        { name: "Whole Milk", times: 9 },
+      ],
+    });
+    assert.equal(revealed?.chips.filter((chip) => chip.action === "toggle-pick").length, 59);
+    assert.equal(revealed?.line, receiptLine(59));
     assert.match(receiptLine(1), /1 item that is/);
     assert.equal(receiptLine(1), "I found 1 item that is not on your list yet. Choose any, then add them.");
     assert.equal(prompt.chips.at(-1)?.label, "Add selected");
@@ -313,6 +326,8 @@ describe("Gitter guide rules", () => {
     const finished = decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: quiet });
     assert.equal(finished?.moment, "trip-saved");
     assert.match(finished?.line || "", /Estimated \$304\.47/);
+    assert.match(finished?.line || "", /Past trips/);
+    assert.equal(finished?.chips?.[0]?.label, "Remember these items");
     assert.doesNotMatch(finished?.line || "", /\$0\.00/);
     const withReceipt = {
       ...quiet,

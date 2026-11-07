@@ -1511,9 +1511,11 @@ function friendlyCartError(message) {
 
 let pendingKrogerReturn = null;
 let profileConnectResume = false;
+let profileConnectHandoff = false;
 
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
+  profileConnectHandoff = false;
   let marker = "";
   try {
     marker = sessionStorage.getItem("gg-profile-connect") || "";
@@ -1529,6 +1531,7 @@ function applyKrogerReturn(parsed) {
     return;
   }
   if (marker === "connected" && parsed.kind !== "added") {
+    profileConnectHandoff = true;
     toast(parsed.kind === "error" ? parsed.message || "Kroger sign-in was cancelled." : "Kroger sign-in was not finished.");
     return;
   }
@@ -1722,7 +1725,7 @@ function consumeKrogerReturn() {
   const kind = parsed.kind === "added" ? "cart" : "store";
   const shared = publishHandoff("Kroger", kind, { phase: "returned", message: parsed.message });
   applyKrogerReturn(parsed);
-  if (profileConnectResume) return;
+  if (profileConnectResume || profileConnectHandoff) return;
   const copy = returnScreenCopy("Kroger", kind);
   showHandoffReturn(copy.title, copy.body);
   if (shared.plan.tryClose && callbackCanClose(window.opener)) window.close();
@@ -2790,8 +2793,11 @@ async function loadPage(reset) {
       ? `<p class="swap-quiet">Your ${escapeHtml(familyLabel(viewed.resolved.family) || "usual")}. <button type="button" class="linkish" data-pref-change="${escapeHtml(viewed.resolved.family)}">Change</button></p>`
       : "";
     const html = viewed.items.map(cardHtml).join("");
+    const heldShelf = reset ? Number.parseFloat(gridEl.style.minHeight) || 0 : 0;
+    const shelfScroll = window.scrollY;
     if (reset) gridEl.style.minHeight = "";
     gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
+    if (reset && heldShelf > gridEl.offsetHeight && shelfScroll > 80) gridEl.style.minHeight = `${heldShelf}px`;
     if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
       const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
@@ -2863,11 +2869,6 @@ function selectDepartment(id) {
     gridEl.style.minHeight = `${height}px`;
     gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
     if (resultCountEl) resultCountEl.textContent = "Loading…";
-  }
-  const chips = document.querySelector(".dept-scroller");
-  if (chips instanceof HTMLElement) {
-    const top = chips.getBoundingClientRect().top + window.scrollY - 8;
-    window.scrollTo(0, Math.max(0, top));
   }
   void loadPage(true);
 }
@@ -3779,7 +3780,8 @@ function reviewItemRows(items) {
       const qty = Number(item.quantity) > 1 ? ` x${item.quantity}` : "";
       const amount = Number(item.itemTotal ?? linePrice(item));
       const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
-      return `<li class="review-line"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
+      const lineKey = String(item.lineId || item.title || "").replace(/"/g, "");
+      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
     })
     .join("");
 }
@@ -3959,6 +3961,41 @@ function selectReviewMode(mode) {
   haptic();
 }
 
+function reviewScrollSnapshot() {
+  if (!tripEl) return null;
+  const openStores = [...tripEl.querySelectorAll("details.store-fold[open]")]
+    .map((node) => node.closest("[data-store]")?.getAttribute("data-store") || "")
+    .filter(Boolean);
+  let anchor = "";
+  let anchorTop = null;
+  for (const line of tripEl.querySelectorAll("[data-review-line]")) {
+    const top = line.getBoundingClientRect().top;
+    if (top >= 48 && top < window.innerHeight * 0.72) {
+      anchor = line.getAttribute("data-review-line") || "";
+      anchorTop = top;
+      break;
+    }
+  }
+  return { scrollY: window.scrollY, height: tripEl.getBoundingClientRect().height, openStores, anchor, anchorTop };
+}
+
+function restoreReviewScroll(snapshot) {
+  if (!snapshot || !tripEl) return;
+  for (const name of snapshot.openStores) {
+    const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
+    if (fold instanceof HTMLDetailsElement) fold.open = true;
+  }
+  const contentHeight = [...tripEl.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+  if (snapshot.scrollY > 40 && contentHeight + 1 < snapshot.height) tripEl.style.minHeight = `${Math.ceil(snapshot.height)}px`;
+  else tripEl.style.minHeight = "";
+  window.scrollTo(0, snapshot.scrollY);
+  if (!snapshot.anchor || snapshot.anchorTop == null) return;
+  const line = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
+  if (!(line instanceof HTMLElement)) return;
+  const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
+  if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
+}
+
 function paintTrip() {
   clearReviewRefresh();
   const finish = () => {
@@ -4080,6 +4117,8 @@ function paintTrip() {
         <button type="button" class="text-btn" id="clear-trip-open">Clear trip</button>
       </div>
     </div>`;
+  const reviewSnapshot = reviewScrollSnapshot();
+  if (reviewSnapshot && reviewSnapshot.scrollY > 40) tripEl.style.minHeight = `${Math.ceil(reviewSnapshot.height)}px`;
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
@@ -4139,6 +4178,7 @@ function paintTrip() {
     };
   }
   void fillMissingSuggestions();
+  restoreReviewScroll(reviewSnapshot);
   finish();
 }
 

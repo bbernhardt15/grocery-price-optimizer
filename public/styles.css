@@ -446,6 +446,10 @@ a.text-btn:hover { background: var(--accent-soft); }
 .savings-card h2 { margin: 4px 0 8px; font-family: var(--display); font-size: 1.6rem; line-height: 1.2; }
 .review-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
 .review-head-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.review-head-actions button.is-busy { position: relative; }
+.review-head-actions button.is-busy::after {
+  position: absolute; right: 8px; top: 50%; margin-top: -7px;
+}
 .prices-age { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .savings-nudge { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 8px 0; background: var(--surface); }
 .savings-nudge p { margin: 0 0 8px; }

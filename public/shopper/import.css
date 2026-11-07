@@ -196,9 +196,22 @@
   dialog.import-sheet[open] {
     bottom: calc(var(--keyboard, 0px) + max(8px, env(safe-area-inset-bottom)));
     height: auto;
-    max-height: calc(var(--vv-height, 100dvh) - var(--safe-top) - var(--keyboard, 0px) - 12px);
+    max-height: min(
+      calc(var(--vv-height, 100dvh) - var(--safe-top) - 16px),
+      calc(100dvh - var(--keyboard, 0px) - var(--safe-top) - 16px)
+    );
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
-  dialog.import-sheet[open] .sheet-body,
+  dialog.import-sheet[open] .sheet-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    overflow: auto;
+    padding: 12px 14px calc(16px + var(--safe-bottom));
+  }
   dialog.match-sheet[open] .sheet-body {
     max-height: 100%;
     height: 100%;

@@ -2007,6 +2007,10 @@ export function mountProfileOnboarding(deps = {}) {
       stepId = "receipts";
       receiptPhase = "upload";
       returnTo = "";
+      draft = persist({
+        ...draft,
+        onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "receipts", updatedAt: Date.now() },
+      });
       render();
       if (!dialog.open) dialog.showModal();
       focusTitle();

@@ -253,6 +253,15 @@ export function mountImport(deps) {
   dialog.addEventListener("close", () => {
     releaseAfterLastSheet(document);
   });
+  dialog.addEventListener("focusin", (event) => {
+    const target = event.target;
+    const body = dialog.querySelector(".sheet-body");
+    if (!(target instanceof HTMLElement) || !(body instanceof HTMLElement)) return;
+    const frame = body.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    if (rect.bottom > frame.bottom - 8) body.scrollTop += rect.bottom - frame.bottom + 16;
+    else if (rect.top < frame.top + 8) body.scrollTop -= frame.top + 8 - rect.top;
+  });
 
   const $ = (id) => dialog.querySelector(`#${id}`);
   const home = $("import-home");

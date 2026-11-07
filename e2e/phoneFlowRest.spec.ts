@@ -168,6 +168,8 @@ test("a cancelled Kroger sign-in returns to onboarding", async ({ page }) => {
   await page.locator("#store-connect-now").click();
   await expect(page.locator("#profile-onboard")).toBeVisible();
   await expect(page.locator("#profile-zip")).toHaveValue(/45103/);
+  await expect(page.locator("#handoff-return")).toBeHidden();
+  await expect(page.locator("#cart-ready")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toHaveCount(0);
   await expect(page.locator("#profile-onboard input[type=password]")).toHaveCount(0);
 });
@@ -199,6 +201,10 @@ test("a connected Kroger return opens receipts and keeps the ZIP", async ({ page
   await reachStores(page);
   await status;
   await page.locator("#store-connect-now").click();
+  await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem("gg-profile") || "{}").onboarding?.step)).toBe("receipts");
+  await page.reload();
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
   await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
   await expect(page.locator("#profile-onboard input[type=password]")).toHaveCount(0);
@@ -236,7 +242,7 @@ test("receipt choices stay selected after the guide repaints", async ({ page }) 
   await expect(page.locator("#bar-count")).toContainText("1");
 });
 
-test("a long aisle and in-store list keep a scroll target while work is in flight", async ({ page }) => {
+test("a long aisle and in-store list keep a scroll target while work is in flight", async ({ page, browserName }) => {
   const products = (department: string, count: number) =>
     Array.from({ length: count }, (_, index) => ({
       id: `${department}-${index}`,
@@ -275,12 +281,12 @@ test("a long aisle and in-store list keep a scroll target while work is in fligh
   await page.route("**/api/optimize-list", async (route) => {
     const items = Array.from({ length: 58 }, (_, index) => ({
       lineId: `walk-${index}`,
-      name: `Walk item ${index + 1}`,
+      name: index % 2 ? `Dairy yogurt d${index}` : `Produce kale p${index}`,
       price: 1.5,
       quantity: 1,
       itemTotal: 1.5,
       storeName: index % 2 ? "Walmart" : "Kroger",
-      department: index % 2 ? "Dairy" : "Produce",
+      department: index % 2 ? "Dairy & Eggs" : "Produce",
     }));
     await route.fulfill({
       status: 200,
@@ -312,7 +318,7 @@ test("a long aisle and in-store list keep a scroll target while work is in fligh
         Array.from({ length: 58 }, (_, index) => ({
           id: `custom:walk-${index}`,
           itemId: `custom:walk-${index}`,
-          name: `Walk item ${index + 1}`,
+          name: index % 2 ? `Dairy yogurt d${index}` : `Produce kale p${index}`,
           quantity: 1,
         }))
       )
@@ -320,39 +326,101 @@ test("a long aisle and in-store list keep a scroll target while work is in fligh
   });
   await unlock(page);
   await page.locator("#browse-toggle").click();
-  await expect(page.locator("#grid .card, #grid .shelf-loading").first()).toBeVisible();
-  await page.mouse.move(200, 640);
-  await page.mouse.down();
-  await page.mouse.move(200, 280, { steps: 12 });
-  await page.mouse.up();
-  const beforeAisle = await page.evaluate(() => window.scrollY);
-  await page.locator(".chip[data-dept='dairy']").click();
+  await expect(page.locator("#grid .card").nth(10)).toBeVisible();
+  const shelfTall = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+  expect(shelfTall).toBeGreaterThan(600);
+  const aisleScroll = await page.evaluate(() => {
+    window.scrollTo(0, 900);
+    return window.scrollY;
+  });
+  expect(aisleScroll).toBeGreaterThan(700);
+  await page.locator(".chip[data-dept='dairy']").evaluate((button) => (button as HTMLButtonElement).click());
   await expect(page.locator(".shelf-loading")).toBeVisible();
-  await expect(page.locator("#grid")).not.toContainText("produce item 1");
-  const height = await page.evaluate(() => document.getElementById("grid")?.getBoundingClientRect().height || 0);
-  expect(height).toBeGreaterThan(400);
+  const heldScroll = await page.evaluate(() => window.scrollY);
+  expect(Math.abs(heldScroll - aisleScroll)).toBeLessThan(8);
   releaseDairy();
   await expect(page.locator("#grid")).toContainText("dairy item 1");
-  expect(beforeAisle).toBeGreaterThanOrEqual(0);
+  await expect(page.locator("#grid .card")).toHaveCount(30);
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - aisleScroll)).toBeLessThan(24);
 
+  await page.locator('[data-flow="plan"]').click();
+  await expect(page.locator("#trip")).toContainText("Produce kale p0");
   await page.locator('[data-flow="shop"]').click();
   await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
+  await expect(page.getByRole("heading", { name: "Kroger" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Walmart" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Produce" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dairy & Eggs" })).toBeVisible();
   await expect(page.locator(".shop-row")).toHaveCount(58);
-  const tall = await page.evaluate(() => document.documentElement.scrollHeight);
-  expect(tall).toBeGreaterThan(1400);
-  await page.evaluate(() => window.scrollTo(0, 640));
-  const walked = await page.evaluate(() => window.scrollY);
-  expect(walked).toBeGreaterThan(400);
-  await page.mouse.move(180, 520);
-  await page.mouse.down();
-  await page.mouse.move(180, 220, { steps: 10 });
-  await page.mouse.up();
-  const afterDrag = await page.evaluate(() => window.scrollY);
-  expect(afterDrag).toBeGreaterThan(200);
-  const name = page.locator(".shop-name").nth(10);
-  await expect(name).toBeAttached();
-  await name.evaluate((node) => (node as HTMLElement).click());
-  expect(Math.abs((await page.evaluate(() => window.scrollY)) - afterDrag)).toBeLessThan(80);
+  const range = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+  expect(range).toBeGreaterThan(600);
+  const walked = await page.evaluate(() => {
+    const before = window.scrollY;
+    window.scrollTo(0, before + 480);
+    return { before, after: window.scrollY };
+  });
+  expect(walked.after - walked.before).toBeGreaterThan(300);
+  const tapped = await page.evaluate(() => {
+    const row = [...document.querySelectorAll(".shop-row")].find((node) => {
+      const box = node.getBoundingClientRect();
+      return box.top > 120 && box.bottom < window.innerHeight - 40;
+    });
+    if (!(row instanceof HTMLElement)) return { ok: false, delta: 999 };
+    const before = window.scrollY;
+    row.querySelector(".shop-name")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    return { ok: true, delta: Math.abs(window.scrollY - before) };
+  });
+  expect(tapped.ok).toBe(true);
+  expect(tapped.delta).toBeLessThan(80);
+  if (browserName === "chromium") {
+    const box = await page.locator(".shop-row").nth(12).boundingBox();
+    expect(box).toBeTruthy();
+    const client = await page.context().newCDPSession(page);
+    const x = Math.round((box?.x || 40) + 24);
+    const y = Math.round((box?.y || 400) + 16);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - 220 }] });
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    const touched = await page.evaluate(() => window.scrollY);
+    expect(Math.abs(touched - walked.after)).toBeGreaterThan(40);
+  }
+});
+
+test("the import field stays inside the sheet for a keyboard inset", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+  });
+  await unlock(page);
+  await page.locator("#add-items").click();
+  const field = page.locator("#import-paste");
+  await field.click();
+  const contained = () =>
+    page.evaluate(() => {
+      const dialog = document.getElementById("import-dialog");
+      const input = document.getElementById("import-paste");
+      if (!dialog || !input) return { inside: false, dialog: null, field: null };
+      const frame = dialog.getBoundingClientRect();
+      const rect = input.getBoundingClientRect();
+      return {
+        inside: rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 && rect.height > 40,
+        dialogBottom: frame.bottom,
+        fieldBottom: rect.bottom,
+      };
+    });
+  expect((await contained()).inside).toBe(true);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--keyboard", "320px");
+    document.documentElement.style.setProperty("--vv-height", "524px");
+  });
+  await field.focus();
+  const open = await contained();
+  expect(open.inside).toBe(true);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--keyboard", "0px");
+    document.documentElement.style.removeProperty("--vv-height");
+  });
+  expect((await contained()).inside).toBe(true);
 });
 
 test("Refine budget stays reachable when the viewport is short", async ({ page }) => {

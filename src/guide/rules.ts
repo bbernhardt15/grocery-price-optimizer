@@ -64,7 +64,7 @@ export type GuideSettings = {
 export type GuideSession = {
   shown: Partial<Record<Moment, boolean>>;
   declined?: Partial<Record<Moment, boolean>>;
-  receipt: { count: number; lines: ReceiptLine[]; taught?: boolean } | null;
+  receipt: { count: number; lines: ReceiptLine[]; taught?: boolean; showAll?: boolean } | null;
   trip: { saved: number; total?: number; savedToPastTrips?: boolean; items?: ReceiptLine[] } | null;
 };
 
@@ -181,6 +181,13 @@ export function noteDeclined(session: GuideSession, moment: unknown): GuideSessi
   };
 }
 
+export function revealReceiptPicks(session: GuideSession): GuideSession {
+  if (!session.receipt) return session;
+  const shown = { ...session.shown };
+  delete shown.receipt;
+  return { ...session, shown, receipt: { ...session.receipt, showAll: true } };
+}
+
 export function noteReceipt(session: GuideSession, payload: unknown): GuideSession {
   const lines = linesFromReceipt(payload);
   if (!lines.length) return session;
@@ -266,9 +273,11 @@ export function formatDollars(amount: unknown): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(roundDollars(Number(amount)));
 }
 
-export function receiptLine(count: number): string {
+export function receiptLine(count: number, total?: number): string {
   const n = Math.max(0, Math.floor(count));
-  const noun = n === 1 ? "item that is" : "items that are";
+  const all = Math.max(n, Math.floor(Number(total) || n));
+  const noun = all === 1 ? "item that is" : "items that are";
+  if (all > n) return `Showing ${n} of ${all} ${noun} not on your list yet. Choose any, then add them.`;
   return `I found ${n} ${noun} not on your list yet. Choose any, then add them.`;
 }
 
@@ -289,7 +298,7 @@ export function tripLine(saved: number, total?: number): string {
   const estimate = Number(total);
   const estimateText = Number.isFinite(estimate) && estimate > 0.009 ? ` Estimated ${formatDollars(estimate)}.` : "";
   if (!(amount > 0.009)) {
-    return estimateText ? `Trip saved.${estimateText} Shop it again from Past trips.` : "Trip saved. Shop it again from Past trips.";
+    return estimateText ? `Trip saved.${estimateText} The receipt is in Past trips.` : "Trip saved. The receipt is in Past trips.";
   }
   return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }
@@ -396,7 +405,7 @@ export function receiptPicks(lines: ReceiptLine[], usuals: Usual[] | undefined, 
   pool.sort((a, b) => b.times - a.times || b.quantity - a.quantity || a.name.localeCompare(b.name));
   const names: string[] = [];
   const seen = new Set<string>();
-  const cap = Math.max(1, Math.min(12, Math.floor(limit) || 8));
+  const cap = Math.max(1, Math.min(80, Math.floor(limit) || 8));
   for (const row of pool) {
     const key = normalizeName(row.name);
     if (!key || seen.has(key)) continue;
@@ -456,11 +465,12 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
 
   if (!session.shown["trip-saved"] && session.trip) {
     const names = (session.trip.items || []).map((item) => item.name).filter(Boolean);
+    const remember = !(Number(session.trip.saved) > 0.009);
     return {
       moment: "trip-saved",
       line: tripLine(session.trip.saved, session.trip.total),
       chips: [
-        { id: "save", label: "Save Shopping list", action: "save-list", names },
+        { id: "save", label: remember ? "Remember these items" : "Save Shopping list", action: "save-list", names },
         { id: "skip", label: "Not this time", action: "later" },
       ],
     };
@@ -468,13 +478,16 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
 
   if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
     const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
-    const picks = receiptPicks(offList, usuals, 6);
+    const available = receiptPicks(offList, usuals, Math.max(offList.length, 1));
+    const picks = session.receipt.showAll ? available : available.slice(0, 6);
+    const hidden = available.length - picks.length;
     if (picks.length) {
       return {
         moment: "receipt",
-        line: receiptLine(picks.length),
+        line: receiptLine(picks.length, available.length),
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
+          ...(hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : []),
           { id: "add", label: "Add selected", action: "commit-picks" },
         ],
       };

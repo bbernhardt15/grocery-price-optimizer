@@ -89,6 +89,12 @@ function noteDeclined(session, moment) {
     declined: { ...session.declined || {}, [key]: true }
   };
 }
+function revealReceiptPicks(session) {
+  if (!session.receipt) return session;
+  const shown = { ...session.shown };
+  delete shown.receipt;
+  return { ...session, shown, receipt: { ...session.receipt, showAll: true } };
+}
 function noteReceipt(session, payload) {
   const lines = linesFromReceipt(payload);
   if (!lines.length) return session;
@@ -160,9 +166,11 @@ function onList(name, listNames) {
 function formatDollars(amount) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(roundDollars(Number(amount)));
 }
-function receiptLine(count) {
+function receiptLine(count, total) {
   const n = Math.max(0, Math.floor(count));
-  const noun = n === 1 ? "item that is" : "items that are";
+  const all = Math.max(n, Math.floor(Number(total) || n));
+  const noun = all === 1 ? "item that is" : "items that are";
+  if (all > n) return `Showing ${n} of ${all} ${noun} not on your list yet. Choose any, then add them.`;
   return `I found ${n} ${noun} not on your list yet. Choose any, then add them.`;
 }
 function runningLowLine(names) {
@@ -180,7 +188,7 @@ function tripLine(saved, total) {
   const estimate = Number(total);
   const estimateText = Number.isFinite(estimate) && estimate > 9e-3 ? ` Estimated ${formatDollars(estimate)}.` : "";
   if (!(amount > 9e-3)) {
-    return estimateText ? `Trip saved.${estimateText} Shop it again from Past trips.` : "Trip saved. Shop it again from Past trips.";
+    return estimateText ? `Trip saved.${estimateText} The receipt is in Past trips.` : "Trip saved. The receipt is in Past trips.";
   }
   return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }
@@ -271,7 +279,7 @@ function receiptPicks(lines, usuals, limit = 8) {
   pool.sort((a, b) => b.times - a.times || b.quantity - a.quantity || a.name.localeCompare(b.name));
   const names = [];
   const seen = /* @__PURE__ */ new Set();
-  const cap = Math.max(1, Math.min(12, Math.floor(limit) || 8));
+  const cap = Math.max(1, Math.min(80, Math.floor(limit) || 8));
   for (const row of pool) {
     const key = normalizeName(row.name);
     if (!key || seen.has(key)) continue;
@@ -316,24 +324,28 @@ function decideGuide(input = {}) {
   if (input.savingsCard) return null;
   if (!session.shown["trip-saved"] && session.trip) {
     const names = (session.trip.items || []).map((item) => item.name).filter(Boolean);
+    const remember = !(Number(session.trip.saved) > 9e-3);
     return {
       moment: "trip-saved",
       line: tripLine(session.trip.saved, session.trip.total),
       chips: [
-        { id: "save", label: "Save Shopping list", action: "save-list", names },
+        { id: "save", label: remember ? "Remember these items" : "Save Shopping list", action: "save-list", names },
         { id: "skip", label: "Not this time", action: "later" }
       ]
     };
   }
   if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
     const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
-    const picks = receiptPicks(offList, usuals, 6);
+    const available = receiptPicks(offList, usuals, Math.max(offList.length, 1));
+    const picks = session.receipt.showAll ? available : available.slice(0, 6);
+    const hidden = available.length - picks.length;
     if (picks.length) {
       return {
         moment: "receipt",
-        line: receiptLine(picks.length),
+        line: receiptLine(picks.length, available.length),
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
+          ...hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : [],
           { id: "add", label: "Add selected", action: "commit-picks" }
         ]
       };
@@ -536,6 +548,7 @@ export {
   receiptLinesFromImportBody,
   receiptLinesFromPayload,
   receiptPicks,
+  revealReceiptPicks,
   reviewLine,
   runningLowLine,
   runningLowSuggestions,

@@ -112,7 +112,7 @@ test("Refresh keeps the Review list and scroll until the new prices arrive", asy
       return;
     }
     await held;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan(4)) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan(12)) });
   });
   await page.addInitScript(() => {
     localStorage.setItem("gg-onboarding-done", "1");
@@ -133,18 +133,33 @@ test("Refresh keeps the Review list and scroll until the new prices arrive", asy
   await page.locator('[data-flow="plan"]').click();
   const lines = page.locator("#trip [data-plan-panel='spread'] .review-lines li");
   await expect(lines).toHaveCount(80);
-  const scrolled = await page.evaluate(() => {
-    window.scrollTo(0, 720);
-    return window.scrollY;
+  const fold = page.locator("#trip details.store-fold");
+  await fold.evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
   });
-  expect(scrolled).toBeGreaterThan(400);
+  const anchor = page.locator("#trip [data-review-line='line-8']");
+  const placed = await anchor.evaluate((node) => {
+    const top = node.getBoundingClientRect().top + window.scrollY - 180;
+    window.scrollTo(0, Math.max(0, top));
+    return { scrollY: window.scrollY, lineTop: node.getBoundingClientRect().top };
+  });
+  expect(placed.scrollY).toBeGreaterThan(200);
   await page.locator("#plan-refresh").evaluate((button) => (button as HTMLButtonElement).click());
   await page.waitForTimeout(400);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  expect(await page.evaluate(() => window.scrollY)).toBe(placed.scrollY);
   await expect(lines).toHaveCount(80);
   await expect(page.locator("[data-review-refresh]")).toBeVisible();
+  const heldLine = await anchor.evaluate((node) => node.getBoundingClientRect().top);
+  expect(Math.abs(heldLine - placed.lineTop)).toBeLessThan(2);
   release();
-  await expect(lines).toHaveCount(4);
+  await expect(lines).toHaveCount(12);
+  await expect(fold).toHaveJSProperty("open", true);
+  const landed = await anchor.evaluate((node) => ({
+    scrollY: window.scrollY,
+    lineTop: node.getBoundingClientRect().top,
+  }));
+  expect(Math.abs(landed.scrollY - placed.scrollY)).toBeLessThan(24);
+  expect(Math.abs(landed.lineTop - placed.lineTop)).toBeLessThan(24);
 });
 
 test("a late aisle response cannot change the next page cursor", async ({ page }) => {

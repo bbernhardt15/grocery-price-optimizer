@@ -22,6 +22,7 @@ import {
   noteShown,
   noteTrip as rememberTrip,
   presentGuide,
+  revealReceiptPicks,
   readGuideSettings,
   setGuideEnabled,
   typeFrames,
@@ -155,10 +156,24 @@ export function mountGuide(deps = {}) {
       host.removeAttribute("data-moment");
       return;
     }
-    const same = host.dataset.moment === prompt.moment && !host.hidden;
+    const chipKey = (prompt.chips || []).map((chip) => `${chip.id}:${chip.label}`).join("|");
+    const same = host.dataset.moment === prompt.moment && host.dataset.chips === chipKey && !host.hidden;
+    const pressed = same
+      ? null
+      : new Set(
+          [...host.querySelectorAll("[aria-pressed='true']")].map((button) => button.getAttribute("data-guide-name") || "").filter(Boolean)
+        );
     host.hidden = false;
     host.dataset.moment = prompt.moment;
-    if (chipsEl && !same) chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");
+    host.dataset.chips = chipKey;
+    if (chipsEl && !same) {
+      chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");
+      if (pressed?.size) {
+        for (const button of chipsEl.querySelectorAll("[data-guide-name]")) {
+          if (pressed.has(button.getAttribute("data-guide-name") || "")) button.setAttribute("aria-pressed", "true");
+        }
+      }
+    }
     if (liveEl && !same) liveEl.textContent = prompt.line || "";
     if (!same) typeLine(prompt.line || "");
   }
@@ -256,6 +271,12 @@ export function mountGuide(deps = {}) {
     }
     const action = button.getAttribute("data-guide-action");
     if (!action) return;
+    if (action === "show-rest") {
+      session = revealReceiptPicks(session);
+      current = null;
+      sync();
+      return;
+    }
     if (action === "toggle-pick") {
       const on = button.getAttribute("aria-pressed") === "true";
       button.setAttribute("aria-pressed", on ? "false" : "true");
