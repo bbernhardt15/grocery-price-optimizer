@@ -86,10 +86,10 @@ export function modeLine(row) {
 
 export function frequencyLine(row) {
   const receipts = Math.max(0, Math.floor(Number(row?.receipts) || 0));
-  const count = Math.max(0, Math.floor(Number(row?.count) || 0));
+  const units = Math.max(0, Math.floor(Number(row?.count) || 0));
   if (receipts > 1) return `On ${receipts} orders`;
-  if (count > 1) return `Bought ${count} times`;
-  if (count === 1 || receipts === 1) return "Bought once";
+  if (units > 1 && receipts <= 1) return `${units} on the order`;
+  if (units === 1 || receipts === 1) return "Bought once";
   return "";
 }
 

@@ -89,6 +89,12 @@ function noteDeclined(session, moment) {
     declined: { ...session.declined || {}, [key]: true }
   };
 }
+function revealReceiptPicks(session) {
+  if (!session.receipt) return session;
+  const shown = { ...session.shown };
+  delete shown.receipt;
+  return { ...session, shown, receipt: { ...session.receipt, showAll: true } };
+}
 function noteReceipt(session, payload) {
   const lines = linesFromReceipt(payload);
   if (!lines.length) return session;
@@ -109,11 +115,22 @@ function noteReceipt(session, payload) {
 function noteTrip(session, saved) {
   const row = asRecord(saved);
   const value = Number(row ? row.saved : saved);
+  const total = Number(row ? row.total : NaN);
   const items = row ? readLines(row.items).slice(0, 40) : [];
+  const shown = {
+    ...session.shown,
+    receipt: true,
+    welcome: true,
+    "before-review": true,
+    "running-low": true,
+    "keep-building": true
+  };
   return {
     ...session,
+    shown,
     trip: {
       saved: Number.isFinite(value) ? roundDollars(Math.max(0, value)) : 0,
+      total: Number.isFinite(total) && total > 0 ? roundDollars(total) : 0,
       savedToPastTrips: row?.savedToPastTrips === true,
       items
     }
@@ -122,6 +139,11 @@ function noteTrip(session, saved) {
 function clearTripNote(session) {
   const shown = { ...session.shown };
   delete shown["trip-saved"];
+  delete shown.welcome;
+  delete shown.receipt;
+  delete shown["before-review"];
+  delete shown["running-low"];
+  delete shown["keep-building"];
   return { ...session, trip: null, shown };
 }
 function normalizeName(value) {
@@ -144,9 +166,11 @@ function onList(name, listNames) {
 function formatDollars(amount) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(roundDollars(Number(amount)));
 }
-function receiptLine(count) {
+function receiptLine(count, total) {
   const n = Math.max(0, Math.floor(count));
-  const noun = n === 1 ? "item that is" : "items that are";
+  const all = Math.max(n, Math.floor(Number(total) || n));
+  const noun = all === 1 ? "item that is" : "items that are";
+  if (all > n) return `Showing ${n} of ${all} ${noun} not on your list yet. Choose any, then add them.`;
   return `I found ${n} ${noun} not on your list yet. Choose any, then add them.`;
 }
 function runningLowLine(names) {
@@ -159,8 +183,14 @@ function reviewLine(unfound) {
   if (name) return `I couldn't find ${name}. ${SIMILAR_LINE}`;
   return SIMILAR_LINE;
 }
-function tripLine(saved) {
-  return `Nice, you saved ${formatDollars(saved)}. Save this Shopping list for next time?`;
+function tripLine(saved, total) {
+  const amount = Number(saved);
+  const estimate = Number(total);
+  const estimateText = Number.isFinite(estimate) && estimate > 9e-3 ? ` Estimated ${formatDollars(estimate)}.` : "";
+  if (!(amount > 9e-3)) {
+    return estimateText ? `Trip saved.${estimateText} The receipt is in Past trips.` : "Trip saved. The receipt is in Past trips.";
+  }
+  return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }
 function linesFromReceipt(payload) {
   if (Array.isArray(payload)) return readLines(payload);
@@ -245,13 +275,15 @@ function receiptPicks(lines, usuals, limit = 8) {
     const usual = (usuals || []).find((row) => namesMatch(row.name, line.name));
     return { name: line.name, quantity: line.quantity || 1, times: Math.max(0, Math.floor(Number(usual?.times) || 0)) };
   });
-  const frequent = ranked.filter((row) => row.times > 0);
-  const pool = (frequent.length ? frequent : ranked).slice();
+  const pool = ranked.slice();
   pool.sort((a, b) => b.times - a.times || b.quantity - a.quantity || a.name.localeCompare(b.name));
   const names = [];
-  const cap = Math.max(1, Math.min(12, Math.floor(limit) || 8));
+  const seen = /* @__PURE__ */ new Set();
+  const cap = Math.max(1, Math.min(80, Math.floor(limit) || 8));
   for (const row of pool) {
-    if (!row.name || names.some((name) => namesMatch(name, row.name))) continue;
+    const key = normalizeName(row.name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     names.push(row.name);
     if (names.length >= cap) break;
   }
@@ -292,24 +324,28 @@ function decideGuide(input = {}) {
   if (input.savingsCard) return null;
   if (!session.shown["trip-saved"] && session.trip) {
     const names = (session.trip.items || []).map((item) => item.name).filter(Boolean);
+    const remember = !(Number(session.trip.saved) > 9e-3);
     return {
       moment: "trip-saved",
-      line: tripLine(session.trip.saved),
+      line: tripLine(session.trip.saved, session.trip.total),
       chips: [
-        { id: "save", label: "Save Shopping list", action: "save-list", names },
+        { id: "save", label: remember ? "Remember these items" : "Save Shopping list", action: "save-list", names },
         { id: "skip", label: "Not this time", action: "later" }
       ]
     };
   }
   if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
     const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
-    const picks = receiptPicks(offList, usuals, 6);
+    const available = receiptPicks(offList, usuals, Math.max(offList.length, 1));
+    const picks = session.receipt.showAll ? available : available.slice(0, 6);
+    const hidden = available.length - picks.length;
     if (picks.length) {
       return {
         moment: "receipt",
-        line: receiptLine(offList.length),
+        line: receiptLine(picks.length, available.length),
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
+          ...hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : [],
           { id: "add", label: "Add selected", action: "commit-picks" }
         ]
       };
@@ -416,6 +452,13 @@ function presentGuide(input = {}) {
   if (frame.defer) {
     return { session, current, defer: true, hidden: frame.hidden };
   }
+  if (current?.moment === "review-next" && !session.declined?.["review-next"]) {
+    const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
+    if (!decision || decision.moment === "review-next" || nextRank <= MOMENT_RANK["review-next"]) {
+      const nextSession = session.shown["review-next"] ? session : noteShown(session, "review-next");
+      return { session: nextSession, current, defer: false, hidden: false };
+    }
+  }
   if (current && momentStillFits(packed, current.moment)) {
     const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
     if (!decision || decision.moment === current.moment || nextRank <= MOMENT_RANK[current.moment]) {
@@ -505,6 +548,7 @@ export {
   receiptLinesFromImportBody,
   receiptLinesFromPayload,
   receiptPicks,
+  revealReceiptPicks,
   reviewLine,
   runningLowLine,
   runningLowSuggestions,

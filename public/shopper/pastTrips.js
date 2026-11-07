@@ -17,6 +17,23 @@ function money(cents) {
   return amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+/** Cents from a line price. A missing price is 0, not a made-up number. */
+export function lineEstimateCents(item) {
+  const qty = Math.max(1, Math.floor(Number(item?.quantity) || 1));
+  const itemTotal = Number(item?.itemTotal);
+  if (Number.isFinite(itemTotal) && itemTotal > 0) return Math.round(itemTotal * 100);
+  const price = Number(item?.price);
+  if (Number.isFinite(price) && price > 0) return Math.round(price * qty * 100);
+  return 0;
+}
+
+/** Store subtotal when it is priced, otherwise the sum of priced lines. */
+export function storeEstimateCents(store) {
+  const sub = Number(store?.subtotal);
+  if (Number.isFinite(sub) && sub > 0) return Math.round(sub * 100);
+  return (store?.items || []).reduce((sum, item) => sum + lineEstimateCents(item), 0);
+}
+
 /**
  * @param {{
  *   stores?: Array<{ storeName?: string, subtotal?: number, items?: object[] }>,
@@ -26,7 +43,13 @@ function money(cents) {
  *   id?: string,
  * }} input
  */
-export function tripReceipt(input = {}) {
+function isCentsReceipt(input) {
+  if (!input || typeof input !== "object") return false;
+  if (input.totalCents != null) return true;
+  return (input.stores || []).some((store) => store && store.totalCents != null);
+}
+
+function centsReceipt(input) {
   const at = Number(input.at) > 0 ? Math.floor(Number(input.at)) : Date.now();
   const stores = (input.stores || [])
     .map((store) => {
@@ -37,7 +60,34 @@ export function tripReceipt(input = {}) {
         }))
         .filter((item) => item.name)
         .slice(0, 80);
-      const totalCents = Math.max(0, Math.round(Number(store.subtotal) * 100) || 0);
+      return {
+        storeName: clean(store.storeName, 40),
+        totalCents: Math.max(0, Math.round(Number(store.totalCents) || 0)),
+        items,
+      };
+    })
+    .filter((store) => store.storeName);
+  const stated = Math.round(Number(input.totalCents) || 0);
+  const fromStores = stores.reduce((sum, store) => sum + store.totalCents, 0);
+  const totalCents = Math.max(0, stated > 0 ? stated : fromStores);
+  const savedCents = Math.max(0, Math.round(Number(input.savedCents) || 0));
+  const id = clean(input.id, 40) || `trip-${at}`;
+  return { id, at, totalCents, savedCents, stores };
+}
+
+export function tripReceipt(input = {}) {
+  if (isCentsReceipt(input)) return centsReceipt(input);
+  const at = Number(input.at) > 0 ? Math.floor(Number(input.at)) : Date.now();
+  const stores = (input.stores || [])
+    .map((store) => {
+      const items = (store.items || [])
+        .map((item) => ({
+          name: clean(item?.name || item?.query, 80),
+          quantity: Math.max(1, Math.min(99, Math.floor(Number(item?.quantity) || 1))),
+        }))
+        .filter((item) => item.name)
+        .slice(0, 80);
+      const totalCents = storeEstimateCents(store);
       return {
         storeName: clean(store.storeName, 40),
         totalCents,
@@ -45,7 +95,9 @@ export function tripReceipt(input = {}) {
       };
     })
     .filter((store) => store.storeName);
-  const totalCents = Math.max(0, Math.round(Number(input.total) * 100) || stores.reduce((sum, store) => sum + store.totalCents, 0));
+  const stated = Math.round(Number(input.total) * 100);
+  const fromStores = stores.reduce((sum, store) => sum + store.totalCents, 0);
+  const totalCents = Math.max(0, Number.isFinite(stated) && stated > 0 ? stated : fromStores);
   const savedCents = Math.max(0, Math.round(Number(input.savedCents) || 0));
   const id = clean(input.id, 40) || `trip-${at}`;
   return { id, at, totalCents, savedCents, stores };
@@ -142,12 +194,17 @@ export function receiptCardHtml(receipt, escapeHtml = escapeText) {
     .map((store) => `<li><span>${escapeHtml(store.storeName)}</span><strong>${escapeHtml(money(store.totalCents))}</strong></li>`)
     .join("");
   const items = (receipt.stores || [])
-    .flatMap((store) => (store.items || []).map((item) => `${item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name}`))
-    .map((name) => `<li>${escapeHtml(name)}</li>`)
+    .flatMap((store) =>
+      (store.items || []).map(
+        (item) =>
+          `<li><span>${escapeHtml(item.name)}</span><span>× ${Math.max(1, Math.floor(Number(item.quantity) || 1))}</span></li>`
+      )
+    )
     .join("");
   const saved = receipt.savedCents > 0 ? `<p class="receipt-saved">Saved ${escapeHtml(money(receipt.savedCents))}</p>` : "";
+  const totalLabel = receipt.totalCents > 0 ? money(receipt.totalCents) : "No price saved";
   return `<article class="trip-receipt" data-receipt="${escapeHtml(receipt.id)}">
-    <header><h3>${escapeHtml(when || "Trip")}</h3><strong>${escapeHtml(money(receipt.totalCents))}</strong></header>
+    <header><h3>${escapeHtml(when || "Trip")}</h3><p class="receipt-estimate"><span>Estimated</span> <strong data-trip-total>${escapeHtml(totalLabel)}</strong></p></header>
     <ul class="receipt-stores">${stores}</ul>
     ${saved}
     <div class="starter-actions">

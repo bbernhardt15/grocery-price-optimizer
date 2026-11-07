@@ -93,6 +93,11 @@ body:has(#gitter-guide:not([hidden])) .body {
   pointer-events: auto;
 }
 
+.gitter-guide-chip[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
 .gitter-guide-chip {
   flex: 1 1 auto;
   min-width: 0;

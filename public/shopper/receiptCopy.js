@@ -6,7 +6,7 @@
 import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
 import { learnedActionsHtml } from "./learnedActions.js";
 import { learnedRulePillHtml } from "./learnedRule.js";
-import { tripAddHtml } from "./tripAdd.js";
+import { joinBrandName, tripAddHtml } from "./tripAdd.js";
 
 export const RECEIPT_TITLE = "Teach Gitter your usual groceries";
 
@@ -35,6 +35,10 @@ export const STORE_HINTS = [
   { store: "Amazon", hint: "Amazon Fresh or Whole Foods: Your Orders, open the order, screenshot it." },
   { store: "Email", hint: "Open the store's receipt and screenshot it, or save the PDF." },
 ];
+
+function joinLineName(line) {
+  return joinBrandName(line?.brand, line?.name);
+}
 
 function escapeText(value) {
   return String(value || "")
@@ -217,7 +221,7 @@ export function learnedSummaryHtml(learned, options = {}) {
     ? `<p class="profile-label">Check each line</p><ul class="learned-lines">${(options.lines || [])
         .map(
           (line, index) =>
-            `<li><span>${escapeText(line.brand ? `${line.brand} ${line.name}` : line.name)}</span> <button type="button" class="text-btn" data-line-remove="${index}">Remove</button></li>`
+            `<li><span>${escapeText(joinLineName(line))}</span> <button type="button" class="text-btn" data-line-remove="${index}">Remove</button></li>`
         )
         .join("")}</ul>`
     : "";

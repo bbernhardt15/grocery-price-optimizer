@@ -28,6 +28,7 @@ import {
   presentGuide,
   readGuideSettings,
   receiptLine,
+  revealReceiptPicks,
   receiptLinesFromImportBody,
   receiptLinesFromPayload,
   receiptPicks,
@@ -111,8 +112,20 @@ describe("Gitter guide rules", () => {
     });
     assert.ok(prompt);
     assert.equal(prompt.moment, "receipt");
-    assert.equal(prompt.line, "I found 59 items that are not on your list yet. Choose any, then add them.");
-    assert.equal(receiptLine(59), prompt.line);
+    assert.equal(prompt.line, receiptLine(6, 59));
+    assert.equal(prompt.chips.some((chip) => chip.action === "show-rest"), true);
+    const revealed = decideGuide({
+      ...view(),
+      settings: emptyGuideSettings(),
+      session: revealReceiptPicks(session),
+      usuals: [
+        { name: "Large Eggs", times: 2 },
+        { name: "Whole Milk", times: 9 },
+      ],
+    });
+    assert.equal(revealed?.chips.filter((chip) => chip.action === "toggle-pick").length, 59);
+    assert.equal(revealed?.line, receiptLine(59));
+    assert.match(receiptLine(1), /1 item that is/);
     assert.equal(receiptLine(1), "I found 1 item that is not on your list yet. Choose any, then add them.");
     assert.equal(prompt.chips.at(-1)?.label, "Add selected");
     assert.equal(prompt.chips.at(-1)?.action, "commit-picks");
@@ -128,6 +141,18 @@ describe("Gitter guide rules", () => {
         []
       ),
       ["Soda", "Bread"]
+    );
+    assert.deepEqual(
+      receiptPicks(
+        [
+          { name: "Milk", quantity: 2 },
+          { name: "Whole Milk", quantity: 2 },
+          { name: "Eggs", quantity: 1 },
+        ],
+        [],
+        6
+      ),
+      ["Milk", "Whole Milk", "Eggs"]
     );
   });
 
@@ -297,9 +322,44 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, tripLine(12.5));
     assert.equal(prompt.line, `Nice, you saved ${formatDollars(12.5)}. Save this Shopping list for next time?`);
     assert.match(prompt.line, /Nice, you saved \$12\.50\. Save this Shopping list for next time\?/);
+    const quiet = noteTrip(createGuideSession(), { saved: 0, total: 304.47, savedToPastTrips: true, items: [{ name: "Milk", quantity: 1 }] });
+    const finished = decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: quiet });
+    assert.equal(finished?.moment, "trip-saved");
+    assert.match(finished?.line || "", /Estimated \$304\.47/);
+    assert.match(finished?.line || "", /Past trips/);
+    assert.equal(finished?.chips?.[0]?.label, "Remember these items");
+    assert.doesNotMatch(finished?.line || "", /\$0\.00/);
+    const withReceipt = {
+      ...quiet,
+      receipt: { count: 9, lines: Array.from({ length: 9 }, (_, index) => ({ name: `Item ${index}`, quantity: 1 })), taught: true },
+    };
+    assert.equal(
+      decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: noteShown(withReceipt, "trip-saved") }),
+      null
+    );
     assert.equal(prompt.chips[0].label, "Save Shopping list");
     assert.deepEqual(prompt.chips[0].names, ["Whole Milk"]);
     assert.equal(prompt.chips[0].action, "save-list");
+    const unmatched = presentGuide({
+      settings: emptyGuideSettings(),
+      session: createGuideSession(),
+      view: view({
+        step: "plan",
+        itemCount: 3,
+        unfound: ["Shirley Temple"],
+        pricesLabel: "Prices updated",
+        search: unfoundSearchLinks("Shirley Temple"),
+      }),
+    });
+    assert.equal(unmatched.current?.moment, "review-next");
+    const kept = presentGuide({
+      settings: emptyGuideSettings(),
+      session: unmatched.session,
+      current: unmatched.current,
+      view: view({ step: "plan", itemCount: 3, savingsCard: true, unfound: [], pricesLabel: "Prices updated" }),
+    });
+    assert.equal(kept.current?.moment, "review-next");
+    assert.equal(kept.current?.line, unmatched.current?.line);
     assert.equal(prompt.chips.some((chip) => chip.label === "Undo"), false);
     const undone = clearTripNote(session);
     assert.equal(undone.trip, null);

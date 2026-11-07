@@ -22,6 +22,20 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+/** Brand once, even when the receipt name already starts with that brand. */
+export function joinBrandName(brand, name) {
+  const brandText = clean(brand);
+  const nameText = clean(name);
+  if (!brandText) return nameText || "Item";
+  if (!nameText) return brandText;
+  const escaped = brandText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const repeated = new RegExp(`^(?:${escaped})(?:\\s+${escaped})*$`, "i");
+  if (repeated.test(nameText)) return brandText;
+  const prefix = new RegExp(`^${escaped}\\s+`, "i");
+  const rest = nameText.replace(prefix, "").trim();
+  return rest && rest.toLowerCase() !== nameText.toLowerCase() ? `${brandText} ${rest}` : `${brandText} ${nameText}`;
+}
+
 function lineTotal(line) {
   const price = Number(line?.price);
   return Number.isFinite(price) && price > 0 ? price : 0;
@@ -35,7 +49,7 @@ export function buildTripAddList(lines, _options = {}) {
   const rows = (lines || []).map((line, index) => {
     const receiptQty = Math.max(1, Math.floor(Number(line?.quantity) || 1));
     const quantity = tripQuantityDefault(receiptQty);
-    const name = clean(line?.brand ? `${line.brand} ${line.name}` : line?.name) || "Item";
+    const name = joinBrandName(line?.brand, line?.name);
     const family = clean(line?.family);
     const category = clean(line?.label || line?.category) || "Groceries";
     return {

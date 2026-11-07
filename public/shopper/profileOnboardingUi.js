@@ -42,6 +42,8 @@ import { lightTap } from "./phone.js";
 import { knownBrandNames } from "./stapleFamilies.js";
 import { storesForZip, zipContinueDecision } from "./nearbyStores.js";
 import { adStoresVisible, mergeSavedStores, visibleStoreNames } from "./storeScope.js";
+import { receiptBackPhase, receiptReadCurrent } from "./receiptNav.js";
+import { PROFILE_CONNECT_KEY, storeConnectCopy } from "./storeConnect.js";
 import { suggestZipChoices } from "./zipSuggest.js";
 import { fieldZip, ZIP_PLACEHOLDER } from "./zipField.js";
 import { installChainColors } from "./chainColors.js";
@@ -106,6 +108,7 @@ export function mountProfileOnboarding(deps = {}) {
   /** @type {(() => void) | null} */
   let skipBeat = null;
   let beatToken = 0;
+  let connectStatus = null;
   /** Parsing and brand grouping must both finish before the learned screen exists. */
   let importGate = { parsing: false, grouping: false, revealed: false };
   let beatMarkup = "";
@@ -217,7 +220,8 @@ export function mountProfileOnboarding(deps = {}) {
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
         <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
-        <div id="profile-store-list" class="store-choices"></div>`;
+        <div id="profile-store-list" class="store-choices"></div>
+        <div id="store-connect"></div>`;
     }
     if (step.kind === "receipts") {
       const importing = importGate.parsing || importGate.grouping || receiptPhase === "reading" || (receiptPhase === "learned" && !learnedViewReady(importGate));
@@ -249,7 +253,10 @@ export function mountProfileOnboarding(deps = {}) {
           savedFamilies: savedRules,
         })}`;
       }
-      return receiptUploadHtml();
+      const restore = learnedRows.length
+        ? `<p class="paper-note">This order is already read.</p><button type="button" class="ghost" id="receipt-restore">Back to what we learned</button>`
+        : "";
+      return `${restore}${receiptUploadHtml()}`;
     }
     if (step.kind === "products") {
       const categories = preferenceCategories();
@@ -487,6 +494,80 @@ export function mountProfileOnboarding(deps = {}) {
     const open = !draft.shopStores?.length;
     host.innerHTML = storeChoiceHtml(names, { selected, open });
     if (note) note.textContent = nearby.note || "Stores within about 25 miles. Uncheck one to leave it out.";
+    paintStoreConnect(names);
+  }
+
+  function paintStoreConnect(names) {
+    const host = $("store-connect");
+    if (!host) return;
+    if (!names?.length) {
+      host.innerHTML = "";
+      return;
+    }
+    const copy = storeConnectCopy({
+      stores: names,
+      oauthConfigured: Boolean(connectStatus?.oauthConfigured),
+      connected: Boolean(connectStatus?.connected),
+    });
+    const now = copy.showNow ? `<button type="button" class="primary" id="store-connect-now">${escapeText(copy.now)}</button>` : "";
+    const walmart = copy.walmart ? `<p class="muted">${escapeText(copy.walmart)}</p>` : "";
+    host.innerHTML = `<section class="store-connect" aria-labelledby="store-connect-title">
+      <h3 id="store-connect-title">${escapeText(copy.title)}</h3>
+      <p>${escapeText(copy.body)}</p>
+      ${walmart}
+      <div class="choice-stack">
+        ${now}
+        <button type="button" class="ghost" id="store-connect-later">${escapeText(copy.later)}</button>
+      </div>
+    </section>`;
+    if (!connectStatus) void loadConnectStatus(names);
+  }
+
+  async function loadConnectStatus(names) {
+    try {
+      const response = await fetch("/api/kroger/auth-status", { headers: { Accept: "application/json" } });
+      connectStatus = response.ok ? await response.json() : { oauthConfigured: false, connected: false };
+    } catch {
+      connectStatus = { oauthConfigured: false, connected: false };
+    }
+    if (stepId === "place" || stepId === "zip") paintStoreConnect(names);
+  }
+
+  async function connectStoresNow() {
+    const zip = readZip();
+    if (!zip) return;
+    const place = readPlace();
+    if (place) draft.shopStores = place.stores;
+    draft = persist({
+      ...draft,
+      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "place", updatedAt: Date.now() },
+    });
+    try {
+      sessionStorage.setItem(PROFILE_CONNECT_KEY, "connected");
+    } catch {
+      /* private browsing */
+    }
+    try {
+      const response = await fetch("/api/kroger/connect", { method: "POST", headers: { Accept: "application/json" } });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.authorizeUrl) {
+        try {
+          sessionStorage.removeItem(PROFILE_CONNECT_KEY);
+        } catch {
+          /* private browsing */
+        }
+        deps.toast?.(body.error || "Kroger sign-in isn't available. You can do this at checkout.");
+        return;
+      }
+      window.location.assign(body.authorizeUrl);
+    } catch {
+      try {
+        sessionStorage.removeItem(PROFILE_CONNECT_KEY);
+      } catch {
+        /* private browsing */
+      }
+      deps.toast?.("Couldn't open Kroger sign-in. You can do this at checkout.");
+    }
   }
 
   function syncZipContinue() {
@@ -1011,7 +1092,18 @@ export function mountProfileOnboarding(deps = {}) {
     editingFamily = "";
     render();
     focusTitle();
+    pushReceiptHistory();
     for (const row of learnedRows) void loadBrandShelf(row.family);
+  }
+
+  let receiptHistory = 0;
+  function pushReceiptHistory() {
+    try {
+      history.pushState({ ggReceipt: receiptPhase }, "");
+      receiptHistory += 1;
+    } catch {
+      /* private browsing or a missing history API */
+    }
   }
 
   function paintLearnedCard(family, options = {}) {
@@ -1040,6 +1132,7 @@ export function mountProfileOnboarding(deps = {}) {
 
   async function holdThenLearned() {
     beatMarkup = "";
+    if (receiptPhase !== "reading") return;
     if (importGate.parsing || importGate.grouping) return;
     importGate = { parsing: false, grouping: false, revealed: true };
     showLearned();
@@ -1054,6 +1147,7 @@ export function mountProfileOnboarding(deps = {}) {
     card.items = [];
     card.found = 0;
     beatToken += 1;
+    const readToken = beatToken;
     beatMarkup = "";
     importGate = { parsing: true, grouping: false, revealed: false };
     motion = "forward";
@@ -1062,8 +1156,12 @@ export function mountProfileOnboarding(deps = {}) {
     try {
       const result = await deps.readReceipts({
         files: [card.file],
-        onProgress: (event) => applyReadProgress({ ...event, fileIndex: card.index }),
+        onProgress: (event) => {
+          if (!receiptReadCurrent(readToken, beatToken, receiptPhase)) return;
+          applyReadProgress({ ...event, fileIndex: card.index });
+        },
       });
+      if (!receiptReadCurrent(readToken, beatToken, receiptPhase)) return;
       if (!result?.lines?.length) {
         card.status = "error";
         card.error = result?.error || "Couldn't read that file.";
@@ -1106,6 +1204,7 @@ export function mountProfileOnboarding(deps = {}) {
     });
     if (!readCards.length) return;
     beatToken += 1;
+    const readToken = beatToken;
     beatMarkup = "";
     startReadTicker();
     learnedRows = [];
@@ -1120,6 +1219,7 @@ export function mountProfileOnboarding(deps = {}) {
         text,
         files: list,
         onProgress: (event) => {
+          if (!receiptReadCurrent(readToken, beatToken, receiptPhase)) return;
           if (event?.stage === "grouping") {
             importGate = { parsing: false, grouping: true, revealed: false };
             const stage = $("profile-stage");
@@ -1132,6 +1232,7 @@ export function mountProfileOnboarding(deps = {}) {
           applyReadProgress(event);
         },
       });
+      if (!receiptReadCurrent(readToken, beatToken, receiptPhase)) return;
       pendingFiles = [];
       if (!result || (result.error && !result.lines?.length)) {
         const message = result?.error || result?.photoMessage || "We couldn't read that. You can paste the order text, or skip for now.";
@@ -1176,6 +1277,7 @@ export function mountProfileOnboarding(deps = {}) {
         render();
         return;
       }
+      if (!receiptReadCurrent(readToken, beatToken, receiptPhase)) return;
       importGate = { parsing: false, grouping: false, revealed: false };
       void holdThenLearned();
     } catch (error) {
@@ -1299,6 +1401,7 @@ export function mountProfileOnboarding(deps = {}) {
         receiptPhase = "trip";
         motion = "forward";
         render();
+        pushReceiptHistory();
         resetStageScroll();
         focusTitle();
         resetStageScroll();
@@ -1457,7 +1560,13 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (stepId === "receipts" && (receiptPhase === "learned" || receiptPhase === "reading" || receiptPhase === "trip") && !returnTo) {
-      receiptPhase = "upload";
+      const nextPhase = receiptBackPhase(receiptPhase);
+      if (receiptPhase === "reading") {
+        beatToken += 1;
+        stopReadTicker();
+        importGate = { parsing: false, grouping: false, revealed: false };
+      }
+      receiptPhase = nextPhase;
       motion = "back";
       render();
       focusTitle();
@@ -1503,6 +1612,21 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.id === "receipt-restore") {
+      if (!learnedRows.length) return;
+      importGate = { parsing: false, grouping: false, revealed: true };
+      showLearned();
+      return;
+    }
+    if (target.id === "store-connect-later") {
+      const host = $("store-connect");
+      if (host) host.innerHTML = `<p class="muted">You can connect Kroger at checkout. That sign-in still opens on Kroger's site.</p>`;
+      return;
+    }
+    if (target.id === "store-connect-now") {
+      void connectStoresNow();
+      return;
+    }
     if (target.id === "read-beat-continue" || target.id === "read-beat-skip") {
       skipBeat?.();
       return;
@@ -1561,6 +1685,7 @@ export function mountProfileOnboarding(deps = {}) {
         })
         .filter(Boolean);
       if (!picked.length) return;
+      deps.holdGuide?.();
       finish(Date.now());
       void Promise.resolve(deps.addLearnedLines?.(picked)).catch(() => {
         deps.toast?.("Couldn't add those items.");
@@ -1851,9 +1976,44 @@ export function mountProfileOnboarding(deps = {}) {
     draft = persist({ ...draft, onboarding: { status: "in_progress", step: stepId, updatedAt: Date.now() } });
   });
 
+  window.addEventListener("popstate", () => {
+    if (!dialog?.open || receiptHistory <= 0) return;
+    receiptHistory -= 1;
+    if (stepId !== "receipts") return;
+    const nextPhase = receiptBackPhase(receiptPhase);
+    if (nextPhase === receiptPhase) return;
+    if (receiptPhase === "reading") {
+      beatToken += 1;
+      stopReadTicker();
+      importGate = { parsing: false, grouping: false, revealed: false };
+    }
+    receiptPhase = nextPhase;
+    motion = "back";
+    render();
+    focusTitle();
+  });
+
   return {
     open() {
       openAt(resumeStep(getUserProfile(storage)));
+    },
+    resumeAfterConnect() {
+      try {
+        sessionStorage.removeItem(PROFILE_CONNECT_KEY);
+      } catch {
+        /* private browsing */
+      }
+      draft = getUserProfile(storage);
+      stepId = "receipts";
+      receiptPhase = "upload";
+      returnTo = "";
+      draft = persist({
+        ...draft,
+        onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "receipts", updatedAt: Date.now() },
+      });
+      render();
+      if (!dialog.open) dialog.showModal();
+      focusTitle();
     },
     redo() {
       openAt("welcome");

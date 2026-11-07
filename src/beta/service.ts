@@ -26,6 +26,13 @@ export const FEEDBACK_LIMIT = 5;
 export const FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
 const INVITE_LIMIT = 8;
 const INVITE_WINDOW_MS = 10 * 60 * 1000;
+
+/** Playwright redeems a fresh device on every phone test from 127.0.0.1. Production stays at 8. */
+function inviteAttemptLimit(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env.BETA_INVITE_RATE_LIMIT);
+  if (Number.isFinite(raw) && raw >= 1) return Math.min(10_000, Math.floor(raw));
+  return INVITE_LIMIT;
+}
 const EVENT_LIMIT = 120;
 const EVENT_WINDOW_MS = 60 * 1000;
 const ERROR_LIMIT = 20;
@@ -353,7 +360,7 @@ export async function redeemInvite(
     return { status: 200, body: { ok: true, required: true } };
   }
   const ip = clientIp(req);
-  if (!allowRate(`invite:${ip}`, INVITE_LIMIT, INVITE_WINDOW_MS, now)) {
+  if (!allowRate(`invite:${ip}`, inviteAttemptLimit(env), INVITE_WINDOW_MS, now)) {
     return { status: 429, body: { error: "Too many invite attempts. Wait a moment and try again." } };
   }
   if (!code) return { status: 401, body: { error: "That invite code is not recognized." } };

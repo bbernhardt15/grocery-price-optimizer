@@ -28,6 +28,21 @@ export default defineConfig({
       use: { ...sharedUse, baseURL: `http://127.0.0.1:${phonePort}` },
     },
     {
+      name: "phone-webkit",
+      testMatch: /phoneFlow.*\.spec\.ts/,
+      use: {
+        browserName: "webkit",
+        viewport: { width: 390, height: 844 },
+        userAgent:
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 3,
+        baseURL: `http://127.0.0.1:${phonePort}`,
+        trace: "retain-on-failure",
+      },
+    },
+    {
       name: "features",
       testMatch: /features\.spec\.ts/,
       use: {
@@ -47,6 +62,7 @@ export default defineConfig({
         ...process.env,
         PORT: String(phonePort),
         BETA_INVITE_CODES: "Brandon-50y4",
+        BETA_INVITE_RATE_LIMIT: "400",
         E2E_FEATURES: "",
       },
     },
@@ -59,6 +75,7 @@ export default defineConfig({
         ...process.env,
         PORT: String(featuresPort),
         BETA_INVITE_CODES: "Brandon-50y4",
+        BETA_INVITE_RATE_LIMIT: "400",
         E2E_FEATURES: "1",
       },
     },

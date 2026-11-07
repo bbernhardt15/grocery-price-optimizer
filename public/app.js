@@ -174,7 +174,7 @@ import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreL
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
-import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
+import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
@@ -212,13 +212,14 @@ import {
   viewportInsets,
   writeHandoffResult,
 } from "./shopper/chromeIos.js";
-import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, tripReceipt } from "./shopper/pastTrips.js";
+import { mergePastTrips, pastTripsEmptyHtml, pastTripsHomeHtml, readPastTrips, receiptCardHtml, reuseLines, savePastTrip, storeEstimateCents, tripReceipt } from "./shopper/pastTrips.js";
 import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
-import { chooseDisplayedPlan, listDisplayPlan } from "./shopper/planFallback.js";
+import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed } from "./shopper/planFallback.js";
+import { joinBrandName } from "./shopper/tripAdd.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 import { mountGuide, namesMatch as guideNamesMatch } from "./guide.js";
 
@@ -858,7 +859,7 @@ function showTripValue() {
     id: tripFingerprint(view.stores) || `trip-${Date.now()}`,
     at: Date.now(),
     stores: view.stores,
-    total: view.total,
+    total: estimatedTripTotal(view),
     savedCents: Math.round((Number(summary.savedVsSingle) || 0) * 100),
   });
   savePastTrip(localStorage, receipt);
@@ -956,6 +957,26 @@ function openClearTrip() {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+let completedListSave = null;
+
+function listRowsForSave() {
+  return [...list.values()]
+    .map((entry) => ({
+      name: entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "",
+      brand: entry.product?.brand || "",
+      catalogId: String(entry.product?.id || ""),
+      quantity: entry.quantity || 1,
+    }))
+    .filter((row) => row.name);
+}
+
+function estimatedTripTotal(view) {
+  const stated = Number(view?.total);
+  if (Number.isFinite(stated) && stated > 0) return Math.round(stated * 100) / 100;
+  const cents = (view?.stores || []).reduce((sum, store) => sum + storeEstimateCents(store), 0);
+  return Math.round(cents) / 100;
+}
+
 function finishCurrentTrip() {
   const view = currentTrip();
   if (!view?.stores?.length) {
@@ -966,21 +987,23 @@ function finishCurrentTrip() {
   const comparison = singleStoreSavings(lines);
   const profile = getUserProfile(localStorage);
   const usualStore = profile.savings?.usualStore || profile.shopStores?.[0] || comparison.singleStore?.storeName || "";
-  const saved = Math.max(0, Number(comparison.savings) || 0);
+  const realized = comparison.singleStore && Number(comparison.savings) > 0.009 ? Number(comparison.savings) : 0;
   const fingerprint = tripFingerprint(view.stores);
   const seenKey = "gg-savings-fingerprint";
-  if (saved > 0 && localStorage.getItem(seenKey) !== fingerprint) {
-    const next = addLifetimeSavings(profile, saved);
+  if (realized > 0 && localStorage.getItem(seenKey) !== fingerprint) {
+    const next = addLifetimeSavings(profile, realized);
     saveUserProfile(localStorage, { ...profile, savings: { ...next, usualStore: usualStore || next.usualStore } });
     localStorage.setItem(seenKey, fingerprint);
     scheduleAccountSync();
   }
+  const estimated = estimatedTripTotal(view);
+  completedListSave = listRowsForSave();
   const receipt = tripReceipt({
     id: fingerprint || `trip-${Date.now()}`,
     at: Date.now(),
     stores: view.stores,
-    total: view.total,
-    savedCents: Math.round(saved * 100),
+    total: estimated,
+    savedCents: Math.round(realized * 100),
   });
   savePastTrip(localStorage, receipt);
   scheduleAccountSync();
@@ -996,7 +1019,8 @@ function finishCurrentTrip() {
   };
   const at = writeCompletedTrip(localStorage, Date.now());
   guide?.noteTrip?.({
-    saved,
+    saved: realized,
+    total: estimated,
     savedToPastTrips: true,
     items: lines.map((item) => ({
       name: item.name || item.familyName || "",
@@ -1486,9 +1510,31 @@ function friendlyCartError(message) {
 }
 
 let pendingKrogerReturn = null;
+let profileConnectResume = false;
+let profileConnectHandoff = false;
 
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
+  profileConnectHandoff = false;
+  let marker = "";
+  try {
+    marker = sessionStorage.getItem("gg-profile-connect") || "";
+    if (marker) sessionStorage.removeItem("gg-profile-connect");
+  } catch {
+    /* private browsing */
+  }
+  if (marker === "connected" && parsed.kind === "connected") {
+    profileConnectResume = true;
+    rememberKrogerConnected();
+    toast(parsed.message || "Kroger connected. Kroger may still ask you to sign in at checkout.");
+    profileUi?.resumeAfterConnect?.();
+    return;
+  }
+  if (marker === "connected" && parsed.kind !== "added") {
+    profileConnectHandoff = true;
+    toast(parsed.kind === "error" ? parsed.message || "Kroger sign-in was cancelled." : "Kroger sign-in was not finished.");
+    return;
+  }
   landedFromKroger = true;
   if (parsed.kind === "added") {
     const saved = readKrogerTrip(localStorage);
@@ -1659,7 +1705,14 @@ let finishOnReturn = false;
 
 function consumeKrogerReturn() {
   const parsed = parseKrogerReturn(window.location.search);
-  if (!parsed) return;
+  if (!parsed) {
+    try {
+      sessionStorage.removeItem("gg-profile-connect");
+    } catch {
+      /* private browsing */
+    }
+    return;
+  }
   const params = new URLSearchParams(window.location.search);
   finishOnReturn = params.get("checkedOut") === "1";
   params.delete("kroger");
@@ -1672,6 +1725,7 @@ function consumeKrogerReturn() {
   const kind = parsed.kind === "added" ? "cart" : "store";
   const shared = publishHandoff("Kroger", kind, { phase: "returned", message: parsed.message });
   applyKrogerReturn(parsed);
+  if (profileConnectResume || profileConnectHandoff) return;
   const copy = returnScreenCopy("Kroger", kind);
   showHandoffReturn(copy.title, copy.body);
   if (shared.plan.tryClose && callbackCanClose(window.opener)) window.close();
@@ -2713,8 +2767,8 @@ async function loadPage(reset) {
   const requestedDepartment = activeDepartment;
   const requestedQuery = query;
   loading = true;
-  if (reset) {
-    if (flowStep === "add" && !gridEl.querySelector(".card")) skeletons();
+    if (reset) {
+    if (flowStep === "add" && !gridEl.querySelector(".card") && !gridEl.querySelector(".shelf-loading")) skeletons();
     nextCursor = null;
   }
   showCatalogError("");
@@ -2724,13 +2778,13 @@ async function loadPage(reset) {
     const response = await fetch(apiUrl(`/api/catalog/browse?${params.toString()}`));
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
+    if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
     coverage = body.coverage ?? coverage;
     weeklyAdBanners = Array.isArray(body.weeklyAdBanners) ? body.weeklyAdBanners : [];
     catalogSource = body.catalogSource || catalogSource;
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
-    if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
     const items = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
@@ -2739,6 +2793,8 @@ async function loadPage(reset) {
       ? `<p class="swap-quiet">Your ${escapeHtml(familyLabel(viewed.resolved.family) || "usual")}. <button type="button" class="linkish" data-pref-change="${escapeHtml(viewed.resolved.family)}">Change</button></p>`
       : "";
     const html = viewed.items.map(cardHtml).join("");
+    const shelfScroll = reset ? window.scrollY : 0;
+    if (reset) gridEl.style.minHeight = "";
     gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
     if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
@@ -2753,6 +2809,7 @@ async function loadPage(reset) {
         resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
       }
     }
+    if (reset) holdShelfForScroll(shelfScroll);
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
@@ -2801,8 +2858,56 @@ function selectDepartment(id) {
   renderDepartments();
   syncBrowse();
   const chip = document.querySelector(`[data-dept="${CSS.escape(id)}"]`);
-  chip?.scrollIntoView({ inline: "center", block: "nearest" });
+  const scroller = chip?.closest(".dept-scroller");
+  if (chip instanceof HTMLElement && scroller instanceof HTMLElement) {
+    const left = chip.offsetLeft - (scroller.clientWidth - chip.offsetWidth) / 2;
+    scroller.scrollTo({ left: Math.max(0, left) });
+  }
+  if (gridEl) {
+    const visual = gridEl.getBoundingClientRect().height;
+    const hold = window.scrollY > 80 ? Math.max(visual, 720) : Math.min(Math.max(visual, 1), 720);
+    gridEl.style.minHeight = `${Math.ceil(hold)}px`;
+    gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
+    if (resultCountEl) resultCountEl.textContent = "Loading…";
+  }
   void loadPage(true);
+}
+
+function clearShelfFloor() {
+  if (gridEl) gridEl.style.minHeight = "";
+}
+
+/** Keep the current scroll from clamping while a shorter aisle paints, then let a return to the top drop the spacer. */
+function holdShelfForScroll(scrollY) {
+  if (!gridEl) return;
+  if (!(scrollY > 80)) {
+    clearShelfFloor();
+    return;
+  }
+  const natural = gridEl.getBoundingClientRect().height;
+  const top = gridEl.getBoundingClientRect().top + window.scrollY;
+  const needed = Math.ceil(scrollY + window.innerHeight - top + 24);
+  if (needed > natural + 8) {
+    gridEl.style.minHeight = `${needed}px`;
+    armShelfFloorWatch();
+    window.scrollTo(0, scrollY);
+    return;
+  }
+  clearShelfFloor();
+}
+
+let shelfFloorWatch = false;
+function armShelfFloorWatch() {
+  if (shelfFloorWatch) return;
+  shelfFloorWatch = true;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!gridEl?.style.minHeight || window.scrollY > 80) return;
+      clearShelfFloor();
+    },
+    { passive: true }
+  );
 }
 
 function highlightHtml(text, q) {
@@ -2996,7 +3101,7 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
   document.body.dataset.refine = open ? "1" : "";
   paintRefine();
-  if (open) $("sort")?.focus();
+  if (open) $("refine-title")?.focus();
 }
 
 function openProduct(product) {
@@ -3712,7 +3817,8 @@ function reviewItemRows(items) {
       const qty = Number(item.quantity) > 1 ? ` x${item.quantity}` : "";
       const amount = Number(item.itemTotal ?? linePrice(item));
       const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
-      return `<li class="review-line"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
+      const lineKey = String(item.lineId || item.title || "").replace(/"/g, "");
+      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
     })
     .join("");
 }
@@ -3789,6 +3895,7 @@ function settleEntryScroll(extra = false) {
 
 function paintReviewLoading(status) {
   if (!tripEl || flowStep !== "plan") return;
+  if (holdVisibleReview(status)) return;
   const existing = tripEl.querySelector("[data-review-stable='loading']");
   if (existing) {
     const line = existing.querySelector(".review-loading-status");
@@ -3800,6 +3907,28 @@ function paintReviewLoading(status) {
   tripEl.innerHTML = `${krogerBannerHtml()}${reviewLoadingHtml(selectedStoreNames(), status)}`;
   paintPlanBar();
   settleEntryScroll();
+}
+
+function clearReviewRefresh() {
+  document.querySelector("[data-review-refresh]")?.remove();
+  tripEl?.querySelector("[data-review-shell]")?.removeAttribute("aria-busy");
+}
+
+/** Keep the priced Review on screen while a refresh is in flight. The note does not change the page height. */
+function holdVisibleReview(status) {
+  const shell = tripEl?.querySelector("[data-review-shell]");
+  if (!(shell instanceof HTMLElement)) return false;
+  shell.setAttribute("aria-busy", "true");
+  let note = document.querySelector("[data-review-refresh]");
+  if (!(note instanceof HTMLElement)) {
+    note = document.createElement("p");
+    note.className = "review-refresh-note";
+    note.setAttribute("data-review-refresh", "1");
+    note.setAttribute("role", "status");
+    document.body.appendChild(note);
+  }
+  note.textContent = status || "Checking store prices";
+  return true;
 }
 
 function settledReviewPayload(signature, zip, force = false) {
@@ -3869,7 +3998,113 @@ function selectReviewMode(mode) {
   haptic();
 }
 
+let refreshAnchorWatch = 0;
+
+function releaseRefreshScrollGuard(watchId) {
+  if (watchId && watchId === refreshAnchorWatch) refreshAnchorWatch += 1;
+}
+
+/**
+ * A refresh can focus its button and the browser scrolls that control into view.
+ * Correct that jump until the shopper actually scrolls. A wheel, touch, key, or
+ * pointer gesture ends the correction immediately and keeps the new position.
+ */
+function beginRefreshScrollGuard(startY) {
+  const watchId = ++refreshAnchorWatch;
+  let handedToUser = false;
+  const detach = () => {
+    window.removeEventListener("wheel", onUser, true);
+    window.removeEventListener("touchstart", onUser, true);
+    window.removeEventListener("touchmove", onUser, true);
+    window.removeEventListener("pointerdown", onPointer, true);
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const finishUser = () => {
+    if (handedToUser || watchId !== refreshAnchorWatch) return;
+    handedToUser = true;
+    refreshAnchorWatch += 1;
+    detach();
+  };
+  const onUser = () => finishUser();
+  const onPointer = (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("#plan-refresh")) return;
+    finishUser();
+  };
+  const onKey = (event) => {
+    const key = event.key;
+    if (key !== " " && key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(key)) return;
+    finishUser();
+  };
+  window.addEventListener("wheel", onUser, { capture: true, passive: true });
+  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
+  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
+  const until = performance.now() + 500;
+  const watch = () => {
+    if (handedToUser || watchId !== refreshAnchorWatch) {
+      detach();
+      return;
+    }
+    if (Math.abs(window.scrollY - startY) > 1) window.scrollTo(0, startY);
+    if (performance.now() < until) requestAnimationFrame(watch);
+    else detach();
+  };
+  watch();
+  return watchId;
+}
+
+function clearTripFloor() {
+  if (tripEl) tripEl.style.minHeight = "";
+}
+
+function tripContentHeight() {
+  if (!tripEl) return 0;
+  return [...tripEl.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+}
+
+function reviewScrollSnapshot() {
+  if (!tripEl) return null;
+  const openStores = [...tripEl.querySelectorAll("details.store-fold[open]")]
+    .map((node) => node.closest("[data-store]")?.getAttribute("data-store") || "")
+    .filter(Boolean);
+  let anchor = "";
+  let anchorTop = null;
+  for (const line of tripEl.querySelectorAll("[data-review-line]")) {
+    const top = line.getBoundingClientRect().top;
+    if (top >= 48 && top < window.innerHeight * 0.72) {
+      anchor = line.getAttribute("data-review-line") || "";
+      anchorTop = top;
+      break;
+    }
+  }
+  return { scrollY: window.scrollY, height: tripContentHeight(), openStores, anchor, anchorTop };
+}
+
+function placeReviewAnchor(snapshot) {
+  if (!snapshot?.anchor || snapshot.anchorTop == null || !tripEl) return;
+  const line = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
+  if (!(line instanceof HTMLElement)) return;
+  const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
+  if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
+}
+
+function restoreReviewScroll(snapshot) {
+  refreshAnchorWatch += 1;
+  if (!snapshot || !tripEl) return;
+  for (const name of snapshot.openStores) {
+    const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
+    if (fold instanceof HTMLDetailsElement) fold.open = true;
+  }
+  window.scrollTo(0, snapshot.scrollY);
+  placeReviewAnchor(snapshot);
+  clearTripFloor();
+  placeReviewAnchor(snapshot);
+}
+
 function paintTrip() {
+  clearReviewRefresh();
   const finish = () => {
     paintPlanBar();
     settleEntryScroll();
@@ -3915,9 +4150,7 @@ function paintTrip() {
   } else if (card.lines?.length) {
     card.lines = card.lines.filter((line) => line.label !== "This plan" || !/^\$0\.00$/.test(String(line.value || "")));
   }
-  const checksOpen =
-    (lastOptimize?.pendingStores || []).length > 0 ||
-    (lastOptimize?.pricingByStore || []).some((row) => row?.check && row.check !== "ok");
+  const checksOpen = !savingsClaimAllowed(lastOptimize);
   if (checksOpen) {
     card.title = "Checking store prices";
     card.lines = [];
@@ -3974,8 +4207,8 @@ function paintTrip() {
       return `<p class="coverage-note"><span>${escapeHtml(sentence)}</span>${button}</p>`;
     })
     .join("");
-  const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
-  const nudge = mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
+  const savingsLine = !checksOpen && plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
+  const nudge = checksOpen || mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = lastOptimize?.unavailable || [];
   const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
   const progress = "";
@@ -3991,6 +4224,10 @@ function paintTrip() {
         <button type="button" class="text-btn" id="clear-trip-open">Clear trip</button>
       </div>
     </div>`;
+  const reviewSnapshot = reviewScrollSnapshot();
+  if (reviewSnapshot && reviewSnapshot.scrollY > 40) {
+    tripEl.style.minHeight = `${Math.ceil(Math.max(reviewSnapshot.height, tripContentHeight()))}px`;
+  }
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
@@ -4050,6 +4287,7 @@ function paintTrip() {
     };
   }
   void fillMissingSuggestions();
+  restoreReviewScroll(reviewSnapshot);
   finish();
 }
 
@@ -4534,6 +4772,7 @@ function listPlanFallback() {
 }
 
 async function planTrip({ stay = false, trigger = null, force = false } = {}) {
+  const anchorScroll = stay && force ? window.scrollY : null;
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
   zipEl.value = zip;
@@ -4616,9 +4855,16 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   setBusy(document.querySelector('[data-flow="plan"]'), true);
   const preview = !planReady(lastOptimize) ? listPlanFallback() : null;
   if (preview && planIsShowable(preview)) renderTrip(preview, { keepEdits: true, force: true });
+  else if (flowStep === "plan" && holdVisibleReview()) {
+    /* the priced list stays. Refresh must not swap in the short loading shell. */
+  }
   else if (flowStep === "plan") paintReviewLoading();
-  else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
+  else {
+    clearReviewRefresh();
+    if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
+  }
   paintPlanBar();
+  const scrollGuardId = anchorScroll == null ? 0 : beginRefreshScrollGuard(anchorScroll);
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
     .then((status) => {
@@ -4756,7 +5002,9 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       toast(timedOut ? PLAN_PARTIAL_NOTE : message);
     }
   } finally {
+    releaseRefreshScrollGuard(scrollGuardId);
     if (planAbort === controller) {
+      clearReviewRefresh();
       planning = false;
       window.clearInterval(planTicker);
       planTicker = 0;
@@ -5962,6 +6210,16 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener(
+  "toggle",
+  (event) => {
+    const node = event.target;
+    if (!(node instanceof HTMLDetailsElement) || !node.classList.contains("store-fold") || node.open) return;
+    clearTripFloor();
+  },
+  true
+);
+
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
@@ -6000,8 +6258,7 @@ document.addEventListener("change", (event) => {
     document.querySelectorAll(`[data-ready-line="${CSS.escape(line)}"]`).forEach((row) => {
       row.classList.toggle("is-done", on);
     });
-    if (flowStep === "shop") renderShop();
-    else paintShopChrome();
+    paintShopChrome();
     haptic();
   }
 });
@@ -6331,9 +6588,16 @@ new MutationObserver(() => syncHomeProxy()).observe(document.body, {
 window.addEventListener("scroll", () => syncHomeProxy(), { passive: true });
 window.addEventListener("resize", () => syncHomeProxy());
 $("add-items")?.addEventListener("click", () => {
-  showStep("add");
-  window.scrollTo(0, 0);
+  const origin = flowStep;
   importer?.open?.("home");
+  const dialog = document.getElementById("import-dialog");
+  dialog?.addEventListener(
+    "close",
+    () => {
+      if (flowStep !== origin) showStep(origin, "user");
+    },
+    { once: true }
+  );
 });
 $("menu-home")?.addEventListener("click", () => {
   closeDrawer();
@@ -6591,6 +6855,9 @@ function syncDrawerMode() {
     }
   }
   const open = drawer.classList.contains("is-open");
+  const lockPage = open && !wide;
+  document.body.dataset.drawer = lockPage ? "open" : "";
+  document.documentElement.dataset.drawer = lockPage ? "open" : "";
   drawer.setAttribute("aria-hidden", open ? "false" : "true");
   if (open) drawer.removeAttribute("inert");
   else drawer.setAttribute("inert", "");
@@ -6608,6 +6875,26 @@ function openDrawer(options = {}) {
     target.focus();
   }
 }
+
+document.addEventListener(
+  "touchmove",
+  (event) => {
+    if (document.body.dataset.drawer !== "open") return;
+    const drawer = document.getElementById("app-drawer");
+    if (drawer && event.target instanceof Node && drawer.contains(event.target)) return;
+    event.preventDefault();
+  },
+  { passive: false }
+);
+document.addEventListener(
+  "touchcancel",
+  () => {
+    if (document.body.dataset.drawer !== "open") return;
+    const drawer = document.getElementById("app-drawer");
+    if (drawer) drawer.style.touchAction = "pan-y";
+  },
+  { passive: true }
+);
 
 function closeDrawer(options = {}) {
   const drawer = $("app-drawer");
@@ -7501,6 +7788,14 @@ function showStep(step, reason = "user") {
     if (lists?.open) lists.close();
     if (lists) lists.innerHTML = "";
   }
+  if (priorStep !== flowStep) {
+    if (priorStep === "plan" && flowStep !== "plan") {
+      releaseRefreshScrollGuard(refreshAnchorWatch);
+      clearReviewRefresh();
+    }
+    if (priorStep === "plan" || flowStep === "plan") clearTripFloor();
+    if (priorStep === "add" || flowStep === "add") clearShelfFloor();
+  }
   if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
     if (!list.size) paintPlanNow();
@@ -7685,6 +7980,8 @@ function renderShop() {
   const backPrompt = showReturnBanner
     ? `<section class="return-banner" id="walmart-return"><p>Back in Grocery Gitter: mark what you bought.</p></section>`
     : "";
+  const keepScroll = !pinTabTop;
+  const scrollY = keepScroll ? window.scrollY : 0;
   shop.innerHTML = `
     ${backPrompt}
     <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button> <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button></p>
@@ -7699,6 +7996,8 @@ function renderShop() {
   if (pinTabTop) {
     pinTabTop = false;
     scrollPageTop();
+  } else if (keepScroll) {
+    window.scrollTo(0, scrollY);
   }
 }
 
@@ -8401,10 +8700,13 @@ async function boot() {
     consumeKrogerReturn();
     paintKrogerConnected(krogerConnectedNow());
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
-    if (!landedFromKroger && shouldPromptProfile(localStorage)) profileUi?.open();
+    if (!landedFromKroger && !profileConnectResume && shouldPromptProfile(localStorage)) profileUi?.open();
     await bootApp();
   } finally {
-    if (!landedFromKroger) {
+    if (profileConnectResume) {
+      const profileDialog = document.getElementById("profile-onboard");
+      if (!profileDialog?.open) profileUi?.resumeAfterConnect?.();
+    } else if (!landedFromKroger) {
       const profileDialog = document.getElementById("profile-onboard");
       if (shouldPromptProfile(localStorage)) {
         if (!profileDialog?.open) profileUi?.open();
@@ -8776,15 +9078,16 @@ profileUi = mountProfileOnboarding({
   getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
   setZip: (zip) => applyZip(zip, { reload: false }),
   locateZip: () => zipFromLocation(),
+  holdGuide: () => guide?.holdAfterImport?.(),
   addLearnedLines: async (lines) => {
+    guide?.holdAfterImport?.();
     const rows = lines || [];
     let added = 0;
     for (const line of rows) {
       const brand = String(line.brand || "").trim();
       const itemName = String(line.name || "").trim();
-      const name =
-        brand && itemName && !itemName.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${itemName}` : itemName || brand;
-      if (!name) continue;
+      if (!brand && !itemName) continue;
+      const name = joinBrandName(brand, itemName);
       const qty = Math.max(1, Math.min(99, Math.floor(Number(line.quantity) || 1)));
       addProduct(customCatalogProduct(name), qty, { quiet: true, skipAsk: true });
       added += 1;
@@ -8928,7 +9231,14 @@ function onGuideAction(action, detail = {}) {
     window.scrollTo(0, 0);
     openBrowse();
     const search = document.getElementById("search");
-    if (search instanceof HTMLElement) search.focus();
+    if (search instanceof HTMLElement) {
+      const focusSearch = () => {
+        if (document.activeElement !== search) search.focus();
+      };
+      focusSearch();
+      // Hiding the guide chip moves focus after this click. Focus again once that settles.
+      setTimeout(focusSearch, 0);
+    }
     return;
   }
   if (action === "commit-picks") {
@@ -8978,15 +9288,9 @@ function onGuideAction(action, detail = {}) {
     return;
   }
   if (action === "save-list") {
-    const fromList = [...list.values()]
-      .map((entry) => ({
-        name: entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "",
-        brand: entry.product?.brand || "",
-        catalogId: entry.product?.id || "",
-        quantity: entry.quantity || 1,
-      }))
-      .filter((row) => row.name);
-    const items = fromList.length ? fromList : (detail.names || []).map((name) => ({ name, brand: "", catalogId: "", quantity: 1 }));
+    const captured = completedListSave;
+    completedListSave = null;
+    const items = captured?.length ? captured : listRowsForSave();
     if (!items.length) {
       toast("Nothing on the list to save yet.");
       return;
@@ -9001,6 +9305,9 @@ guide = mountGuide({
   storage: localStorage,
   getState: guideView,
   onAction: onGuideAction,
+  onQuiet() {
+    importer?.stopListening?.();
+  },
 });
 
 matchSheet = mountMatchSheet({
