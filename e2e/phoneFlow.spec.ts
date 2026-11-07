@@ -160,6 +160,45 @@ test("Refresh keeps the Review list and scroll until the new prices arrive", asy
   }));
   expect(Math.abs(landed.scrollY - placed.scrollY)).toBeLessThan(24);
   expect(Math.abs(landed.lineTop - placed.lineTop)).toBeLessThan(24);
+  expect(await page.evaluate(() => document.getElementById("trip")?.style.minHeight || "")).toBe("");
+
+  await fold.evaluate((node) => {
+    (node as HTMLDetailsElement).open = false;
+  });
+  const closed = await page.evaluate(() => {
+    const trip = document.getElementById("trip");
+    const children = [...(trip?.children || [])].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+    return {
+      min: trip?.style.minHeight || "",
+      children,
+      scrollHeight: document.documentElement.scrollHeight,
+    };
+  });
+  expect(closed.min).toBe("");
+  expect(closed.scrollHeight).toBeLessThan(closed.children + 1400);
+
+  await page.locator("#plan-refresh").evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(lines).toHaveCount(12);
+  expect(await page.evaluate(() => document.getElementById("trip")?.style.minHeight || "")).toBe("");
+
+  await page.locator("#step-bar [data-flow='shop']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
+  await page.locator("#step-bar [data-flow='plan']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
+  await expect(lines).toHaveCount(12);
+  const returned = await page.evaluate(() => {
+    const trip = document.getElementById("trip");
+    const children = [...(trip?.children || [])].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+    return {
+      min: trip?.style.minHeight || "",
+      y: window.scrollY,
+      children,
+      scrollHeight: document.documentElement.scrollHeight,
+    };
+  });
+  expect(returned.min).toBe("");
+  expect(returned.y).toBeLessThan(40);
+  expect(returned.scrollHeight).toBeLessThan(returned.children + 1400);
 });
 
 test("a late aisle response cannot change the next page cursor", async ({ page }) => {

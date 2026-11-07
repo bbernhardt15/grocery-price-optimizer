@@ -342,10 +342,29 @@ test("a long aisle and in-store list keep a scroll target while work is in fligh
   await expect(page.locator("#grid")).toContainText("dairy item 1");
   await expect(page.locator("#grid .card")).toHaveCount(30);
   expect(Math.abs((await page.evaluate(() => window.scrollY)) - aisleScroll)).toBeLessThan(24);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(async () => page.evaluate(() => document.getElementById("grid")?.style.minHeight || "")).toBe("");
+  const natural = await page.evaluate(() => {
+    const grid = document.getElementById("grid");
+    return {
+      box: grid?.getBoundingClientRect().height || 0,
+      scrollHeight: document.documentElement.scrollHeight,
+    };
+  });
+  expect(natural.box).toBeGreaterThan(400);
+  expect(natural.scrollHeight - natural.box).toBeLessThan(2500);
+  expect(natural.scrollHeight).toBeGreaterThan(natural.box);
 
-  await page.locator('[data-flow="plan"]').click();
+  await page.locator("#step-bar [data-flow='plan']").click();
+  await page.locator("#step-bar [data-flow='add']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-step", "add");
+  expect(await page.evaluate(() => document.getElementById("grid")?.style.minHeight || "")).toBe("");
+  const revisited = await page.evaluate(() => document.documentElement.scrollHeight);
+  expect(revisited - natural.box).toBeLessThan(2500);
+
+  await page.locator("#step-bar [data-flow='plan']").click();
   await expect(page.locator("#trip")).toContainText("Produce kale p0");
-  await page.locator('[data-flow="shop"]').click();
+  await page.locator("#step-bar [data-flow='shop']").click();
   await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
   await expect(page.getByRole("heading", { name: "Kroger" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Walmart" })).toBeVisible();

@@ -2793,11 +2793,9 @@ async function loadPage(reset) {
       ? `<p class="swap-quiet">Your ${escapeHtml(familyLabel(viewed.resolved.family) || "usual")}. <button type="button" class="linkish" data-pref-change="${escapeHtml(viewed.resolved.family)}">Change</button></p>`
       : "";
     const html = viewed.items.map(cardHtml).join("");
-    const heldShelf = reset ? Number.parseFloat(gridEl.style.minHeight) || 0 : 0;
-    const shelfScroll = window.scrollY;
+    const shelfScroll = reset ? window.scrollY : 0;
     if (reset) gridEl.style.minHeight = "";
     gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
-    if (reset && heldShelf > gridEl.offsetHeight && shelfScroll > 80) gridEl.style.minHeight = `${heldShelf}px`;
     if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
       const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
@@ -2811,6 +2809,7 @@ async function loadPage(reset) {
         resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
       }
     }
+    if (reset) holdShelfForScroll(shelfScroll);
     const more = $("show-more");
     if (more) more.hidden = !nextCursor;
     const zipOk = ZIP_PATTERN.test(normalizeZip(zipEl.value));
@@ -2865,12 +2864,50 @@ function selectDepartment(id) {
     scroller.scrollTo({ left: Math.max(0, left) });
   }
   if (gridEl) {
-    const height = Math.max(gridEl.offsetHeight, 720);
-    gridEl.style.minHeight = `${height}px`;
+    const visual = gridEl.getBoundingClientRect().height;
+    const hold = window.scrollY > 80 ? Math.max(visual, 720) : Math.min(Math.max(visual, 1), 720);
+    gridEl.style.minHeight = `${Math.ceil(hold)}px`;
     gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
     if (resultCountEl) resultCountEl.textContent = "Loading…";
   }
   void loadPage(true);
+}
+
+function clearShelfFloor() {
+  if (gridEl) gridEl.style.minHeight = "";
+}
+
+/** Keep the current scroll from clamping while a shorter aisle paints, then let a return to the top drop the spacer. */
+function holdShelfForScroll(scrollY) {
+  if (!gridEl) return;
+  if (!(scrollY > 80)) {
+    clearShelfFloor();
+    return;
+  }
+  const natural = gridEl.getBoundingClientRect().height;
+  const top = gridEl.getBoundingClientRect().top + window.scrollY;
+  const needed = Math.ceil(scrollY + window.innerHeight - top + 24);
+  if (needed > natural + 8) {
+    gridEl.style.minHeight = `${needed}px`;
+    armShelfFloorWatch();
+    window.scrollTo(0, scrollY);
+    return;
+  }
+  clearShelfFloor();
+}
+
+let shelfFloorWatch = false;
+function armShelfFloorWatch() {
+  if (shelfFloorWatch) return;
+  shelfFloorWatch = true;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!gridEl?.style.minHeight || window.scrollY > 80) return;
+      clearShelfFloor();
+    },
+    { passive: true }
+  );
 }
 
 function highlightHtml(text, q) {
@@ -3961,6 +3998,15 @@ function selectReviewMode(mode) {
   haptic();
 }
 
+function clearTripFloor() {
+  if (tripEl) tripEl.style.minHeight = "";
+}
+
+function tripContentHeight() {
+  if (!tripEl) return 0;
+  return [...tripEl.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+}
+
 function reviewScrollSnapshot() {
   if (!tripEl) return null;
   const openStores = [...tripEl.querySelectorAll("details.store-fold[open]")]
@@ -3976,7 +4022,15 @@ function reviewScrollSnapshot() {
       break;
     }
   }
-  return { scrollY: window.scrollY, height: tripEl.getBoundingClientRect().height, openStores, anchor, anchorTop };
+  return { scrollY: window.scrollY, height: tripContentHeight(), openStores, anchor, anchorTop };
+}
+
+function placeReviewAnchor(snapshot) {
+  if (!snapshot?.anchor || snapshot.anchorTop == null || !tripEl) return;
+  const line = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
+  if (!(line instanceof HTMLElement)) return;
+  const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
+  if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
 }
 
 function restoreReviewScroll(snapshot) {
@@ -3985,15 +4039,10 @@ function restoreReviewScroll(snapshot) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
     if (fold instanceof HTMLDetailsElement) fold.open = true;
   }
-  const contentHeight = [...tripEl.children].reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
-  if (snapshot.scrollY > 40 && contentHeight + 1 < snapshot.height) tripEl.style.minHeight = `${Math.ceil(snapshot.height)}px`;
-  else tripEl.style.minHeight = "";
   window.scrollTo(0, snapshot.scrollY);
-  if (!snapshot.anchor || snapshot.anchorTop == null) return;
-  const line = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
-  if (!(line instanceof HTMLElement)) return;
-  const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
-  if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
+  placeReviewAnchor(snapshot);
+  clearTripFloor();
+  placeReviewAnchor(snapshot);
 }
 
 function paintTrip() {
@@ -4118,7 +4167,9 @@ function paintTrip() {
       </div>
     </div>`;
   const reviewSnapshot = reviewScrollSnapshot();
-  if (reviewSnapshot && reviewSnapshot.scrollY > 40) tripEl.style.minHeight = `${Math.ceil(reviewSnapshot.height)}px`;
+  if (reviewSnapshot && reviewSnapshot.scrollY > 40) {
+    tripEl.style.minHeight = `${Math.ceil(Math.max(reviewSnapshot.height, tripContentHeight()))}px`;
+  }
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
@@ -6094,6 +6145,16 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener(
+  "toggle",
+  (event) => {
+    const node = event.target;
+    if (!(node instanceof HTMLDetailsElement) || !node.classList.contains("store-fold") || node.open) return;
+    clearTripFloor();
+  },
+  true
+);
+
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
@@ -7661,6 +7722,10 @@ function showStep(step, reason = "user") {
     const lists = document.getElementById("list-sheet");
     if (lists?.open) lists.close();
     if (lists) lists.innerHTML = "";
+  }
+  if (priorStep !== flowStep) {
+    if (priorStep === "plan" || flowStep === "plan") clearTripFloor();
+    if (priorStep === "add" || flowStep === "add") clearShelfFloor();
   }
   if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
