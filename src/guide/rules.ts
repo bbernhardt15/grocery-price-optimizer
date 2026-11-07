@@ -592,6 +592,15 @@ export function presentGuide(input: PresentInput = {}): PresentResult {
   if (frame.defer) {
     return { session, current, defer: true, hidden: frame.hidden };
   }
+  // An unmatched-item question stays until the shopper answers or dismisses it.
+  // A later savings card or a cleared unfound list must not take it down.
+  if (current?.moment === "review-next" && !session.declined?.["review-next"]) {
+    const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
+    if (!decision || decision.moment === "review-next" || nextRank <= MOMENT_RANK["review-next"]) {
+      const nextSession = session.shown["review-next"] ? session : noteShown(session, "review-next");
+      return { session: nextSession, current, defer: false, hidden: false };
+    }
+  }
   if (current && momentStillFits(packed, current.moment)) {
     const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
     if (!decision || decision.moment === current.moment || nextRank <= MOMENT_RANK[current.moment]) {

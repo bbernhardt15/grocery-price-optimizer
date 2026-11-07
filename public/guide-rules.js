@@ -416,6 +416,13 @@ function presentGuide(input = {}) {
   if (frame.defer) {
     return { session, current, defer: true, hidden: frame.hidden };
   }
+  if (current?.moment === "review-next" && !session.declined?.["review-next"]) {
+    const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
+    if (!decision || decision.moment === "review-next" || nextRank <= MOMENT_RANK["review-next"]) {
+      const nextSession = session.shown["review-next"] ? session : noteShown(session, "review-next");
+      return { session: nextSession, current, defer: false, hidden: false };
+    }
+  }
   if (current && momentStillFits(packed, current.moment)) {
     const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
     if (!decision || decision.moment === current.moment || nextRank <= MOMENT_RANK[current.moment]) {

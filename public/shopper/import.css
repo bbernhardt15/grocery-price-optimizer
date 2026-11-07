@@ -58,6 +58,9 @@
 .import-paste,
 .import-transcript,
 .import-goal {
+  display: block;
+  box-sizing: border-box;
+  flex-shrink: 0;
   width: 100%;
   min-height: 140px;
   resize: vertical;
@@ -68,6 +71,16 @@
   padding: 12px;
   font: inherit;
   line-height: 1.4;
+}
+.import-paste:focus,
+.import-paste:focus-visible,
+.import-transcript:focus,
+.import-transcript:focus-visible,
+.import-goal:focus,
+.import-goal:focus-visible {
+  outline: none;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .import-goal { min-height: 72px; }
 .import-tools, .import-choice-row, .import-size-row {
@@ -179,6 +192,11 @@
     margin: 0;
     border: 0;
     border-radius: 0;
+  }
+  dialog.import-sheet[open] {
+    bottom: calc(var(--keyboard, 0px) + max(8px, env(safe-area-inset-bottom)));
+    height: auto;
+    max-height: calc(var(--vv-height, 100dvh) - var(--safe-top) - var(--keyboard, 0px) - 12px);
   }
   dialog.import-sheet[open] .sheet-body,
   dialog.match-sheet[open] .sheet-body {

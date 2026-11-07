@@ -21,16 +21,33 @@ function unitPrice(product) {
   return Number.isFinite(direct) && direct > 0 ? direct : 0;
 }
 
-/** Drop the streaming flags so this pass can paint once. */
+/**
+ * The cards can paint, but a store that has not finished is not a savings claim.
+ * pendingStores stays so Review does not treat a partial as a finished comparison.
+ */
 export function markDisplayed(payload, now = Date.now()) {
   if (!payload || typeof payload !== "object") return null;
+  const pending = Array.isArray(payload.pendingStores) ? payload.pendingStores.filter(Boolean) : [];
+  const checks = Array.isArray(payload.pricingByStore) ? payload.pricingByStore : [];
+  const coverageOpen = pending.length > 0 || checks.length === 0 || checks.some((row) => row?.check !== "ok");
   return {
     ...payload,
     partial: false,
-    pendingStores: [],
+    pendingStores: pending,
+    coverageOpen,
     displaySettled: true,
     pricedAt: Number(payload.pricedAt) || now,
   };
+}
+
+/** Dollar savings, "same total", and the one-store alternative need a finished check for every store. */
+export function savingsClaimAllowed(payload) {
+  if (!payload || payload.partial || payload.coverageOpen) return false;
+  const pending = Array.isArray(payload.pendingStores) ? payload.pendingStores : [];
+  if (pending.length) return false;
+  const checks = Array.isArray(payload.pricingByStore) ? payload.pricingByStore : [];
+  if (!checks.length) return false;
+  return checks.every((row) => row?.check === "ok");
 }
 
 /**

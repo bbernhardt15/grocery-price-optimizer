@@ -18,7 +18,8 @@ describe("plan fallback after a store timeout", () => {
     const shown = chooseDisplayedPlan({ stores: [], partial: true }, partial, 50);
     assert.ok(shown);
     assert.equal(shown?.partial, false);
-    assert.deepEqual(shown?.pendingStores, []);
+    assert.deepEqual(shown?.pendingStores, ["Walmart"]);
+    assert.equal(shown?.coverageOpen, true);
     assert.equal(planIsShowable(shown), true);
     assert.equal(reviewHeadlineReady(shown), true);
     assert.equal(reviewHeadlineReady(partial), false);

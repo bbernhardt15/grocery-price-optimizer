@@ -300,6 +300,26 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.chips[0].label, "Save Shopping list");
     assert.deepEqual(prompt.chips[0].names, ["Whole Milk"]);
     assert.equal(prompt.chips[0].action, "save-list");
+    const unmatched = presentGuide({
+      settings: emptyGuideSettings(),
+      session: createGuideSession(),
+      view: view({
+        step: "plan",
+        itemCount: 3,
+        unfound: ["Shirley Temple"],
+        pricesLabel: "Prices updated",
+        search: unfoundSearchLinks("Shirley Temple"),
+      }),
+    });
+    assert.equal(unmatched.current?.moment, "review-next");
+    const kept = presentGuide({
+      settings: emptyGuideSettings(),
+      session: unmatched.session,
+      current: unmatched.current,
+      view: view({ step: "plan", itemCount: 3, savingsCard: true, unfound: [], pricesLabel: "Prices updated" }),
+    });
+    assert.equal(kept.current?.moment, "review-next");
+    assert.equal(kept.current?.line, unmatched.current?.line);
     assert.equal(prompt.chips.some((chip) => chip.label === "Undo"), false);
     const undone = clearTripNote(session);
     assert.equal(undone.trip, null);

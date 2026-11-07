@@ -12,7 +12,7 @@ describe("import entry on the phone dock", () => {
   it("keeps the dock, the drawer, and Refine, and loads the import sheet above the dock", () => {
     assert.match(html, /id="bottom-dock"/);
     assert.match(html, /id="app-drawer"/);
-    assert.match(html, /id="refine-title">Refine</);
+    assert.match(html, /id="refine-title"[^>]*>Refine</);
     assert.match(html, /id="start-here"/);
     assert.match(html, /shopper\/import\.css\?v=shelf-1/);
     assert.match(html, /app\.js\?v=shelf-1/);
@@ -42,7 +42,7 @@ describe("import entry on the phone dock", () => {
     const accept = parsed.share_target?.params?.files?.[0]?.accept || [];
     assert.ok(accept.includes("image/*"));
     assert.ok(accept.includes("audio/*"));
-    assert.match(sw, /grocery-gitter-shell-v49/);
+    assert.match(sw, /grocery-gitter-shell-v50/);
     assert.match(sw, /pathname === "\/import-share"/);
     assert.match(sw, /gg-import-share/);
   });

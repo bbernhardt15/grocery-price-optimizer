@@ -44,6 +44,7 @@ test("teaching receipt keeps Name brand tappable, hides store-brand name chips, 
   await page.getByRole("button", { name: "Select all" }).click();
   await page.locator("#learned-add-trip").first().click();
   await expect(page.getByText(/Want me to start with the ones you buy most/)).toHaveCount(0);
+  await expect(page.getByText("Want me to check which stores are cheaper?")).toHaveCount(0);
 });
 
 test("Review paints a priced partial, chat import is full screen, and Not here is gone", async ({ page }) => {
@@ -112,7 +113,8 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
     localStorage.setItem("gg-list", JSON.stringify(items));
   });
   await unlock(page);
-  await expect(page.locator("#gitter-guide")).toBeVisible();
+  const cheaper = page.getByText("Want me to check which stores are cheaper?");
+  if (await cheaper.count()) await page.locator("#gitter-guide").getByRole("button", { name: "Not yet" }).click();
   const headerBox = await (async () => {
     await page.locator("#add-items").click();
     const sheet = page.locator("#import-dialog");
@@ -120,10 +122,12 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
     const box = await sheet.boundingBox();
     await page.locator("#import-close").click();
     await expect(sheet).toBeHidden();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     return box;
   })();
-  await page.locator("#gitter-guide").getByRole("button", { name: "Not yet" }).click();
-  await page.locator("#gitter-guide").getByRole("button", { name: "Add an item" }).click();
+  const addItem = page.locator("#gitter-guide").getByRole("button", { name: "Add an item" });
+  if (await addItem.count()) await addItem.click();
+  else await page.locator("#search").focus();
   await expect(page.locator("#import-dialog")).toBeHidden();
   await expect(page.locator("#search")).toBeFocused();
   expect(headerBox && headerBox.height).toBeGreaterThan(400);

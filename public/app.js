@@ -174,7 +174,7 @@ import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreL
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
-import { REVIEW_GAVE_UP_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
+import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
@@ -218,7 +218,8 @@ import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
-import { chooseDisplayedPlan, listDisplayPlan } from "./shopper/planFallback.js";
+import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed } from "./shopper/planFallback.js";
+import { joinBrandName } from "./shopper/tripAdd.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 import { mountGuide, namesMatch as guideNamesMatch } from "./guide.js";
 
@@ -1489,6 +1490,18 @@ let pendingKrogerReturn = null;
 
 function applyKrogerReturn(parsed) {
   if (!parsed) return;
+  try {
+    if (sessionStorage.getItem("gg-profile-connect") === "place") {
+      sessionStorage.removeItem("gg-profile-connect");
+      landedFromKroger = true;
+      if (krogerReturnMarksConnected(parsed.kind)) rememberKrogerConnected();
+      toast(parsed.message || "Back from Kroger. Kroger may still ask you to sign in at checkout.");
+      profileUi?.resumeAfterConnect?.();
+      return;
+    }
+  } catch {
+    /* private browsing */
+  }
   landedFromKroger = true;
   if (parsed.kind === "added") {
     const saved = readKrogerTrip(localStorage);
@@ -2724,13 +2737,13 @@ async function loadPage(reset) {
     const response = await fetch(apiUrl(`/api/catalog/browse?${params.toString()}`));
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
+    if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
     coverage = body.coverage ?? coverage;
     weeklyAdBanners = Array.isArray(body.weeklyAdBanners) ? body.weeklyAdBanners : [];
     catalogSource = body.catalogSource || catalogSource;
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
-    if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
     const items = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
@@ -2996,7 +3009,7 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
   document.body.dataset.refine = open ? "1" : "";
   paintRefine();
-  if (open) $("sort")?.focus();
+  if (open) $("refine-title")?.focus();
 }
 
 function openProduct(product) {
@@ -3789,6 +3802,7 @@ function settleEntryScroll(extra = false) {
 
 function paintReviewLoading(status) {
   if (!tripEl || flowStep !== "plan") return;
+  if (holdVisibleReview(status)) return;
   const existing = tripEl.querySelector("[data-review-stable='loading']");
   if (existing) {
     const line = existing.querySelector(".review-loading-status");
@@ -3800,6 +3814,28 @@ function paintReviewLoading(status) {
   tripEl.innerHTML = `${krogerBannerHtml()}${reviewLoadingHtml(selectedStoreNames(), status)}`;
   paintPlanBar();
   settleEntryScroll();
+}
+
+function clearReviewRefresh() {
+  document.querySelector("[data-review-refresh]")?.remove();
+  tripEl?.querySelector("[data-review-shell]")?.removeAttribute("aria-busy");
+}
+
+/** Keep the priced Review on screen while a refresh is in flight. The note does not change the page height. */
+function holdVisibleReview(status) {
+  const shell = tripEl?.querySelector("[data-review-shell]");
+  if (!(shell instanceof HTMLElement)) return false;
+  shell.setAttribute("aria-busy", "true");
+  let note = document.querySelector("[data-review-refresh]");
+  if (!(note instanceof HTMLElement)) {
+    note = document.createElement("p");
+    note.className = "review-refresh-note";
+    note.setAttribute("data-review-refresh", "1");
+    note.setAttribute("role", "status");
+    document.body.appendChild(note);
+  }
+  note.textContent = status || "Checking store prices";
+  return true;
 }
 
 function settledReviewPayload(signature, zip, force = false) {
@@ -3870,6 +3906,7 @@ function selectReviewMode(mode) {
 }
 
 function paintTrip() {
+  clearReviewRefresh();
   const finish = () => {
     paintPlanBar();
     settleEntryScroll();
@@ -3915,9 +3952,7 @@ function paintTrip() {
   } else if (card.lines?.length) {
     card.lines = card.lines.filter((line) => line.label !== "This plan" || !/^\$0\.00$/.test(String(line.value || "")));
   }
-  const checksOpen =
-    (lastOptimize?.pendingStores || []).length > 0 ||
-    (lastOptimize?.pricingByStore || []).some((row) => row?.check && row.check !== "ok");
+  const checksOpen = !savingsClaimAllowed(lastOptimize);
   if (checksOpen) {
     card.title = "Checking store prices";
     card.lines = [];
@@ -3974,8 +4009,8 @@ function paintTrip() {
       return `<p class="coverage-note"><span>${escapeHtml(sentence)}</span>${button}</p>`;
     })
     .join("");
-  const savingsLine = plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
-  const nudge = mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
+  const savingsLine = !checksOpen && plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
+  const nudge = checksOpen || mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = lastOptimize?.unavailable || [];
   const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
   const progress = "";
@@ -4616,6 +4651,9 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
   setBusy(document.querySelector('[data-flow="plan"]'), true);
   const preview = !planReady(lastOptimize) ? listPlanFallback() : null;
   if (preview && planIsShowable(preview)) renderTrip(preview, { keepEdits: true, force: true });
+  else if (flowStep === "plan" && holdVisibleReview()) {
+    /* the priced list stays. Refresh must not swap in the short loading shell. */
+  }
   else if (flowStep === "plan") paintReviewLoading();
   else if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   paintPlanBar();
@@ -6331,9 +6369,16 @@ new MutationObserver(() => syncHomeProxy()).observe(document.body, {
 window.addEventListener("scroll", () => syncHomeProxy(), { passive: true });
 window.addEventListener("resize", () => syncHomeProxy());
 $("add-items")?.addEventListener("click", () => {
-  showStep("add");
-  window.scrollTo(0, 0);
+  const origin = flowStep;
   importer?.open?.("home");
+  const dialog = document.getElementById("import-dialog");
+  dialog?.addEventListener(
+    "close",
+    () => {
+      if (flowStep !== origin) showStep(origin, "user");
+    },
+    { once: true }
+  );
 });
 $("menu-home")?.addEventListener("click", () => {
   closeDrawer();
@@ -6591,6 +6636,9 @@ function syncDrawerMode() {
     }
   }
   const open = drawer.classList.contains("is-open");
+  const lockPage = open && !wide;
+  document.body.dataset.drawer = lockPage ? "open" : "";
+  document.documentElement.dataset.drawer = lockPage ? "open" : "";
   drawer.setAttribute("aria-hidden", open ? "false" : "true");
   if (open) drawer.removeAttribute("inert");
   else drawer.setAttribute("inert", "");
@@ -6608,6 +6656,26 @@ function openDrawer(options = {}) {
     target.focus();
   }
 }
+
+document.addEventListener(
+  "touchmove",
+  (event) => {
+    if (document.body.dataset.drawer !== "open") return;
+    const drawer = document.getElementById("app-drawer");
+    if (drawer && event.target instanceof Node && drawer.contains(event.target)) return;
+    event.preventDefault();
+  },
+  { passive: false }
+);
+document.addEventListener(
+  "touchcancel",
+  () => {
+    if (document.body.dataset.drawer !== "open") return;
+    const drawer = document.getElementById("app-drawer");
+    if (drawer) drawer.style.touchAction = "pan-y";
+  },
+  { passive: true }
+);
 
 function closeDrawer(options = {}) {
   const drawer = $("app-drawer");
@@ -8776,15 +8844,16 @@ profileUi = mountProfileOnboarding({
   getZip: () => zipEl?.value || localStorage.getItem(ZIP_KEY) || "",
   setZip: (zip) => applyZip(zip, { reload: false }),
   locateZip: () => zipFromLocation(),
+  holdGuide: () => guide?.holdAfterImport?.(),
   addLearnedLines: async (lines) => {
+    guide?.holdAfterImport?.();
     const rows = lines || [];
     let added = 0;
     for (const line of rows) {
       const brand = String(line.brand || "").trim();
       const itemName = String(line.name || "").trim();
-      const name =
-        brand && itemName && !itemName.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${itemName}` : itemName || brand;
-      if (!name) continue;
+      if (!brand && !itemName) continue;
+      const name = joinBrandName(brand, itemName);
       const qty = Math.max(1, Math.min(99, Math.floor(Number(line.quantity) || 1)));
       addProduct(customCatalogProduct(name), qty, { quiet: true, skipAsk: true });
       added += 1;

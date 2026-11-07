@@ -125,19 +125,17 @@
             <button type="button" id="menu-new-trip">Start a new trip</button>
             <button type="button" id="menu-settings" hidden>Settings</button>
             <button type="button" id="menu-feedback" hidden>Send feedback</button>
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
             <button type="button" id="menu-redo">Redo setup</button>
           </nav>
-          <section class="drawer-help" aria-labelledby="help-title">
-            <h2 id="help-title">Help</h2>
+          <details class="drawer-fold" id="menu-help">
+            <summary id="help-title">Help</summary>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
             <nav class="drawer-links" aria-label="About">
               <button type="button" id="help-feedback" class="text-btn">Send feedback</button>
               <a id="help-privacy" href="/privacy">Privacy</a>
               <a id="help-terms" href="/terms">Terms</a>
             </nav>
-          </section>
+          </details>
         </aside>
       </div>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -236,7 +234,7 @@
                 </div>
                 <form id="filters" class="filters" aria-labelledby="refine-title">
                   <div class="filters-head">
-                    <h2 id="refine-title">Refine</h2>
+                    <h2 id="refine-title" tabindex="-1">Refine</h2>
                     <button type="button" class="text-btn" id="filters-close">Close</button>
                   </div>
                   <label>Sort

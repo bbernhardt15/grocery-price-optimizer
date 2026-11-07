@@ -45,4 +45,4 @@ npm run smoke -- https://grocery-price-optimizer-production.up.railway.app YOUR_
 
 The script checks the invite gate, health, a two-item plan with a non-zero Kroger or Walmart price, and that the plan includes store rows for In-store. It exits non-zero on any failure. It prints statuses only. It does not print the invite code or any secret.
 
-The shell cache is `v49` (`public/sw.js` and `public/shopper/betaContext.js`). A phone that is still on an older shell needs one reload in the browser so the new worker takes over.
+The shell cache is `v50` (`public/sw.js` and `public/shopper/betaContext.js`). A phone that is still on an older shell needs one reload in the browser so the new worker takes over.

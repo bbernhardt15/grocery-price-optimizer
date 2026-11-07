@@ -372,6 +372,15 @@ export function mountGuide(deps = {}) {
       current = null;
       host.hidden = true;
     },
+    holdAfterImport() {
+      for (const moment of ["before-review", "running-low"]) {
+        session = noteShown(session, moment);
+      }
+      if (current?.moment === "before-review" || current?.moment === "running-low") {
+        current = null;
+        host.hidden = true;
+      }
+    },
     noteTrip(saved) {
       session = rememberTrip(session, saved);
       sync();
