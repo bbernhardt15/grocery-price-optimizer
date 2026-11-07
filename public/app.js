@@ -9057,7 +9057,14 @@ function onGuideAction(action, detail = {}) {
     window.scrollTo(0, 0);
     openBrowse();
     const search = document.getElementById("search");
-    if (search instanceof HTMLElement) search.focus();
+    if (search instanceof HTMLElement) {
+      const focusSearch = () => {
+        if (document.activeElement !== search) search.focus();
+      };
+      focusSearch();
+      // Hiding the guide chip moves focus after this click. Focus again once that settles.
+      setTimeout(focusSearch, 0);
+    }
     return;
   }
   if (action === "commit-picks") {

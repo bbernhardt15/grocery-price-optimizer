@@ -54,6 +54,7 @@ describe("beta tester routes", { concurrency: false }, () => {
     resetRateLimits();
     delete process.env.GG_ADMIN_TOKEN;
     delete process.env.BETA_INVITE_CODES;
+    delete process.env.BETA_INVITE_RATE_LIMIT;
     await Promise.all([
       BetaFeedback.deleteMany({}),
       BetaSignup.deleteMany({}),
@@ -91,6 +92,29 @@ describe("beta tester routes", { concurrency: false }, () => {
     assert.equal(invite.status, 200);
     assert.deepEqual(invite.json, { ok: true, required: false });
     assert.equal(await BetaSignup.countDocuments(), 0);
+  });
+
+  it("limits fresh invite attempts from one IP unless the server raises the cap", async () => {
+    process.env.BETA_INVITE_CODES = "friend";
+    for (let index = 0; index < 8; index += 1) {
+      const device = `rate-device-${index}`;
+      const attempt = await post("/api/beta/invite", { code: "nope", deviceId: device }, { "x-device-id": device });
+      assert.equal(attempt.status, 401);
+    }
+    const blocked = await post(
+      "/api/beta/invite",
+      { code: "friend", deviceId: "rate-device-9" },
+      { "x-device-id": "rate-device-9" }
+    );
+    assert.equal(blocked.status, 429);
+
+    resetRateLimits();
+    process.env.BETA_INVITE_RATE_LIMIT = "20";
+    for (let index = 0; index < 9; index += 1) {
+      const device = `rate-raised-${index}`;
+      const attempt = await post("/api/beta/invite", { code: "nope", deviceId: device }, { "x-device-id": device });
+      assert.equal(attempt.status, 401);
+    }
   });
 
   it("remembers a valid code and counts signups without personal data", async () => {

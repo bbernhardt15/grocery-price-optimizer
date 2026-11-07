@@ -221,6 +221,7 @@ test("receipt choices stay selected after the guide repaints", async ({ page }) 
   await page.addInitScript(() => {
     localStorage.setItem("gg-onboarding-done", "1");
     localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
   });
   await unlock(page);
   await page.evaluate(() =>

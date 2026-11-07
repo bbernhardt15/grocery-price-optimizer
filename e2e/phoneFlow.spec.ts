@@ -189,7 +189,9 @@ test("a late aisle response cannot change the next page cursor", async ({ page }
       body: JSON.stringify({
         items: [{ id: "dairy-1", name: "DAIRY ONLY", familyName: "DAIRY ONLY", brand: "Test", imageUrls: [], variants: [] }],
         total: 1,
-        nextCursor: department === "dairy" ? "cursor-dairy" : null,
+        // Only the first Dairy page continues. A later page that always
+        // returns a cursor makes the tall WebKit viewport load forever.
+        nextCursor: department === "dairy" && !cursor ? "cursor-dairy" : null,
       }),
     });
   });
@@ -209,7 +211,8 @@ test("a late aisle response cannot change the next page cursor", async ({ page }
   await page.waitForTimeout(500);
   await expect(page.locator("#grid")).toContainText("DAIRY ONLY");
   await expect(page.locator("#grid")).not.toContainText("PRODUCE ONLY");
-  await page.locator("#show-more").click();
+  const more = page.locator("#show-more");
+  if (await more.isVisible()) await more.evaluate((button) => (button as HTMLButtonElement).click());
   await expect.poll(() => seen.some((row) => row.cursor === "cursor-dairy")).toBe(true);
   expect(seen.some((row) => row.cursor === "cursor-produce")).toBe(false);
 });

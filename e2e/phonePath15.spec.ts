@@ -113,8 +113,6 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
     localStorage.setItem("gg-list", JSON.stringify(items));
   });
   await unlock(page);
-  const cheaper = page.getByText("Want me to check which stores are cheaper?");
-  if (await cheaper.count()) await page.locator("#gitter-guide").getByRole("button", { name: "Not yet" }).click();
   const headerBox = await (async () => {
     await page.locator("#add-items").click();
     const sheet = page.locator("#import-dialog");
@@ -125,9 +123,13 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
     await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     return box;
   })();
-  const addItem = page.locator("#gitter-guide").getByRole("button", { name: "Add an item" });
-  if (await addItem.count()) await addItem.click();
-  else await page.locator("#search").focus();
+  const guide = page.locator("#gitter-guide");
+  const notYet = guide.getByRole("button", { name: "Not yet" });
+  const addItem = guide.getByRole("button", { name: "Add an item" });
+  await expect(notYet.or(addItem)).toBeVisible();
+  if (await notYet.isVisible()) await notYet.click();
+  await expect(addItem).toBeVisible();
+  await addItem.click();
   await expect(page.locator("#import-dialog")).toBeHidden();
   await expect(page.locator("#search")).toBeFocused();
   expect(headerBox && headerBox.height).toBeGreaterThan(400);
