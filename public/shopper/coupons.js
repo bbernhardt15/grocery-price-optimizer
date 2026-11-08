@@ -446,6 +446,11 @@ function couponFormMarkup(store) {
   const storeName = escapeHtml(store.storeName || "");
   return `<form class="coupon-form" data-coupon-store="${storeName}">
     <p class="coupon-form-title">Add a coupon you already have</p>
+    <p class="muted">Clip it at the store first. A screenshot stays on this phone. Grocery Gitter does not read the image, so type the amount, the item, and the date you can see. An expired coupon or the wrong store is left out of the estimate.</p>
+    <label>Screenshot, optional
+      <input data-coupon-shot type="file" accept="image/*" />
+    </label>
+    <p class="coupon-shot-note" data-coupon-shot-note hidden></p>
     <label>Item
       <select data-coupon-line required>${options}</select>
     </label>

@@ -1092,7 +1092,7 @@ function finishCurrentTrip() {
   paintTrip();
   renderShop();
   showStep("add", "user");
-  toastAction("Trip saved to Past trips.", "Undo", () => {
+  toastAction("Saved this trip to Past trips.", "Undo", () => {
     guide?.clearTrip?.();
     clearCompletedTrip(localStorage);
     for (const [id, entry] of snapshot.entries) {
@@ -2695,6 +2695,7 @@ function cardHtml(tile) {
         ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
         <h3>${escapeHtml(title)}</h3>
         <p class="price" data-price>${escapeHtml(priceText(selected))}</p>
+        ${entry ? `<p class="on-list" role="status">On your list.</p>` : ""}
         <div class="card-actions">
           <label class="check card-add">
             <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
@@ -2778,6 +2779,7 @@ function bindKeyboardInset() {
     const next = `${insets.keyboard}|${insets.toolbar}|${viewport ? Math.round(viewport.height) : 0}`;
     if (next === last) return;
     last = next;
+    document.documentElement.dataset.keyboard = insets.keyboard > 80 ? "1" : "0";
     document.documentElement.style.setProperty("--keyboard", `${insets.keyboard}px`);
     document.documentElement.style.setProperty("--browser-bottom", `${insets.toolbar}px`);
     if (viewport) document.documentElement.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
@@ -2835,6 +2837,8 @@ function searchRankContext(text) {
 }
 
 let catalogGeneration = 0;
+let catalogAbort = null;
+const AISLE_TIMEOUT_MS = 12000;
 
 function discontinuedTitle(product) {
   const text = [product?.name, product?.familyName, product?.catalogName, product?.brand].filter(Boolean).join(" ");
@@ -2844,6 +2848,9 @@ function discontinuedTitle(product) {
 async function loadPage(reset) {
   if (loading && !reset) return;
   if (!reset && !nextCursor) return;
+  if (reset) catalogAbort?.abort();
+  const controller = reset ? new AbortController() : null;
+  if (controller) catalogAbort = controller;
   const generation = (catalogGeneration += 1);
   const requestedDepartment = activeDepartment;
   const requestedQuery = query;
@@ -2856,7 +2863,12 @@ async function loadPage(reset) {
   const params = filterQuery();
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
-    const response = await fetch(apiUrl(`/api/catalog/browse?${params.toString()}`));
+    const response = await fetchWithTimeout(
+      fetch,
+      apiUrl(`/api/catalog/browse?${params.toString()}`),
+      controller ? { signal: controller.signal } : {},
+      AISLE_TIMEOUT_MS
+    );
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
@@ -2911,6 +2923,12 @@ async function loadPage(reset) {
     }
   } catch (error) {
     if (generation !== catalogGeneration) return;
+    if (reset && planTimedOut(error) && catalogAbort === controller) {
+      showCatalogError("");
+      gridEl.innerHTML = `<div class="empty-state" role="alert"><h3>This aisle is taking a while</h3><p>The catalog didn't answer. Nothing new was added.</p><button type="button" class="primary" data-empty-action="retry-aisle">Try this aisle again</button></div>`;
+      if (resultCountEl) resultCountEl.textContent = "This aisle is taking a while";
+      return;
+    }
     const kind = networkKind(error, navigator.onLine);
     if (reset && kind) {
       showCatalogError("");
@@ -4376,7 +4394,7 @@ function paintTrip() {
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${/^You save /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
       ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -5133,7 +5151,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
         streamedPlan = shown;
-        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell], [data-review-stable]")) {
+        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell]")) {
           holdVisibleReview("Checking store prices");
           return;
         }
@@ -6641,6 +6659,9 @@ searchEl.addEventListener("input", () => {
 });
 
 searchEl.addEventListener("focus", () => {
+  if (document.documentElement.dataset.keyboard === "1") {
+    requestAnimationFrame(() => searchEl.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  }
   if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
   else if (askIntent(searchEl.value) === "list" || quietMeal(searchEl.value)) showListAsk(searchEl.value);
   else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
@@ -6876,7 +6897,7 @@ $("menu-home")?.addEventListener("click", () => {
 });
 $("menu-brands")?.addEventListener("click", () => {
   closeDrawer();
-  profileUi?.openEditor?.();
+  profileUi?.openFavorites?.();
 });
 $("menu-favorites")?.addEventListener("click", () => {
   openFavorites();
@@ -6903,6 +6924,16 @@ document.addEventListener("change", (event) => {
   }
   const family = target.getAttribute("data-fav-family");
   if (family) saveFavoriteVariant(family, target.value);
+  if (target.matches("[data-coupon-shot]")) {
+    const note = target.closest("form")?.querySelector("[data-coupon-shot-note]");
+    const file = target.files?.[0];
+    if (note) {
+      note.hidden = !file;
+      note.textContent = file
+        ? `${file.name} stays on this phone. Type the amount below. The image was not read.`
+        : "";
+    }
+  }
 });
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
@@ -9404,6 +9435,8 @@ document.addEventListener("click", (event) => {
     searchEl.focus();
   } else if (action === "find-stores") {
     $("find-stores")?.click();
+  } else if (action === "retry-aisle") {
+    void loadPage(true);
   } else if (action === "clear-search") {
     query = "";
     searchEl.value = "";
@@ -9804,6 +9837,15 @@ matchSheet = mountMatchSheet({
       lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
     }
     saveList();
+    if (lastOptimize) pinPreferredStores(lastOptimize);
+    const unfound = document.querySelector("[data-unfound]");
+    if (unfound instanceof HTMLElement && wanted) {
+      const needle = wanted.toLowerCase();
+      for (const row of [...unfound.querySelectorAll("li")]) {
+        if ((row.textContent || "").toLowerCase().includes(needle)) row.remove();
+      }
+      if (!unfound.querySelector("li")) unfound.remove();
+    }
     if (flowStep === "plan") void planTrip({ stay: true });
     else if (flowStep === "shop") renderShop();
     toast(store ? `Added to the ${store} cart.` : "Added that match.");

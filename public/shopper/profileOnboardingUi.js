@@ -220,8 +220,10 @@ export function mountProfileOnboarding(deps = {}) {
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
         <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
-        <div id="profile-store-list" class="store-choices"></div>
-        <div id="store-connect"></div>`;
+        <div id="profile-store-list" class="store-choices"></div>`;
+    }
+    if (step.kind === "connect") {
+      return `<div id="store-connect"></div>`;
     }
     if (step.kind === "receipts") {
       const importing = importGate.parsing || importGate.grouping || receiptPhase === "reading" || (receiptPhase === "learned" && !learnedViewReady(importGate));
@@ -375,6 +377,12 @@ export function mountProfileOnboarding(deps = {}) {
     bindReceiptInput();
     if ((step.kind === "place" || step.kind === "zip") && !options.deferStores) paintStoreList();
     else if (options.deferStores) showStoreSkeleton();
+    if (step.kind === "connect") {
+      const zip = normalizeZipInput(currentZipRaw());
+      const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
+      const names = visibleStoreNames(nearby.stores);
+      paintStoreConnect(names.length ? names : draft.shopStores || []);
+    }
     if (step.kind === "welcome") warmStores();
     if (next && !(dietMode && step.id === "diets")) {
       if (reading) next.disabled = !readingReady;
@@ -534,17 +542,19 @@ export function mountProfileOnboarding(deps = {}) {
     } catch {
       connectStatus = { oauthConfigured: false, connected: false };
     }
-    if (stepId === "place" || stepId === "zip") paintStoreConnect(names);
+    if (stepId === "place" || stepId === "zip" || stepId === "connect") paintStoreConnect(names);
   }
 
   async function connectStoresNow() {
-    const zip = readZip();
-    if (!zip) return;
-    const place = readPlace();
-    if (place) draft.shopStores = place.stores;
+    const zip = normalizeZipInput(currentZipRaw());
+    if (!/^\d{5}/.test(zip)) return;
+    if (document.querySelector("[data-place-store]")) {
+      const place = readPlace();
+      if (place) draft.shopStores = place.stores;
+    }
     draft = persist({
       ...draft,
-      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "place", updatedAt: Date.now() },
+      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "connect", updatedAt: Date.now() },
     });
     try {
       sessionStorage.setItem(PROFILE_CONNECT_KEY, "connected");
@@ -1647,8 +1657,7 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.id === "store-connect-later") {
-      const host = $("store-connect");
-      if (host) host.innerHTML = `<p class="muted">You can connect Kroger at checkout. That sign-in still opens on Kroger's site.</p>`;
+      void advance(false);
       return;
     }
     if (target.id === "store-connect-now") {

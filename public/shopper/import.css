@@ -176,7 +176,13 @@
 .import-check { display: flex; gap: 8px; align-items: center; font-weight: 700; min-height: 44px; }
 .import-stepper { display: flex; align-items: center; gap: 8px; }
 .import-stepper button { min-width: 44px; min-height: 44px; }
-.import-save { display: flex; gap: 8px; align-items: flex-start; }
+.import-save {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 16px 0 8px;
+  padding: 8px 0;
+}
 #onboard-import { width: 100%; }
 
 @media (max-width: 1099px) {

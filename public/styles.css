@@ -134,7 +134,12 @@ img { max-width: 100%; display: block; }
   max-height: min(360px, 50dvh); overflow: auto;
 }
 @media (max-height: 520px) {
-  .suggestions { max-height: 28dvh; }
+  .suggestions { position: static; max-height: 28dvh; margin-top: 8px; }
+}
+html[data-keyboard="1"] .suggestions {
+  position: static;
+  max-height: min(28dvh, 160px);
+  margin-top: 8px;
 }
 .suggestions ul { list-style: none; margin: 0; padding: 0; }
 .suggestions button {
@@ -1048,6 +1053,13 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between;
+  max-width: min(28rem, calc(100% - 24px));
+}
+body:has(#gitter-guide:not([hidden])) .toast.show {
+  bottom: auto;
+  top: calc(12px + var(--safe-top));
+  transform: translateX(-50%);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast button, #toast-action {
@@ -1452,15 +1464,26 @@ dialog.profile-onboard[data-step="receipts"] #profile-stage,
 dialog.profile-onboard[data-step="learned"] #profile-stage { padding-bottom: 8px; }
 dialog.profile-onboard[data-step="receipts"] .profile-actions,
 dialog.profile-onboard[data-step="learned"] .profile-actions,
-dialog.profile-onboard[data-step="trip"] .profile-actions { position: static; }
+dialog.profile-onboard[data-step="trip"] .profile-actions,
 dialog.profile-onboard[data-step="place"] .profile-actions,
-dialog.profile-onboard[data-step="zip"] .profile-actions {
-  position: static;
-  bottom: auto;
-  background: transparent;
+dialog.profile-onboard[data-step="zip"] .profile-actions,
+dialog.profile-onboard[data-step="connect"] .profile-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 4;
 }
 dialog.profile-onboard[data-step="place"] #profile-stage,
-dialog.profile-onboard[data-step="zip"] #profile-stage { padding-bottom: 8px; }
+dialog.profile-onboard[data-step="zip"] #profile-stage,
+dialog.profile-onboard[data-step="connect"] #profile-stage,
+dialog.profile-onboard[data-step="trip"] #profile-stage { padding-bottom: 8px; }
+dialog.profile-onboard[data-step="trip"] #trip-add-end {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding-top: 8px;
+  z-index: 1;
+}
 dialog.profile-onboard[data-zip-typing="1"] #profile-next { display: none !important; }
 dialog.profile-onboard[data-step="receipts"] .profile-dots { display: none; }
 dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padding: 16px; }
@@ -1562,7 +1585,7 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
 .value-store li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
 .trip-summary-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .trip-summary-list li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
-.toast { display: flex; align-items: center; gap: 10px; }
+.toast { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toast button { min-height: 36px; }
 .import-progress {
   display: flex;
@@ -1695,8 +1718,9 @@ body[data-step="add"] #bar-primary { display: none !important; }
   font-weight: 700;
 }
 .mini-chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-.gate-grid { display: grid; grid-template-columns: 1fr 1fr; }
-.gate-chip { justify-content: center; }
+.gate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gate-chip { justify-content: center; white-space: normal; line-height: 1.2; text-align: center; min-height: 48px; }
+.buy-question { margin: 0; line-height: 1.25; }
 .chosen-mode { margin: 0; font-weight: 750; }
 .brand-row { display: flex; flex-direction: column; gap: 8px; }
 .brand-chip {
@@ -1926,6 +1950,48 @@ dialog.sheet, dialog.profile-onboard {
 }
 .read-card h3 { margin: 0; font-size: 1.05rem; }
 .read-card progress, .read-progress progress { width: 100%; height: 8px; accent-color: var(--accent); border: 0; }
+.read-cart-track {
+  position: relative;
+  height: 28px;
+  margin: 8px 0 0;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  overflow: hidden;
+}
+.read-cart {
+  position: absolute;
+  top: 4px;
+  left: calc(var(--read-ratio, 0) * (100% - 36px));
+  width: 28px;
+  height: 20px;
+  border-radius: 6px 6px 4px 4px;
+  background: var(--accent);
+}
+.read-cart::before,
+.read-cart::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.read-cart::before { left: 3px; }
+.read-cart::after { right: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .read-cart { transition: none; }
+}
+.on-list { margin: 4px 0 0; font-weight: 750; color: var(--accent); }
+.savings-callout {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 1.15rem;
+}
 .read-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .read-items:empty { display: none; }
 .read-error { margin: 0; color: var(--sale); }

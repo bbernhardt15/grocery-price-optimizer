@@ -6,9 +6,11 @@
 
 import {
   DISMISS_LABEL,
+  GUIDE_DWELL_MS,
   GUIDE_KEY,
   GUIDE_LABEL,
   GUIDE_QUIET_MS,
+  holdVisiblePrompt,
   REPLIES_LABEL,
   TURN_OFF_LABEL,
   clearTripNote,
@@ -113,6 +115,7 @@ export function mountGuide(deps = {}) {
   let holding = 0;
   let quietUntil = 0;
   let typeTimer = 0;
+  let promptShownAt = 0;
 
   const host = doc.createElement("aside");
   host.id = "gitter-guide";
@@ -231,8 +234,14 @@ export function mountGuide(deps = {}) {
         dialogOpen: dialogOpen(),
         fieldFocused: fieldFocused(),
       });
+      if (!result.defer && holdVisiblePrompt(current, result.current, promptShownAt, now)) {
+        if (win) win.setTimeout(() => sync(), Math.max(50, GUIDE_DWELL_MS - (now - promptShownAt)));
+        return;
+      }
+      const previousMoment = current?.moment || "";
       session = result.session;
       current = result.current;
+      if (result.current && result.current.moment !== previousMoment) promptShownAt = now;
       if (result.defer && !result.hidden) return;
       if (result.hidden || !result.current) {
         host.hidden = true;

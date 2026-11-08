@@ -2,6 +2,7 @@
 var GUIDE_KEY = "gg-guide";
 var DISMISS_LIMIT = 3;
 var GUIDE_QUIET_MS = 280;
+var GUIDE_DWELL_MS = 4e3;
 var GUIDE_LABEL = "Gitter guide";
 var DISMISS_LABEL = "Dismiss guide";
 var TURN_OFF_LABEL = "Turn off guide";
@@ -437,6 +438,15 @@ function momentStillFits(input, moment) {
   }
   return decideGuide({ ...input, session: { ...session, shown } })?.moment === moment;
 }
+function holdVisiblePrompt(current, next, shownAt, now, dwellMs = GUIDE_DWELL_MS) {
+  if (!current || !next) return false;
+  if (current.moment === next.moment) return false;
+  if (next.moment === "trip-saved") return false;
+  const started = Number(shownAt) || 0;
+  const clock = Number(now) || 0;
+  if (started <= 0 || clock <= 0) return false;
+  return clock - started < dwellMs;
+}
 function presentGuide(input = {}) {
   const session = input.session || createGuideSession();
   const settings = input.settings ? parseGuideSettings(input.settings) : emptyGuideSettings();
@@ -510,6 +520,7 @@ function readLines(value) {
 export {
   DISMISS_LABEL,
   DISMISS_LIMIT,
+  GUIDE_DWELL_MS,
   GUIDE_KEY,
   GUIDE_LABEL,
   GUIDE_QUIET_MS,
@@ -526,6 +537,7 @@ export {
   emptyGuideSettings,
   formatDollars,
   guideIsOff,
+  holdVisiblePrompt,
   importReceiptUrl,
   linesFromImportBody,
   linesFromReceipt,

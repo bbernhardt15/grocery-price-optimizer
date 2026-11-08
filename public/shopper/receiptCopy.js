@@ -115,9 +115,12 @@ export function receiptUploadHtml() {
       <div class="store-finds">${hints}</div>
     </details>
     <p class="receipt-privacy">${escapeText(PRIVACY_NOTE)}</p>
-    <label class="profile-field">Or paste the order text
-      <textarea id="profile-receipt-paste" maxlength="50000" placeholder="Paste a Kroger, Walmart, Target, Instacart, or emailed order"></textarea>
-    </label>
+    <details class="receipt-paste">
+      <summary>Paste order text instead</summary>
+      <label class="profile-field">Order text
+        <textarea id="profile-receipt-paste" maxlength="50000" placeholder="Paste a Kroger, Walmart, Target, Instacart, or emailed order"></textarea>
+      </label>
+    </details>
   </div>`;
 }
 
@@ -226,7 +229,8 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines)}</div>`;
+  const missing = `<p class="paper-note">Departments that were not on this receipt are not set yet. Each line above keeps a brand when you tap Change. After you start shopping, open Brands for each category in the menu for the rest.</p>`;
+  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${missing}${basketTeaserHtml(options.lines)}</div>`;
 }
 
 /** After Confirm: pick which learned lines join this trip. */

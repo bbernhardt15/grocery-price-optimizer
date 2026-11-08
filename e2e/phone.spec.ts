@@ -70,6 +70,10 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await page.locator("#profile-zip-done").click();
   await shot(page, "02-stores");
   await page.locator("#profile-next").click();
+  await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
+  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    await page.locator("#profile-next").click();
+  }
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
   await page.getByRole("button", { name: "Read my receipts" }).click();

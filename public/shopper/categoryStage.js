@@ -82,6 +82,7 @@ export function categoryDetailHtml(input) {
           : mode === "never"
             ? `Chosen: I don't buy ${label.toLowerCase()}`
             : "Choose one. You can switch without losing the cut.";
+  const savedLead = mode ? "Saved on this phone. " : "";
   const picked = new Set(selectedBrands.map((name) => String(name).toLowerCase()));
   const brandButtons = (input?.brands || [])
     .map((row) => {
@@ -113,7 +114,7 @@ export function categoryDetailHtml(input) {
   return `<p class="profile-label">${escapeText(label)} · ${index + 1} of ${total}</p>
     <h3 class="buy-question">${escapeText(question)}</h3>
     ${cuts ? `<p class="profile-label">${escapeText(cutLabel)}</p><div class="mini-row">${cuts}</div>` : ""}
-    <p class="chosen-mode" role="status">${escapeText(chosen)}</p>
+    <p class="chosen-mode" role="status">${escapeText(`${savedLead}${chosen}`)}</p>
     <p class="profile-label">Rule</p>
     <div class="choice-stack rule-list" role="radiogroup" aria-label="Rule">
       ${choiceButton("never", `I don't buy ${label.toLowerCase()}`, mode === "never")}

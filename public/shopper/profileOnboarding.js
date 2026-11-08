@@ -26,6 +26,12 @@ const FLOW = [
     kind: "place",
   },
   {
+    id: "connect",
+    title: "Connect a store?",
+    hint: "Optional. You can skip this and connect at checkout.",
+    kind: "connect",
+  },
+  {
     id: "receipts",
     title: "Teach Gitter your usual groceries",
     hint: "We'll learn the brands you already buy.",
@@ -205,7 +211,7 @@ export function primaryLabel(id) {
   if (id === "summary") return "Start shopping";
   if (id === "welcome") return "Get started";
   if (id === "zip") return "Find stores";
-  if (id === "place") return "Continue";
+  if (id === "place" || id === "connect") return "Continue";
   return "Next";
 }
 

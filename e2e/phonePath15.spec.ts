@@ -18,6 +18,10 @@ test("teaching receipt keeps Name brand tappable, hides store-brand name chips, 
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
   await page.locator("#profile-zip-done").click();
   await page.locator("#profile-next").click();
+  await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
+  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    await page.locator("#profile-next").click();
+  }
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
   await page.getByRole("button", { name: "Read my receipts" }).click();
