@@ -4209,43 +4209,18 @@ function reviewAnchorLine(snapshot) {
   return [...tripEl.querySelectorAll("[data-review-line]")].find((node) => node.textContent?.trim() === snapshot.anchorText) || null;
 }
 
-function placeReviewAnchor(snapshot) {
-  if (snapshot?.anchorTop == null || !tripEl) return;
+function anchorDelta(snapshot) {
+  if (snapshot?.anchorTop == null || !tripEl) return 0;
   const line = reviewAnchorLine(snapshot);
-  if (!(line instanceof HTMLElement)) return;
-  const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
-  if (Math.abs(delta) > 1) writeReviewScroll(window.scrollY + delta);
+  if (!(line instanceof HTMLElement)) return 0;
+  return line.getBoundingClientRect().top - snapshot.anchorTop;
 }
 
-function holdPaintedReviewScroll(snapshot) {
-  if (!snapshot || snapshot.scrollY < 40) return;
-  const target = snapshot.scrollY;
-  let handed = false;
-  const detach = () => {
-    window.removeEventListener("wheel", stop, true);
-    window.removeEventListener("touchstart", stop, true);
-    window.removeEventListener("pointerdown", stop, true);
-    window.removeEventListener("keydown", stop, true);
-  };
-  const stop = (event) => {
-    if (event?.type === "pointerdown" && event.target instanceof Element && event.target.closest("#plan-refresh")) return;
-    if (event?.type === "keydown" && event.key !== " " && event.key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(event.key)) return;
-    handed = true;
-    detach();
-  };
-  window.addEventListener("wheel", stop, true);
-  window.addEventListener("touchstart", stop, true);
-  window.addEventListener("pointerdown", stop, true);
-  window.addEventListener("keydown", stop, true);
-  const until = performance.now() + 700;
-  const watch = () => {
-    if (handed) return;
-    if (window.scrollY < 24 && target > window.scrollY + 80) writeReviewScroll(target);
-    placeReviewAnchor(snapshot);
-    if (performance.now() < until) requestAnimationFrame(watch);
-    else detach();
-  };
-  requestAnimationFrame(watch);
+function placeReviewAnchor(snapshot) {
+  const delta = anchorDelta(snapshot);
+  // A large delta means the line moved because the plan above it changed.
+  // Chasing it pulls a shopper who just scrolled back to the top.
+  if (Math.abs(delta) > 1 && Math.abs(delta) < 140) writeReviewScroll(Math.max(0, window.scrollY + delta));
 }
 
 function restoreReviewScroll(snapshot) {
@@ -4255,11 +4230,13 @@ function restoreReviewScroll(snapshot) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
     if (fold instanceof HTMLDetailsElement) fold.open = true;
   }
-  writeReviewScroll(snapshot.scrollY);
+  const intended = Math.max(0, snapshot.scrollY || 0);
+  writeReviewScroll(intended);
   placeReviewAnchor(snapshot);
   clearTripFloor();
-  placeReviewAnchor(snapshot);
-  holdPaintedReviewScroll(snapshot);
+  const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  const next = Math.min(Math.max(0, window.scrollY), maxScroll);
+  if (Math.abs(window.scrollY - next) > 1) writeReviewScroll(next);
 }
 
 function paintTrip() {

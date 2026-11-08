@@ -182,6 +182,21 @@ describe("category preferences", () => {
       ],
     });
     assert.equal(cherry.product?.id, "cherry");
+    const specific = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        attributes: ["cherry"],
+        variant: "Cherry Coke",
+      }),
+      family: "soda",
+      products: [
+        product("cola-cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.28 }),
+        product("cherry-coke", "Cherry Coke", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(specific.product?.id, "cherry-coke");
   });
 
   it("offers soda flavor chips from the catalog words and keeps Cherry over Classic", () => {

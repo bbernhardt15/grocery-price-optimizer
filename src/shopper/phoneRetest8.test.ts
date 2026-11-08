@@ -23,7 +23,7 @@ const importer = readFileSync(new URL("../../public/shopper/import.js", import.m
 
 describe("eighth phone test", () => {
   it("bumps the shell cache to v32", () => {
-    assert.match(sw, /grocery-gitter-shell-v61/);
+    assert.match(sw, /grocery-gitter-shell-v62/);
   });
 
   it("derives ZIP from device coordinates and labels a coarse fix", () => {

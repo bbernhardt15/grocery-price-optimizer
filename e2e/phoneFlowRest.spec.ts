@@ -860,6 +860,17 @@ test("unresolved rows remove by swipe or button and can be undone", async ({ pag
     if (!(target instanceof HTMLElement)) return;
     const rect = target.getBoundingClientRect();
     const startX = rect.left + 24;
+    const startY = rect.top + 10;
+    target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: startX, clientY: startY }));
+    window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, clientX: startX, clientY: startY + 90 }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, clientX: startX, clientY: startY + 90 }));
+  });
+  await expect(page.locator("[data-unfound]")).toContainText("Eggs");
+  await page.evaluate(() => {
+    const target = document.querySelector("[data-swipe='1'] p");
+    if (!(target instanceof HTMLElement)) return;
+    const rect = target.getBoundingClientRect();
+    const startX = rect.left + 24;
     const y = rect.top + 10;
     target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: startX, clientY: y }));
     window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, clientX: startX - 140, clientY: y }));
@@ -922,8 +933,9 @@ test("soda flavor chips persist and apply to search and the tailgate list", asyn
       body: JSON.stringify({
         items: soda
           ? [
+              { id: "cola-cherry", name: "Coca-Cola Cherry", brand: "Coca-Cola", familyName: "Coca-Cola Cherry", catalogName: "Coca-Cola Cherry", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 6.28 }] },
+              { id: "cherry-coke", name: "Cherry Coke", brand: "Coca-Cola", familyName: "Cherry Coke", catalogName: "Cherry Coke", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 6.48 }] },
               { id: "classic-coke", name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", familyName: "Coca-Cola Classic", catalogName: "Coca-Cola Classic", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 7.28 }] },
-              { id: "cherry-coke", name: "Coca-Cola Cherry", brand: "Coca-Cola", familyName: "Coca-Cola Cherry", catalogName: "Coca-Cola Cherry", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 6.48 }] },
             ]
           : [],
       }),
@@ -963,9 +975,9 @@ test("soda flavor chips persist and apply to search and the tailgate list", asyn
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await page.locator("#search-form").evaluate((form) => (form as HTMLFormElement).requestSubmit());
-  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || "").join(" | "))).toMatch(/cherry/i);
-  const searched = await page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || "").join(" "));
-  expect(searched).not.toMatch(/Coca-Cola Classic/);
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ id?: string; name?: string }>).map((row) => `${row.id || ""}:${row.name || ""}`).join(" | "))).toMatch(/cherry-coke:Cherry Coke/);
+  const searched = await page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ id?: string; name?: string }>).map((row) => `${row.id || ""} ${row.name || ""}`).join(" "));
+  expect(searched).not.toMatch(/cola-cherry|Coca-Cola Classic/);
   await page.locator("[data-lists-open]").evaluate((button) => (button as HTMLButtonElement).click());
   if (!(await page.locator("[data-list-open='tailgate']").count())) {
     await page.locator("[data-lists-all]").evaluate((button) => (button as HTMLButtonElement).click());
@@ -1004,6 +1016,13 @@ test("undo inside the open list keeps the header clear and expires", async ({ pa
   expect(overlap.place).toBe("sheet");
   expect(overlap.close).toBe(false);
   expect(overlap.title).toBe(false);
+  const closeBox = await page.locator("#list-close").boundingBox();
+  expect(closeBox).toBeTruthy();
+  expect(closeBox!.y).toBeGreaterThanOrEqual(0);
+  expect(closeBox!.y + closeBox!.height).toBeLessThanOrEqual(844);
+  await page.locator("#list-close").click();
+  await expect(page.locator("#list-panel")).not.toHaveClass(/open/);
+  await page.locator("#list-toggle").evaluate((button) => (button as HTMLButtonElement).click());
   await page.locator("#toast-action").click();
   await expect(page.locator("#list-items")).toContainText("Milk");
   await page.clock.install();

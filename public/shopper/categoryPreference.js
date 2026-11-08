@@ -119,6 +119,15 @@ function variantWord(word) {
   return token;
 }
 
+function variantSpecificity(product, needle) {
+  const names = [product?.name, product?.familyName, product?.catalogName, product?.variantLabel]
+    .map((value) => clean(value, 120).toLowerCase())
+    .filter(Boolean);
+  if (names.some((name) => name === needle)) return 3;
+  if (names.some((name) => name.includes(needle))) return 2;
+  return 1;
+}
+
 function variantHit(product, variant) {
   const needle = clean(variant, 80).toLowerCase();
   if (!needle) return false;
@@ -193,7 +202,9 @@ export function resolveCategoryPreference(input) {
       const flavored = rows.filter((product) => variantHit(product, pref.variant));
       if (flavored.length) {
         const exact = pref.productId ? flavored.find((product) => product.id === pref.productId) : null;
-        return { status: "brand", family, product: exact || flavored[0], mode: "brand", swapped: null, ask: false };
+        const needle = clean(pref.variant, 80).toLowerCase();
+        const ranked = flavored.slice().sort((a, b) => variantSpecificity(b, needle) - variantSpecificity(a, needle));
+        return { status: "brand", family, product: exact || ranked[0], mode: "brand", swapped: null, ask: false };
       }
       return { status: "ask", family, product: null, mode: "brand", swapped: null, ask: true };
     }
