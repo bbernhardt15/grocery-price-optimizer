@@ -796,9 +796,12 @@ let lastBarTotal = 0;
 
 function parkToast() {
   const dialog = document.querySelector("dialog[open]");
-  const host = dialog?.querySelector(".sheet-body") || dialog;
+  const panel = document.getElementById("list-panel");
+  const host = dialog?.querySelector(".sheet-body") || dialog || (panel?.classList.contains("open") ? panel : null);
   if (host instanceof HTMLElement) {
-    if (toastEl.parentElement !== host) host.insertBefore(toastEl, host.firstChild);
+    const head = host.querySelector(":scope > .list-head");
+    const before = head ? head.nextSibling : host.firstChild;
+    if (toastEl.parentElement !== host || toastEl.previousElementSibling !== head) host.insertBefore(toastEl, before);
     toastEl.dataset.place = "sheet";
     return;
   }
@@ -2340,7 +2343,7 @@ function listRowHtml(entry, locked) {
       </li>`;
 }
 
-function setQuantity(id, quantity) {
+function setQuantity(id, quantity, options = {}) {
   const entry = list.get(id);
   if (!entry) return;
   if (listIsLocked()) {
@@ -2348,12 +2351,21 @@ function setQuantity(id, quantity) {
     return;
   }
   if (quantity < 1) {
+    const snapshot = { ...entry, product: entry.product };
     entry.writtenAt = Date.now();
     entry.itemId = entry.itemId || id;
     queueWrite(entry, true);
     if (!shareState?.shareToken) noteRemoved(entry.itemId || id, entry.writtenAt);
     list.delete(id);
-    toast("Removed from list");
+    if (!options.quiet) {
+      toastAction("Removed from list.", "Undo", () => {
+        if (!list.has(id)) list.set(id, snapshot);
+        saveList();
+        renderEstimate();
+        syncCards();
+        onListChanged();
+      });
+    }
   } else {
     entry.quantity = Math.min(99, quantity);
     entry.writtenAt = Date.now();
@@ -4082,9 +4094,25 @@ function selectReviewMode(mode) {
 }
 
 let refreshAnchorWatch = 0;
+let reviewUserScroll = null;
+let reviewScrollWriting = false;
 
 function releaseRefreshScrollGuard(watchId) {
   if (watchId && watchId === refreshAnchorWatch) refreshAnchorWatch += 1;
+}
+
+function writeReviewScroll(y) {
+  reviewScrollWriting = true;
+  window.scrollTo(0, y);
+  requestAnimationFrame(() => {
+    reviewScrollWriting = false;
+  });
+}
+
+function rememberReviewUserScroll() {
+  if (reviewScrollWriting) return;
+  if (document.body?.dataset?.step !== "plan") return;
+  reviewUserScroll = window.scrollY;
 }
 
 /**
@@ -4130,7 +4158,7 @@ function beginRefreshScrollGuard(startY) {
       detach();
       return;
     }
-    if (Math.abs(window.scrollY - startY) > 1) window.scrollTo(0, startY);
+    if (Math.abs(window.scrollY - startY) > 1) writeReviewScroll(startY);
     if (performance.now() < until) requestAnimationFrame(watch);
     else detach();
   };
@@ -4154,23 +4182,68 @@ function reviewScrollSnapshot() {
     .filter(Boolean);
   let anchor = "";
   let anchorTop = null;
+  let anchorText = "";
   for (const line of tripEl.querySelectorAll("[data-review-line]")) {
     const top = line.getBoundingClientRect().top;
     if (top >= 48 && top < window.innerHeight * 0.72) {
       anchor = line.getAttribute("data-review-line") || "";
       anchorTop = top;
+      anchorText = line.textContent?.trim() || "";
       break;
     }
   }
-  return { scrollY: window.scrollY, height: tripContentHeight(), openStores, anchor, anchorTop };
+  let scrollY = window.scrollY;
+  if (reviewUserScroll != null && scrollY < 24 && reviewUserScroll > scrollY + 80) scrollY = reviewUserScroll;
+  return { scrollY, height: tripContentHeight(), openStores, anchor, anchorTop, anchorText };
+}
+
+function reviewAnchorLine(snapshot) {
+  if (!snapshot || !tripEl) return null;
+  if (snapshot.anchor) {
+    const byId = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
+    if (byId instanceof HTMLElement) return byId;
+  }
+  if (!snapshot.anchorText) return null;
+  return [...tripEl.querySelectorAll("[data-review-line]")].find((node) => node.textContent?.trim() === snapshot.anchorText) || null;
 }
 
 function placeReviewAnchor(snapshot) {
-  if (!snapshot?.anchor || snapshot.anchorTop == null || !tripEl) return;
-  const line = tripEl.querySelector(`[data-review-line="${CSS.escape(snapshot.anchor)}"]`);
+  if (snapshot?.anchorTop == null || !tripEl) return;
+  const line = reviewAnchorLine(snapshot);
   if (!(line instanceof HTMLElement)) return;
   const delta = line.getBoundingClientRect().top - snapshot.anchorTop;
-  if (Math.abs(delta) > 1) window.scrollTo(0, window.scrollY + delta);
+  if (Math.abs(delta) > 1) writeReviewScroll(window.scrollY + delta);
+}
+
+function holdPaintedReviewScroll(snapshot) {
+  if (!snapshot || snapshot.scrollY < 40) return;
+  const target = snapshot.scrollY;
+  let handed = false;
+  const detach = () => {
+    window.removeEventListener("wheel", stop, true);
+    window.removeEventListener("touchstart", stop, true);
+    window.removeEventListener("pointerdown", stop, true);
+    window.removeEventListener("keydown", stop, true);
+  };
+  const stop = (event) => {
+    if (event?.type === "pointerdown" && event.target instanceof Element && event.target.closest("#plan-refresh")) return;
+    if (event?.type === "keydown" && event.key !== " " && event.key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(event.key)) return;
+    handed = true;
+    detach();
+  };
+  window.addEventListener("wheel", stop, true);
+  window.addEventListener("touchstart", stop, true);
+  window.addEventListener("pointerdown", stop, true);
+  window.addEventListener("keydown", stop, true);
+  const until = performance.now() + 700;
+  const watch = () => {
+    if (handed) return;
+    if (window.scrollY < 24 && target > window.scrollY + 80) writeReviewScroll(target);
+    placeReviewAnchor(snapshot);
+    if (performance.now() < until) requestAnimationFrame(watch);
+    else detach();
+  };
+  requestAnimationFrame(watch);
 }
 
 function restoreReviewScroll(snapshot) {
@@ -4180,10 +4253,11 @@ function restoreReviewScroll(snapshot) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
     if (fold instanceof HTMLDetailsElement) fold.open = true;
   }
-  window.scrollTo(0, snapshot.scrollY);
+  writeReviewScroll(snapshot.scrollY);
   placeReviewAnchor(snapshot);
   clearTripFloor();
   placeReviewAnchor(snapshot);
+  holdPaintedReviewScroll(snapshot);
 }
 
 function paintTrip() {
@@ -4418,7 +4492,7 @@ function removeNamedItem(name) {
     if (labels.some((label) => label === wanted || label.includes(wanted) || wanted.includes(label))) removed.push([id, entry]);
   }
   const unavailable = Array.isArray(lastOptimize?.unavailable) ? lastOptimize.unavailable.slice() : null;
-  for (const [id] of removed) setQuantity(id, 0);
+  for (const [id] of removed) setQuantity(id, 0, { quiet: true });
   if (unavailable && lastOptimize) {
     lastOptimize.unavailable = unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
     lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
@@ -5032,6 +5106,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   }
   paintPlanBar();
+  if (anchorScroll != null) reviewUserScroll = anchorScroll;
   const scrollGuardId = anchorScroll == null ? 0 : beginRefreshScrollGuard(anchorScroll);
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
@@ -6790,7 +6865,10 @@ new MutationObserver(() => syncHomeProxy()).observe(document.body, {
   attributes: true,
   attributeFilter: ["open"],
 });
-window.addEventListener("scroll", () => syncHomeProxy(), { passive: true });
+window.addEventListener("scroll", () => {
+  rememberReviewUserScroll();
+  syncHomeProxy();
+}, { passive: true });
 window.addEventListener("resize", () => syncHomeProxy());
 $("add-items")?.addEventListener("click", () => {
   const origin = flowStep;
@@ -6868,9 +6946,10 @@ document.addEventListener("click", (event) => {
       if (attributes.has(id)) attributes.delete(id);
       else attributes.add(id);
       const label = flavor.textContent?.trim() || id;
-      const variant = attributes.has(id)
-        ? [current.brand, label, current.variant].filter(Boolean).filter((part, index, all) => all.findIndex((row) => row.toLowerCase() === part.toLowerCase()) === index).join(" ")
-        : current.variant || "";
+      const typed = String(current.variant || "").trim();
+      const flavorLabels = new Set((favoriteWizardSteps().find((step) => step.id === family)?.flavors || []).map((row) => String(row.label || "").toLowerCase()));
+      const typedIsChip = flavorLabels.has(typed.toLowerCase());
+      const variant = attributes.has(id) ? (typed && !typedIsChip ? typed : label) : typedIsChip ? "" : typed;
       saveFavoriteChoice(family, { attributes: [...attributes], variant, brand: current.brand || "" });
     }
     paintFavorites();

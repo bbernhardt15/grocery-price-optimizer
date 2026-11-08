@@ -97,9 +97,11 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
   await expect(page.locator("[data-reading-screen], .read-live").first()).toBeVisible();
   await page.locator("#profile-back").click();
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read my receipts" })).toBeVisible();
   release();
   await page.waitForTimeout(1000);
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read my receipts" })).toBeVisible();
 });
 
 test("internal Back from the trip list returns to the parsed review", async ({ page }) => {
@@ -758,17 +760,18 @@ test("four receipt suggestions can be selected and added", async ({ page }) => {
   await page.evaluate(() => fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
   const guide = page.locator("#gitter-guide");
   await expect(guide).toContainText("I found 4 items that are not on your list yet.");
-  await guide.locator("[data-guide-name='Whole Milk']").click();
-  await guide.locator("[data-guide-name='Cherry Coke']").click();
-  await expect(guide.locator("[data-guide-name='Whole Milk']")).toHaveAttribute("aria-pressed", "true");
-  await expect(guide.locator("[data-guide-name='Cherry Coke']")).toHaveAttribute("aria-pressed", "true");
-  const chips = guide.locator(".gitter-guide-chips");
-  await chips.evaluate((node) => {
-    node.scrollTop = node.scrollHeight;
-  });
-  await expect(guide.getByRole("button", { name: "Add selected" })).toBeVisible();
+  for (const name of ["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"]) {
+    await guide.locator(`[data-guide-name='${name}']`).click();
+    await expect(guide.locator(`[data-guide-name='${name}']`)).toHaveAttribute("aria-pressed", "true");
+  }
   await guide.getByRole("button", { name: "Add selected" }).click();
-  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(expect.arrayContaining(["Whole Milk", "Cherry Coke"]));
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(
+    expect.arrayContaining(["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"])
+  );
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(
+    expect.arrayContaining(["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"])
+  );
   await page.screenshot({ path: "/opt/cursor/artifacts/receipt-four-added.png", fullPage: false });
 });
 
@@ -913,4 +916,112 @@ test("saving with no store selected explains the choice", async ({ page }) => {
   await expect(page.locator("#profile-zip-error")).not.toContainText("still loading");
   await page.locator("#profile-back").click();
   await expect(page.locator("#profile-onboard")).toContainText("Stores");
+});
+
+test("soda flavor chips persist and apply to search and the tailgate list", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+  });
+  await page.route("**/api/catalog/browse**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") || "";
+    const soda = /soda|coke|cola|cherry/i.test(query);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: soda
+          ? [
+              { id: "classic-coke", name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", familyName: "Coca-Cola Classic", catalogName: "Coca-Cola Classic", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 7.28 }] },
+              { id: "cherry-coke", name: "Coca-Cola Cherry", brand: "Coca-Cola", familyName: "Coca-Cola Cherry", catalogName: "Coca-Cola Cherry", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 6.48 }] },
+            ]
+          : [],
+      }),
+    });
+  });
+  await unlock(page);
+  if (await page.locator("#gitter-guide [data-guide-off]").isVisible().catch(() => false)) {
+    await page.locator("#gitter-guide [data-guide-off]").evaluate((button) => (button as HTMLButtonElement).click());
+  }
+  await page.locator("#tab-favorites").evaluate((button) => (button as HTMLButtonElement).click());
+  for (let step = 0; step < 45; step += 1) {
+    if ((await page.locator("#favorites-prefs h3").innerText()) === "Soda") break;
+    await page.locator("#fav-next").evaluate((button) => (button as HTMLButtonElement).click());
+  }
+  await expect(page.locator("#favorites-prefs h3")).toHaveText("Soda");
+  for (const label of ["Classic", "Cherry", "Vanilla", "Diet", "Zero"]) {
+    await expect(page.locator(`[data-fav-flavor]` , { hasText: label }).first()).toBeVisible();
+  }
+  await page.locator("[data-fav-flavor='cherry']").click();
+  await expect(page.locator("[data-fav-flavor='cherry']")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#favorites-prefs input")).toHaveValue("Cherry");
+  await page.locator("#favorites-prefs input").fill("Cherry Coke");
+  await page.locator("#favorites-prefs input").blur();
+  await expect(page.locator("#favorites-prefs input")).toHaveValue("Cherry Coke");
+  await page.reload();
+  await page.locator("#tab-favorites").evaluate((button) => (button as HTMLButtonElement).click());
+  for (let step = 0; step < 45; step += 1) {
+    if ((await page.locator("#favorites-prefs h3").innerText()) === "Soda") break;
+    await page.locator("#fav-next").evaluate((button) => (button as HTMLButtonElement).click());
+  }
+  await expect(page.locator("[data-fav-flavor='cherry']")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#favorites-prefs input")).toHaveValue("Cherry Coke");
+  await page.locator("#favorites-close").evaluate((button) => (button as HTMLButtonElement).click());
+  await page.locator("#search").evaluate((input) => {
+    const field = input as HTMLInputElement;
+    field.value = "soda";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.locator("#search-form").evaluate((form) => (form as HTMLFormElement).requestSubmit());
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || "").join(" | "))).toMatch(/cherry/i);
+  const searched = await page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || "").join(" "));
+  expect(searched).not.toMatch(/Coca-Cola Classic/);
+  await page.locator("[data-lists-open]").evaluate((button) => (button as HTMLButtonElement).click());
+  if (!(await page.locator("[data-list-open='tailgate']").count())) {
+    await page.locator("[data-lists-all]").evaluate((button) => (button as HTMLButtonElement).click());
+  }
+  await page.locator("[data-list-open='tailgate']").evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(page.locator("#list-sheet")).toContainText(/Cherry Coke|Cherry/i);
+});
+
+test("undo inside the open list keeps the header clear and expires", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem("gg-list", JSON.stringify([{ id: "custom:milk", itemId: "custom:milk", name: "Milk", quantity: 1 }]));
+  });
+  await unlock(page);
+  if (await page.locator("#gitter-guide [data-guide-off]").isVisible().catch(() => false)) {
+    await page.locator("#gitter-guide [data-guide-off]").evaluate((button) => (button as HTMLButtonElement).click());
+  }
+  await page.locator("#list-toggle").evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(page.locator("#list-panel")).toHaveClass(/open/);
+  await page.locator("[data-list-remove]").click();
+  const toast = page.locator("#toast.show");
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Removed from list");
+  const overlap = await page.evaluate(() => {
+    const toastBox = document.getElementById("toast")?.getBoundingClientRect();
+    const closeBox = document.getElementById("list-close")?.getBoundingClientRect();
+    const titleBox = document.querySelector("#list-panel h2")?.getBoundingClientRect();
+    const hits = (a?: DOMRect, b?: DOMRect) => Boolean(a && b && a.bottom > b.top && a.top < b.bottom && a.right > b.left && a.left < b.right);
+    return {
+      close: hits(toastBox, closeBox),
+      title: hits(toastBox, titleBox),
+      place: document.getElementById("toast")?.dataset.place || "",
+    };
+  });
+  expect(overlap.place).toBe("sheet");
+  expect(overlap.close).toBe(false);
+  expect(overlap.title).toBe(false);
+  await page.locator("#toast-action").click();
+  await expect(page.locator("#list-items")).toContainText("Milk");
+  await page.clock.install();
+  await page.locator("[data-list-remove]").click();
+  await expect(page.locator("#toast.show")).toBeVisible();
+  await page.clock.fastForward(4400);
+  await expect(page.locator("#toast.show")).toBeVisible();
+  await page.clock.fastForward(200);
+  await expect(page.locator("#toast.show")).toHaveCount(0);
 });

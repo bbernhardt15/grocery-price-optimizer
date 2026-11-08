@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyProfile } from "../../public/shopper/profile.js";
 import {
+  favoriteWizardSteps,
   isPreferenceList,
   learnCategoryFromProduct,
   nameBrandsFor,
@@ -181,5 +182,29 @@ describe("category preferences", () => {
       ],
     });
     assert.equal(cherry.product?.id, "cherry");
+  });
+
+  it("offers soda flavor chips from the catalog words and keeps Cherry over Classic", () => {
+    const soda = favoriteWizardSteps().find((step) => step.id === "soda");
+    assert.ok(soda);
+    assert.deepEqual(
+      soda.flavors.map((row) => row.label),
+      ["Classic", "Cherry", "Vanilla", "Diet", "Zero"]
+    );
+    const picked = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        attributes: ["cherry"],
+        variant: "Cherry",
+      }),
+      family: "soda",
+      products: [
+        product("classic", "Coca-Cola Classic 12 Pack", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 7.28 }),
+        product("cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(picked.product?.id, "cherry");
   });
 });

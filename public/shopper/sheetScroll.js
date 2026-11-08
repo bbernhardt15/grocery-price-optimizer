@@ -31,6 +31,17 @@ function clearLockStyles(node) {
   if ("pointerEvents" in node.style) node.style.pointerEvents = "";
 }
 
+function scrollLocked(body, root) {
+  if (!body?.style) return false;
+  if (body.style.position === "fixed") return true;
+  if (body.style.overflow === "hidden" || body.style.overflowY === "hidden") return true;
+  if (root?.style?.overflow === "hidden" || root?.style?.overflowY === "hidden") return true;
+  if (body.classList?.contains?.("modal-open") || body.classList?.contains?.("scroll-lock")) return true;
+  if (root?.classList?.contains?.("modal-open") || root?.classList?.contains?.("scroll-lock")) return true;
+  if (body.inert) return true;
+  return false;
+}
+
 /**
  * Clear a document scroll lock left by a modal sheet.
  * A fixed body with a negative top is the scroll offset to restore.
@@ -40,6 +51,7 @@ export function releaseScrollLock(doc) {
   const body = doc?.body;
   const root = doc?.documentElement;
   if (!body?.style || !root?.style) return { released: false, y: 0 };
+  if (!scrollLocked(body, root)) return { released: false, y: 0, reason: "unlocked" };
   let y = 0;
   if (body.style.position === "fixed") {
     const top = parseInt(body.style.top || "0", 10);
@@ -80,7 +92,7 @@ export function releaseDocumentScroll(doc) {
 export function releaseAfterLastSheet(doc) {
   if (doc?.querySelector?.("dialog[open]")) return { released: false, y: 0, reason: "open" };
   const result = releaseScrollLock(doc);
-  return { ...result, reason: result.released ? "released" : "missing" };
+  return { ...result, reason: result.reason || (result.released ? "released" : "missing") };
 }
 
 /**

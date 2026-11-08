@@ -218,7 +218,13 @@ const DEFS = [
   food("coffee", "Coffee", "ground coffee", 15, ["beverages", "pantry"], ["Coffee & Tea"], ["coffee"], ["ground", "grounds", "whole", "bean", "beans", "roast", "medium", "dark", "light", "breakfast", "blend", "classic", "pods", "pod", "k", "cups", "cup", "kcup"], [/\b(?:creamer|candy|cake|syrup|liqueur|ice cream)\b/i, CANDY, ALCOHOL], /\bcoffee\b/i, ["folgers", "maxwell house", "peet's", "starbucks", "dunkin'"], { dim: "weight", ideal: 16, min: 10, max: 32 }, [
     attr("ground", "Ground", /\bground\b/i),
   ]),
-  food("soda", "Soda", "cola", 16, ["beverages"], ["Soda"], ["soda", "cola", "coke", "pepsi", "sprite"], ["diet", "zero", "cherry", "vanilla", "cream", "classic", "caffeine", "free", "sugar"], [/\b(?:baking|club|caustic|washing)\s+sodas?\b/i, ALCOHOL], /\b(?:soda|cola|coke|pepsi)\b/i, ["coca-cola", "pepsi", "sprite", "dr pepper"], { dim: "count", ideal: 12, min: 6, max: 24 }, []),
+  food("soda", "Soda", "cola", 16, ["beverages"], ["Soda"], ["soda", "cola", "coke", "pepsi", "sprite"], ["diet", "zero", "cherry", "vanilla", "cream", "classic", "caffeine", "free", "sugar"], [/\b(?:baking|club|caustic|washing)\s+sodas?\b/i, ALCOHOL], /\b(?:soda|cola|coke|pepsi)\b/i, ["coca-cola", "pepsi", "sprite", "dr pepper"], { dim: "count", ideal: 12, min: 6, max: 24 }, [
+    attr("classic", "Classic", /\bclassic\b/i),
+    attr("cherry", "Cherry", /\bcherry\b/i),
+    attr("vanilla", "Vanilla", /\bvanilla\b/i),
+    attr("diet", "Diet", /\bdiet\b/i),
+    attr("zero", "Zero", /\bzero\b/i),
+  ]),
   food("yogurt", "Yogurt", "greek yogurt", 17, ["dairy-eggs"], ["Yogurt"], ["yogurt", "yoghurt"], ["greek", "plain", "vanilla", "strawberry", "blueberry", "peach", "nonfat", "lowfat", "whole", "organic", "original", "fat", "free", "low"], [/\b(?:covered|raisins|pretzel|candy|bark)\b/i, CANDY, PET], /\byogurt/i, ["chobani", "fage", "oikos", "yoplait", "siggi's"], { dim: "weight", ideal: 32, min: 16, max: 32 }, [
     attr("greek", "Greek", /\bgreek\b/i),
     attr("plain", "Plain", /\bplain\b/i),
