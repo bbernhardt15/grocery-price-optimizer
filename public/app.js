@@ -643,6 +643,8 @@ function syncBrowse() {
   const start = $("start-here");
   if (start) start.hidden = !add || Boolean(query);
   if (label) label.textContent = browseOpen ? "Hide the aisle" : "Browse the catalog by aisle";
+  const aisleHint = toggle?.querySelector(".muted");
+  if (aisleHint) aisleHint.textContent = browseOpen ? "Closes this shelf. Your list stays put." : "Every department, from produce to frozen.";
   if (toggle) {
     toggle.hidden = !add || Boolean(query);
     toggle.setAttribute("aria-expanded", browseOpen ? "true" : "false");
@@ -4752,9 +4754,28 @@ async function readPlanBody(response, onStatus, onPartial) {
   return finalBody || {};
 }
 
+function pinPreferredStores(payload) {
+  const moves = { ...(tripEdits.moves || {}) };
+  let changed = false;
+  for (const store of payload?.stores || []) {
+    for (const item of store.items || []) {
+      if (!item?.lineId) continue;
+      const entry = [...list.values()].find((row) => {
+        if (!row?.preferredStore) return false;
+        return row.product?.id === item.catalogId || guideNamesMatch(item.name, row.product?.name || row.product?.familyName);
+      });
+      if (!entry?.preferredStore || sameStoreName(entry.preferredStore, store.storeName)) continue;
+      moves[item.lineId] = entry.preferredStore;
+      changed = true;
+    }
+  }
+  if (changed) tripEdits = { ...tripEdits, moves, planMode: "custom" };
+}
+
 function commitDisplayedPlan(payload, { zip } = {}) {
   if (!payload) return false;
   quietRetryAttempt = 0;
+  pinPreferredStores(payload);
   renderTrip(payload, { keepEdits: true, force: true });
   if (!planReady(lastOptimize)) return false;
   writePlanCache(localStorage, {
@@ -6057,7 +6078,7 @@ document.addEventListener("click", (event) => {
   }
   const matchSearch = target.closest("[data-match-search]");
   if (matchSearch) {
-    matchSheet?.open?.(matchSearch.getAttribute("data-match-search") || "");
+    matchSheet?.open?.(matchSearch.getAttribute("data-match-search") || "", matchSearch.getAttribute("data-match-store") || "");
     return;
   }
   const shopSwap = target.closest("[data-shop-swap]");
@@ -6607,6 +6628,15 @@ $("menu-home")?.addEventListener("click", () => {
 $("menu-brands")?.addEventListener("click", () => {
   closeDrawer();
   profileUi?.openEditor?.();
+});
+$("menu-favorites")?.addEventListener("click", () => {
+  closeDrawer();
+  showStep("add");
+  const block = document.getElementById("usuals-block");
+  const toggle = document.getElementById("usuals-toggle");
+  if (block) block.hidden = false;
+  if (toggle instanceof HTMLElement && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+  document.getElementById("usuals-block")?.scrollIntoView({ block: "start" });
 });
 $("menu-zip")?.addEventListener("click", () => openDrawer({ focus: "zip" }));
 $("menu-new-trip")?.addEventListener("click", () => {
@@ -8106,7 +8136,7 @@ function paintUsuals() {
   const toggle = $("usuals-toggle");
   if (toggle) {
     toggle.setAttribute("aria-expanded", usualsOpen ? "true" : "false");
-    toggle.setAttribute("aria-label", `Your usuals, ${summary.label}`);
+    toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
   }
   const panel = $("usuals-panel");
   if (panel) panel.hidden = !usualsOpen;
@@ -9312,14 +9342,23 @@ guide = mountGuide({
 
 matchSheet = mountMatchSheet({
   apiUrl,
-  onPick(product, name) {
-    addProduct(product, 1, { quiet: false, source: "match", skipAsk: true });
-    const wanted = String(name || "").trim().toLowerCase();
-    if (wanted && Array.isArray(lastOptimize?.unavailable)) {
-      lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
-      if (flowStep === "plan") paintTrip();
+  onPick(product, name, store) {
+    const wanted = String(name || "").trim();
+    for (const [id, entry] of [...list]) {
+      const labels = [entry?.product?.name, entry?.product?.familyName, entry?.product?.catalogName].filter(Boolean);
+      if (labels.some((label) => guideNamesMatch(wanted, label))) list.delete(id);
     }
-    toast("Added that match.");
+    addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true });
+    const added = findListEntry(product.id);
+    if (added && store) added.preferredStore = store;
+    if (wanted && Array.isArray(lastOptimize?.unavailable)) {
+      lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => !guideNamesMatch(wanted, row));
+      lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
+    }
+    saveList();
+    if (flowStep === "plan") void planTrip({ stay: true });
+    else if (flowStep === "shop") renderShop();
+    toast(store ? `Added to the ${store} cart.` : "Added that match.");
   },
 });
 

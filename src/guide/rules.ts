@@ -438,12 +438,8 @@ export function runningLowUsuals(usuals: Usual[] | undefined, listNames: string[
   return names;
 }
 
-export function typeFrames(line: string, reduced: boolean): string[] {
-  const text = String(line || "");
-  if (reduced || text.length < 2) return [text];
-  const frames: string[] = [];
-  for (let i = 1; i <= text.length; i += 1) frames.push(text.slice(0, i));
-  return frames;
+export function typeFrames(line: string, _reduced?: boolean): string[] {
+  return [String(line || "")];
 }
 
 /**

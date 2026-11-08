@@ -39,8 +39,8 @@ describe("three-step flow", () => {
     assert.equal(add.countLabel, "3 items");
     assert.equal(add.totalLabel, "$12.50");
     assert.equal(add.button, "Review your trip");
-    assert.equal(add.enabled, true);
-    assert.equal(add.showButton, true);
+    assert.equal(add.enabled, false);
+    assert.equal(add.showButton, false);
     assert.equal(add.provisional, true);
 
     const missing = planBarCopy({ step: "add", itemCount: 2, total: Number.NaN });

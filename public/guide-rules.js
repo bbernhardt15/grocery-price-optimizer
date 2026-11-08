@@ -305,12 +305,8 @@ function runningLowUsuals(usuals, listNames, limit = 3) {
   }
   return names;
 }
-function typeFrames(line, reduced) {
-  const text = String(line || "");
-  if (reduced || text.length < 2) return [text];
-  const frames = [];
-  for (let i = 1; i <= text.length; i += 1) frames.push(text.slice(0, i));
-  return frames;
+function typeFrames(line, _reduced) {
+  return [String(line || "")];
 }
 function decideGuide(input = {}) {
   const settings = input.settings ? parseGuideSettings(input.settings) : emptyGuideSettings();

@@ -1380,8 +1380,13 @@ dialog.profile-onboard #profile-stage {
   overflow-anchor: none;
   padding-bottom: 12px;
 }
+dialog.profile-onboard[open] { z-index: 80; }
 dialog.profile-onboard .profile-actions {
-  position: static;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--bg);
+  padding-bottom: calc(12px + var(--bar-h) + env(safe-area-inset-bottom));
   flex: none;
   background: var(--bg);
 }
@@ -1419,7 +1424,13 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   border-color: var(--accent);
 }
 .drop-primary .muted { color: inherit; opacity: 0.88; }
-.zip-row { display: flex; gap: 8px; align-items: flex-end; }
+.zip-row { display: flex; gap: 8px; align-items: flex-end; padding: 4px 2px; overflow: visible; }
+#profile-zip:focus,
+#onboard-zip:focus {
+  outline: none;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .zip-row .profile-field { flex: 1 1 auto; min-width: 0; }
 .zip-done {
   flex: none;

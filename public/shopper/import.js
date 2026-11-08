@@ -621,7 +621,7 @@ export function mountImport(deps) {
       ${foundHtml ? `<ul class="import-review">${foundHtml}</ul>` : ""}
       ${missingNote}
       ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
-      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save for next time on this phone.</span></label>
+      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Remember these items on this phone.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
         <button type="button" class="primary" id="import-accept" ${count ? "" : "disabled"}>${escapeHtml(acceptLabel(count))}</button>

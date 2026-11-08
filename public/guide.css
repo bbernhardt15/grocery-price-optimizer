@@ -94,9 +94,9 @@ body:has(#gitter-guide:not([hidden])) .body {
 }
 
 .gitter-guide-chip[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
 }
 .gitter-guide-chip {
   flex: 1 1 auto;

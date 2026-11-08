@@ -788,7 +788,12 @@ export function mountProfileOnboarding(deps = {}) {
     const boxes = [...document.querySelectorAll("[data-place-store]")];
     const picked = boxes.map((box) => (box.checked ? box.getAttribute("data-place-store") : "")).filter(Boolean);
     if (!boxes.length) {
-      deps.toast?.("No stores near that ZIP. Go back and try another.");
+      const note = $("profile-zip-error");
+      if (note) {
+        note.hidden = false;
+        note.textContent = "Stores are still loading. Wait a moment, then save.";
+      }
+      deps.toast?.("Stores are still loading. Wait a moment, then save.");
       return null;
     }
     if (!picked.length) {
@@ -1776,7 +1781,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (target.dataset.edit) {
       returnTo = "summary";
-      stepId = target.dataset.edit;
+      stepId = target.dataset.edit === "stores" ? "place" : target.dataset.edit;
       render();
       focusTitle();
       return;

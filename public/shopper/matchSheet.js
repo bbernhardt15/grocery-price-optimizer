@@ -32,6 +32,7 @@ export function mountMatchSheet(deps) {
   const history = armSheetHistory(dialog);
   const products = new Map();
   let query = "";
+  let storeName = "";
 
   function paint(rows, message) {
     const host = dialog.querySelector("#match-results");
@@ -50,11 +51,25 @@ export function mountMatchSheet(deps) {
       .join("");
   }
 
+  function offerFor(item, store) {
+    const offers = Array.isArray(item?.offers) ? item.offers : item?.bestOffer ? [item.bestOffer] : [];
+    const wanted = String(store || "").trim().toLowerCase();
+    if (!wanted) {
+      const price = Number(item?.bestOffer?.price ?? item?.price);
+      return { store: String(item?.bestOffer?.storeName || ""), price };
+    }
+    const hit = offers.find((offer) => String(offer?.storeName || "").trim().toLowerCase() === wanted);
+    if (!hit) return null;
+    return { store: String(hit.storeName || store), price: Number(hit.price) };
+  }
+
   async function search(name) {
-    paint([], "Searching Grocery Gitter…");
+    const where = storeName ? ` at ${storeName}` : "";
+    paint([], `Searching Grocery Gitter${where}…`);
     const apiUrl = deps.apiUrl || ((path) => path);
+    const storeQuery = storeName ? `&store=${encodeURIComponent(storeName)}` : "";
     try {
-      const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`));
+      const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12${storeQuery}`));
       const body = await response.json().catch(() => ({}));
       const items = Array.isArray(body.items) ? body.items : [];
       products.clear();
@@ -62,31 +77,37 @@ export function mountMatchSheet(deps) {
       for (const item of items) {
         const id = String(item?.id || item?.defaultVariantId || "");
         if (!id) continue;
+        const offer = offerFor(item, storeName);
+        if (storeName && !offer) continue;
         products.set(id, item);
         const label = String(item.familyName || item.name || "Item");
         const brand = String(item.brand || "").trim();
-        const price = Number(item.bestOffer?.price ?? item.price);
+        const price = offer ? offer.price : Number(item.bestOffer?.price ?? item.price);
         rows.push({
           id,
           label: brand && !label.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${label}` : label,
           price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
+          store: offer?.store || storeName,
         });
       }
-      paint(rows, rows.length ? "" : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
+      paint(rows, rows.length ? "" : storeName ? `Nothing at ${storeName} in Grocery Gitter. That item stays off the ${storeName} cart.` : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
     } catch {
       paint([], "Couldn't search just now. You can keep shopping in the store.");
     }
   }
 
-  function open(name) {
+  function open(name, store) {
     query = String(name || "").replace(/\s+/g, " ").trim();
+    storeName = String(store || "").replace(/\s+/g, " ").trim();
     const title = dialog.querySelector("#match-title");
     const lead = dialog.querySelector("#match-lead");
     if (title) title.textContent = query ? `Find a match for ${query}` : "Find a match";
     if (lead) {
-      lead.textContent = query
-        ? `Pick one to add ${query} here. This stays in Grocery Gitter.`
-        : "Pick a product. This stays in Grocery Gitter.";
+      lead.textContent = storeName
+        ? `Pick a ${storeName} price for ${query || "this item"}. It is added to the ${storeName} cart in Grocery Gitter, not the other store.`
+        : query
+          ? `Pick one to add ${query} here. This stays in Grocery Gitter.`
+          : "Pick a product. This stays in Grocery Gitter.";
     }
     if (!dialog.open) dialog.showModal();
     history.push();
@@ -101,7 +122,7 @@ export function mountMatchSheet(deps) {
     if (!target) return;
     event.preventDefault();
     const product = products.get(target.getAttribute("data-match-pick") || "");
-    if (product) deps.onPick?.(product, query);
+    if (product) deps.onPick?.(product, query, storeName);
     dialog.close();
   });
   dialog.addEventListener("close", () => {

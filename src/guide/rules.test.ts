@@ -462,8 +462,7 @@ describe("Gitter guide rules", () => {
 
   it("types the line unless reduced motion is on, and reads receipt bodies without calling ask", () => {
     assert.deepEqual(typeFrames("Hi", true), ["Hi"]);
-    const frames = typeFrames("Hi", false);
-    assert.deepEqual(frames, ["H", "Hi"]);
+    assert.deepEqual(typeFrames("Hello there", false), ["Hello there"]);
     assert.equal(importReceiptUrl("/api/import/receipt"), true);
     assert.equal(importReceiptUrl("https://grocery.gitter/api/import/photo"), true);
     assert.equal(importReceiptUrl("/api/import/pdf?progress=1"), true);
