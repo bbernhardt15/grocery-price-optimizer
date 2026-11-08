@@ -137,7 +137,7 @@ describe("Gitter guide moments on the real flows", () => {
     assert.equal(review.current?.line, "Want me to check which stores are cheaper?");
     assert.deepEqual(
       review.current?.chips.map((chip) => chip.label),
-      ["Review", "Not yet"]
+      ["Check prices", "Keep building"]
     );
     const again = presentGuide({ settings, session: review.session, view: seen, current: review.current });
     assert.equal(again.current?.moment, "before-review");

@@ -14,7 +14,7 @@ describe("calm add screen", () => {
     assert.match(html, /id="ask-mic"/);
     assert.match(html, /id="ask-import"/);
     assert.match(html, /id="starter-lists"/);
-    assert.match(html, /Your usuals/);
+    assert.match(html, /Your favorites/);
     assert.match(html, /id="browse-panel" hidden/);
     assert.match(html, /Browse the catalog by aisle/);
     assert.match(html, /id="refine-count"/);

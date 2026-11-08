@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyProfile } from "../../public/shopper/profile.js";
 import {
+  favoriteWizardSteps,
   isPreferenceList,
   learnCategoryFromProduct,
   nameBrandsFor,
@@ -139,5 +140,86 @@ describe("category preferences", () => {
     assert.ok(fewer.delta > 0);
     assert.equal(handoffMark({ storeName: "Kroger", handoff: { tier: "cart", action: { type: "kroger_cart" } } }).label, "Cart");
     assert.equal(handoffMark({ storeName: "Target", handoff: { tier: "link" } }).label, "List");
+  });
+
+  it("uses a saved flavor and does not swap in a different one", () => {
+    const rows = [
+      product("kraft", "Kraft Macaroni and Cheese Original", "Kraft", { departmentId: "pantry", subcategory: "Pasta & Rice", price: 1.2 }),
+      product("annie", "Annie's Shells and Cheese", "Annie's", { departmentId: "pantry", subcategory: "Pasta & Rice", price: 2.4 }),
+    ];
+    const saved = setCategoryPreference(emptyProfile(), {
+      family: "mac-and-cheese",
+      mode: "brand",
+      brand: "Kraft",
+      variant: "Kraft Original",
+    });
+    const hit = resolveCategoryPreference({ profile: saved, family: "mac-and-cheese", products: rows });
+    assert.equal(hit.product?.id, "kraft");
+    assert.equal(hit.ask, false);
+    const miss = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "mac-and-cheese",
+        mode: "brand",
+        brand: "Kraft",
+        variant: "Double Stuf",
+      }),
+      family: "mac-and-cheese",
+      products: rows,
+    });
+    assert.equal(miss.product, null);
+    assert.equal(miss.ask, true);
+    const cherry = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        variant: "Cherry Coke",
+      }),
+      family: "soda",
+      products: [
+        product("classic", "Coca-Cola Classic 12 Pack", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 7.28 }),
+        product("cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(cherry.product?.id, "cherry");
+    const specific = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        attributes: ["cherry"],
+        variant: "Cherry Coke",
+      }),
+      family: "soda",
+      products: [
+        product("cola-cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.28 }),
+        product("cherry-coke", "Cherry Coke", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(specific.product?.id, "cherry-coke");
+  });
+
+  it("offers soda flavor chips from the catalog words and keeps Cherry over Classic", () => {
+    const soda = favoriteWizardSteps().find((step) => step.id === "soda");
+    assert.ok(soda);
+    assert.deepEqual(
+      soda.flavors.map((row) => row.label),
+      ["Classic", "Cherry", "Vanilla", "Diet", "Zero"]
+    );
+    const picked = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        attributes: ["cherry"],
+        variant: "Cherry",
+      }),
+      family: "soda",
+      products: [
+        product("classic", "Coca-Cola Classic 12 Pack", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 7.28 }),
+        product("cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(picked.product?.id, "cherry");
   });
 });

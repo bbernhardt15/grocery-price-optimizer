@@ -115,7 +115,7 @@ export function basketTeaserHtml(lines) {
   const teaser = basketTeaser(lines);
   const before = teaser.before
     ? `<div><span>Last time</span><strong>${escapeText(teaser.before)}</strong></div>`
-    : `<div><span>Last time</span><strong>Your usuals</strong></div>`;
+    : `<div><span>Last time</span><strong>Your favorites</strong></div>`;
   return `<aside class="basket-teaser">
     <p class="basket-kicker">Your usual basket</p>
     <div class="basket-compare">

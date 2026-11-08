@@ -11,7 +11,7 @@ import { applyLearnedChoice, learnedSummaryHtml } from "../../public/shopper/rec
 import { categoryDetailHtml } from "../../public/shopper/categoryStage.js";
 import { setCategoryPreference } from "../../public/shopper/categoryPreference.js";
 import { emptyProfile } from "../../public/shopper/profile.js";
-import { buildTripAddList, quantityLabel, tripAddTotal, tripQuantityDefault } from "../../public/shopper/tripAdd.js";
+import { buildTripAddList, quantityLabel, splitPackedQuantity, tripAddTotal, tripQuantityDefault } from "../../public/shopper/tripAdd.js";
 import { callbackCanClose, emptyMustNotReplace, returnScreenCopy, tripRecord } from "../../public/shopper/tripSync.js";
 import { suggestZipChoices } from "../../public/shopper/zipSuggest.js";
 
@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v57", () => {
-    assert.match(sw, /grocery-gitter-shell-v57/);
+  it("bumps the shell cache to v62", () => {
+    assert.match(sw, /grocery-gitter-shell-v62/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -90,6 +90,13 @@ describe("ninth phone test", () => {
     assert.equal(rows[0].quantity, 1);
     assert.equal(rows[0].selected, false);
     assert.equal(rows[1].selected, false);
+    const packed = splitPackedQuantity("Bloom Shirley Temple x2", 1);
+    assert.equal(packed.name, "Bloom Shirley Temple");
+    assert.equal(packed.quantity, 2);
+    const shirley = buildTripAddList([{ name: "Bloom Shirley Temple x2", quantity: 1, price: 3 }]);
+    assert.equal(shirley[0].name, "Bloom Shirley Temple");
+    assert.equal(shirley[0].quantity, 2);
+    assert.match(shirley[0].label, /x2/);
     assert.equal(tripAddTotal(rows), 0);
     assert.match(profileUi, /finish\(Date\.now\(\)\)/);
     assert.match(profileUi, /data-trip-pick/);

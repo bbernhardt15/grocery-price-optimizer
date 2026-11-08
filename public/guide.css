@@ -26,7 +26,9 @@
   overflow: auto;
 }
 
-.gitter-guide[hidden] {
+.gitter-guide[hidden],
+body:has(dialog[open]) #gitter-guide,
+body:has(.filters.open) #gitter-guide {
   display: none !important;
 }
 
@@ -83,6 +85,11 @@ body:has(#gitter-guide:not([hidden])) .body {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  pointer-events: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .gitter-guide-chip,
@@ -94,9 +101,9 @@ body:has(#gitter-guide:not([hidden])) .body {
 }
 
 .gitter-guide-chip[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
 }
 .gitter-guide-chip {
   flex: 1 1 auto;

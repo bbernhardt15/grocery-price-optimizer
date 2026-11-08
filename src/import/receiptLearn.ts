@@ -268,6 +268,7 @@ function isJunkLine(line: string): boolean {
   if (/^(?:kroger|walmart|target|instacart|amazon|whole foods|aldi)(?:\s*#?\s*\d+)?$/i.test(value)) return true;
   if (/^page\s+\d+/i.test(value)) return true;
   if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(value)) return true;
+  if (/fsa\s*\/\s*hsa|eligible item total|amount saved|you saved|balance due|change due|payment|visa|mastercard|debit|credit card|loyalty|fuel points|survey|receipt id|transaction/i.test(value)) return true;
   if (/^(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?|qty|quantity|each|ea\.?|items?)$/i.test(value)) return true;
   if (/^(?:\d+\s*[x×]\s*)?(?:box(?:es)?|bags?|tax(?:es)?|fees?|tips?|totals?|sub\s*totals?)$/i.test(value)) return true;
   if (/^[x×]\s*\d{1,2}$/.test(value) || /^\d{1,2}\s*[x×]$/.test(value)) return true;

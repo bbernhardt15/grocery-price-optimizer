@@ -172,7 +172,8 @@ export function markDietPrompt(profile, value, at = Date.now()) {
 }
 
 export function stepById(id) {
-  return decorate(STEP_DEFS).find((step) => step.id === id) || profileSteps()[0];
+  const wanted = id === "stores" ? "place" : id;
+  return decorate(STEP_DEFS).find((step) => step.id === wanted) || profileSteps()[0];
 }
 
 export function nextStepId(id) {
@@ -354,10 +355,15 @@ export function summarySections(profile) {
   const parsed = parseProfile(profile);
   const products = Object.values(parsed.productPreferences || {});
   const stores = (parsed.shopStores || []).join(", ");
+  const asked = parsed.onboarding?.status === "done" || parsed.onboarding?.status === "skipped" || parsed.onboarding?.status === "in_progress";
+  const storeValue = stores || (asked ? "All nearby stores" : "Not set yet");
+  const allergyValue = (parsed.allergies || []).length ? joinLabels(parsed.allergies) : parsed.dietPrompt ? "None" : "Not asked yet";
+  const dietJoined = [joinLabels(parsed.diets), (parsed.dietNotes || []).join(", ")].filter((part) => part && part !== "Not set yet").join(" · ");
+  const dietValue = dietJoined && dietJoined !== "Not set yet" ? dietJoined : parsed.dietPrompt ? "None" : "Not asked yet";
   return [
-    { id: "stores", step: "stores", label: "Stores", value: stores || "Not set yet" },
-    { id: "allergies", step: "allergies", label: "Allergies", value: joinLabels(parsed.allergies) },
-    { id: "diets", step: "diets", label: "Diets", value: [joinLabels(parsed.diets), (parsed.dietNotes || []).join(", ")].filter((part) => part && part !== "Not set yet").join(" · ") || "Not set yet" },
+    { id: "stores", step: "place", label: "Stores", value: storeValue },
+    { id: "allergies", step: "allergies", label: "Allergies", value: allergyValue },
+    { id: "diets", step: "diets", label: "Diets", value: dietValue },
     { id: "receipts", step: "receipts", label: "From your receipts", value: preferenceLine(parsed, products) },
   ];
 }

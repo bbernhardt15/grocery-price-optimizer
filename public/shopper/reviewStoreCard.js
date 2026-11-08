@@ -51,13 +51,10 @@ export function reviewStoreCardHtml(card) {
       <p class="review-store-meta"><span>${escapeText(card.countLabel)}</span>${total}</p>
     </header>
     <div class="review-store-main">
-      <details class="store-fold">
-        <summary>
-          <span class="store-fold-name">${escapeText(card.name)}</span>
-          ${card.markHtml || ""}
-          <span>${escapeText(card.countLabel)}</span>
-          ${total}
-        </summary>
+      <details class="store-fold" open>
+        <summary>Items in this cart</summary>
+        ${card.markHtml || ""}
+        <p class="price-source">Shelf estimates from ${escapeText(card.name)}. Not a checkout total.</p>
         <ul class="review-lines">${card.itemsHtml || ""}</ul>
         ${card.swapsHtml || ""}
       </details>

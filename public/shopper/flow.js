@@ -49,7 +49,9 @@ export function planBarCopy(input = {}) {
   const step = readFlowStep(input.step);
   const count = Math.max(0, Math.floor(Number(input.itemCount) || 0));
   const left = input.left == null ? count : Math.max(0, Math.floor(Number(input.left) || 0));
+  const lines = input.lineCount == null ? null : Math.max(0, Math.floor(Number(input.lineCount) || 0));
   let countLabel = count === 1 ? "1 item" : `${count} items`;
+  if (step !== "shop" && lines && lines !== count) countLabel = `${count} units · ${lines} lines`;
   if (step === "shop") {
     if (count === 0) countLabel = "Nothing to shop";
     else if (left === 0) countLabel = "All checked";
@@ -58,10 +60,10 @@ export function planBarCopy(input = {}) {
   const amount = Number(input.total);
   const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
   const provisional = !input.hasPlan && step !== "shop";
-  let button = "Review your trip";
-  let enabled = count > 0;
-  let showButton = count > 0;
-  if (step === "plan") {
+  let button = "";
+  let enabled = false;
+  let showButton = false;
+  if (step === "plan" || step === "add") {
     button = "";
     enabled = false;
     showButton = false;

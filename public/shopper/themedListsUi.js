@@ -179,6 +179,9 @@ function slotRowHtml(model, slotDef, book, people, quantities, escapeHtml) {
     <div class="slot-copy">
       <p class="slot-need">${text(escapeHtml, slotDef.label)}</p>
       <p class="slot-product">${text(escapeHtml, shown.title)}</p>
+      <label class="slot-brand">Brand for this list
+        <input data-slot-brand="${text(escapeHtml, slotDef.id)}" value="${text(escapeHtml, picked.choice?.brand || slotDef.suggested?.brand || "")}" maxlength="40" autocomplete="off" />
+      </label>
       ${shown.detail ? `<p class="muted">${text(escapeHtml, shown.detail)}</p>` : ""}
       <p class="muted">${text(escapeHtml, sourceNote(picked.source))}</p>
       ${move}

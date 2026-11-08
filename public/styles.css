@@ -56,8 +56,8 @@ body[data-step="shop"] {
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; min-height: 100%; max-width: 100%; }
-html { scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--bar-h) + 16px); overflow-x: clip; overscroll-behavior-y: none; }
-body { overflow-x: clip; overscroll-behavior-y: none; }
+html { scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--bar-h) + 16px); overflow-x: clip; overscroll-behavior-y: auto; overflow-anchor: none; }
+body { overflow-x: clip; overscroll-behavior-y: none; overflow-anchor: none; }
 body {
   font-family: var(--font);
   color: var(--ink);
@@ -502,7 +502,8 @@ a.text-btn:hover { background: var(--accent-soft); }
 }
 body[data-refine="1"] { overflow: hidden; }
 .filters label, .check-row { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
-.check-row { flex-direction: row; align-items: center; min-height: 44px; color: var(--ink); }
+.check-row { flex-direction: row; align-items: center; min-height: 44px; color: var(--ink); gap: 10px; }
+.check-row input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0; flex: none; }
 .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filter-actions { display: flex; gap: 8px; }
 .filter-actions .primary, .filter-actions .ghost { flex: 1; }
@@ -547,7 +548,27 @@ body[data-results="search"] #shelf-entry { display: none; }
 .shelf-choices button {
   flex: 1 1 30%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--bg); color: var(--ink); font-weight: 700;
+  touch-action: manipulation; position: relative; z-index: 1;
 }
+dialog.shelf-sheet[open] .sheet-body {
+  max-height: min(var(--vv-height, 100dvh), 100dvh);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+.missing-row { touch-action: pan-y; transition: transform 160ms ease; }
+.favorites-screen { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 24px; }
+.favorites-screen[hidden] { display: none !important; }
+.favorites-row { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.favorites-row input, .slot-brand input { min-height: 44px; width: 100%; }
+.slot-brand { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+.price-source { color: var(--muted); font-size: 0.8rem; font-weight: 650; margin: 0 0 6px; }
+body[data-favorites="open"] #browse,
+body[data-favorites="open"] #grid,
+body[data-favorites="open"] .browse-tools,
+body[data-favorites="open"] .dept-scroller,
+body[data-favorites="open"] #usuals-block,
+body[data-favorites="open"] #shelf-entry { display: none !important; }
 .shelf-choices button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .shelf-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .shelf-add label { flex: 1 1 12rem; display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
@@ -730,7 +751,7 @@ dialog.shelf-sheet .sheet-body {
 }
 .step-bar {
   position: static;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
   width: 100%; min-width: 0; padding: 0; background: transparent;
 }
 .step-bar button {
@@ -997,6 +1018,28 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 .kroger-unpriced ul { padding-left: 1.1rem; }
 .kroger-unpriced li { margin: 6px 0; }
 
+.toast[data-place="sheet"] {
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  z-index: auto;
+  width: 100%;
+  margin: 0;
+}
+.toast[data-place="sheet"]:not(.show) { display: none; }
+.toast.show[data-place="sheet"] {
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  width: 100%;
+  margin: 0 0 10px;
+  opacity: 1;
+  pointer-events: auto;
+}
 .toast {
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;
@@ -1111,7 +1154,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
     width: min(360px, 100%); max-height: min(70dvh, 480px);
     border-radius: 16px; border: 1px solid var(--line); z-index: 8;
   }
-  #list-close, .list-bar { display: none; }
+  .list-bar { display: none; }
   body[data-step="shop"] .shop-bar { display: flex; }
   body[data-step="shop"] #shop-done { min-height: 44px; }
   .list-panel, .list-panel.open {
@@ -1380,8 +1423,13 @@ dialog.profile-onboard #profile-stage {
   overflow-anchor: none;
   padding-bottom: 12px;
 }
+dialog.profile-onboard[open] { z-index: 80; }
 dialog.profile-onboard .profile-actions {
-  position: static;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--bg);
+  padding-bottom: calc(12px + var(--bar-h) + env(safe-area-inset-bottom));
   flex: none;
   background: var(--bg);
 }
@@ -1419,7 +1467,13 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   border-color: var(--accent);
 }
 .drop-primary .muted { color: inherit; opacity: 0.88; }
-.zip-row { display: flex; gap: 8px; align-items: flex-end; }
+.zip-row { display: flex; gap: 8px; align-items: flex-end; padding: 4px 2px; overflow: visible; }
+#profile-zip:focus,
+#onboard-zip:focus {
+  outline: none;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .zip-row .profile-field { flex: 1 1 auto; min-width: 0; }
 .zip-done {
   flex: none;
@@ -1602,7 +1656,9 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   color: inherit; text-align: left; text-decoration: underline; text-underline-offset: 2px;
   min-height: 0;
 }
-#bar-primary[hidden] { display: none !important; }
+#bar-primary,
+#bar-primary[hidden],
+body[data-step="add"] #bar-primary { display: none !important; }
 .learned-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .learned-lines li { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .profile-actions { position: sticky; bottom: 0; background: var(--bg); padding: 8px 0 4px; }
@@ -1755,6 +1811,7 @@ dialog.profile-onboard[data-dir="back"] #profile-title,
 dialog.profile-onboard[data-dir="back"] #profile-stage {
   animation: intake-back 420ms cubic-bezier(0.22, 0.8, 0.2, 1);
 }
+body[data-step="plan"] #trip { overflow-anchor: none; }
 body[data-step="plan"] #trip,
 body[data-step="shop"] #shop {
   animation: intake-forward 420ms cubic-bezier(0.22, 0.8, 0.2, 1);

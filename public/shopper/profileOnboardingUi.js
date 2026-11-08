@@ -455,6 +455,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   let storesWarmed = "";
+  let placeStoresState = "idle";
   function warmStores() {
     const zip = normalizeZipInput(currentZipRaw());
     if (!/^\d{5}/.test(zip) || storesWarmed === zip) return;
@@ -471,6 +472,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function showStoreSkeleton() {
+    placeStoresState = "loading";
     const host = $("profile-store-list");
     if (host) host.innerHTML = `<div class="read-skel" aria-busy="true" aria-label="Loading stores"><span></span><span></span><span></span></div>`;
     const note = $("profile-store-note");
@@ -485,11 +487,13 @@ export function mountProfileOnboarding(deps = {}) {
     const zip = normalizeZipInput(raw);
     if (!/^\d{5}/.test(zip)) {
       host.innerHTML = "";
+      placeStoresState = "need-zip";
       if (note) note.textContent = "Stores within about 25 miles show up here.";
       return;
     }
     const nearby = storesForZip(zip);
     const names = visibleStoreNames(nearby.stores);
+    placeStoresState = names.length ? "ready" : "empty";
     const selected = new Set(draft.shopStores || []);
     const open = !draft.shopStores?.length;
     host.innerHTML = storeChoiceHtml(names, { selected, open });
@@ -788,10 +792,26 @@ export function mountProfileOnboarding(deps = {}) {
     const boxes = [...document.querySelectorAll("[data-place-store]")];
     const picked = boxes.map((box) => (box.checked ? box.getAttribute("data-place-store") : "")).filter(Boolean);
     if (!boxes.length) {
-      deps.toast?.("No stores near that ZIP. Go back and try another.");
+      const note = $("profile-zip-error");
+      const message =
+        placeStoresState === "empty"
+          ? "No stores are listed for that ZIP. Change the ZIP, or go back."
+          : placeStoresState === "need-zip"
+            ? "Enter a 5-digit ZIP, then choose stores."
+            : "Stores are still loading. Wait a moment, then save.";
+      if (note) {
+        note.hidden = false;
+        note.textContent = message;
+      }
+      deps.toast?.(message);
       return null;
     }
     if (!picked.length) {
+      const note = $("profile-zip-error");
+      if (note) {
+        note.hidden = false;
+        note.textContent = "Pick at least one store. Back keeps what you already saved.";
+      }
       deps.toast?.("Pick at least one store.");
       return null;
     }
@@ -1361,7 +1381,6 @@ export function mountProfileOnboarding(deps = {}) {
       const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
       const names = visibleStoreNames(nearby.stores);
       const decision = zipContinueDecision({ stores: names });
-      paintStoreList();
       if (!decision.advance) {
         const hiddenOnly = !adStoresVisible() && nearby.stores.length > 0;
         deps.toast?.(hiddenOnly ? "Kroger and Walmart aren't near that ZIP." : "No stores near that ZIP. Try another.");
@@ -1452,7 +1471,9 @@ export function mountProfileOnboarding(deps = {}) {
     if (stepId === "products" && !skipped) draft = rememberPicks(at);
     const answer = skipped ? undefined : currentAnswer();
     if (returnTo && stepId !== "summary") {
+      const wasDone = draft.onboarding?.status === "done" || draft.onboarding?.status === "skipped";
       draft = skipped ? skipStep(draft, stepId, at) : answerStep(draft, stepId, answer, at);
+      if (wasDone) draft = completeProfile(draft, at);
       if (stepId === "allergies" || stepId === "diets") draft = markDietPrompt(draft, "asked", at);
       if (!skipped && stepId === "products") draft = rememberPicks(at);
       stepId = "summary";
@@ -1582,6 +1603,10 @@ export function mountProfileOnboarding(deps = {}) {
       returnTo = "";
       render();
       focusTitle();
+      return;
+    }
+    if (stepId === "summary" && (draft.onboarding?.status === "done" || draft.onboarding?.status === "skipped")) {
+      if (dialog.open) dialog.close();
       return;
     }
     draft = persist(goBack(draft, stepId));
@@ -1731,7 +1756,8 @@ export function mountProfileOnboarding(deps = {}) {
           : [...current, brand].slice(0, 12);
         return { ...row, brands: nextBrands, brand: nextBrands[0] || "", mode: nextBrands.length ? "cheapestPicks" : row.mode };
       });
-      paintLearnedCard(family);
+      paintLearnedCard(family, { saved: true });
+      deps.toast?.("Saved");
       return;
     }
     if (target.dataset.learnedMode) {
@@ -1776,7 +1802,7 @@ export function mountProfileOnboarding(deps = {}) {
     }
     if (target.dataset.edit) {
       returnTo = "summary";
-      stepId = target.dataset.edit;
+      stepId = target.dataset.edit === "stores" ? "place" : target.dataset.edit;
       render();
       focusTitle();
       return;

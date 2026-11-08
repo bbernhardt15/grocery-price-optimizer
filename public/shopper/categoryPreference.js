@@ -76,6 +76,7 @@ export function categoryPreferenceOf(value, familyId) {
     confidence,
     count,
     label: clean(value.label, 80),
+    variant: clean(value.variant || value.flavor, 80),
     updatedAt: Number(value.updatedAt) || 0,
   };
 }
@@ -112,6 +113,60 @@ function brandHit(product, brand, familyId) {
   return have.key === wanted.key || have.key.includes(wanted.key) || wanted.key.includes(have.key);
 }
 
+function variantWord(word) {
+  const token = String(word || "").toLowerCase();
+  if (token === "coke" || token === "cola" || token === "coca") return "coca-cola";
+  return token;
+}
+
+function variantSpecificity(product, needle) {
+  const names = [product?.name, product?.familyName, product?.catalogName, product?.variantLabel]
+    .map((value) => clean(value, 120).toLowerCase())
+    .filter(Boolean);
+  if (names.some((name) => name === needle)) return 3;
+  if (names.some((name) => name.includes(needle))) return 2;
+  return 1;
+}
+
+function variantHit(product, variant) {
+  const needle = clean(variant, 80).toLowerCase();
+  if (!needle) return false;
+  const text = `${product?.name || ""} ${product?.brand || ""} ${product?.familyName || ""} ${product?.variantLabel || ""} ${product?.sizeLabel || ""}`.toLowerCase();
+  const words = needle
+    .split(/\s+/)
+    .map(variantWord)
+    .filter((word) => word.length > 2);
+  if (!words.length) return text.includes(needle);
+  return words.every((word) => {
+    if (word === "coca-cola") return /coca-?\s*cola|\bcoke\b/.test(text);
+    return text.includes(word);
+  });
+}
+
+/** The saved brand or flavor for a themed slot, when the shopper has one. */
+export function savedFlavor(profile, slot) {
+  const family = familyFromQuery(slot?.id) || familyFromQuery(slot?.search) || familyFromQuery(slot?.label) || familyFromQuery(slot?.name) || "";
+  const pref = family ? profile?.categoryPreferences?.[family] : null;
+  if (!pref || pref.mode === "skip" || pref.mode === "never") return null;
+  const variant = clean(pref.variant, 80);
+  const brand = clean(pref.brand, 80);
+  const attributes = Array.isArray(pref.attributes) ? pref.attributes.filter(Boolean) : [];
+  if (!variant && !brand && !attributes.length) return null;
+  const name = variant || [brand, familyLabel(family)].filter(Boolean).join(" ");
+  return { family, brand, variant, name, attributes };
+}
+
+/** One aisle at a time: known brands, flavor chips, and a specific product. */
+export function favoriteWizardSteps() {
+  return preferenceCategories().map((category) => ({
+    id: category.id,
+    label: category.label,
+    search: category.search || category.label,
+    brands: knownBrandNames(category.id).slice(0, 6),
+    flavors: (category.attributes || []).slice(0, 6).map((row) => ({ id: row.id, label: row.label || row.id })),
+  }));
+}
+
 function labelOf(product) {
   const brand = clean(product?.brand, 80);
   const name = clean(product?.familyName || product?.name, 120);
@@ -143,6 +198,16 @@ export function resolveCategoryPreference(input) {
   const narrowed = pool.filter((product) => matchesAttributes(product, family, pref.attributes));
   const rows = narrowed.length ? narrowed : pool;
   if (pref.mode === "brand") {
+    if (pref.variant) {
+      const flavored = rows.filter((product) => variantHit(product, pref.variant));
+      if (flavored.length) {
+        const exact = pref.productId ? flavored.find((product) => product.id === pref.productId) : null;
+        const needle = clean(pref.variant, 80).toLowerCase();
+        const ranked = flavored.slice().sort((a, b) => variantSpecificity(b, needle) - variantSpecificity(a, needle));
+        return { status: "brand", family, product: exact || ranked[0], mode: "brand", swapped: null, ask: false };
+      }
+      return { status: "ask", family, product: null, mode: "brand", swapped: null, ask: true };
+    }
     const exact = pref.productId ? rows.find((product) => product.id === pref.productId) : null;
     if (exact) return { status: "brand", family, product: exact, mode: "brand", swapped: null, ask: false };
     const branded = pref.brand ? rows.filter((product) => brandHit(product, pref.brand, family)) : [];

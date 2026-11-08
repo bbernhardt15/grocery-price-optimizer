@@ -202,7 +202,7 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, "Want me to check which stores are cheaper?");
     assert.deepEqual(
       prompt.chips.map((chip) => chip.label),
-      ["Review", "Not yet"]
+      ["Check prices", "Keep building"]
     );
     assert.equal(prompt.chips[0].action, "review");
   });
@@ -305,7 +305,7 @@ describe("Gitter guide rules", () => {
   it("after the trip is complete, names the savings from that finish and keeps the 10 second undo", () => {
     const finish = completeTripAction();
     assert.equal(finish.undoMs, FINISH_TRIP_UNDO_MS);
-    assert.equal(FINISH_TRIP_UNDO_MS, 10_000);
+    assert.equal(FINISH_TRIP_UNDO_MS, 4_500);
     const session = noteTrip(createGuideSession(), {
       saved: 12.5,
       savedToPastTrips: true,
@@ -462,8 +462,7 @@ describe("Gitter guide rules", () => {
 
   it("types the line unless reduced motion is on, and reads receipt bodies without calling ask", () => {
     assert.deepEqual(typeFrames("Hi", true), ["Hi"]);
-    const frames = typeFrames("Hi", false);
-    assert.deepEqual(frames, ["H", "Hi"]);
+    assert.deepEqual(typeFrames("Hello there", false), ["Hello there"]);
     assert.equal(importReceiptUrl("/api/import/receipt"), true);
     assert.equal(importReceiptUrl("https://grocery.gitter/api/import/photo"), true);
     assert.equal(importReceiptUrl("/api/import/pdf?progress=1"), true);

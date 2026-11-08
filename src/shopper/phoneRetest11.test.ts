@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v57", () => {
-    assert.match(sw, /grocery-gitter-shell-v57/);
+  it("bumps the shell cache to v62", () => {
+    assert.match(sw, /grocery-gitter-shell-v62/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -194,7 +194,8 @@ describe("eleventh phone test", () => {
     assert.equal(doc.body.inert, false);
     assert.deepEqual(scrolled, [180]);
     const after = releaseAfterLastSheet(doc);
-    assert.equal(after.reason, "released");
+    assert.equal(after.reason, "unlocked");
+    assert.deepEqual(scrolled, [180]);
     assert.match(app, /releaseAfterLastSheet/);
     assert.match(app, /pullAllowed/);
   });
@@ -381,7 +382,7 @@ describe("eleventh phone test at 390px", { timeout: 60_000, skip: chrome ? false
       assert.equal(light.word, "Grocery Gitter");
       assert.equal(light.fixed, false);
       assert.equal(light.proxy, false);
-      assert.deepEqual(light.tabs, ["Build", "Review", "In-store"]);
+      assert.deepEqual(light.tabs, ["Build", "Review", "In-store", "Favorites"]);
       assert.ok(light.activeIncludesPill, "active tab is a pill");
       assert.ok(light.headerInside, "header stays inside the phone");
       assert.ok(light.wordInside, "wordmark stays inside the header");

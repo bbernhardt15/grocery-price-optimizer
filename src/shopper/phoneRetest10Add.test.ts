@@ -51,7 +51,7 @@ function clickable(id: string, tag: "input" | "button" = "button") {
 
 describe("tenth phone test — Add tab", () => {
   it("keeps Your usuals to a count and one horizontal chip row", () => {
-    assert.match(html, /Your usuals/);
+    assert.match(html, /Your favorites/);
     assert.match(html, /id="usuals-toggle"/);
     assert.match(html, /id="usuals-count"/);
     assert.match(html, /id="usuals-panel"/);
@@ -167,7 +167,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v57/);
+    assert.match(sw, /grocery-gitter-shell-v62/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);

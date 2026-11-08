@@ -122,6 +122,11 @@ describe("taste profile storage", () => {
     assert.equal(WELCOME_PROMISE, "Tell us what you usually buy. We'll find it for less.");
     assert.equal(resumeStep(emptyProfile()), "welcome");
     assert.equal(summarySections(profile).some((section) => section.step === "allergies"), true);
+    const stores = summarySections(profile).find((section) => section.id === "stores");
+    assert.equal(stores?.step, "place");
+    assert.equal(stores?.value, "Kroger, Walmart");
+    const done = profileWith({ onboarding: { status: "done", step: "summary", updatedAt: 1 }, shopStores: [] });
+    assert.equal(summarySections(done).find((section) => section.id === "stores")?.value, "All nearby stores");
   });
 
   it("keeps the newer butter lock when two devices merge", () => {

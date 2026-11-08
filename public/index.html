@@ -129,6 +129,7 @@
             <summary>Preferences</summary>
             <nav class="menu-nav" aria-label="Preferences">
               <button type="button" id="menu-brands">My brands and preferences</button>
+              <button type="button" id="menu-favorites">Your favorites</button>
               <button type="button" id="menu-zip" hidden>Edit ZIP and stores</button>
               <button type="button" id="menu-settings" hidden>Settings</button>
               <button type="button" id="menu-redo">Redo setup</button>
@@ -172,7 +173,7 @@
               <div class="start-head usuals-head">
                 <button type="button" id="usuals-toggle" class="usuals-toggle" aria-expanded="false" aria-controls="usuals-panel">
                   <span class="usuals-chevron" aria-hidden="true"></span>
-                  <span class="usuals-title">Your usuals</span>
+                  <span class="usuals-title">Your favorites</span>
                   <span id="usuals-count" class="usuals-count">0</span>
                 </button>
                 <button type="button" id="add-usuals" class="text-btn">Add all</button>
@@ -184,6 +185,16 @@
             <h2 class="sr-only">Starter lists</h2>
             <div id="starter-lists" class="list-home"></div>
           <div id="past-trips-home" class="feature-cards"></div>
+          </section>
+          <section id="favorites-screen" class="favorites-screen" hidden aria-labelledby="favorites-title">
+            <div class="list-head">
+              <h2 id="favorites-title" tabindex="-1">Your favorites</h2>
+              <button type="button" class="text-btn" id="favorites-close">Back to Build</button>
+            </div>
+            <p class="muted">Brand and flavor for every aisle. Saved on this phone and used the next time that aisle is added.</p>
+            <div id="favorites-prefs"></div>
+            <h3>Remembered items</h3>
+            <ul id="favorites-usuals" class="usuals-list"></ul>
           </section>
           <section id="browse" class="browse">
             <button type="button" id="browse-toggle" class="feature-card browse-toggle" aria-expanded="false" aria-controls="browse-panel">
@@ -261,6 +272,8 @@
                   </label>
                   <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
                   <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
+                  <label class="check-row"><input id="filter-priced" type="checkbox" /> Has a shelf price</label>
+                  <label class="check-row"><input id="filter-mine" type="checkbox" /> My saved brands</label>
                   <div class="filter-actions">
                     <button type="submit" class="primary">Show items</button>
                     <button type="button" class="ghost" id="filters-clear">Clear</button>
@@ -360,6 +373,7 @@
           <button type="button" data-flow="add" aria-current="step" aria-label="Build"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h7v2H4v-2zM17 14h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg><span>Build</span></button>
           <button type="button" data-flow="plan" aria-label="Review"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 4h6v7H5V4zm8 0h6v4h-6V4zM5 13h6v7H5v-7zm8-3h6v10h-6V10z"/></svg><span>Review</span></button>
           <button type="button" data-flow="shop" aria-label="In-store"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 9l1.2-4h13.6L20 9H4zm0 2h16v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8z"/></svg><span>In-store</span></button>
+          <button type="button" id="tab-favorites" aria-label="Favorites"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 17.3l-5.4 3.2 1.4-6.1L3 10.2l6.2-.5L12 4l2.8 5.7 6.2.5-5 4.2 1.4 6.1z"/></svg><span>Favorites</span></button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">
@@ -539,7 +553,7 @@
           <a id="cart-ready-open" class="kroger-cart-btn" href="https://www.kroger.com/cart" rel="noopener" hidden>Open Kroger cart</a>
           <button type="button" class="ghost" id="cart-ready-checked" hidden>I checked out</button>
           <button type="button" class="ghost" id="cart-ready-retry" hidden>Retry</button>
-          <button type="button" class="ghost" id="cart-ready-trip">Back to my trip</button>
+          <button type="button" class="ghost" id="cart-ready-trip">Open Review</button>
         </div>
       </form>
     </dialog>
@@ -601,10 +615,10 @@
     <dialog id="store-return" class="sheet handoff-sheet" aria-labelledby="store-return-title">
       <form class="sheet-body" id="store-return-form">
         <h2 id="store-return-title">Did you finish at the store?</h2>
-        <p>A website can't come back from the store on its own.</p>
+        <p>The store opened in the browser. Grocery Gitter can't put their sign-in inside this app. Still shopping keeps this screen. Open Review goes to the store split.</p>
         <div class="onboard-actions">
-          <button type="button" class="ghost" id="store-return-no">Not yet</button>
-          <button type="button" class="ghost" id="store-return-trip">Back to my trip</button>
+          <button type="button" class="ghost" id="store-return-no">Still shopping</button>
+          <button type="button" class="ghost" id="store-return-trip">Open Review</button>
           <button type="submit" class="primary" id="store-return-yes">Yes, I finished</button>
         </div>
       </form>
@@ -631,8 +645,8 @@
     <dialog id="handoff-return" class="sheet handoff-sheet" aria-labelledby="handoff-return-title">
       <div class="sheet-body">
         <h2 id="handoff-return-title">Return to Grocery Gitter</h2>
-        <p id="handoff-return-body">Your trip is in the other Grocery Gitter tab.</p>
-        <button type="button" class="primary" id="handoff-return-back">Back to my trip</button>
+        <p id="handoff-return-body">The store stays in the browser. Your list is still in Grocery Gitter. Open Review shows the store split.</p>
+        <button type="button" class="primary" id="handoff-return-back">Open Review</button>
       </div>
     </dialog>
     <dialog id="trip-value" class="sheet" aria-labelledby="trip-value-title">

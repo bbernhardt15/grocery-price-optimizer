@@ -212,6 +212,22 @@
     overflow: auto;
     padding: 12px 14px calc(16px + var(--safe-bottom));
   }
+  dialog.import-sheet[open] .import-paste {
+    max-height: min(28vh, 140px);
+  }
+  dialog.import-sheet[open] #import-find,
+  dialog.import-sheet[open] .import-review-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--bg);
+  }
+  dialog.import-sheet[open] #import-review {
+    overflow: auto;
+    max-height: min(52vh, 420px);
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
   dialog.match-sheet[open] .sheet-body {
     max-height: 100%;
     height: 100%;

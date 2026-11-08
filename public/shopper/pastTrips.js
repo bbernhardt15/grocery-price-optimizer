@@ -208,6 +208,7 @@ export function receiptCardHtml(receipt, escapeHtml = escapeText) {
     <ul class="receipt-stores">${stores}</ul>
     ${saved}
     <div class="starter-actions">
+      <label class="check-row"><input type="checkbox" data-trip-select="${escapeHtml(receipt.id)}" /> Select</label>
       <button type="button" class="primary" data-reuse-trip="${escapeHtml(receipt.id)}">Reuse this list</button>
     </div>
     ${items ? `<details><summary>Items</summary><ul class="receipt-items">${items}</ul></details>` : ""}

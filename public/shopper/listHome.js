@@ -37,6 +37,7 @@ import {
   writeParty,
   writeSwaps,
 } from "./themedLists.js";
+import { savedFlavor } from "./categoryPreference.js";
 import { getUserProfile } from "./profile.js";
 import { defaultHeadcount, orderStarterLists } from "./profileConstraints.js";
 import {
@@ -204,12 +205,35 @@ export function createListHome(deps) {
     });
   }
 
+  function productMatchesWanted(product, wanted) {
+    const text = `${product?.name || ""} ${product?.brand || ""} ${product?.familyName || ""} ${product?.catalogName || ""}`.toLowerCase();
+    return String(wanted || "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 2)
+      .every((word) => text.includes(word) || (word === "coke" && /coca-?\s*cola|\bcoke\b/.test(text)));
+  }
+
+  function flavorFor(slotDef) {
+    if (!slotDef) return null;
+    return savedFlavor(deps.profile?.() || {}, slotDef);
+  }
+
+  function shelfQueries(model) {
+    return picksForShelf(model, book).map((pick) => {
+      if (pick.source === "override") return pick;
+      const flavor = flavorFor(pick.slotId ? { id: pick.slotId, search: pick.search, label: pick.label } : null);
+      if (!flavor?.name) return pick;
+      return { ...pick, name: flavor.name, brand: flavor.brand || pick.brand };
+    });
+  }
+
   function openList(listId) {
     const model = listModel(listId, book);
     if (!model) return;
     const checklist = model.mine
       ? null
-      : checklistFromList(model, book, party, { isBlocked: (slot) => Boolean(deps.slotBlocked?.(slot)) });
+      : checklistFromList(model, book, party, { isBlocked: (slot) => Boolean(deps.slotBlocked?.(slot)), profile: deps.profile?.() });
     view = { kind: "list", listId, quantities: {}, touched: {}, confirmDelete: false, finder: "", checklist };
     paintSheet();
     openDialog();
@@ -324,10 +348,11 @@ export function createListHome(deps) {
     markBusy(button, true);
     try {
       const shelf = await deps.loadShelf(
-        picks.map((pick) => ({
-          name: pick.slot?.search || pick.slot?.suggested?.name || pick.slot?.label || pick.name,
-          brand: pick.slot?.suggested?.brand || "",
-        }))
+        picks.flatMap((pick) => {
+          const flavor = flavorFor(pick.slot);
+          const names = [flavor?.name, pick.title, pick.slot?.search, pick.slot?.suggested?.name, pick.slot?.label].filter(Boolean);
+          return [...new Set(names)].map((name) => ({ name, brand: flavor?.brand || "" }));
+        })
       );
       let added = 0;
       const missing = [];
@@ -354,13 +379,21 @@ export function createListHome(deps) {
               quantity: pick.quantity,
             });
         if (resolved.excluded) continue;
-        if (!resolved.product?.id) {
-          missing.push(slotDef.label);
+        const wanted = flavorFor(slotDef)?.name || (pick.title && pick.title.toLowerCase() !== String(slotDef.label || "").toLowerCase() ? pick.title : "");
+        const chosen = resolved.product?.id && (!wanted || productMatchesWanted(resolved.product, wanted)) ? resolved.product : null;
+        if (!chosen?.id) {
+          const qty = Math.max(1, Math.floor(Number(resolved.quantity) || Number(pick.quantity) || 1));
+          const named = wanted || slotDef.label;
+          if (typeof deps.addCustom === "function") {
+            deps.addCustom(named, qty);
+            added += 1;
+          }
+          missing.push(named);
           continue;
         }
-        const stored = deps.productById(resolved.product.id) || resolved.product;
+        const stored = deps.productById(chosen.id) || chosen;
         if (deps.hasProduct(stored.id)) continue;
-        deps.addProduct(stored, resolved.quantity, { quiet: true });
+        deps.addProduct(stored, resolved.quantity, { quiet: true, preferredStore: stored.preferredStore || "" });
         added += 1;
         if (resolved.swapped) {
           swaps[stored.id] = { from: resolved.swapped.from, to: stored.catalogName || stored.name || resolved.swapped.to };
@@ -371,8 +404,8 @@ export function createListHome(deps) {
       const title = listModel(checklist.listId, book)?.title || "That list";
       if (!added && missing.length) deps.toast("Those items aren't on the shelf yet. Try browsing.");
       else if (missing.length) {
-        const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
-        deps.toast(`Added ${title}. ${phrase}.`);
+        const phrase = missing.length === 1 ? `${missing[0]} is on your list to match` : `${missing.join(", ")} are on your list to match`;
+        deps.toast(`Added ${added} items. ${phrase}.`);
       } else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
       else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
       else deps.toast(`${title} is already on your list.`);
@@ -405,7 +438,7 @@ export function createListHome(deps) {
     markBusy(button, true);
     const quantities = view?.listId === listId ? view.quantities : {};
     try {
-      const shelf = await deps.loadShelf(picksForShelf(model, book));
+      const shelf = await deps.loadShelf(shelfQueries(model));
       let added = 0;
       const missing = [];
       const swapped = [];
@@ -432,7 +465,13 @@ export function createListHome(deps) {
             });
         if (resolved.excluded) continue;
         if (!resolved.product?.id) {
-          missing.push(slotDef.label);
+          const qty = Math.max(1, Math.floor(Number(resolved.quantity) || Number(quantities[slotDef.id]) || 1));
+          const named = flavorFor(slotDef)?.name || slotDef.label;
+          if (typeof deps.addCustom === "function") {
+            deps.addCustom(named, qty);
+            added += 1;
+          }
+          missing.push(named);
           continue;
         }
         const stored = deps.productById(resolved.product.id) || resolved.product;
@@ -447,8 +486,8 @@ export function createListHome(deps) {
       saveSwaps();
       if (!added && missing.length) deps.toast("Those items aren't on the shelf yet. Try browsing.");
       else if (missing.length) {
-        const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
-        deps.toast(`Added ${model.title}. ${phrase}.`);
+        const phrase = missing.length === 1 ? `${missing[0]} is on your list to match` : `${missing.join(", ")} are on your list to match`;
+        deps.toast(`Added ${added} items. ${phrase}.`);
       }
       else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
       else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
@@ -490,6 +529,22 @@ export function createListHome(deps) {
     }
     if (target.id === "theme-add-input" && view?.checklist) {
       view.checklist = setDraft(view.checklist, target.value);
+    }
+    if (target instanceof HTMLInputElement && target.hasAttribute("data-slot-brand") && view.kind === "list") {
+      const slotId = target.getAttribute("data-slot-brand") || "";
+      const model = listModel(view.listId, book);
+      const slotDef = model?.slots?.find((slot) => slot.id === slotId);
+      if (!slotDef) return;
+      const picked = activeChoice(book, view.listId, slotDef);
+      book = persist(
+        setOverride(
+          book,
+          view.listId,
+          slotId,
+          { ...picked.choice, brand: target.value, name: picked.choice?.name || slotDef.suggested?.name || slotDef.label },
+          Date.now()
+        )
+      );
     }
   }
 

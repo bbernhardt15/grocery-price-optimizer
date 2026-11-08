@@ -124,7 +124,7 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
     return box;
   })();
   const guide = page.locator("#gitter-guide");
-  const notYet = guide.getByRole("button", { name: "Not yet" });
+  const notYet = guide.getByRole("button", { name: "Keep building" });
   const addItem = guide.getByRole("button", { name: "Add an item" });
   await expect(notYet.or(addItem)).toBeVisible();
   if (await notYet.isVisible()) await notYet.click();
@@ -141,7 +141,7 @@ test("Review paints a priced partial, chat import is full screen, and Not here i
   await expect(page.locator("[data-review-stable='loading']")).toHaveCount(0);
   const kroger = page.locator("[data-store='Kroger'] .review-store-head");
   await expect(kroger).toContainText("Kroger");
-  await expect(kroger).toContainText("2 items");
+  await expect(kroger).toContainText("2 lines");
   await expect(kroger).toContainText("$5.70");
   await expect(page.locator("#trip")).toContainText("You save");
   await expect(page.getByText("Shop in store")).toBeVisible();

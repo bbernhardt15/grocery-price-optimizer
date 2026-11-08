@@ -82,8 +82,9 @@ test("retest keeps the latest aisle, a scrollable Refine sheet, and department g
   const guide = page.locator("#gitter-guide");
   await expect(guide).toBeVisible();
   await expect(guide).not.toContainText(/low on Milk/i);
-  if (await guide.getByRole("button", { name: "Not yet" }).count()) {
-    await guide.getByRole("button", { name: "Not yet" }).click();
+  const keepBuilding = guide.getByRole("button", { name: "Keep building" });
+  if (await keepBuilding.count()) {
+    await keepBuilding.click();
   }
   if (await guide.getByRole("button", { name: "Add an item" }).count()) {
     await guide.getByRole("button", { name: "Add an item" }).click();
