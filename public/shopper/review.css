@@ -22,10 +22,14 @@ body[data-step="shop"] #shop {
 .shop-line {
   overflow-anchor: none;
 }
-.review-head-slot,
-body[data-step="plan"] .savings-card {
+.review-head-slot {
   min-height: 196px;
   box-sizing: border-box;
+}
+body[data-step="plan"] .savings-card {
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 12px 14px;
 }
 .review-loading-status {
   min-height: 24px;

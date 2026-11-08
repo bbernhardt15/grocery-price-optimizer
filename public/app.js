@@ -3677,6 +3677,13 @@ function addOwnCoupon(button) {
   const error = form?.querySelector("[data-coupon-error]");
   const line = form?.querySelector("[data-coupon-line]");
   const selected = line?.selectedOptions?.[0];
+  if (form?.dataset.couponHold === "store") {
+    if (error) {
+      error.hidden = false;
+      error.textContent = "This coupon is for a different store, so it is not applied here.";
+    }
+    return;
+  }
   const parsed = parseCouponForm({
     storeName: form?.dataset.couponStore || "",
     lineId: line?.value || "",
@@ -4315,11 +4322,13 @@ function paintTrip() {
   }
   const checksOpen = !savingsClaimAllowed(lastOptimize);
   if (checksOpen) {
-    card.title = "Checking store prices";
+    const pending = Array.isArray(lastOptimize?.pendingStores) ? lastOptimize.pendingStores.filter(Boolean) : [];
+    const waiting = pending.length > 0 || !(lastOptimize?.pricingByStore || []).length;
+    card.title = waiting ? "Checking store prices" : "Savings aren't available yet";
     card.lines = [];
-    card.saved = "";
+    card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
     card.note = "";
-  } else if (plans) card.saved = savingsVersusBaseline(plans);
+  } else if (plans && !/^You save /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -6962,6 +6971,19 @@ document.addEventListener("change", (event) => {
           return;
         }
         const fields = couponDraftFields(body.coupon);
+        const formStore = String(form.dataset.couponStore || "");
+        if (fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase()) {
+          form.dataset.couponHold = "store";
+          if (note) note.textContent = `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`;
+          return;
+        }
+        form.dataset.couponHold = "";
+        const line = form.querySelector("[data-coupon-line]");
+        if (line instanceof HTMLSelectElement && fields.itemName) {
+          const wanted = fields.itemName.toLowerCase();
+          const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
+          if (match) line.value = match.value;
+        }
         const amount = form.querySelector("[data-coupon-amount]");
         const kind = form.querySelector("[data-coupon-kind]");
         const expires = form.querySelector("[data-coupon-expires]");

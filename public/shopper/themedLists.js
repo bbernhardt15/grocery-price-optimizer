@@ -576,7 +576,9 @@ export function resolveSlot(input) {
   const hit = findChoice(target, input.products || []);
   if (hit) return { quantity, product: hit, source, swapped: null, missing: false };
   const fallback = closestProduct(slotDef, target, input.products || []);
-  if (!fallback) {
+  const wantedBrand = norm(target.brand);
+  const foundBrand = norm(fallback?.brand);
+  if (!fallback || (wantedBrand && foundBrand && wantedBrand !== foundBrand)) {
     return { quantity, product: null, source: "missing", swapped: null, missing: true, wanted: choiceLabel(target) };
   }
   return {

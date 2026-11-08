@@ -89,6 +89,31 @@ const rows = [...names].flatMap((name) => {
   }));
 });
 if (rows.length) await Product.insertMany(rows);
+const demoShelf = [
+  ["Bananas", "Fresh", "Aldi", 0.49, "lbs"],
+  ["Bananas", "Fresh", "Walmart", 0.54, "lbs"],
+  ["Bananas", "Fresh", "Kroger", 0.62, "lbs"],
+  ["Bananas", "Fresh", "Target", 0.69, "lbs"],
+  ["Whole Milk", "Dairy Pure", "Walmart", 3.18, "gal"],
+  ["Whole Milk", "Dairy Pure", "Kroger", 3.29, "gal"],
+  ["Whole Milk", "Dairy Pure", "Target", 3.49, "gal"],
+  ["Salted Butter", "Challenge", "Walmart", 4.48, "oz"],
+  ["Salted Butter", "Challenge", "Kroger", 4.29, "oz"],
+  ["Salted Butter", "Challenge", "Target", 4.69, "oz"],
+] as const;
+await Product.insertMany(
+  demoShelf.map(([name, brand, storeName, price, unit]) => ({
+    name,
+    brand,
+    storeName,
+    ...(storeName === "Kroger" ? { locationId: DEMO_KROGER_LOCATION_ID } : {}),
+    price,
+    unit,
+    normalizedUnit: unit,
+    priceSource: "seed" as const,
+    lastUpdated: now,
+  }))
+);
 
 if (features) {
   const { setImportRuntime } = await import("../src/import/runtime.ts");

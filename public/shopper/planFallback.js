@@ -29,7 +29,7 @@ export function markDisplayed(payload, now = Date.now()) {
   if (!payload || typeof payload !== "object") return null;
   const pending = Array.isArray(payload.pendingStores) ? payload.pendingStores.filter(Boolean) : [];
   const checks = Array.isArray(payload.pricingByStore) ? payload.pricingByStore : [];
-  const coverageOpen = pending.length > 0 || checks.length === 0 || checks.some((row) => row?.check !== "ok");
+  const coverageOpen = pending.length > 0 || checks.length === 0 || checks.some((row) => !storeCheckSettled(row));
   return {
     ...payload,
     partial: false,
@@ -40,6 +40,17 @@ export function markDisplayed(payload, now = Date.now()) {
   };
 }
 
+const SETTLED_SOURCES = new Set(["seed", "live", "cached_live", "weekly_ad", "cached_weekly_ad", "mixed", "partner_feed"]);
+
+/** A store that returned prices, including the demo catalog. A timeout is not finished. */
+export function storeCheckSettled(row) {
+  if (!row || typeof row !== "object") return false;
+  const check = String(row.check || "");
+  if (check === "timeout" || check === "error" || check === "rate_limit" || check === "budget") return false;
+  if (check === "ok" || row.ok === true) return true;
+  return SETTLED_SOURCES.has(String(row.source || ""));
+}
+
 /** Dollar savings, "same total", and the one-store alternative need a finished check for every store. */
 export function savingsClaimAllowed(payload) {
   if (!payload || payload.partial || payload.coverageOpen) return false;
@@ -47,7 +58,7 @@ export function savingsClaimAllowed(payload) {
   if (pending.length) return false;
   const checks = Array.isArray(payload.pricingByStore) ? payload.pricingByStore : [];
   if (!checks.length) return false;
-  return checks.every((row) => row?.check === "ok");
+  return checks.every((row) => storeCheckSettled(row));
 }
 
 /**

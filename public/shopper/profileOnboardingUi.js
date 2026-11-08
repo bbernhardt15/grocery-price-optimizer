@@ -1022,9 +1022,12 @@ export function mountProfileOnboarding(deps = {}) {
       }
       readTick += 1;
       for (const card of readCards) {
-        if (card.status === "reading") patchReadCard(card);
+        if (card.status !== "reading") continue;
+        const floor = Math.max(0, Math.min(0.92, Number(card.ratio) || 0));
+        card.walk = Math.min(0.92, Math.max(floor, Number(card.walk) || 0) + 0.2);
+        patchReadCard(card);
       }
-    }, 2200);
+    }, 800);
   }
 
   function applyReadProgress(event) {
@@ -1101,7 +1104,10 @@ export function mountProfileOnboarding(deps = {}) {
       else meter.removeAttribute("value");
     }
     const track = node.querySelector(".read-cart-track");
-    if (track instanceof HTMLElement) track.style.setProperty("--read-ratio", String(ratio));
+    if (track instanceof HTMLElement) {
+      const walked = card.status === "reading" ? Math.max(ratio, Math.min(0.92, Number(card.walk) || 0)) : ratio;
+      track.style.setProperty("--read-ratio", String(Math.round(walked * 1000) / 1000));
+    }
     const list = node.querySelector(".read-items");
     if (list && !card.hideItems) {
       const have = list.children.length;

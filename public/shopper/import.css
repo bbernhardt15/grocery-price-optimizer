@@ -223,18 +223,30 @@
   dialog.import-sheet[open] .import-paste {
     max-height: min(28vh, 140px);
   }
-  dialog.import-sheet[open] #import-find,
-  dialog.import-sheet[open] .import-review-actions {
+  dialog.import-sheet[open] #import-find {
     position: sticky;
     bottom: 0;
     z-index: 2;
     background: var(--bg);
   }
   dialog.import-sheet[open] #import-review {
+    display: flex;
+    flex-direction: column;
     overflow: auto;
-    max-height: min(52vh, 420px);
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
     touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
+  }
+  dialog.import-sheet[open] .import-review-scroll {
+    overflow: visible;
+  }
+  dialog.import-sheet[open] .import-save,
+  dialog.import-sheet[open] .import-review-actions {
+    position: static;
+    flex: none;
+    background: var(--bg);
   }
   dialog.match-sheet[open] .sheet-body {
     max-height: 100%;

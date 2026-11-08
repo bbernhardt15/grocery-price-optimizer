@@ -239,6 +239,10 @@ describe("beta tester routes", { concurrency: false }, () => {
       headers: { authorization: "Bearer beta-admin" },
     });
     assert.equal(image.status, 200);
+    const missingShot = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/3`, {
+      headers: { authorization: "Bearer beta-admin" },
+    });
+    assert.equal(missingShot.status, 404);
     assert.equal(image.headers.get("content-type"), "image/png");
     assert.equal(Buffer.from(await image.arrayBuffer()).equals(png), true);
     const fake = await post(
@@ -252,6 +256,49 @@ describe("beta tester routes", { concurrency: false }, () => {
       { "x-device-id": OTHER }
     );
     assert.equal(fake.status, 400);
+    const over = Buffer.alloc(1_200_001, 7);
+    over[0] = 0x89;
+    over[1] = 0x50;
+    over[2] = 0x4e;
+    over[3] = 0x47;
+    const tooBig = await post(
+      "/api/beta/feedback",
+      {
+        rating: 4,
+        message: "Too big",
+        deviceId: THIRD,
+        shots: [{ name: "big.png", mimeType: "image/png", data: over.toString("base64") }],
+      },
+      { "x-device-id": THIRD }
+    );
+    assert.equal(tooBig.status, 400);
+    const open = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`);
+    assert.equal(open.status, 401);
+    const wrong = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`, {
+      headers: { authorization: "Bearer not-the-admin" },
+    });
+    assert.equal(wrong.status, 401);
+    const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+    const other = await post(
+      "/api/beta/feedback",
+      {
+        rating: 2,
+        message: "Other note",
+        deviceId: OTHER,
+        shots: [{ name: "other.gif", mimeType: "image/gif", data: gif.toString("base64") }],
+      },
+      { "x-device-id": OTHER }
+    );
+    assert.equal(other.status, 201);
+    const again = await fetch(`${origin}/api/admin/beta/feedback`, { headers: { authorization: "Bearer beta-admin" } });
+    const rows = ((await again.json()) as { feedback: Array<{ id: string; message: string }> }).feedback;
+    const otherNote = rows.find((row) => row.message === "Other note");
+    const crossed = await fetch(`${origin}/api/admin/beta/feedback/${otherNote?.id}/shots/0`, {
+      headers: { authorization: "Bearer beta-admin" },
+    });
+    assert.equal(crossed.status, 200);
+    assert.equal(Buffer.from(await crossed.arrayBuffer()).equals(png), false);
+    assert.equal(Buffer.from(await (await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`, { headers: { authorization: "Bearer beta-admin" } })).arrayBuffer()).equals(gif), false);
   });
 
   it("rejects receipt contents, a missing device, and a burst of notes", async () => {

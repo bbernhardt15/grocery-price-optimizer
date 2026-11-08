@@ -36,7 +36,7 @@ function itemCopy(book, listId, slotDef, profile) {
   const showBrand = brand && !title.toLowerCase().includes(brand.toLowerCase());
   const detail = [showBrand ? brand : "", size].filter(Boolean).join(" · ");
   const note = picked.source === "favorite" ? "Your favorite" : picked.source === "override" ? "Only on this list" : "";
-  return { title, detail, note };
+  return { title, detail, note, brand };
 }
 
 /**
@@ -58,6 +58,7 @@ export function checklistFromList(model, book, people, options = {}) {
       title: copy.title,
       detail: copy.detail,
       note: copy.note,
+      brand: copy.brand || "",
       checked: true,
       quantity: scaleQuantity(slotDef.serves, party),
       touched: false,
@@ -112,6 +113,10 @@ export function stepQuantity(state, id, delta) {
 
 export function setDraft(state, value) {
   return { ...state, draft: clean(value, 40) };
+}
+
+export function setChecklistBrand(state, id, brand) {
+  return mapItem(state, id, (item) => ({ ...item, brand: clean(brand, 40) }));
 }
 
 export function rescaleParty(state, people) {
@@ -198,6 +203,9 @@ function rowHtml(item, escapeHtml) {
         <strong>${text(escapeHtml, item.label)}</strong>
         ${meta ? `<span class="muted">${text(escapeHtml, meta)}</span>` : ""}
       </span>
+    </label>
+    <label class="theme-brand">Brand for this list
+      <input data-theme-brand="${text(escapeHtml, item.id)}" value="${text(escapeHtml, item.brand || "")}" maxlength="40" autocomplete="off" />
     </label>
     <div class="stepper" role="group" aria-label="Quantity for ${text(escapeHtml, item.label)}">
       <button type="button" data-theme-dec="${text(escapeHtml, item.id)}" aria-label="Decrease ${text(escapeHtml, item.label)}">−</button>

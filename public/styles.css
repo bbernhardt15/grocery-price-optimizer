@@ -1058,7 +1058,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 }
 body:has(#gitter-guide:not([hidden])) .toast.show {
   bottom: auto;
-  top: calc(12px + var(--safe-top));
+  top: calc(72px + var(--safe-top));
   transform: translateX(-50%);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
@@ -1432,6 +1432,7 @@ dialog.profile-onboard .sheet-body {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
+  padding-bottom: 8px;
 }
 dialog.profile-onboard #profile-stage {
   flex: 1 1 auto;
@@ -1446,9 +1447,8 @@ dialog.profile-onboard .profile-actions {
   bottom: 0;
   z-index: 4;
   background: var(--bg);
-  padding-bottom: calc(12px + var(--bar-h) + env(safe-area-inset-bottom));
+  padding-bottom: 8px;
   flex: none;
-  background: var(--bg);
 }
 .profile-top { display: flex; align-items: center; gap: 8px; }
 .profile-top .onboard-progress { margin: 0; flex: 1; text-align: center; }
@@ -1815,8 +1815,8 @@ body[data-step="add"] #bar-primary { display: none !important; }
 
 dialog.profile-onboard[data-step="welcome"] .sheet-body {
   justify-content: flex-end;
-  gap: 28px;
-  padding-bottom: calc(28px + var(--safe-bottom));
+  gap: 16px;
+  padding-bottom: 8px;
 }
 dialog.profile-onboard[data-step="welcome"] #profile-stage {
   flex: 0 0 auto;

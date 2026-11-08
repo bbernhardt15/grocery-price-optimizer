@@ -617,10 +617,12 @@ export function mountImport(deps) {
     const missingHtml = missingCards.join("");
     reviewHeading();
     reviewHost.innerHTML = `
+      <div class="import-review-scroll">
       ${reviewLead()}
       ${foundHtml ? `<ul class="import-review">${foundHtml}</ul>` : ""}
       ${missingNote}
       ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
+      </div>
       <label class="import-save"><input type="checkbox" id="import-save" /> <span>Remember these items on this phone.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
