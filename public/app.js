@@ -4112,6 +4112,8 @@ function writeReviewScroll(y) {
 function rememberReviewUserScroll() {
   if (reviewScrollWriting) return;
   if (document.body?.dataset?.step !== "plan") return;
+  const focused = document.activeElement;
+  if (focused instanceof Element && focused.closest("#plan-refresh") && window.scrollY + 80 < (reviewUserScroll ?? 0)) return;
   reviewUserScroll = window.scrollY;
 }
 
@@ -5106,8 +5108,13 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     if (flowStep === "shop" && !planReady(lastOptimize)) renderShop();
   }
   paintPlanBar();
-  if (anchorScroll != null) reviewUserScroll = anchorScroll;
-  const scrollGuardId = anchorScroll == null ? 0 : beginRefreshScrollGuard(anchorScroll);
+  const refreshScroll = anchorScroll == null
+    ? null
+    : reviewUserScroll != null && anchorScroll < 24 && reviewUserScroll > anchorScroll + 80
+      ? reviewUserScroll
+      : anchorScroll;
+  if (refreshScroll != null) reviewUserScroll = refreshScroll;
+  const scrollGuardId = refreshScroll == null ? 0 : beginRefreshScrollGuard(refreshScroll);
   const instacartTask = fetchWithTimeout(fetch, apiUrl("/api/instacart/status"), { signal: controller.signal }, 4000)
     .then((response) => response.json().catch(() => ({ enabled: false })))
     .then((status) => {
