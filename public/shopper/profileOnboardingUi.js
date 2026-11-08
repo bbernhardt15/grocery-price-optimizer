@@ -1550,6 +1550,9 @@ export function mountProfileOnboarding(deps = {}) {
 
   $("profile-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const submitter = event.submitter;
+    if (submitter && submitter.id !== "profile-next") return;
+    if (stepId === "products" && phase === "gate" && event.target instanceof Element && event.target.closest("[data-gate]")) return;
     void advance(false);
   });
   $("profile-skip")?.addEventListener("click", () => {
@@ -1824,10 +1827,14 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.dataset.gate) {
-      if (neverIds.has(target.dataset.gate)) neverIds.delete(target.dataset.gate);
-      else neverIds.add(target.dataset.gate);
+      const id = target.dataset.gate;
+      if (neverIds.has(id)) neverIds.delete(id);
+      else neverIds.add(id);
       const stage = $("profile-stage");
-      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      requestAnimationFrame(() => {
+        if (stepId !== "products" || phase !== "gate" || !stage) return;
+        stage.innerHTML = stageHtml(stepById("products"));
+      });
       return;
     }
     if (target.dataset.buy) {

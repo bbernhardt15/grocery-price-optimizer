@@ -203,6 +203,10 @@ export function feedbackSheetHtml() {
       <label>What screen were you on? <span class="muted">(optional)</span>
         <input id="beta-feedback-screen" name="screen" type="text" maxlength="80" placeholder="Review, Add, In-store…" />
       </label>
+      <label>Video link <span class="muted">(optional)</span>
+        <input id="beta-feedback-video" name="video" type="url" inputmode="url" maxlength="300" placeholder="https://" />
+      </label>
+      <p class="beta-note">Screenshot files stay on this phone. Paste a link if you want them seen. This form stores text only.</p>
       <div class="beta-actions">
         <button type="submit" class="primary">Send</button>
       </div>
@@ -432,9 +436,11 @@ function mountFeedback() {
       pathname: where.pathname,
       tab: where.tab,
     });
+    const video = String(data.get("video") || "").trim();
+    const note = String(data.get("message") || "");
     const payload = feedbackBody({
       rating,
-      message: data.get("message"),
+      message: video ? `${note}\nVideo: ${video}` : note,
       screen: screenNote,
       context,
       deviceId: deviceId(memoryStorage()),

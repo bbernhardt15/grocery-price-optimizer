@@ -179,7 +179,8 @@ export function stepById(id) {
 export function nextStepId(id) {
   const steps = profileSteps();
   const index = steps.findIndex((step) => step.id === id);
-  if (index < 0 || index >= steps.length - 1) return steps[steps.length - 1].id;
+  if (index < 0) return "summary";
+  if (index >= steps.length - 1) return steps[steps.length - 1].id;
   return steps[index + 1].id;
 }
 

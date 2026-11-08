@@ -135,6 +135,8 @@
   50% { transform: scale(0.7); opacity: 0.55; }
 }
 .import-tile .import-entry-row { flex-wrap: wrap; }
+.import-remove { margin-left: 12px; }
+.import-undo { margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--ink); color: var(--bg); }
 .import-count { margin: 0; font-weight: 700; }
 .import-idea-lead { margin: 0; color: var(--muted); }
 .import-kicker { margin: 0; color: var(--muted); font-size: 0.82rem; font-weight: 650; letter-spacing: 0.01em; }

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { demoBrowseProducts, demoRecords } from "./demoCatalog";
 import { catalogCoverage, type CoverageFlags } from "./coverage";
-import { facetsFor, filterProducts, paginateProducts, sortProducts } from "./browse";
+import { broadenQuery, facetsFor, filterProducts, paginateProducts, sortProducts } from "./browse";
 import { familyFromQuery, preferRealImages, productMatchesFamily } from "./stapleFamilies";
 import { rankSearchResults } from "../shopper/searchRank";
 import { groupOffersByUpc, krogerLookupCodes, upcForStorage, walmartLookupCodes } from "./normalize";
@@ -516,7 +516,13 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     ...(departmentId && departmentId !== "all" ? { departmentId } : {}),
   });
   const familyId = query ? familyFromQuery(query) : "";
-  const filtered = familyId ? preferRealImages(filterProducts(scope.products, filters)) : filterProducts(scope.products, filters);
+  let filtered = familyId ? preferRealImages(filterProducts(scope.products, filters)) : filterProducts(scope.products, filters);
+  if (query && filtered.length === 0) {
+    const broader = broadenQuery(query);
+    if (broader) {
+      filtered = filterProducts(scope.products, { ...filters, query: broader });
+    }
+  }
   const families = groupBrowseFamilies(filtered);
   const sort = request.sort ?? "relevance";
   const ranked = rankSearchResults(families, { query: query || "", family: familyId });

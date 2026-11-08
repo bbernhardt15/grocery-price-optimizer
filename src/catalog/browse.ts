@@ -33,6 +33,30 @@ function queryTokens(query: string): string[] {
     .filter((token) => token.length > 1);
 }
 
+const STORE_WORDS = new Set(["kroger", "walmart", "aldi", "target", "meijer", "costco", "sam", "club"]);
+const RELAXABLE = new Set(["ultra", "oxi", "boost", "max", "maximum", "advanced", "extra", "new", "traditional", "original"]);
+
+/** Type words such as parmesan stay required. A family match is not a substitute for them. */
+export function distinctiveTokens(query: string, relax = false): string[] {
+  const tokens = queryTokens(query).filter((token) => !STORE_WORDS.has(token));
+  const kept = relax ? tokens.filter((token) => !RELAXABLE.has(token)) : tokens;
+  return kept.length ? kept : tokens;
+}
+
+export function broadenQuery(query: string): string {
+  const relaxed = distinctiveTokens(query, true);
+  const strict = distinctiveTokens(query, false);
+  if (relaxed.join(" ") !== strict.join(" ")) return relaxed.join(" ");
+  const head = relaxed.find((token) => token.length >= 4);
+  return head && relaxed.length > 1 ? head : "";
+}
+
+function tokenHit(text: string, token: string): boolean {
+  if (text.includes(token)) return true;
+  if (token === "coke" || token === "cola" || token === "coca") return /coke|cola|coca/.test(text);
+  return false;
+}
+
 export function filterProducts(products: BrowseProduct[], filters: BrowseFilters): BrowseProduct[] {
   const tokens = queryTokens(filters.query ?? "");
   const departmentId = filters.departmentId?.trim().toLowerCase();
@@ -83,14 +107,10 @@ export function filterProducts(products: BrowseProduct[], filters: BrowseFilters
     }
     if (tokens.length > 0) {
       const familyId = familyFromQuery(filters.query ?? "");
-      if (familyId) {
-        if (!productMatchesFamily(product, familyId)) return false;
-      } else {
-        const text = haystack(product);
-        if (!tokens.every((token) => text.includes(token))) {
-          return false;
-        }
-      }
+      if (familyId && !productMatchesFamily(product, familyId)) return false;
+      const text = haystack(product);
+      const need = distinctiveTokens(filters.query ?? "");
+      if (need.length && !need.every((token) => tokenHit(text, token))) return false;
     }
     return true;
   });

@@ -92,9 +92,12 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
   await unlock(page);
   await page.locator("#step-bar [data-flow='plan']").click();
   await page.locator("[data-store='Kroger']").waitFor();
+  await page.locator("#trip details.store-fold").evaluateAll((nodes) => {
+    for (const node of nodes) (node as HTMLDetailsElement).open = true;
+  });
   await page.evaluate(() => window.scrollTo(0, 2200));
   const deep = await page.evaluate(() => window.scrollY);
-  expect(deep).toBeGreaterThan(1800);
+  expect(deep).toBeGreaterThan(1400);
   for (let pass = 0; pass < 2; pass += 1) {
     const before = await page.evaluate(() => window.scrollY);
     await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());

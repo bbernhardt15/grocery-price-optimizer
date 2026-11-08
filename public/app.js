@@ -2955,11 +2955,10 @@ function selectDepartment(id) {
   window.addEventListener("touchstart", releaseShelfHold, { capture: true, passive: true, once: true });
   window.addEventListener("wheel", releaseShelfHold, { capture: true, passive: true, once: true });
   window.addEventListener("keydown", releaseShelfHold, { capture: true, once: true });
+  window.scrollTo(0, 0);
+  shelfHoldScroll = false;
   if (gridEl) {
-    const top = gridEl.getBoundingClientRect().top + window.scrollY;
-    const visual = gridEl.getBoundingClientRect().height;
-    const hold = window.scrollY > 80 ? Math.ceil(window.scrollY + window.innerHeight - top + 24) : Math.min(Math.max(visual, 1), 720);
-    gridEl.style.minHeight = `${Math.max(1, hold)}px`;
+    gridEl.style.minHeight = "";
     gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
     if (resultCountEl) resultCountEl.textContent = "Loading…";
   }
@@ -3194,7 +3193,11 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
   document.body.dataset.refine = open ? "1" : "";
   paintRefine();
-  if (open) $("refine-title")?.focus();
+  if (open) {
+    const panel = $("filters");
+    if (panel) panel.scrollTop = 0;
+    $("refine-title")?.focus();
+  }
 }
 
 function openProduct(product) {
@@ -6924,6 +6927,7 @@ document.addEventListener("click", (event) => {
       const name = brand.getAttribute("data-fav-brand") || "";
       const on = brand.getAttribute("aria-pressed") === "true";
       saveFavoriteChoice(family, { brand: on ? "" : name, variant: current.variant || "" });
+      toast(on ? "Cleared that brand." : `Saved ${name}.`);
     } else {
       const id = flavor.getAttribute("data-fav-flavor") || "";
       const attributes = new Set(current.attributes || []);
@@ -6935,6 +6939,7 @@ document.addEventListener("click", (event) => {
       const typedIsChip = flavorLabels.has(typed.toLowerCase());
       const variant = attributes.has(id) ? (typed && !typedIsChip ? typed : label) : typedIsChip ? "" : typed;
       saveFavoriteChoice(family, { attributes: [...attributes], variant, brand: current.brand || "" });
+      toast(attributes.has(id) ? `Saved ${label}.` : "Cleared that flavor.");
     }
     paintFavorites();
     return;
@@ -8341,15 +8346,20 @@ function paintPlanBar() {
 }
 
 function listShopHtml() {
-  const rows = [...list.values()]
-    .map((entry) => {
-      const name = entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "Item";
-      const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
-      return `<div class="shop-line"><div class="shop-row"><span class="shop-copy"><span class="shop-name">${escapeHtml(qty)}</span><span class="shop-where">Your list</span></span></div></div>`;
-    })
+  const groups = new Map();
+  for (const entry of list.values()) {
+    const name = entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "Item";
+    const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
+    const section = entry.product?.departmentName || entry.product?.departmentId || "Other";
+    const rows = groups.get(section) || [];
+    rows.push(`<div class="shop-line"><div class="shop-row"><span class="shop-copy"><span class="shop-name">${escapeHtml(qty)}</span><span class="shop-where">${escapeHtml(section)}</span></span></div></div>`);
+    groups.set(section, rows);
+  }
+  const body = [...groups.entries()]
+    .map(([section, rows]) => `<h3 class="list-section-title">${escapeHtml(section)}</h3>${rows.join("")}`)
     .join("");
   const count = list.size === 1 ? "1 item" : `${list.size} items`;
-  return `<section class="shop-store" data-walking-list="1"><h2>Your list</h2><p class="muted">${escapeHtml(count)}. Review the split to sort these by store.</p>${rows}</section>`;
+  return `<section class="shop-store" data-walking-list="1"><h2>Your list</h2><p class="muted">${escapeHtml(count)}. Grouped by department until a store split is ready.</p>${body}</section>`;
 }
 
 function renderShop() {
