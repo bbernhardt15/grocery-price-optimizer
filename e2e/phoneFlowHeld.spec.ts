@@ -132,7 +132,7 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     await page.locator("#plan-refresh").evaluate((node) => (node as HTMLButtonElement).click());
     await page.waitForTimeout(120);
     await page.evaluate(() => window.scrollTo(0, 90));
-    await page.waitForTimeout(80);
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 1500 }).toBe(400);
     const snapped = await page.evaluate(() => window.scrollY);
     await page.evaluate(
       ([mode, y]) => {
