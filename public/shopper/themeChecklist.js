@@ -204,14 +204,14 @@ function rowHtml(item, escapeHtml) {
         ${meta ? `<span class="muted">${text(escapeHtml, meta)}</span>` : ""}
       </span>
     </label>
-    <label class="theme-brand">Brand for this list
-      <input data-theme-brand="${text(escapeHtml, item.id)}" value="${text(escapeHtml, item.brand || "")}" maxlength="40" autocomplete="off" />
-    </label>
     <div class="stepper" role="group" aria-label="Quantity for ${text(escapeHtml, item.label)}">
       <button type="button" data-theme-dec="${text(escapeHtml, item.id)}" aria-label="Decrease ${text(escapeHtml, item.label)}">−</button>
       <output>${item.quantity}</output>
       <button type="button" data-theme-inc="${text(escapeHtml, item.id)}" aria-label="Increase ${text(escapeHtml, item.label)}">+</button>
     </div>
+    <label class="theme-brand">Brand for this list
+      <input data-theme-brand="${text(escapeHtml, item.id)}" value="${text(escapeHtml, item.brand || "")}" maxlength="40" autocomplete="off" />
+    </label>
   </li>`;
 }
 

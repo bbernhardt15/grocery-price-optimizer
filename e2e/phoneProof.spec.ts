@@ -510,7 +510,12 @@ test("coming back from a store opens the return sheet", async ({ page }) => {
     localStorage.setItem("gg-list", JSON.stringify([{ id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 }]));
     window.open = () => ({ closed: false, focus() {}, close() {} });
   });
-  await page.route("**/handoff.html**", (route) => route.fulfill({ status: 204, body: "" }));
+  await page.route("**/*", (route) => {
+    const request = route.request();
+    const url = request.url();
+    if (request.isNavigationRequest() && (url.includes("handoff.html") || url.includes("walmart.com"))) return route.abort();
+    return route.continue();
+  });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
   await page.evaluate(() => {
@@ -547,8 +552,6 @@ test("coming back from a store opens the return sheet", async ({ page }) => {
   expect(result.open, JSON.stringify(result)).toBe(true);
   expect(result.title).toMatch(/finish/i);
   expect(result.still).toMatch(/Still shopping/);
-  await page.screenshot({ path: "/opt/cursor/artifacts/store-return.png" });
-  if (await page.locator("#store-return-no").isVisible()) await page.locator("#store-return-no").click();
 });
 
 test("the finished-trip toast stays off the header and can be undone", async ({ page }) => {
