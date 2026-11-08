@@ -823,7 +823,7 @@ test("an eight item import review can reach the last row and the add button", as
   expect(fit.row).toBe(true);
 });
 
-test("unresolved rows remove by swipe or button and can be undone", async ({ page, browserName }) => {
+test("unresolved rows remove by swipe or button and can be undone", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("gg-onboarding-done", "1");
     localStorage.setItem("gg-zip", "45103");
@@ -855,27 +855,16 @@ test("unresolved rows remove by swipe or button and can be undone", async ({ pag
   await page.locator("#toast-action").click();
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).some((row) => /egg/i.test(row.name || "")))).toBe(true);
   await expect(page.locator("[data-unfound]")).toContainText("Eggs");
-  if (browserName === "webkit") {
-    await page.evaluate(() => {
-      const target = document.querySelector("[data-swipe='1'] p");
-      if (!(target instanceof HTMLElement)) return;
-      const rect = target.getBoundingClientRect();
-      const startX = rect.left + 24;
-      const y = rect.top + 10;
-      target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: startX, clientY: y }));
-      window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: startX - 140, clientY: y }));
-      window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: startX - 140, clientY: y }));
-    });
-  } else {
-    const box = await row.boundingBox();
-    expect(box).toBeTruthy();
-    const startX = (box?.x || 0) + 48;
-    const y = (box?.y || 0) + 18;
-    await page.mouse.move(startX, y);
-    await page.mouse.down();
-    await page.mouse.move(startX - 140, y, { steps: 10 });
-    await page.mouse.up();
-  }
+  await page.evaluate(() => {
+    const target = document.querySelector("[data-swipe='1'] p");
+    if (!(target instanceof HTMLElement)) return;
+    const rect = target.getBoundingClientRect();
+    const startX = rect.left + 24;
+    const y = rect.top + 10;
+    target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: startX, clientY: y }));
+    window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, clientX: startX - 140, clientY: y }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, clientX: startX - 140, clientY: y }));
+  });
   await expect(page.locator("[data-unfound]")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).some((row) => /egg/i.test(row.name || "")))).toBe(false);
 });

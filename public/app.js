@@ -7239,9 +7239,10 @@ document.addEventListener("pointerdown", (event) => {
   const onMove = (move) => {
     const dx = move.clientX - startX;
     const dy = move.clientY - startY;
-    if (!dragging && Math.abs(dy) > Math.abs(dx)) return;
+    if (!dragging && Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return;
     if (dx > -8) return;
     dragging = true;
+    if (move.cancelable) move.preventDefault();
     row.style.transform = `translateX(${Math.max(dx, -140)}px)`;
   };
   const onUp = (up) => {
