@@ -1095,11 +1095,13 @@ export function mountProfileOnboarding(deps = {}) {
       stage.textContent = phase;
     }
     const meter = node.querySelector("progress");
+    const ratio = Math.max(0, Math.min(1, Number(card.ratio) || 0));
     if (meter) {
-      const ratio = Math.max(0, Math.min(1, Number(card.ratio) || 0));
       if (ratio > 0) meter.value = String(ratio);
       else meter.removeAttribute("value");
     }
+    const track = node.querySelector(".read-cart-track");
+    if (track instanceof HTMLElement) track.style.setProperty("--read-ratio", String(ratio));
     const list = node.querySelector(".read-items");
     if (list && !card.hideItems) {
       const have = list.children.length;
@@ -1650,6 +1652,15 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.dataset.missingDept) {
+      const family = target.dataset.missingDept;
+      const label = target.dataset.missingLabel || family;
+      draft = setCategoryPreference(draft, { family, mode: "cheapest", brand: "", productId: "", size: "", attributes: [], label }, Date.now());
+      persist(draft);
+      target.textContent = `${label} saved: cheapest`;
+      target.setAttribute("aria-pressed", "true");
+      return;
+    }
     if (target.id === "receipt-restore") {
       if (!learnedRows.length) return;
       importGate = { parsing: false, grouping: false, revealed: true };

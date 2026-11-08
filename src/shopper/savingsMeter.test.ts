@@ -87,6 +87,11 @@ describe("estimateSavings", () => {
     assert.equal(partial.splitTotal, 3);
     assert.equal(partial.saved, 0);
     assert.match(describeSavings(partial).note, /No single store/);
+    const unpriced = estimateSavings([{ quantity: 1, quotes: [] }, { quantity: 1, quotes: [{ storeName: "Kroger", price: 12.96 }] }]);
+    assert.equal(unpriced.unpricedCount > 0, true);
+    assert.match(describeSavings(unpriced).note, /not savings/);
+    assert.match(describeSavings(unpriced).note, /\$12\.96/);
+    assert.doesNotMatch(describeSavings(unpriced).note, /You save/);
   });
 
   it("compares each item with its highest price when no store stocks the whole list", () => {

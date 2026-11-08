@@ -167,8 +167,10 @@ export function genuineUnfound(names, reports) {
   return list;
 }
 
-export function couldntCheckNote(storeName) {
+export function couldntCheckNote(storeName, kind) {
   const name = String(storeName || "This store").trim() || "This store";
+  if (kind === "rate_limit") return `${name} asked us to slow down. Retry in a moment.`;
+  if (kind === "timeout") return `${name} ran out of time on this check. Retry checks the lines still waiting.`;
   return `${name} couldn't check right now, retry`;
 }
 
@@ -186,7 +188,7 @@ export function coverageNotesFor(plans, reports) {
   const unchecked = [...failed].map((key) => {
     const row = (reports || []).find((entry) => String(entry?.storeName || "").trim().toLowerCase() === key);
     const storeName = row?.storeName || key;
-    return { storeName, text: couldntCheckNote(storeName) };
+    return { storeName, text: couldntCheckNote(storeName, row?.check) };
   });
   const missing = (plans?.coverageNotes || []).filter((note) => !failed.has(String(note?.storeName || "").trim().toLowerCase()));
   return { unchecked, missing };

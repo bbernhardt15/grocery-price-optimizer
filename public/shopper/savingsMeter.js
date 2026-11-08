@@ -159,7 +159,7 @@ export function describeSavings(meter, options = {}) {
 
   if (meter.status === "partial") {
     if (meter.unpricedCount > 0) {
-      const note = `Some picks don’t have a price yet. The priced ones come to ${formatMoney(meter.splitTotal)}.`;
+      const note = `Some picks don’t have a price yet. Priced lines total ${formatMoney(meter.splitTotal)}. That is not savings. Savings versus one store wait until every line has a price.`;
       return {
         badge: null,
         note,

@@ -27,7 +27,7 @@ import { upsertCatalogRecords } from "./ingest/upsert";
 import { rawFromCatalogProduct } from "./catalog/providers/fromCatalogProduct";
 import { shouldStreamReview } from "./pricing/reviewStream";
 import { findFreshUpcPrices } from "./pricing/freshCatalogPrice";
-import { createLookupBudget, runPricedLookup, stableLineKey } from "./pricing/lookupBudget";
+import { createLookupBudget, interleaveByStore, runPricedLookup, stableLineKey } from "./pricing/lookupBudget";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -568,6 +568,7 @@ export async function resolveCatalogProducts(
     }
   }
 
+  const orderedJobs = interleaveByStore(jobs);
   let cursor = 0;
   const pendingStores: string[] = [];
   function noteSkipped(storeName: string, lineName: string): void {
@@ -577,17 +578,17 @@ export async function resolveCatalogProducts(
     if (!pendingStores.includes(storeName)) pendingStores.push(storeName);
   }
   async function priceWorker(): Promise<void> {
-    while (cursor < jobs.length) {
-      const job = jobs[cursor];
+    while (cursor < orderedJobs.length) {
+      const job = orderedJobs[cursor];
       cursor += 1;
       if (!job) return;
       await job.run();
     }
   }
-  await Promise.all(Array.from({ length: Math.min(PRICE_POOL, Math.max(jobs.length, 1)) }, () => priceWorker()));
-  if (cursor < jobs.length) {
-    for (let index = cursor; index < jobs.length; index += 1) {
-      noteSkipped(jobs[index].storeName, jobs[index].lineName);
+  await Promise.all(Array.from({ length: Math.min(PRICE_POOL, Math.max(orderedJobs.length, 1)) }, () => priceWorker()));
+  if (cursor < orderedJobs.length) {
+    for (let index = cursor; index < orderedJobs.length; index += 1) {
+      noteSkipped(orderedJobs[index].storeName, orderedJobs[index].lineName);
     }
     console.info(`price partial pending ${pendingStores.join(", ") || "stores"}`);
   }

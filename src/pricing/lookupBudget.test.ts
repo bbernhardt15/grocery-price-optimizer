@@ -5,6 +5,7 @@ import {
   budgetOpen,
   couldntCheckNote,
   createLookupBudget,
+  interleaveByStore,
   lookupIsRetryable,
   runPricedLookup,
   stableLineKey,
@@ -29,6 +30,18 @@ describe("lookup budget", () => {
     assert.equal(outcome.status, "failed");
     if (outcome.status === "failed") assert.equal(outcome.kind, "timeout");
     assert.equal(couldntCheckNote("Walmart"), "Walmart couldn't check right now, retry");
+    assert.match(couldntCheckNote("Walmart", "timeout"), /ran out of time/);
+    assert.match(couldntCheckNote("Walmart", "rate_limit"), /slow down/);
+    const jobs = [
+      { storeName: "Kroger", lineName: "Milk" },
+      { storeName: "Kroger", lineName: "Eggs" },
+      { storeName: "Walmart", lineName: "Milk" },
+      { storeName: "Walmart", lineName: "Eggs" },
+    ];
+    assert.deepEqual(
+      interleaveByStore(jobs).map((job) => job.storeName),
+      ["Kroger", "Walmart", "Kroger", "Walmart"]
+    );
   });
 
   it("does not retry a real miss and stops when the call budget is spent", async () => {

@@ -158,7 +158,7 @@ export function readingPhaseText(card, tick = 0) {
   const found = Math.max(0, Math.floor(Number(card?.found) || 0), named);
   const count = found > 0 ? foundLabel(card?.name, found) : "";
   if (/match/i.test(message)) return count ? `${count}. Matching brands…` : "Matching brands…";
-  if (message && !/^reading your receipt/i.test(message)) return message;
+  if (message && !/^reading your receipt/i.test(message) && !/still reading/i.test(message)) return message;
   if (count) return count;
   const fillers = ["Looking for item names…", "Working through the receipt…", "Almost through the receipt…"];
   const step = Math.floor(Number(tick) || 0);

@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 
 process.env.BETA_INVITE_CODES = process.env.BETA_INVITE_CODES || "Brandon-50y4";
+process.env.GG_ADMIN_TOKEN = process.env.GG_ADMIN_TOKEN || "e2e-feedback-admin";
 process.env.CATALOG_INGEST_ENABLED = "false";
 process.env.KROGER_INGEST_ENABLED = "false";
 process.env.WALMART_INGEST_ENABLED = "false";

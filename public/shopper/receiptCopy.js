@@ -229,7 +229,18 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  const missing = `<p class="paper-note">Departments that were not on this receipt are not set yet. Each line above keeps a brand when you tap Change. After you start shopping, open Brands for each category in the menu for the rest.</p>`;
+  const covered = new Set([...groups.keys()]);
+  const missingDepts = [
+    ["produce", "Produce"],
+    ["meat", "Meat & Seafood"],
+    ["frozen", "Frozen"],
+    ["household", "Household"],
+  ].filter(([, label]) => !covered.has(label));
+  const missing = missingDepts.length
+    ? `<section class="missing-depts"><p class="paper-note">Not on this receipt. Save a default now, or leave it unset.</p><div class="mini-row">${missingDepts
+        .map(([id, label]) => `<button type="button" class="mini-chip" data-missing-dept="${escapeText(id)}" data-missing-label="${escapeText(label)}">${escapeText(label)}: cheapest</button>`)
+        .join("")}</div></section>`
+    : "";
   return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${missing}${basketTeaserHtml(options.lines)}</div>`;
 }
 

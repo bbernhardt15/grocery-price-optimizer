@@ -7,6 +7,7 @@ import {
   feedbackCsv,
   inviteCodes,
   listFeedback,
+  readFeedbackShot,
   readyPayload,
   recordClientError,
   redeemInvite,
@@ -49,6 +50,19 @@ router.post("/beta/events", async (req, res) => {
 router.post("/beta/client-errors", async (req, res) => {
   const result = await recordClientError(req);
   res.status(result.status).json(result.body);
+});
+
+router.get("/admin/beta/feedback/:id/shots/:index", async (req, res) => {
+  if (!betaAdminOk(req, res)) return;
+  const shot = await readFeedbackShot(req.params.id, Number(req.params.index));
+  if (!shot) {
+    res.status(404).json({ error: "That screenshot is not on this note." });
+    return;
+  }
+  res.setHeader("Content-Type", shot.mimeType);
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(shot.data);
 });
 
 router.get("/admin/beta/feedback", async (req, res) => {

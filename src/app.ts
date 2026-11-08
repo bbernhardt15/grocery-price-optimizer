@@ -38,7 +38,9 @@ app.use((req, res, next) => {
     (req.path === "/api/import/photo" ||
       req.path === "/api/import/audio" ||
       req.path === "/api/import/pdf" ||
-      req.path === "/api/import/shelf");
+      req.path === "/api/import/coupon" ||
+      req.path === "/api/import/shelf" ||
+      req.path === "/api/beta/feedback");
   return (media ? jsonMedia : jsonSmall)(req, res, next);
 });
 app.use(express.urlencoded({ extended: false }));
@@ -162,7 +164,9 @@ app.get("/api", (_req, res) => {
       "POST /api/beta/invite":
         "Checks one invite code for this device and records the code used. A code no longer on the list is rejected, and a new valid code replaces it. 200 with required false when the gate is off.",
       "POST /api/beta/feedback":
-        "Stores a 1 to 5 rating and a note for this device, tagged with the invite code already saved for that device. Rate limited. No receipt text.",
+        "Stores a 1 to 5 rating, a note, and up to three screenshots (JPEG, PNG, WebP, or GIF, 1.2 MB each) for this device. Rate limited. No receipt text in the note. Screenshot bytes are not written to the log.",
+      "GET /api/admin/beta/feedback/:id/shots/:index":
+        "One stored feedback screenshot. Same admin token. The list route returns names and sizes only.",
       "POST /api/beta/events":
         "Increments one privacy-friendly product counter and, when this device has a saved invite code, the matching per-code count. No account id is stored.",
       "POST /api/beta/client-errors":

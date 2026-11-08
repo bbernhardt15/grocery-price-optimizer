@@ -42,7 +42,8 @@ describe("intake presentation", () => {
     assert.equal(readingPhaseText({ status: "reading" }, 1), "Looking for item names…");
     assert.equal(readingPhaseText({ status: "reading" }, 2), "Working through the receipt…");
     assert.equal(readingPhaseText({ status: "reading" }, 8), "Almost through the receipt…");
-    assert.equal(/still reading/i.test(readingPhaseText({ status: "reading" }, 8)), false);
+    assert.equal(readingPhaseText({ message: "Still reading…" }, 3), "Almost through the receipt…");
+    assert.equal(/still reading/i.test(readingPhaseText({ message: "Still reading…" }, 4)), false);
     const reading = readCardHtml({
       index: 2,
       name: "kroger.pdf",

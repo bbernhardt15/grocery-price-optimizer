@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { requestAuth } from "../auth/middleware";
 import { captureServerException } from "../observability/sentry";
+import { parseFeedbackShots } from "./feedbackShots";
 import { BetaClientError, BetaEvent, BetaFeedback, BetaSignup } from "./models";
 import { allowRate } from "./rateLimit";
 
@@ -255,6 +256,8 @@ export async function submitFeedback(req: Request, res: Response, now = Date.now
   ) {
     return { status: 429, body: { error: "Too many feedback notes. Try again in a little while." } };
   }
+  const parsedShots = parseFeedbackShots(body.shots);
+  if (!parsedShots.ok) return { status: 400, body: { error: parsedShots.error } };
   const screen = scrubBetaText(clip(body.screen, 80));
   const context = pickContext(body.context, new Date(now));
   const accountId = accountIdFrom(res);
@@ -263,6 +266,7 @@ export async function submitFeedback(req: Request, res: Response, now = Date.now
     rating,
     message,
     screen,
+    shots: parsedShots.shots,
     context,
     deviceId,
     code,
@@ -291,8 +295,23 @@ export async function listFeedback(
       context: doc.context,
       code: typeof doc.code === "string" ? doc.code : "",
       createdAt: doc.createdAt,
+      shots: (Array.isArray(doc.shots) ? doc.shots : []).map((shot, index) => ({
+        index,
+        name: shot?.name || "screenshot",
+        mimeType: shot?.mimeType || "",
+        byteLength: Buffer.isBuffer(shot?.data) ? shot.data.length : shot?.data?.buffer ? Buffer.from(shot.data.buffer).length : 0,
+      })),
     })),
   };
+}
+
+export async function readFeedbackShot(id: string, index: number): Promise<{ mimeType: string; data: Buffer; name: string } | null> {
+  if (!mongoose.isValidObjectId(id) || !Number.isInteger(index) || index < 0) return null;
+  const doc = await BetaFeedback.findById(id).select("shots").lean();
+  const shot = doc?.shots?.[index];
+  if (!shot?.data || !shot.mimeType) return null;
+  const data = Buffer.isBuffer(shot.data) ? shot.data : Buffer.from(shot.data.buffer || shot.data);
+  return { mimeType: shot.mimeType, data, name: shot.name || "screenshot" };
 }
 
 function csvCell(value: unknown): string {
@@ -307,7 +326,7 @@ export async function feedbackCsv(limit = 2000, code = ""): Promise<string> {
     .sort({ createdAt: -1 })
     .limit(Math.min(5000, Math.max(1, limit)))
     .lean();
-  const header = ["createdAt", "rating", "screen", "message", "appVersion", "shellCache", "tab", "tripItemCount", "storeCount", "userAgent", "timestamp", "code"];
+  const header = ["createdAt", "rating", "screen", "message", "appVersion", "shellCache", "tab", "tripItemCount", "storeCount", "userAgent", "timestamp", "shotCount", "code"];
   const lines = [header.join(",")];
   for (const doc of docs) {
     const context = (doc.context || {}) as Partial<BetaContext>;
@@ -324,6 +343,7 @@ export async function feedbackCsv(limit = 2000, code = ""): Promise<string> {
         context.storeCount,
         context.userAgent,
         context.timestamp,
+        Array.isArray(doc.shots) ? doc.shots.length : 0,
         typeof doc.code === "string" ? doc.code : "",
       ]
         .map(csvCell)

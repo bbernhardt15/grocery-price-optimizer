@@ -185,6 +185,44 @@ export function dialogAllowedDuringGate(id, gated) {
   return !gated || id === "beta-gate";
 }
 
+export const FEEDBACK_SHOT_MAX = 1_200_000;
+export const FEEDBACK_SHOT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+export function feedbackShotError(file) {
+  if (!file) return "";
+  const type = String(file.type || "").toLowerCase();
+  if (!FEEDBACK_SHOT_TYPES.includes(type)) return "Use a JPEG, PNG, WebP, or GIF.";
+  if (Number(file.size) > FEEDBACK_SHOT_MAX) return "That screenshot is over 1.2 MB. Use a smaller image.";
+  return "";
+}
+
+export function feedbackScreenshotNote(files) {
+  const list = [...(files || [])];
+  if (!list.length) return "";
+  const problem = list.map(feedbackShotError).find(Boolean);
+  if (problem) return problem;
+  const names = list.map((file) => String(file?.name || "").trim()).filter(Boolean).slice(0, 3);
+  return `${names.length === 1 ? "1 screenshot" : `${names.length} screenshots`} will be sent with this note: ${names.join(", ")}.`;
+}
+
+export async function readFeedbackShots(files) {
+  const list = [...(files || [])].slice(0, 3);
+  const shots = [];
+  for (const file of list) {
+    const error = feedbackShotError(file);
+    if (error) return { ok: false, error };
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    shots.push({
+      name: String(file.name || "screenshot").slice(0, 80),
+      mimeType: String(file.type || "").toLowerCase(),
+      data: btoa(binary),
+    });
+  }
+  return { ok: true, shots };
+}
+
 export function feedbackSheetHtml() {
   return `<dialog id="beta-feedback" class="sheet beta-feedback" aria-labelledby="beta-feedback-title">
     <form id="beta-feedback-form" class="sheet-body">
@@ -194,7 +232,7 @@ export function feedbackSheetHtml() {
       </div>
       <fieldset class="beta-ratings">
         <legend class="sr-only">Rating from 1 to 5</legend>
-        ${[1, 2, 3, 4, 5].map((score) => `<label>${score}<input type="radio" name="rating" value="${score}" ${score === 5 ? "" : ""} required /></label>`).join("")}
+        ${[1, 2, 3, 4, 5].map((score) => `<label class="beta-rating">${score}<input type="radio" name="rating" value="${score}" required /></label>`).join("")}
       </fieldset>
       <label>What should we know?
         <textarea id="beta-feedback-text" name="message" maxlength="2000" placeholder="A short note is enough."></textarea>
@@ -206,7 +244,12 @@ export function feedbackSheetHtml() {
       <label>Video link <span class="muted">(optional)</span>
         <input id="beta-feedback-video" name="video" type="url" inputmode="url" maxlength="300" placeholder="https://" />
       </label>
-      <p class="beta-note">Screenshot files stay on this phone. Paste a link if you want them seen. This form stores text only.</p>
+      <label>Screenshots <span class="muted">(optional)</span>
+        <input id="beta-feedback-shots" name="shots" type="file" accept="image/*" multiple />
+      </label>
+      <p id="beta-feedback-shots-note" class="beta-note" hidden></p>
+      <div id="beta-feedback-shots-preview" class="beta-shot-preview"></div>
+      <p class="beta-note">Up to 3 images, 1.2 MB each. They are stored with this note so they can be reviewed. Don't include receipts, passwords, or card numbers.</p>
       <div class="beta-actions">
         <button type="submit" class="primary">Send</button>
       </div>
@@ -422,6 +465,26 @@ function mountFeedback() {
   document.getElementById("beta-feedback-close")?.addEventListener("click", () => {
     document.getElementById("beta-feedback")?.close();
   });
+  document.getElementById("beta-feedback-shots")?.addEventListener("change", (event) => {
+    const note = document.getElementById("beta-feedback-shots-note");
+    const preview = document.getElementById("beta-feedback-shots-preview");
+    const files = event.target?.files;
+    const text = feedbackScreenshotNote(files);
+    if (note) {
+      note.hidden = !text;
+      note.textContent = text;
+    }
+    if (preview) {
+      preview.replaceChildren();
+      for (const file of [...(files || [])].slice(0, 3)) {
+        if (feedbackShotError(file)) continue;
+        const img = document.createElement("img");
+        img.alt = file.name || "Screenshot";
+        img.src = URL.createObjectURL(file);
+        preview.appendChild(img);
+      }
+    }
+  });
   document.getElementById("beta-feedback-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -438,12 +501,23 @@ function mountFeedback() {
     });
     const video = String(data.get("video") || "").trim();
     const note = String(data.get("message") || "");
+    const files = document.getElementById("beta-feedback-shots")?.files;
+    const read = await readFeedbackShots(files);
+    if (!read.ok) {
+      if (status) {
+        status.hidden = false;
+        status.textContent = read.error;
+      }
+      return;
+    }
+    const message = [note, video ? `Video: ${video}` : ""].filter(Boolean).join("\n");
     const payload = feedbackBody({
       rating,
-      message: video ? `${note}\nVideo: ${video}` : note,
+      message,
       screen: screenNote,
       context,
       deviceId: deviceId(memoryStorage()),
+      shots: read.shots,
     });
     if (status) {
       status.hidden = true;

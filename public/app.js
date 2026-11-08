@@ -102,6 +102,7 @@ import {
 import { dedupeReviewLines } from "./shopper/reviewList.js";
 import { missingAccordionHtml, rankSwapSuggestions } from "./shopper/reviewMissing.js";
 import { customizeRowsHtml } from "./shopper/reviewCustomize.js";
+import { placePickedLine } from "./shopper/pickedCart.js";
 import { reviewCheckoutLabel, reviewStoreCardHtml, withCheckoutLabel } from "./shopper/reviewStoreCard.js";
 import { planStatusHtml, planStatusModel } from "./shopper/reviewProgress.js";
 import {
@@ -122,6 +123,7 @@ import {
   readCoupons,
   removeCoupon,
   saleBadgeMarkup,
+  couponDraftFields,
   couponLineLabel,
   shopCouponHint,
   storeCouponMarkup,
@@ -172,7 +174,7 @@ import { rankSearchResults } from "./shopper/searchRank.js";
 import { completionHook, finishCheckedOut, sentItemsHtml } from "./shopper/krogerReady.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "./shopper/inStoreShare.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
-import { groupListEntries } from "./shopper/listSections.js";
+import { groupListEntries, sectionForEntry } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan, storeLineLabel } from "./shopper/reviewSettle.js";
@@ -3682,6 +3684,10 @@ function addOwnCoupon(button) {
     kind: form?.querySelector("[data-coupon-kind]")?.value,
     amount: form?.querySelector("[data-coupon-amount]")?.value,
     expiresOn: form?.querySelector("[data-coupon-expires]")?.value,
+    minQuantity: form?.querySelector("[data-coupon-min-qty]")?.value,
+    minSpend: form?.querySelector("[data-coupon-min-spend]")?.value,
+    conditions: form?.querySelector("[data-coupon-conditions]")?.value,
+    source: form?.querySelector("[data-coupon-source]")?.value,
   });
   if (!parsed.ok) {
     if (error) {
@@ -6925,14 +6931,57 @@ document.addEventListener("change", (event) => {
   const family = target.getAttribute("data-fav-family");
   if (family) saveFavoriteVariant(family, target.value);
   if (target.matches("[data-coupon-shot]")) {
-    const note = target.closest("form")?.querySelector("[data-coupon-shot-note]");
+    const form = target.closest("form");
+    const note = form?.querySelector("[data-coupon-shot-note]");
     const file = target.files?.[0];
-    if (note) {
-      note.hidden = !file;
-      note.textContent = file
-        ? `${file.name} stays on this phone. Type the amount below. The image was not read.`
-        : "";
+    if (!file || !form) {
+      if (note) note.hidden = true;
+      return;
     }
+    if (note) {
+      note.hidden = false;
+      note.textContent = "Reading the coupon…";
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const data = String(reader.result || "");
+      const imageBase64 = data.includes(",") ? data.split(",")[1] : "";
+      if (!imageBase64) {
+        if (note) note.textContent = "That screenshot could not be read. Type the amount you can see.";
+        return;
+      }
+      try {
+        const response = await fetch(apiUrl("/api/import/coupon"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ imageBase64, mimeType: file.type || "image/jpeg" }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (note) note.textContent = body.error || "Photo reading isn't available. Type the amount you can see.";
+          return;
+        }
+        const fields = couponDraftFields(body.coupon);
+        const amount = form.querySelector("[data-coupon-amount]");
+        const kind = form.querySelector("[data-coupon-kind]");
+        const expires = form.querySelector("[data-coupon-expires]");
+        if (amount instanceof HTMLInputElement && fields.amount) amount.value = fields.amount;
+        if (kind instanceof HTMLSelectElement && fields.kind) kind.value = fields.kind;
+        if (expires instanceof HTMLInputElement && fields.expiresOn) expires.value = fields.expiresOn;
+        const minQty = form.querySelector("[data-coupon-min-qty]");
+        const minSpend = form.querySelector("[data-coupon-min-spend]");
+        const conditions = form.querySelector("[data-coupon-conditions]");
+        const source = form.querySelector("[data-coupon-source]");
+        if (minQty instanceof HTMLInputElement) minQty.value = fields.minQuantity ? String(fields.minQuantity) : "";
+        if (minSpend instanceof HTMLInputElement) minSpend.value = fields.minSpend ? String(fields.minSpend) : "";
+        if (conditions instanceof HTMLInputElement) conditions.value = fields.conditions || "";
+        if (source instanceof HTMLInputElement) source.value = "screenshot";
+        if (note) note.textContent = fields.review;
+      } catch {
+        if (note) note.textContent = "Photo reading didn't answer. Type the amount you can see.";
+      }
+    };
+    reader.readAsDataURL(file);
   }
 });
 document.addEventListener("click", (event) => {
@@ -8224,12 +8273,24 @@ function paintFavorites() {
   const listHost = $("favorites-usuals");
   const usuals = readUsuals(localStorage);
   if (listHost) {
+    const grouped = new Map();
+    for (const row of usuals) {
+      const section = sectionForEntry({ product: { name: row.name, familyName: row.name, departmentName: row.department } });
+      const rows = grouped.get(section) || [];
+      rows.push(row);
+      grouped.set(section, rows);
+    }
     listHost.innerHTML = usuals.length
-      ? usuals
-          .map(
-            (row) =>
-              `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
-          )
+      ? [...grouped.entries()]
+          .map(([section, rows]) => {
+            const items = rows
+              .map(
+                (row) =>
+                  `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
+              )
+              .join("");
+            return `<li class="list-section" role="presentation"><h3 class="list-section-title">${escapeHtml(section)}</h3></li>${items}`;
+          })
           .join("")
       : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or pick a brand above.</li>`;
   }
@@ -9417,6 +9478,27 @@ document.addEventListener("focusin", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const popup = event.target instanceof Element ? event.target.closest("[data-cart-popup]") : null;
+  if (popup) {
+    event.preventDefault();
+    event.stopPropagation();
+    const name = popup.getAttribute("data-cart-popup") || "Cart";
+    const lines = document.querySelector(`[data-store="${CSS.escape(name)}"] .review-lines`);
+    let dialog = document.getElementById("cart-popup");
+    if (!(dialog instanceof HTMLDialogElement)) {
+      dialog = document.createElement("dialog");
+      dialog.id = "cart-popup";
+      dialog.className = "sheet cart-popup";
+      dialog.innerHTML = `<form method="dialog" class="sheet-body"><div class="list-head"><h2 id="cart-popup-title"></h2><button type="submit" class="text-btn">Close</button></div><ul id="cart-popup-body" class="review-lines"></ul></form>`;
+      document.body.appendChild(dialog);
+    }
+    const title = dialog.querySelector("#cart-popup-title");
+    const body = dialog.querySelector("#cart-popup-body");
+    if (title) title.textContent = `${name} cart`;
+    if (body) body.innerHTML = lines?.innerHTML || `<li class="muted">Nothing in this cart yet.</li>`;
+    if (!dialog.open) dialog.showModal();
+    return;
+  }
   const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
   if (!button) return;
   const action = button.getAttribute("data-empty-action");
@@ -9832,20 +9914,33 @@ matchSheet = mountMatchSheet({
     addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true, preferredStore: store || "" });
     const added = findListEntry(product.id);
     if (added && store) added.preferredStore = store;
-    if (wanted && Array.isArray(lastOptimize?.unavailable)) {
+    const offer = (Array.isArray(product.offers) ? product.offers : product.bestOffer ? [product.bestOffer] : []).find((row) =>
+      store ? String(row?.storeName || "").trim().toLowerCase() === String(store).trim().toLowerCase() : Number(row?.price) > 0
+    );
+    const catalogPrice = Number(offer?.price ?? product.bestOffer?.price ?? product.price);
+    const title = String(product.familyName || product.name || wanted || "Item");
+    const lineId = `pref-${product.id || title}`;
+    const placed = placePickedLine(document, {
+      storeName: store || offer?.storeName || "",
+      lineId,
+      title,
+      price: Number.isFinite(catalogPrice) && catalogPrice > 0 ? catalogPrice : undefined,
+      quantity: 1,
+    });
+    if (placed.placed && wanted && Array.isArray(lastOptimize?.unavailable)) {
       lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => !guideNamesMatch(wanted, row));
       lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
+      const unfound = document.querySelector("[data-unfound]");
+      if (unfound instanceof HTMLElement) {
+        const needle = wanted.toLowerCase();
+        for (const row of [...unfound.querySelectorAll("li")]) {
+          if ((row.textContent || "").toLowerCase().includes(needle)) row.remove();
+        }
+        if (!unfound.querySelector("li")) unfound.remove();
+      }
     }
     saveList();
     if (lastOptimize) pinPreferredStores(lastOptimize);
-    const unfound = document.querySelector("[data-unfound]");
-    if (unfound instanceof HTMLElement && wanted) {
-      const needle = wanted.toLowerCase();
-      for (const row of [...unfound.querySelectorAll("li")]) {
-        if ((row.textContent || "").toLowerCase().includes(needle)) row.remove();
-      }
-      if (!unfound.querySelector("li")) unfound.remove();
-    }
     if (flowStep === "plan") void planTrip({ stay: true });
     else if (flowStep === "shop") renderShop();
     toast(store ? `Added to the ${store} cart.` : "Added that match.");

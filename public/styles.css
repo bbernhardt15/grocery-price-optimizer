@@ -1966,6 +1966,7 @@ dialog.sheet, dialog.profile-onboard {
   height: 20px;
   border-radius: 6px 6px 4px 4px;
   background: var(--accent);
+  transition: left 420ms linear;
 }
 .read-cart::before,
 .read-cart::after {
