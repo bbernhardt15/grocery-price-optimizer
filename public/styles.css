@@ -502,7 +502,8 @@ a.text-btn:hover { background: var(--accent-soft); }
 }
 body[data-refine="1"] { overflow: hidden; }
 .filters label, .check-row { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
-.check-row { flex-direction: row; align-items: center; min-height: 44px; color: var(--ink); }
+.check-row { flex-direction: row; align-items: center; min-height: 44px; color: var(--ink); gap: 10px; }
+.check-row input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0; flex: none; }
 .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filter-actions { display: flex; gap: 8px; }
 .filter-actions .primary, .filter-actions .ghost { flex: 1; }
@@ -997,6 +998,11 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
 .kroger-unpriced ul { padding-left: 1.1rem; }
 .kroger-unpriced li { margin: 6px 0; }
 
+body:has(dialog[open]) .toast {
+  bottom: auto;
+  top: calc(12px + var(--safe-top));
+  z-index: 90;
+}
 .toast {
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;

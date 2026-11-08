@@ -1736,7 +1736,8 @@ export function mountProfileOnboarding(deps = {}) {
           : [...current, brand].slice(0, 12);
         return { ...row, brands: nextBrands, brand: nextBrands[0] || "", mode: nextBrands.length ? "cheapestPicks" : row.mode };
       });
-      paintLearnedCard(family);
+      paintLearnedCard(family, { saved: true });
+      deps.toast?.("Saved");
       return;
     }
     if (target.dataset.learnedMode) {
