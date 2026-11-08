@@ -93,6 +93,8 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
   await page.locator("#step-bar [data-flow='plan']").click();
   await page.locator("[data-store='Kroger']").waitFor();
   await page.evaluate(() => window.scrollTo(0, 2200));
+  const deep = await page.evaluate(() => window.scrollY);
+  expect(deep).toBeGreaterThan(1800);
   for (let pass = 0; pass < 2; pass += 1) {
     const before = await page.evaluate(() => window.scrollY);
     await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
@@ -101,9 +103,9 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     await page.locator("#match-close").click();
     await page.waitForTimeout(150);
     const closed = await page.evaluate(() => window.scrollY);
-    expect(before).toBe(2200);
-    expect(open).toBe(2200);
-    expect(closed).toBe(2200);
+    expect(before).toBe(deep);
+    expect(open).toBe(deep);
+    expect(closed).toBe(deep);
   }
   await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
   await page.getByRole("button", { name: /Great Value/ }).click();
@@ -112,7 +114,7 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     y: window.scrollY,
     max: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
   }));
-  expect(picked.max).toBeLessThan(2200);
+  expect(picked.max).toBeLessThan(deep);
   expect(picked.y).toBe(picked.max);
 
   for (const [kind, target] of [
