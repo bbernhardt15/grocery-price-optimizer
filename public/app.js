@@ -58,7 +58,7 @@ import {
   resolveProductPreference,
   shouldAskAlways,
 } from "./shopper/productPreference.js";
-import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, categorySearch } from "./shopper/categoryPreference.js";
+import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, preferenceCategories, resolveCategoryPreference, resolveNeedList, categorySearch, setCategoryPreference } from "./shopper/categoryPreference.js";
 import { matchConfidence, selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { fileToBase64, readNdjsonResponse, readReceiptBatch } from "./shopper/receiptImport.js";
@@ -602,7 +602,33 @@ function fillEmpty(el, state, role) {
 }
 
 function hasActiveFilters() {
-  return Boolean($("filter-brand").value || $("filter-sale").checked || $("filter-budget").checked);
+  return Boolean($("filter-brand").value || $("filter-sale").checked || $("filter-budget").checked || $("filter-priced")?.checked || $("filter-mine")?.checked);
+}
+
+function savedBrandNeedles() {
+  const profile = getUserProfile(localStorage);
+  const needles = [];
+  for (const pref of Object.values(profile.categoryPreferences || {})) {
+    for (const value of [pref?.brand, pref?.variant, ...(pref?.brands || [])]) {
+      const text = String(value || "").trim().toLowerCase();
+      if (text.length > 1) needles.push(text);
+    }
+  }
+  return needles;
+}
+
+function applyClientFilters() {
+  if (!gridEl) return;
+  const pricedOnly = Boolean($("filter-priced")?.checked);
+  const mine = Boolean($("filter-mine")?.checked);
+  const needles = mine ? savedBrandNeedles() : [];
+  for (const card of gridEl.querySelectorAll(".card")) {
+    const text = (card.textContent || "").toLowerCase();
+    const price = card.querySelector("[data-price]")?.textContent || "";
+    const brandOk = !mine || !needles.length || needles.some((needle) => text.includes(needle));
+    const priceOk = !pricedOnly || /\$\s?\d/.test(price);
+    card.hidden = !(brandOk && priceOk);
+  }
 }
 
 function refineCount() {
@@ -610,6 +636,8 @@ function refineCount() {
   if ($("filter-brand")?.value) count += 1;
   if ($("filter-sale")?.checked) count += 1;
   if ($("filter-budget")?.checked) count += 1;
+  if ($("filter-priced")?.checked) count += 1;
+  if ($("filter-mine")?.checked) count += 1;
   if (sortEl?.value && sortEl.value !== "relevance") count += 1;
   return count;
 }
@@ -892,7 +920,7 @@ function showTripValue() {
   if (!dialog.open) dialog.showModal();
 }
 
-function reuseTrip(receipt) {
+function reuseTrip(receipt, { review = false } = {}) {
   const lines = reuseLines(receipt);
   if (!lines.length) {
     toast("That receipt has no items to shop again.");
@@ -901,10 +929,10 @@ function reuseTrip(receipt) {
   for (const line of lines) {
     addProduct(customCatalogProduct(line.name), line.quantity, { quiet: true, skipAsk: true });
   }
-  showStep("plan");
+  showStep(review ? "plan" : "add");
   renderEstimate();
-  toast(lines.length === 1 ? "Added 1 item. Checking prices." : `Added ${lines.length} items. Checking prices.`);
-  void planTrip({ stay: true });
+  toast(lines.length === 1 ? "Added 1 item to your list." : `Added ${lines.length} items to your list.`);
+  if (review) void planTrip({ stay: true });
 }
 
 function paintPastTrips() {
@@ -913,7 +941,9 @@ function paintPastTrips() {
   if (home) home.innerHTML = pastTripsHomeHtml(trips.length);
   const sheet = $("past-trips-body");
   if (sheet) {
-    sheet.innerHTML = trips.length ? trips.map((trip) => receiptCardHtml(trip, escapeHtml)).join("") : pastTripsEmptyHtml();
+    const cards = trips.map((trip) => receiptCardHtml(trip, escapeHtml)).join("");
+    const addSelected = trips.length > 1 ? `<button type="button" class="primary" id="past-add-selected">Add selected to my list</button>` : "";
+    sheet.innerHTML = trips.length ? `${cards}${addSelected}` : pastTripsEmptyHtml();
   }
 }
 
@@ -2796,8 +2826,9 @@ async function loadPage(reset) {
       : "";
     const html = viewed.items.map(cardHtml).join("");
     const shelfScroll = reset ? window.scrollY : 0;
-    if (reset) gridEl.style.minHeight = "";
+    if (reset && !(shelfScroll > 80)) gridEl.style.minHeight = "";
     gridEl.innerHTML = reset ? banner + html : gridEl.innerHTML + html;
+    applyClientFilters();
     if (!viewed.items.length && reset) {
       const kind = catalogEmptyKind({ query, filtered: hasActiveFilters() });
       const state = kind === "search" ? searchEmpty(query) : emptyState(kind);
@@ -2851,6 +2882,12 @@ async function loadPage(reset) {
   }
 }
 
+let shelfHoldScroll = true;
+
+function releaseShelfHold() {
+  shelfHoldScroll = false;
+}
+
 function selectDepartment(id) {
   browseOpen = true;
   activeDepartment = id;
@@ -2865,10 +2902,15 @@ function selectDepartment(id) {
     const left = chip.offsetLeft - (scroller.clientWidth - chip.offsetWidth) / 2;
     scroller.scrollTo({ left: Math.max(0, left) });
   }
+  shelfHoldScroll = true;
+  window.addEventListener("touchstart", releaseShelfHold, { capture: true, passive: true, once: true });
+  window.addEventListener("wheel", releaseShelfHold, { capture: true, passive: true, once: true });
+  window.addEventListener("keydown", releaseShelfHold, { capture: true, once: true });
   if (gridEl) {
+    const top = gridEl.getBoundingClientRect().top + window.scrollY;
     const visual = gridEl.getBoundingClientRect().height;
-    const hold = window.scrollY > 80 ? Math.max(visual, 720) : Math.min(Math.max(visual, 1), 720);
-    gridEl.style.minHeight = `${Math.ceil(hold)}px`;
+    const hold = window.scrollY > 80 ? Math.ceil(window.scrollY + window.innerHeight - top + 24) : Math.min(Math.max(visual, 1), 720);
+    gridEl.style.minHeight = `${Math.max(1, hold)}px`;
     gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
     if (resultCountEl) resultCountEl.textContent = "Loading…";
   }
@@ -2892,7 +2934,7 @@ function holdShelfForScroll(scrollY) {
   if (needed > natural + 8) {
     gridEl.style.minHeight = `${needed}px`;
     armShelfFloorWatch();
-    window.scrollTo(0, scrollY);
+    if (shelfHoldScroll && Math.abs(window.scrollY - scrollY) > 1) window.scrollTo(0, scrollY);
     return;
   }
   clearShelfFloor();
@@ -3820,7 +3862,8 @@ function reviewItemRows(items) {
       const amount = Number(item.itemTotal ?? linePrice(item));
       const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
       const lineKey = String(item.lineId || item.title || "").replace(/"/g, "");
-      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>` : ""}</li>`;
+      const source = price ? `<span class="price-source" title="Estimated shelf price. Not a checkout total.">est.</span>` : "";
+      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>${source}` : ""}</li>`;
     })
     .join("");
 }
@@ -4754,22 +4797,71 @@ async function readPlanBody(response, onStatus, onPartial) {
   return finalBody || {};
 }
 
+function preferredEntryFor(item) {
+  return [...list.values()].find((row) => {
+    if (!row?.preferredStore) return false;
+    return row.product?.id === item?.catalogId || guideNamesMatch(item?.name, row.product?.name || row.product?.familyName);
+  });
+}
+
 function pinPreferredStores(payload) {
+  if (!payload) return;
+  const stores = Array.isArray(payload.stores) ? payload.stores : [];
+  payload.stores = stores;
   const moves = { ...(tripEdits.moves || {}) };
   let changed = false;
-  for (const store of payload?.stores || []) {
+  for (const entry of list.values()) {
+    const storeName = entry?.preferredStore;
+    const title = entry?.product?.name || entry?.product?.familyName || entry?.product?.catalogName || "";
+    if (!storeName || !title) continue;
+    const matches = (item) => item?.catalogId === entry.product?.id || guideNamesMatch(item?.name, title);
+    for (const store of stores) {
+      if (sameStoreName(store.storeName, storeName)) continue;
+      const before = store.items || [];
+      store.items = before.filter((item) => !matches(item));
+      if (store.items.length !== before.length) changed = true;
+    }
+    let home = stores.find((store) => sameStoreName(store.storeName, storeName));
+    const already = home?.items?.some(matches);
+    if (!already) {
+      if (!home) {
+        home = { storeName, items: [], subtotal: 0 };
+        stores.push(home);
+      }
+      const offer = (entry.product?.offers || []).find((row) => sameStoreName(row.storeName, storeName));
+      const price = Number(offer?.price);
+      const qty = Math.max(1, Math.floor(Number(entry.quantity) || 1));
+      const priced = Number.isFinite(price) && price > 0;
+      home.items = [
+        ...(home.items || []),
+        {
+          lineId: `pref-${entry.product?.id || title}`,
+          name: title,
+          title,
+          catalogId: entry.product?.id,
+          quantity: qty,
+          brand: entry.product?.brand || "",
+          storeName,
+          ...(priced ? { price, itemTotal: Math.round(price * qty * 100) / 100 } : {}),
+        },
+      ];
+      changed = true;
+    }
+    if (Array.isArray(payload.unavailable)) {
+      payload.unavailable = payload.unavailable.filter((row) => !guideNamesMatch(title, row));
+      payload.toFindInStore = toFindRecords(payload.unavailable);
+    }
+  }
+  for (const store of stores) {
     for (const item of store.items || []) {
       if (!item?.lineId) continue;
-      const entry = [...list.values()].find((row) => {
-        if (!row?.preferredStore) return false;
-        return row.product?.id === item.catalogId || guideNamesMatch(item.name, row.product?.name || row.product?.familyName);
-      });
+      const entry = preferredEntryFor(item);
       if (!entry?.preferredStore || sameStoreName(entry.preferredStore, store.storeName)) continue;
       moves[item.lineId] = entry.preferredStore;
       changed = true;
     }
   }
-  if (changed) tripEdits = { ...tripEdits, moves, planMode: "custom" };
+  if (changed) tripEdits = { ...tripEdits, moves, planMode: tripEdits.planMode || "custom" };
 }
 
 function commitDisplayedPlan(payload, { zip } = {}) {
@@ -4923,6 +5015,11 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       const shown = chooseDisplayedPlan(null, result, Date.now());
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
+        streamedPlan = shown;
+        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell], [data-review-stable]")) {
+          holdVisibleReview("Checking store prices");
+          return;
+        }
         if (commitDisplayedPlan(shown, { zip })) clearPlanTabBusy();
         return;
       }
@@ -6459,6 +6556,8 @@ $("filters-clear").addEventListener("click", () => {
   $("filter-brand").value = "";
   $("filter-sale").checked = false;
   $("filter-budget").checked = false;
+  if ($("filter-priced")) $("filter-priced").checked = false;
+  if ($("filter-mine")) $("filter-mine").checked = false;
   if (sortEl) sortEl.value = "relevance";
   openFilters(false);
   void loadPage(true);
@@ -6552,6 +6651,25 @@ document.addEventListener("click", (event) => {
     openPastTrips();
     return;
   }
+  if (target.closest("#past-add-selected")) {
+    const ids = [...document.querySelectorAll("[data-trip-select]:checked")].map((box) => box.getAttribute("data-trip-select")).filter(Boolean);
+    const trips = readPastTrips(localStorage).filter((row) => ids.includes(row.id));
+    if (!trips.length) {
+      toast("Select at least one trip.");
+      return;
+    }
+    let count = 0;
+    for (const trip of trips) {
+      for (const line of reuseLines(trip)) {
+        addProduct(customCatalogProduct(line.name), line.quantity, { quiet: true, skipAsk: true });
+        count += 1;
+      }
+    }
+    $("past-trips")?.close();
+    showStep("add");
+    toast(count === 1 ? "Added 1 item to your list." : `Added ${count} items to your list.`);
+    return;
+  }
   const reuse = target.closest("[data-reuse-trip]");
   if (!reuse || reuse.closest("#trip-value")) return;
   const id = reuse.getAttribute("data-reuse-trip");
@@ -6630,13 +6748,39 @@ $("menu-brands")?.addEventListener("click", () => {
   profileUi?.openEditor?.();
 });
 $("menu-favorites")?.addEventListener("click", () => {
-  closeDrawer();
-  showStep("add");
-  const block = document.getElementById("usuals-block");
-  const toggle = document.getElementById("usuals-toggle");
-  if (block) block.hidden = false;
-  if (toggle instanceof HTMLElement && toggle.getAttribute("aria-expanded") !== "true") toggle.click();
-  document.getElementById("usuals-block")?.scrollIntoView({ block: "start" });
+  openFavorites();
+});
+$("tab-favorites")?.addEventListener("click", () => {
+  if (document.body.dataset.favorites === "open") {
+    closeFavorites();
+    return;
+  }
+  openFavorites();
+});
+$("favorites-close")?.addEventListener("click", () => closeFavorites());
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.id === "filter-priced" || target.id === "filter-mine") {
+    applyClientFilters();
+    const count = refineCount();
+    const pill = $("refine-count");
+    if (pill) {
+      pill.hidden = count === 0;
+      pill.textContent = String(count);
+    }
+  }
+  const family = target.getAttribute("data-fav-family");
+  if (family) saveFavoriteVariant(family, target.value);
+});
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const add = target?.closest("[data-fav-add]");
+  if (!add) return;
+  const name = add.getAttribute("data-fav-add");
+  if (!name) return;
+  addProduct(customCatalogProduct(name), 1, { quiet: true, skipAsk: true });
+  toast(`Added ${name}.`);
 });
 $("menu-zip")?.addEventListener("click", () => openDrawer({ focus: "zip" }));
 $("menu-new-trip")?.addEventListener("click", () => {
@@ -6906,6 +7050,32 @@ function openDrawer(options = {}) {
   }
 }
 
+document.addEventListener("pointerdown", (event) => {
+  const row = event.target instanceof Element ? event.target.closest("[data-swipe='1']") : null;
+  if (!(row instanceof HTMLElement) || (event.target instanceof Element && event.target.closest("button, a, input"))) return;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let dragging = false;
+  const onMove = (move) => {
+    const dx = move.clientX - startX;
+    const dy = move.clientY - startY;
+    if (!dragging && Math.abs(dy) > Math.abs(dx)) return;
+    if (dx > -8) return;
+    dragging = true;
+    row.style.transform = `translateX(${Math.max(dx, -140)}px)`;
+  };
+  const onUp = (up) => {
+    const dx = up.clientX - startX;
+    row.style.transform = "";
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    if (dragging && dx < -72) row.querySelector("[data-missing-remove]")?.click();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+});
 document.addEventListener(
   "touchmove",
   (event) => {
@@ -7795,7 +7965,74 @@ function syncStepVisibility() {
   syncBrowse();
 }
 
+function closeFavorites() {
+  document.body.dataset.favorites = "";
+  const screen = $("favorites-screen");
+  if (screen) screen.hidden = true;
+  $("tab-favorites")?.removeAttribute("aria-current");
+}
+
+function openFavorites() {
+  showStep("add");
+  closeDrawer();
+  const screen = $("favorites-screen");
+  if (!screen) return;
+  paintFavorites();
+  screen.hidden = false;
+  document.body.dataset.favorites = "open";
+  $("tab-favorites")?.setAttribute("aria-current", "step");
+  screen.querySelector("h2")?.focus();
+}
+
+function paintFavorites() {
+  const host = $("favorites-prefs");
+  const profile = getUserProfile(localStorage);
+  if (host) {
+    host.innerHTML = preferenceCategories()
+      .map((category) => {
+        const pref = profile.categoryPreferences?.[category.id];
+        const value = pref?.variant || "";
+        return `<label class="favorites-row">${escapeHtml(category.label)}
+          <input data-fav-family="${escapeHtml(category.id)}" value="${escapeHtml(value)}" maxlength="80" placeholder="Brand and flavor" autocomplete="off" enterkeyhint="done" />
+        </label>`;
+      })
+      .join("");
+  }
+  const listHost = $("favorites-usuals");
+  const usuals = readUsuals(localStorage);
+  if (listHost) {
+    listHost.innerHTML = usuals.length
+      ? usuals
+          .map(
+            (row) =>
+              `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
+          )
+          .join("")
+      : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or type a brand above.</li>`;
+  }
+}
+
+function saveFavoriteVariant(family, value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const profile = getUserProfile(localStorage);
+  const current = profile.categoryPreferences?.[family] || {};
+  const next = setCategoryPreference(
+    profile,
+    {
+      ...current,
+      family,
+      mode: text ? "brand" : current.mode || "skip",
+      brand: text || current.brand || "",
+      variant: text,
+      source: "manual",
+    },
+    Date.now()
+  );
+  saveUserProfile(localStorage, next);
+}
+
 function showStep(step, reason = "user") {
+  closeFavorites();
   const decision = allowTabChange(tabGuard, reason);
   tabGuard = decision.state;
   if (!decision.allow) return;
@@ -7873,6 +8110,7 @@ function paintPlanBar() {
   const copy = planBarCopy({
     step: flowStep,
     itemCount: flowStep === "shop" && progress.total ? progress.total : count,
+    lineCount: flowStep === "shop" ? undefined : list.size,
     total,
     hasPlan: Boolean(view?.stores?.length),
     planning,
@@ -8074,6 +8312,9 @@ function lists() {
       },
       productById: (id) => productsById.get(id),
       hasProduct: (id) => Boolean(findListEntry(id)),
+      addCustom: (name, quantity) => {
+        addProduct(customCatalogProduct(name), Math.max(1, Math.floor(Number(quantity) || 1)), { quiet: true, skipAsk: true });
+      },
       locked: () => listIsLocked(),
       onChange: () => scheduleAccountSync(),
       mediaUrl,
@@ -8424,15 +8665,17 @@ async function addStarter(id) {
       const product = matchPick(pick, shelf);
       const stored = product?.id ? productsById.get(product.id) || product : null;
       if (!stored?.id) {
+        addProduct(customCatalogProduct(pick.name), 1, { quiet: true, skipAsk: true });
+        added += 1;
         missing.push(pick.name);
         continue;
       }
       if (findListEntry(stored.id)) continue;
-      addProduct(stored, 1, { quiet: true });
+      addProduct(stored, Math.max(1, Math.floor(Number(pick.quantity) || 1)), { quiet: true });
       added += 1;
     }
     if (!added && missing.length) toast("Those items aren't on the shelf yet. Try browsing.");
-    else if (missing.length) toast(`Added ${listDef.title}. ${missing.length} weren't on the shelf.`);
+    else if (missing.length) toast(`Added ${added} items. ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} on your list to match.`);
     else if (added) toast(`Added ${listDef.title}.`);
     else toast(`${listDef.title} is already on your list.`);
     haptic();

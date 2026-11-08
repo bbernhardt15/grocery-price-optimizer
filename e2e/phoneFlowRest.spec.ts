@@ -435,6 +435,15 @@ test("the import field stays inside the sheet for a keyboard inset", async ({ pa
   await field.focus();
   const open = await contained();
   expect(open.inside).toBe(true);
+  const find = await page.evaluate(() => {
+    const dialog = document.getElementById("import-dialog");
+    const button = document.getElementById("import-find");
+    if (!dialog || !button) return { inside: false };
+    const frame = dialog.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    return { inside: rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 && rect.height >= 40 };
+  });
+  expect(find.inside).toBe(true);
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--keyboard", "0px");
     document.documentElement.style.removeProperty("--vv-height");
@@ -459,4 +468,115 @@ test("Refine budget stays reachable when the viewport is short", async ({ page }
   expect(budget).toBeTruthy();
   expect(budget!.y).toBeGreaterThan(0);
   expect(budget!.y + budget!.height).toBeLessThan(430);
+  const priced = await page.locator("label:has(#filter-priced)").boundingBox();
+  expect(priced).toBeTruthy();
+  expect(priced!.y + priced!.height).toBeLessThan(430);
+});
+
+test("favorites is its own screen and a flavor survives reload", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+  });
+  await unlock(page);
+  await page.locator("#tab-favorites").click();
+  await expect(page.locator("#favorites-screen")).toBeVisible();
+  await expect(page.locator("#grid")).toBeHidden();
+  const field = page.locator("[data-fav-family='mac-and-cheese']");
+  await field.fill("Kraft Original");
+  await field.blur();
+  await page.screenshot({ path: "/opt/cursor/artifacts/favorites-flavor.png", fullPage: false });
+  await page.reload();
+  await page.locator("#tab-favorites").click();
+  await expect(page.locator("[data-fav-family='mac-and-cheese']")).toHaveValue("Kraft Original");
+  await page.locator("#favorites-close").click();
+  await expect(page.locator("#favorites-screen")).toBeHidden();
+});
+
+test("themed Add keeps every slot on the list when the shelf misses", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+  });
+  await page.route("**/api/catalog/browse**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) })
+  );
+  await unlock(page);
+  await page.locator("[data-lists-open]").click();
+  const cookout = page.locator("[data-list-open='cookout']");
+  if (!(await cookout.isVisible().catch(() => false))) await page.locator("[data-lists-all]").click();
+  await cookout.click();
+  await page.locator("[data-sheet-add='cookout']").click();
+  await expect(page.locator("#bar-count")).not.toHaveText("0 items");
+  const names = await page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || ""));
+  expect(names.length).toBeGreaterThanOrEqual(4);
+  expect(names.join(" ").toLowerCase()).toMatch(/bun|chip|soda|beef|ketchup/);
+  await page.screenshot({ path: "/opt/cursor/artifacts/themed-add-included.png", fullPage: false });
+});
+
+test("past trips can be selected and added without opening Review", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-past-trips",
+      JSON.stringify([
+        { id: "trip-a", at: Date.now(), totalCents: 500, savedCents: 0, stores: [{ storeName: "Kroger", totalCents: 500, items: [{ name: "Milk", quantity: 1 }, { name: "Eggs", quantity: 1 }] }] },
+        { id: "trip-b", at: Date.now() - 1000, totalCents: 300, savedCents: 0, stores: [{ storeName: "Walmart", totalCents: 300, items: [{ name: "Bread", quantity: 1 }] }] },
+      ])
+    );
+  });
+  await unlock(page);
+  await page.locator("#menu-open").click();
+  await page.locator("#menu-past").click();
+  await page.locator("[data-trip-select]").nth(0).check();
+  await page.locator("[data-trip-select]").nth(1).check();
+  await page.locator("#past-add-selected").click();
+  await expect(page.locator("#bar-count")).toContainText("3");
+  await expect.poll(() => page.evaluate(() => document.body.dataset.step)).toBe("add");
+});
+
+test("store editor saves and stays with an 85 item trip", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify(Array.from({ length: 85 }, (_, index) => ({ id: `custom:trip-${index}`, itemId: `custom:trip-${index}`, name: `Trip item ${index + 1}`, quantity: 1 })))
+    );
+    localStorage.setItem(
+      "gg-profile",
+      JSON.stringify({
+        version: 1,
+        updatedAt: Date.now(),
+        onboarding: { status: "done", step: "summary", updatedAt: Date.now() },
+        shopStores: ["Kroger", "Walmart"],
+        categoryPreferences: {},
+      })
+    );
+  });
+  await unlock(page);
+  await expect(page.locator("#bar-count")).toContainText("85");
+  await page.locator("#menu-open").click();
+  await page.locator("#drawer-profile").click();
+  const stores = page.locator("#profile-onboard section", { hasText: "Stores" });
+  await expect(stores).toContainText(/Kroger|All nearby stores/);
+  await expect(stores).not.toContainText("Not set yet");
+  await stores.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: "Get started" })).toHaveCount(0);
+  await expect(page.locator("#profile-store-list input").first()).toBeVisible();
+  const walmart = page.locator("[data-place-store='Walmart']");
+  await expect(walmart).toBeVisible();
+  if (await walmart.isChecked()) await walmart.uncheck();
+  await page.screenshot({ path: "/opt/cursor/artifacts/profile-stores-edit.png", fullPage: false });
+  await page.locator("#profile-next").click();
+  await expect(stores).toContainText("Kroger");
+  await expect(stores).not.toContainText("Walmart");
+  await page.locator("#profile-back").click();
+  await expect(page.locator("#profile-onboard")).toBeHidden();
+  await page.reload();
+  await expect(page.locator("#bar-count")).toContainText("85");
+  await page.locator("#menu-open").click();
+  await page.locator("#drawer-profile").click();
+  await expect(page.locator("#profile-onboard section", { hasText: "Stores" })).toContainText(/Kroger/);
 });

@@ -70,9 +70,9 @@ export function unfoundSectionHtml(names, escapeHtml = escapeText) {
   const rows = list
     .map((name) => {
       const links = unfoundSearchLinks(name);
-      return `<li class="missing-row">
+      return `<li class="missing-row" data-swipe="1">
         <p>${escapeHtml(name)}</p>
-        <p class="muted">To find in store. A name can't be added to the Kroger or Walmart cart from here.</p>
+        <p class="muted">To find in store. Swipe left or use Remove. A name can't be added to the Kroger or Walmart cart from here.</p>
         <div class="unfound-links">${linkHtml(links.kroger, name, escapeHtml)}${linkHtml(links.walmart, name, escapeHtml)}<button type="button" class="text-btn" data-missing-remove="${escapeHtml(name)}">Remove</button></div>
       </li>`;
     })

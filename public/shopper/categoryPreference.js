@@ -76,6 +76,7 @@ export function categoryPreferenceOf(value, familyId) {
     confidence,
     count,
     label: clean(value.label, 80),
+    variant: clean(value.variant || value.flavor, 80),
     updatedAt: Number(value.updatedAt) || 0,
   };
 }
@@ -112,6 +113,13 @@ function brandHit(product, brand, familyId) {
   return have.key === wanted.key || have.key.includes(wanted.key) || wanted.key.includes(have.key);
 }
 
+function variantHit(product, variant) {
+  const needle = clean(variant, 80).toLowerCase();
+  if (!needle) return false;
+  const text = `${product?.name || ""} ${product?.brand || ""} ${product?.variantLabel || ""} ${product?.sizeLabel || ""}`.toLowerCase();
+  return needle.split(/\s+/).filter((word) => word.length > 2).every((word) => text.includes(word));
+}
+
 function labelOf(product) {
   const brand = clean(product?.brand, 80);
   const name = clean(product?.familyName || product?.name, 120);
@@ -143,6 +151,14 @@ export function resolveCategoryPreference(input) {
   const narrowed = pool.filter((product) => matchesAttributes(product, family, pref.attributes));
   const rows = narrowed.length ? narrowed : pool;
   if (pref.mode === "brand") {
+    if (pref.variant) {
+      const flavored = rows.filter((product) => variantHit(product, pref.variant));
+      if (flavored.length) {
+        const exact = pref.productId ? flavored.find((product) => product.id === pref.productId) : null;
+        return { status: "brand", family, product: exact || flavored[0], mode: "brand", swapped: null, ask: false };
+      }
+      return { status: "ask", family, product: null, mode: "brand", swapped: null, ask: true };
+    }
     const exact = pref.productId ? rows.find((product) => product.id === pref.productId) : null;
     if (exact) return { status: "brand", family, product: exact, mode: "brand", swapped: null, ask: false };
     const branded = pref.brand ? rows.filter((product) => brandHit(product, pref.brand, family)) : [];

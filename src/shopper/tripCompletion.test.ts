@@ -38,7 +38,7 @@ describe("trip completion", () => {
     assert.equal(restoreActiveTrip(idb, handoff, at), null);
     clearCompletedTrip(storage);
     assert.equal(readCompletedAt(storage), 0);
-    assert.equal(FINISH_TRIP_UNDO_MS, 10_000);
+    assert.equal(FINISH_TRIP_UNDO_MS, 4_500);
     assert.equal(clearTripAction().event, CLEAR_TRIP_EVENT);
     assert.equal(clearTripAction().label, "Clear trip");
     assert.equal(completeTripAction().label, "Complete trip");

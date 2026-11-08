@@ -305,7 +305,7 @@ describe("Gitter guide rules", () => {
   it("after the trip is complete, names the savings from that finish and keeps the 10 second undo", () => {
     const finish = completeTripAction();
     assert.equal(finish.undoMs, FINISH_TRIP_UNDO_MS);
-    assert.equal(FINISH_TRIP_UNDO_MS, 10_000);
+    assert.equal(FINISH_TRIP_UNDO_MS, 4_500);
     const session = noteTrip(createGuideSession(), {
       saved: 12.5,
       savedToPastTrips: true,

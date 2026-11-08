@@ -45,11 +45,23 @@ function lineTotal(line) {
  * @param {object[] | null | undefined} lines
  * @param {{ usualFamilies?: Iterable<string> }} [options]
  */
+export function splitPackedQuantity(name, quantity) {
+  const title = clean(name);
+  const packed = title.match(/^(.*?)(?:\s*[x×]\s*(\d{1,2}))$/i);
+  const qty = Math.max(1, Math.floor(Number(quantity) || 1));
+  if (!packed?.[1]?.trim()) return { name: title || "Item", quantity: qty };
+  const packedQty = Number(packed[2]);
+  if (!packedQty || (qty > 1 && qty !== packedQty)) return { name: title, quantity: qty };
+  return { name: packed[1].trim(), quantity: packedQty };
+}
+
 export function buildTripAddList(lines, _options = {}) {
   const rows = (lines || []).map((line, index) => {
-    const receiptQty = Math.max(1, Math.floor(Number(line?.quantity) || 1));
+    const joined = joinBrandName(line?.brand, line?.name);
+    const packed = splitPackedQuantity(joined, line?.quantity);
+    const receiptQty = packed.quantity;
     const quantity = tripQuantityDefault(receiptQty);
-    const name = joinBrandName(line?.brand, line?.name);
+    const name = packed.name;
     const family = clean(line?.family);
     const category = clean(line?.label || line?.category) || "Groceries";
     return {

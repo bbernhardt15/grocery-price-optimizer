@@ -355,6 +355,11 @@ export function createListHome(deps) {
             });
         if (resolved.excluded) continue;
         if (!resolved.product?.id) {
+          const qty = Math.max(1, Math.floor(Number(resolved.quantity) || Number(pick.quantity) || 1));
+          if (typeof deps.addCustom === "function") {
+            deps.addCustom(slotDef.label, qty);
+            added += 1;
+          }
           missing.push(slotDef.label);
           continue;
         }
@@ -371,8 +376,8 @@ export function createListHome(deps) {
       const title = listModel(checklist.listId, book)?.title || "That list";
       if (!added && missing.length) deps.toast("Those items aren't on the shelf yet. Try browsing.");
       else if (missing.length) {
-        const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
-        deps.toast(`Added ${title}. ${phrase}.`);
+        const phrase = missing.length === 1 ? `${missing[0]} is on your list to match` : `${missing.join(", ")} are on your list to match`;
+        deps.toast(`Added ${added} items. ${phrase}.`);
       } else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
       else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
       else deps.toast(`${title} is already on your list.`);
@@ -432,6 +437,11 @@ export function createListHome(deps) {
             });
         if (resolved.excluded) continue;
         if (!resolved.product?.id) {
+          const qty = Math.max(1, Math.floor(Number(resolved.quantity) || Number(quantities[slotDef.id]) || 1));
+          if (typeof deps.addCustom === "function") {
+            deps.addCustom(slotDef.label, qty);
+            added += 1;
+          }
           missing.push(slotDef.label);
           continue;
         }
@@ -447,8 +457,8 @@ export function createListHome(deps) {
       saveSwaps();
       if (!added && missing.length) deps.toast("Those items aren't on the shelf yet. Try browsing.");
       else if (missing.length) {
-        const phrase = missing.length === 1 ? `${missing[0]} wasn't on the shelf` : `${missing.join(", ")} weren't on the shelf`;
-        deps.toast(`Added ${model.title}. ${phrase}.`);
+        const phrase = missing.length === 1 ? `${missing[0]} is on your list to match` : `${missing.join(", ")} are on your list to match`;
+        deps.toast(`Added ${added} items. ${phrase}.`);
       }
       else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
       else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
@@ -490,6 +500,22 @@ export function createListHome(deps) {
     }
     if (target.id === "theme-add-input" && view?.checklist) {
       view.checklist = setDraft(view.checklist, target.value);
+    }
+    if (target instanceof HTMLInputElement && target.hasAttribute("data-slot-brand") && view.kind === "list") {
+      const slotId = target.getAttribute("data-slot-brand") || "";
+      const model = listModel(view.listId, book);
+      const slotDef = model?.slots?.find((slot) => slot.id === slotId);
+      if (!slotDef) return;
+      const picked = activeChoice(book, view.listId, slotDef);
+      book = persist(
+        setOverride(
+          book,
+          view.listId,
+          slotId,
+          { ...picked.choice, brand: target.value, name: picked.choice?.name || slotDef.suggested?.name || slotDef.label },
+          Date.now()
+        )
+      );
     }
   }
 

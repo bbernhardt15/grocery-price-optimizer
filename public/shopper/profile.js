@@ -266,6 +266,7 @@ export function parseProfile(raw) {
         confidence,
         count: Math.max(0, Math.min(999, Math.floor(Number(entry.count) || 0))),
         label: clean(entry.label, 80),
+        variant: clean(entry.variant || entry.flavor, 80),
         updatedAt: stamp(entry.updatedAt),
       };
     }

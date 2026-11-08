@@ -1366,7 +1366,6 @@ export function mountProfileOnboarding(deps = {}) {
       const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
       const names = visibleStoreNames(nearby.stores);
       const decision = zipContinueDecision({ stores: names });
-      paintStoreList();
       if (!decision.advance) {
         const hiddenOnly = !adStoresVisible() && nearby.stores.length > 0;
         deps.toast?.(hiddenOnly ? "Kroger and Walmart aren't near that ZIP." : "No stores near that ZIP. Try another.");
@@ -1457,7 +1456,9 @@ export function mountProfileOnboarding(deps = {}) {
     if (stepId === "products" && !skipped) draft = rememberPicks(at);
     const answer = skipped ? undefined : currentAnswer();
     if (returnTo && stepId !== "summary") {
+      const wasDone = draft.onboarding?.status === "done" || draft.onboarding?.status === "skipped";
       draft = skipped ? skipStep(draft, stepId, at) : answerStep(draft, stepId, answer, at);
+      if (wasDone) draft = completeProfile(draft, at);
       if (stepId === "allergies" || stepId === "diets") draft = markDietPrompt(draft, "asked", at);
       if (!skipped && stepId === "products") draft = rememberPicks(at);
       stepId = "summary";
@@ -1587,6 +1588,10 @@ export function mountProfileOnboarding(deps = {}) {
       returnTo = "";
       render();
       focusTitle();
+      return;
+    }
+    if (stepId === "summary" && (draft.onboarding?.status === "done" || draft.onboarding?.status === "skipped")) {
+      if (dialog.open) dialog.close();
       return;
     }
     draft = persist(goBack(draft, stepId));

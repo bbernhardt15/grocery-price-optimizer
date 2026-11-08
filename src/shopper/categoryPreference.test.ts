@@ -140,4 +140,32 @@ describe("category preferences", () => {
     assert.equal(handoffMark({ storeName: "Kroger", handoff: { tier: "cart", action: { type: "kroger_cart" } } }).label, "Cart");
     assert.equal(handoffMark({ storeName: "Target", handoff: { tier: "link" } }).label, "List");
   });
+
+  it("uses a saved flavor and does not swap in a different one", () => {
+    const rows = [
+      product("kraft", "Kraft Macaroni and Cheese Original", "Kraft", { departmentId: "pantry", subcategory: "Pasta & Rice", price: 1.2 }),
+      product("annie", "Annie's Shells and Cheese", "Annie's", { departmentId: "pantry", subcategory: "Pasta & Rice", price: 2.4 }),
+    ];
+    const saved = setCategoryPreference(emptyProfile(), {
+      family: "mac-and-cheese",
+      mode: "brand",
+      brand: "Kraft",
+      variant: "Kraft Original",
+    });
+    const hit = resolveCategoryPreference({ profile: saved, family: "mac-and-cheese", products: rows });
+    assert.equal(hit.product?.id, "kraft");
+    assert.equal(hit.ask, false);
+    const miss = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "mac-and-cheese",
+        mode: "brand",
+        brand: "Kraft",
+        variant: "Double Stuf",
+      }),
+      family: "mac-and-cheese",
+      products: rows,
+    });
+    assert.equal(miss.product, null);
+    assert.equal(miss.ask, true);
+  });
 });

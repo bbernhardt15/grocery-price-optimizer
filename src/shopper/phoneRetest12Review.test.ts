@@ -70,9 +70,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v58", () => {
-    assert.equal(SHELL_CACHE, "v58");
-    assert.match(sw, /grocery-gitter-shell-v58/);
+  it("bumps the shell cache to v59", () => {
+    assert.equal(SHELL_CACHE, "v59");
+    assert.match(sw, /grocery-gitter-shell-v59/);
   });
 
   it("keeps Review card heights stable and withholds the headline while prices load", () => {

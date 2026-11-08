@@ -377,6 +377,8 @@ export function mountGuide(deps = {}) {
   }
 
   installReceiptWatch(win, (payload) => {
+    const pressed = host.querySelector("[data-guide-action='toggle-pick'][aria-pressed='true']");
+    if (pressed && host.dataset.moment === "receipt") return;
     session = rememberReceipt(session, payload);
     sync();
   });

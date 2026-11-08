@@ -35,6 +35,8 @@ describe("three-step flow", () => {
     assert.equal(empty.showButton, false);
     assert.equal(empty.provisional, true);
 
+    const units = planBarCopy({ step: "add", itemCount: 66, lineCount: 59, total: 12.5 });
+    assert.equal(units.countLabel, "66 units · 59 lines");
     const add = planBarCopy({ step: "add", itemCount: 3, total: 12.5 });
     assert.equal(add.countLabel, "3 items");
     assert.equal(add.totalLabel, "$12.50");

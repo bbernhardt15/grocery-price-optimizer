@@ -83,6 +83,11 @@ body:has(#gitter-guide:not([hidden])) .body {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  pointer-events: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .gitter-guide-chip,

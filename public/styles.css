@@ -548,7 +548,27 @@ body[data-results="search"] #shelf-entry { display: none; }
 .shelf-choices button {
   flex: 1 1 30%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--bg); color: var(--ink); font-weight: 700;
+  touch-action: manipulation; position: relative; z-index: 1;
 }
+dialog.shelf-sheet[open] .sheet-body {
+  max-height: min(var(--vv-height, 100dvh), 100dvh);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+.missing-row { touch-action: pan-y; transition: transform 160ms ease; }
+.favorites-screen { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 24px; }
+.favorites-screen[hidden] { display: none !important; }
+.favorites-row { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.favorites-row input, .slot-brand input { min-height: 44px; width: 100%; }
+.slot-brand { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+.price-source { color: var(--muted); font-size: 0.8rem; font-weight: 650; margin: 0 0 6px; }
+body[data-favorites="open"] #browse,
+body[data-favorites="open"] #grid,
+body[data-favorites="open"] .browse-tools,
+body[data-favorites="open"] .dept-scroller,
+body[data-favorites="open"] #usuals-block,
+body[data-favorites="open"] #shelf-entry { display: none !important; }
 .shelf-choices button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .shelf-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .shelf-add label { flex: 1 1 12rem; display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
@@ -731,7 +751,7 @@ dialog.shelf-sheet .sheet-body {
 }
 .step-bar {
   position: static;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
   width: 100%; min-width: 0; padding: 0; background: transparent;
 }
 .step-bar button {
