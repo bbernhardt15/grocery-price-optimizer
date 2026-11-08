@@ -4,6 +4,7 @@
  * The template itself stays unchanged.
  */
 
+import { savedFlavor } from "./categoryPreference.js";
 import { activeChoice, partySize, scaleQuantity } from "./themedLists.js";
 import { themeIcon } from "./themedListsUi.js";
 import { inlineLoaderHtml } from "./addTabIcons.js";
@@ -21,8 +22,13 @@ function text(escapeHtml, value) {
   return escapeHtml(String(value ?? ""));
 }
 
-function itemCopy(book, listId, slotDef) {
+function itemCopy(book, listId, slotDef, profile) {
   const picked = activeChoice(book, listId, slotDef);
+  const flavor = picked.source === "suggested" ? savedFlavor(profile, slotDef) : null;
+  if (flavor?.name) {
+    const brand = flavor.brand && !flavor.name.toLowerCase().includes(flavor.brand.toLowerCase()) ? flavor.brand : "";
+    return { title: flavor.name, detail: brand, note: "Your flavor" };
+  }
   const choice = picked.choice || {};
   const title = clean(choice.familyName || choice.name || slotDef.label, 80) || slotDef.label;
   const brand = clean(choice.brand, 40);
@@ -45,7 +51,7 @@ export function checklistFromList(model, book, people, options = {}) {
   const items = [];
   for (const slotDef of model?.slots || []) {
     if (blocked(slotDef)) continue;
-    const copy = itemCopy(book, model.id, slotDef);
+    const copy = itemCopy(book, model.id, slotDef, options.profile);
     items.push({
       id: slotDef.id,
       label: slotDef.label,
@@ -176,7 +182,8 @@ export function checkedPicks(state) {
     .map((item) => ({
       slot: item.slot,
       quantity: item.quantity,
-      name: item.slot?.search || item.label,
+      title: item.title || "",
+      name: item.title || item.slot?.search || item.label,
     }));
 }
 

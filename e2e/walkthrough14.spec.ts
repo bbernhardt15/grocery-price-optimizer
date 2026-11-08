@@ -63,7 +63,7 @@ test("fourteenth walkthrough keeps Review, In-store, chat, photo, and Build spac
     await milk.click();
     await expect(guide).toContainText(/cheaper/i);
   }
-  await guide.getByRole("button", { name: "Not yet" }).click();
+  await guide.getByRole("button", { name: "Keep building" }).click();
   await expect(guide).toContainText(/Add anything else/);
   await expect(guide.getByRole("button", { name: "Check store prices" })).toBeVisible();
 

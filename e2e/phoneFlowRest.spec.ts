@@ -482,13 +482,22 @@ test("favorites is its own screen and a flavor survives reload", async ({ page }
   await page.locator("#tab-favorites").click();
   await expect(page.locator("#favorites-screen")).toBeVisible();
   await expect(page.locator("#grid")).toBeHidden();
-  const field = page.locator("[data-fav-family='mac-and-cheese']");
+  const next = page.locator("#fav-next");
+  for (let step = 0; step < 40; step += 1) {
+    if ((await page.locator("#favorites-prefs h3").innerText()) === "Mac and cheese") break;
+    await next.click();
+  }
+  const field = page.locator("#favorites-prefs input");
   await field.fill("Kraft Original");
   await field.blur();
   await page.screenshot({ path: "/opt/cursor/artifacts/favorites-flavor.png", fullPage: false });
   await page.reload();
   await page.locator("#tab-favorites").click();
-  await expect(page.locator("[data-fav-family='mac-and-cheese']")).toHaveValue("Kraft Original");
+  for (let step = 0; step < 40; step += 1) {
+    if ((await page.locator("#favorites-prefs h3").innerText()) === "Mac and cheese") break;
+    await page.locator("#fav-next").click();
+  }
+  await expect(page.locator("#favorites-prefs input")).toHaveValue("Kraft Original");
   await page.locator("#favorites-close").click();
   await expect(page.locator("#favorites-screen")).toBeHidden();
 });
@@ -579,4 +588,329 @@ test("store editor saves and stays with an 85 item trip", async ({ page }) => {
   await page.locator("#menu-open").click();
   await page.locator("#drawer-profile").click();
   await expect(page.locator("#profile-onboard section", { hasText: "Stores" })).toContainText(/Kroger/);
+});
+
+test("Build keeps the count and hides Review your trip", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify(Array.from({ length: 85 }, (_, index) => ({ id: `custom:trip-${index}`, itemId: `custom:trip-${index}`, name: `Trip item ${index + 1}`, quantity: index === 0 ? 8 : 1 })))
+    );
+  });
+  await unlock(page);
+  await expect(page.locator("#bar-count")).toContainText("92 units · 85 lines");
+  await expect(page.locator("#bar-primary")).toBeHidden();
+  await expect(page.locator("#step-bar [data-flow='plan']")).toBeVisible();
+});
+
+test("a Walmart match stays in that cart through save, reload, and a new plan", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+    if (!localStorage.getItem("gg-list")) {
+      localStorage.setItem(
+        "gg-list",
+        JSON.stringify([
+          { id: "milk", itemId: "milk", name: "Milk", quantity: 2 },
+          { id: "custom:eggs", itemId: "custom:eggs", name: "Eggs", quantity: 1 },
+        ])
+      );
+    }
+  });
+  const plan = {
+    total: 6.4,
+    partial: false,
+    pendingStores: [],
+    unavailable: ["Eggs"],
+    stores: [
+      { storeName: "Kroger", items: [{ lineId: "milk", name: "Milk", title: "Milk", price: 3.2, quantity: 2, itemTotal: 6.4, storeName: "Kroger" }] },
+      { storeName: "Walmart", items: [{ lineId: "milk-w", name: "Milk", title: "Milk", price: 3.4, quantity: 2, itemTotal: 6.8, storeName: "Walmart" }] },
+    ],
+  };
+  await page.route("**/api/optimize-list", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan) });
+  });
+  await page.route("**/api/catalog/browse**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "gv-eggs",
+            name: "Large Eggs",
+            familyName: "Large Eggs",
+            brand: "Great Value",
+            offers: [
+              { storeName: "Walmart", price: 1.98 },
+              { storeName: "Kroger", price: 2.19 },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+  await unlock(page);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  await expect(page.locator("[data-match-search='Eggs'][data-match-store='Walmart']")).toBeVisible();
+  await page.evaluate(() => {
+    const pad = document.createElement("div");
+    pad.id = "scroll-pad";
+    pad.style.height = "1400px";
+    document.body.append(pad);
+    window.scrollTo(0, 640);
+  });
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(400);
+  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLButtonElement).click());
+  await expect(page.locator("#match-sheet")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(before + 80);
+  await expect.poll(() => page.evaluate(() => Math.abs(window.scrollY - 640) < 80)).toBe(true);
+  await page.locator("#match-close").click();
+  await expect.poll(() => page.evaluate(() => Math.abs(window.scrollY - 640) < 80)).toBe(true);
+  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLButtonElement).click());
+  await page.getByRole("button", { name: /Great Value/ }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  const walmart = page.locator("#trip [data-store='Walmart']");
+  await expect(walmart).toContainText(/Great Value|Large Eggs/);
+  await expect(walmart).toContainText("1.98");
+  await expect(page.locator("#trip [data-store='Kroger']")).not.toContainText("Great Value");
+  await expect(page.locator("[data-unfound]")).toHaveCount(0);
+  await page.screenshot({ path: "/opt/cursor/artifacts/walmart-egg-cart.png", fullPage: false });
+});
+
+test("a saved soda flavor replaces the themed default and an empty shelf", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+    localStorage.setItem(
+      "gg-profile",
+      JSON.stringify({
+        version: 1,
+        updatedAt: Date.now(),
+        onboarding: { status: "done", step: "summary", updatedAt: Date.now() },
+        shopStores: ["Kroger"],
+        categoryPreferences: { soda: { family: "soda", mode: "brand", brand: "Coca-Cola", variant: "Cherry Coke", source: "manual", updatedAt: Date.now() } },
+      })
+    );
+  });
+  await page.route("**/api/catalog/browse**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") || "";
+    const cherry = /cherry/i.test(query);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: /soda|coke|cola|cherry/i.test(query)
+          ? [
+              cherry
+                ? { id: "cherry-coke", name: "Coca-Cola Cherry", brand: "Coca-Cola", familyName: "Coca-Cola Cherry", catalogName: "Coca-Cola Cherry", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 6.48 }] }
+                : { id: "classic-coke", name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", familyName: "Coca-Cola Classic", catalogName: "Coca-Cola Classic", departmentId: "beverages", subcategory: "Soda", offers: [{ storeName: "Kroger", price: 7.28 }] },
+            ]
+          : [],
+      }),
+    });
+  });
+  await unlock(page);
+  await page.locator("#tab-favorites").click();
+  await expect(page.locator("#favorites-screen")).toContainText("Aisle 1 of");
+  await page.screenshot({ path: "/opt/cursor/artifacts/favorites-wizard.png", fullPage: false });
+  await page.locator("#favorites-close").click();
+  await page.locator("[data-lists-open]").click();
+  const tailgate = page.locator("[data-list-open='tailgate']");
+  if (!(await tailgate.isVisible().catch(() => false))) await page.locator("[data-lists-all]").click();
+  await tailgate.click();
+  await expect(page.locator("#list-sheet")).toContainText("Cherry Coke");
+  await page.locator("[data-sheet-add='tailgate']").click();
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || "").join(" | "))).toMatch(/cherry/i);
+  const names = await page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name || ""));
+  expect(names.join(" ")).not.toMatch(/Coca-Cola Classic/);
+});
+
+test("four receipt suggestions can be selected and added", async ({ page }) => {
+  await page.route("**/api/import/receipt", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        lines: [
+          { name: "Whole Milk", quantity: 1 },
+          { name: "Sourdough", quantity: 1 },
+          { name: "Cherry Coke", quantity: 1 },
+          { name: "Sharp Cheddar", quantity: 1 },
+        ],
+      }),
+    });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+  });
+  await unlock(page);
+  await page.evaluate(() => fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+  const guide = page.locator("#gitter-guide");
+  await expect(guide).toContainText("I found 4 items that are not on your list yet.");
+  await guide.locator("[data-guide-name='Whole Milk']").click();
+  await guide.locator("[data-guide-name='Cherry Coke']").click();
+  await expect(guide.locator("[data-guide-name='Whole Milk']")).toHaveAttribute("aria-pressed", "true");
+  await expect(guide.locator("[data-guide-name='Cherry Coke']")).toHaveAttribute("aria-pressed", "true");
+  const chips = guide.locator(".gitter-guide-chips");
+  await chips.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect(guide.getByRole("button", { name: "Add selected" })).toBeVisible();
+  await guide.getByRole("button", { name: "Add selected" }).click();
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(expect.arrayContaining(["Whole Milk", "Cherry Coke"]));
+  await page.screenshot({ path: "/opt/cursor/artifacts/receipt-four-added.png", fullPage: false });
+});
+
+test("an eight item import review can reach the last row and the add button", async ({ page }) => {
+  await page.addInitScript(() => {
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+  });
+  await page.route("**/api/import/text", async (route) => {
+    const items = Array.from({ length: 8 }, (_, index) => ({
+      key: `row-${index}`,
+      raw: `Photo item ${index + 1}`,
+      name: `Photo item ${index + 1}`,
+      status: "found",
+      accepted: true,
+      selectedId: `prod-${index}`,
+      choices: [{ product: { id: `prod-${index}`, name: `Photo item ${index + 1}`, brand: "Store", offers: [{ storeName: "Kroger", price: 1 + index }] } }],
+    }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items, found: 8, total: 8 }) });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+  });
+  await unlock(page);
+  await page.locator("#add-items").click();
+  await page.locator("#import-paste").fill("milk\nbread\neggs\ncheese\napples\nchips\nsoda\ncoffee");
+  await page.locator("#import-find").click();
+  await expect(page.locator("#import-dialog")).toContainText("Found 8 of 8");
+  const review = page.locator("#import-review");
+  const last = page.locator("[data-key='row-7']");
+  await review.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect(last).toBeVisible();
+  const fit = await page.evaluate(() => {
+    const dialog = document.getElementById("import-dialog");
+    const button = document.getElementById("import-accept");
+    const row = document.querySelector("[data-key='row-7']");
+    if (!dialog || !button || !row) return { button: false, row: false };
+    const frame = dialog.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    const rowBox = row.getBoundingClientRect();
+    return {
+      button: buttonBox.top >= frame.top && buttonBox.bottom <= frame.bottom + 1,
+      row: rowBox.bottom <= frame.bottom + 1 && rowBox.top >= frame.top,
+    };
+  });
+  expect(fit.button).toBe(true);
+  expect(fit.row).toBe(true);
+});
+
+test("unresolved rows remove by swipe or button and can be undone", async ({ page, browserName }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+    localStorage.setItem("gg-list", JSON.stringify([{ id: "custom:eggs", itemId: "custom:eggs", name: "Eggs", quantity: 1 }, { id: "milk", itemId: "milk", name: "Milk", quantity: 1 }]));
+  });
+  await page.route("**/api/optimize-list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        total: 3.2,
+        partial: false,
+        pendingStores: [],
+        unavailable: ["Eggs"],
+        stores: [
+          { storeName: "Kroger", items: [{ lineId: "milk", name: "Milk", title: "Milk", price: 3.2, quantity: 1, itemTotal: 3.2, storeName: "Kroger" }] },
+          { storeName: "Walmart", items: [{ lineId: "milk-w", name: "Milk", title: "Milk", price: 3.4, quantity: 1, itemTotal: 3.4, storeName: "Walmart" }] },
+        ],
+      }),
+    });
+  });
+  await unlock(page);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  const row = page.locator("[data-swipe='1']");
+  await expect(row).toContainText("Eggs");
+  await page.locator("[data-missing-remove='Eggs']").click();
+  await expect(page.locator("[data-unfound]")).toHaveCount(0);
+  await page.locator("#toast-action").click();
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).some((row) => /egg/i.test(row.name || "")))).toBe(true);
+  await expect(page.locator("[data-unfound]")).toContainText("Eggs");
+  if (browserName === "webkit") {
+    await page.evaluate(() => {
+      const target = document.querySelector("[data-swipe='1'] p");
+      if (!(target instanceof HTMLElement)) return;
+      const rect = target.getBoundingClientRect();
+      const startX = rect.left + 24;
+      const y = rect.top + 10;
+      target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: startX, clientY: y }));
+      window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: startX - 140, clientY: y }));
+      window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: startX - 140, clientY: y }));
+    });
+  } else {
+    const box = await row.boundingBox();
+    expect(box).toBeTruthy();
+    const startX = (box?.x || 0) + 48;
+    const y = (box?.y || 0) + 18;
+    await page.mouse.move(startX, y);
+    await page.mouse.down();
+    await page.mouse.move(startX - 140, y, { steps: 10 });
+    await page.mouse.up();
+  }
+  await expect(page.locator("[data-unfound]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).some((row) => /egg/i.test(row.name || "")))).toBe(false);
+});
+
+test("Refine checkboxes stay clickable while the guide is up", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem("gg-list", JSON.stringify([{ id: "custom:milk", itemId: "custom:milk", name: "Milk", quantity: 1 }]));
+  });
+  await unlock(page);
+  await page.locator("#browse-toggle").click();
+  await page.locator("#filters-open").click();
+  await expect(page.locator("#gitter-guide")).toBeHidden();
+  await page.locator("#filter-mine").check();
+  await expect(page.locator("#filter-mine")).toBeChecked();
+});
+
+test("saving with no store selected explains the choice", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-profile",
+      JSON.stringify({ version: 1, updatedAt: Date.now(), onboarding: { status: "done", step: "summary", updatedAt: Date.now() }, shopStores: ["Kroger", "Walmart"], categoryPreferences: {} })
+    );
+  });
+  await unlock(page);
+  await page.locator("#menu-open").click();
+  await page.locator("#drawer-profile").click();
+  await page.locator("#profile-onboard section", { hasText: "Stores" }).getByRole("button", { name: "Edit" }).click();
+  await expect(page.locator("#profile-store-list input").first()).toBeVisible();
+  await page.locator("#profile-store-list input").evaluateAll((boxes) => {
+    for (const box of boxes) (box as HTMLInputElement).checked = false;
+  });
+  await page.locator("#profile-next").click();
+  await expect(page.locator("#profile-zip-error")).toContainText("Pick at least one store");
+  await expect(page.locator("#profile-zip-error")).not.toContainText("still loading");
+  await page.locator("#profile-back").click();
+  await expect(page.locator("#profile-onboard")).toContainText("Stores");
 });

@@ -455,6 +455,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   let storesWarmed = "";
+  let placeStoresState = "idle";
   function warmStores() {
     const zip = normalizeZipInput(currentZipRaw());
     if (!/^\d{5}/.test(zip) || storesWarmed === zip) return;
@@ -471,6 +472,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function showStoreSkeleton() {
+    placeStoresState = "loading";
     const host = $("profile-store-list");
     if (host) host.innerHTML = `<div class="read-skel" aria-busy="true" aria-label="Loading stores"><span></span><span></span><span></span></div>`;
     const note = $("profile-store-note");
@@ -485,11 +487,13 @@ export function mountProfileOnboarding(deps = {}) {
     const zip = normalizeZipInput(raw);
     if (!/^\d{5}/.test(zip)) {
       host.innerHTML = "";
+      placeStoresState = "need-zip";
       if (note) note.textContent = "Stores within about 25 miles show up here.";
       return;
     }
     const nearby = storesForZip(zip);
     const names = visibleStoreNames(nearby.stores);
+    placeStoresState = names.length ? "ready" : "empty";
     const selected = new Set(draft.shopStores || []);
     const open = !draft.shopStores?.length;
     host.innerHTML = storeChoiceHtml(names, { selected, open });
@@ -789,14 +793,25 @@ export function mountProfileOnboarding(deps = {}) {
     const picked = boxes.map((box) => (box.checked ? box.getAttribute("data-place-store") : "")).filter(Boolean);
     if (!boxes.length) {
       const note = $("profile-zip-error");
+      const message =
+        placeStoresState === "empty"
+          ? "No stores are listed for that ZIP. Change the ZIP, or go back."
+          : placeStoresState === "need-zip"
+            ? "Enter a 5-digit ZIP, then choose stores."
+            : "Stores are still loading. Wait a moment, then save.";
       if (note) {
         note.hidden = false;
-        note.textContent = "Stores are still loading. Wait a moment, then save.";
+        note.textContent = message;
       }
-      deps.toast?.("Stores are still loading. Wait a moment, then save.");
+      deps.toast?.(message);
       return null;
     }
     if (!picked.length) {
+      const note = $("profile-zip-error");
+      if (note) {
+        note.hidden = false;
+        note.textContent = "Pick at least one store. Back keeps what you already saved.";
+      }
       deps.toast?.("Pick at least one store.");
       return null;
     }

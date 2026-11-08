@@ -56,6 +56,16 @@ export function reconcileStores(stores) {
  * Cart card, store cards, and the plan headline share this figure.
  * @param {Array<{ items?: object[] }> | null | undefined} stores
  */
+/** A store card says lines and units, so Milk x2 is not "1 item". */
+export function storeLineLabel(lines, units) {
+  const lineCount = Math.max(0, Math.floor(Number(lines) || 0));
+  const unitCount = Math.max(lineCount, Math.floor(Number(units) || 0));
+  const lineText = lineCount === 1 ? "1 line" : `${lineCount} lines`;
+  if (!lineCount) return "0 lines";
+  if (unitCount === lineCount) return lineText;
+  return `${lineText} · ${unitCount} units`;
+}
+
 export function cartCardFigures(stores) {
   const reconciled = reconcileStores(stores);
   const total = roundMoney(reconciled.reduce((sum, store) => sum + store.subtotal, 0));
@@ -64,7 +74,7 @@ export function cartCardFigures(stores) {
     stores: reconciled,
     total,
     itemCount,
-    countLabel: itemCount === 1 ? "1 item" : `${itemCount} items`,
+    countLabel: storeLineLabel(reconciled.reduce((sum, store) => sum + (store.items || []).length, 0), itemCount),
   };
 }
 

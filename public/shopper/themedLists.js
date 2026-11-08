@@ -775,9 +775,17 @@ export function picksForShelf(list, book) {
   if (!model) return [];
   const picks = [];
   for (const slotDef of model.slots) {
-    const { choice } = activeChoice(book, model.id, slotDef);
-    picks.push({ name: choice.name || slotDef.suggested.name, brand: choice.brand || "" });
-    if (slotDef.search) picks.push({ name: slotDef.search, brand: "" });
+    const picked = activeChoice(book, model.id, slotDef);
+    const choice = picked.choice || {};
+    picks.push({
+      name: choice.name || slotDef.suggested.name,
+      brand: choice.brand || "",
+      slotId: slotDef.id,
+      search: slotDef.search || "",
+      label: slotDef.label || "",
+      source: picked.source,
+    });
+    if (slotDef.search) picks.push({ name: slotDef.search, brand: "", slotId: slotDef.id, search: slotDef.search, label: slotDef.label || "", source: picked.source });
   }
   return picks;
 }

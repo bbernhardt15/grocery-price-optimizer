@@ -96,7 +96,12 @@ export function mountMatchSheet(deps) {
     }
   }
 
+  let returnScroll = 0;
+  function holdPageScroll() {
+    window.scrollTo(0, returnScroll);
+  }
   function open(name, store) {
+    returnScroll = window.scrollY || 0;
     query = String(name || "").replace(/\s+/g, " ").trim();
     storeName = String(store || "").replace(/\s+/g, " ").trim();
     const title = dialog.querySelector("#match-title");
@@ -110,8 +115,10 @@ export function mountMatchSheet(deps) {
           : "Pick a product. This stays in Grocery Gitter.";
     }
     if (!dialog.open) dialog.showModal();
+    holdPageScroll();
     history.push();
-    title?.focus();
+    if (title instanceof HTMLElement) title.focus({ preventScroll: true });
+    requestAnimationFrame(holdPageScroll);
     if (query) void search(query);
     else paint([], "Type isn't needed. Close this and try the item again.");
   }
@@ -127,6 +134,8 @@ export function mountMatchSheet(deps) {
   });
   dialog.addEventListener("close", () => {
     products.clear();
+    holdPageScroll();
+    requestAnimationFrame(holdPageScroll);
   });
   return { open };
 }

@@ -60,10 +60,10 @@ export function planBarCopy(input = {}) {
   const amount = Number(input.total);
   const totalLabel = count > 0 && Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
   const provisional = !input.hasPlan && step !== "shop";
-  let button = "Review your trip";
+  let button = "";
   let enabled = false;
   let showButton = false;
-  if (step === "plan") {
+  if (step === "plan" || step === "add") {
     button = "";
     enabled = false;
     showButton = false;

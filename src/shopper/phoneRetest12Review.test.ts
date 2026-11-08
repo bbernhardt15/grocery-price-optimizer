@@ -16,6 +16,7 @@ import {
 import {
   cartCardFigures,
   coverageVisible,
+  storeLineLabel,
   createDisplayedTotal,
   createReviewEntrySession,
   quietRetryPlan,
@@ -70,9 +71,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v59", () => {
-    assert.equal(SHELL_CACHE, "v59");
-    assert.match(sw, /grocery-gitter-shell-v59/);
+  it("bumps the shell cache to v60", () => {
+    assert.equal(SHELL_CACHE, "v60");
+    assert.match(sw, /grocery-gitter-shell-v60/);
   });
 
   it("keeps Review card heights stable and withholds the headline while prices load", () => {
@@ -130,7 +131,8 @@ describe("twelfth phone test, Review and In-store", () => {
   it("shows one total for the same list and ignores streamed totals", () => {
     const figures = cartCardFigures(cart229());
     assert.equal(figures.itemCount, 35);
-    assert.equal(figures.countLabel, "35 items");
+    assert.equal(figures.countLabel, "35 lines");
+    assert.equal(storeLineLabel(1, 2), "1 line · 2 units");
     assert.equal(figures.total.toFixed(2), "229.20");
     assert.equal(figures.stores[0].subtotal.toFixed(2), "120.00");
     assert.equal(figures.stores[1].subtotal.toFixed(2), "109.20");

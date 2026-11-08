@@ -58,7 +58,7 @@ import {
   resolveProductPreference,
   shouldAskAlways,
 } from "./shopper/productPreference.js";
-import { isPreferenceList, learnCategoryFromProduct, parseNeedItems, preferenceCategories, resolveCategoryPreference, resolveNeedList, categorySearch, setCategoryPreference } from "./shopper/categoryPreference.js";
+import { favoriteWizardSteps, isPreferenceList, learnCategoryFromProduct, parseNeedItems, resolveCategoryPreference, resolveNeedList, savedFlavor, categorySearch, setCategoryPreference } from "./shopper/categoryPreference.js";
 import { matchConfidence, selectStapleTiles } from "./shopper/stapleFamilies.js";
 import { mountProfileOnboarding } from "./shopper/profileOnboardingUi.js";
 import { fileToBase64, readNdjsonResponse, readReceiptBatch } from "./shopper/receiptImport.js";
@@ -175,7 +175,7 @@ import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { groupListEntries } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
 import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
-import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan } from "./shopper/reviewSettle.js";
+import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan, storeLineLabel } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
 import { krogerSendPatch } from "./shopper/krogerSendProgress.js";
@@ -794,7 +794,20 @@ let pullTravel = 0;
 let pullActive = false;
 let lastBarTotal = 0;
 
+function parkToast() {
+  const dialog = document.querySelector("dialog[open]");
+  const host = dialog?.querySelector(".sheet-body") || dialog;
+  if (host instanceof HTMLElement) {
+    if (toastEl.parentElement !== host) host.insertBefore(toastEl, host.firstChild);
+    toastEl.dataset.place = "sheet";
+    return;
+  }
+  if (toastEl.parentElement !== document.body) document.body.appendChild(toastEl);
+  toastEl.dataset.place = "page";
+}
+
 function toast(message, durationMs = 1600) {
+  parkToast();
   const text = $("toast-text");
   const action = $("toast-action");
   if (text) text.textContent = message;
@@ -808,7 +821,7 @@ function toast(message, durationMs = 1600) {
   toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
 }
 
-function toastAction(message, label, onClick, durationMs = 6000) {
+function toastAction(message, label, onClick, durationMs = 4500) {
   toast(message, durationMs);
   const action = $("toast-action");
   if (!action) return;
@@ -2041,9 +2054,27 @@ function storedListCount() {
   }
 }
 
+function storedPreferredStores() {
+  const pins = new Map();
+  try {
+    const rows = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
+    if (!Array.isArray(rows)) return pins;
+    for (const row of rows) {
+      const store = String(row?.preferredStore || "").trim();
+      if (!store) continue;
+      if (row.itemId) pins.set(row.itemId, store);
+      if (row.id) pins.set(row.id, store);
+    }
+  } catch {
+    /* the current list is the source when storage is unreadable */
+  }
+  return pins;
+}
+
 function saveList() {
   if (deletingData) return;
   if (emptyMustNotReplace(storedListCount(), list.size, explicitClear)) return;
+  const pins = storedPreferredStores();
   const rows = [...list.values()].map((entry) => ({
     id: entry.product.id,
     itemId: entry.itemId || entry.product.id,
@@ -2058,6 +2089,11 @@ function saveList() {
     brand: entry.product.brand,
     sizeLabel: entry.product.variantLabel || entry.product.sizeLabel,
     variantLabel: entry.product.variantLabel || entry.product.sizeLabel,
+    preferredStore: entry.preferredStore || pins.get(entry.itemId) || pins.get(entry.product?.id) || "",
+    offers: (entry.product?.offers || [])
+      .filter((offer) => offer?.storeName)
+      .slice(0, 8)
+      .map((offer) => ({ storeName: offer.storeName, price: Number(offer.price) })),
     baselinePrice: entry.baselinePrice,
     baselineStore: entry.baselineStore,
     watch: entry.watch || "inherit",
@@ -2347,6 +2383,7 @@ function addProduct(product, quantity = 1, options = {}) {
     checkedBy: existing?.checkedBy,
     writtenAt: Date.now(),
     ...alertFields(existing, product),
+    preferredStore: options.preferredStore || existing?.preferredStore || "",
   };
   const key = existing?.itemId || product.id;
   for (const [storedId, stored] of [...list]) {
@@ -3887,8 +3924,9 @@ function reviewStoreArticle(store, couponSummary, coupons) {
     open: false,
     coupons,
   });
-  const count = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item)).length;
-  const countLabel = count === 1 ? "1 item" : `${count} items`;
+  const lines = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item));
+  const units = (store.items || []).reduce((sum, item) => sum + (Number(item.quantity) > 0 ? Number(item.quantity) : 0), 0);
+  const countLabel = storeLineLabel(lines.length, units);
   const mark = handoffMark(store);
   const action = withCheckoutLabel(primaryAction(store), reviewCheckoutLabel(store));
   const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
@@ -4372,19 +4410,36 @@ async function fillMissingSuggestions() {
 function removeNamedItem(name) {
   const wanted = String(name || "").trim().toLowerCase();
   if (!wanted) return;
+  const removed = [];
   for (const [id, entry] of [...list]) {
     const labels = [entry.product?.catalogName, entry.product?.name, entry.product?.familyName]
       .map((value) => String(value || "").trim().toLowerCase())
       .filter(Boolean);
-    if (labels.some((label) => label === wanted || label.includes(wanted) || wanted.includes(label))) {
-      setQuantity(id, 0);
-      return;
+    if (labels.some((label) => label === wanted || label.includes(wanted) || wanted.includes(label))) removed.push([id, entry]);
+  }
+  const unavailable = Array.isArray(lastOptimize?.unavailable) ? lastOptimize.unavailable.slice() : null;
+  for (const [id] of removed) setQuantity(id, 0);
+  if (unavailable && lastOptimize) {
+    lastOptimize.unavailable = unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
+    lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
+    if (flowStep === "plan") paintTrip();
+    else if (flowStep === "shop") renderShop();
+  }
+  if (!removed.length && !unavailable) return;
+  toastAction(`Removed ${name}.`, "Undo", () => {
+    for (const [id, entry] of removed) {
+      list.set(id, entry);
+      if (entry?.product?.id) productsById.set(entry.product.id, entry.product);
     }
-  }
-  if (Array.isArray(lastOptimize?.unavailable)) {
-    lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => String(row).trim().toLowerCase() !== wanted);
-    paintTrip();
-  }
+    if (unavailable && lastOptimize) {
+      lastOptimize.unavailable = unavailable;
+      lastOptimize.toFindInStore = toFindRecords(unavailable);
+    }
+    saveList();
+    renderEstimate();
+    if (flowStep === "plan") paintTrip();
+    else if (flowStep === "shop") renderShop();
+  });
 }
 
 function renderStore(store, checks, coupons, couponSummary, openCoupons) {
@@ -5277,6 +5332,7 @@ function toWrite(entry, deleted = false) {
     checked: Boolean(entry.checked),
     writtenAt: entry.writtenAt || Date.now(),
     deleted: Boolean(deleted),
+    preferredStore: entry.preferredStore || "",
   };
 }
 
@@ -5292,7 +5348,7 @@ function stubFromItem(item) {
     variantLabel: item.variantLabel || item.sizeLabel || "",
     familyKey: item.familyKey || "",
     imageUrls: [],
-    offers: [],
+    offers: Array.isArray(item.offers) ? item.offers : [],
     gaps: [],
   };
 }
@@ -5322,6 +5378,7 @@ function applyServerList(body) {
       baselineStore: entry.baselineStore,
       watch: entry.watch,
       targetPrice: entry.targetPrice,
+      preferredStore: entry.preferredStore || "",
     };
     if (entry.itemId) previousAlerts.set(entry.itemId, prefs);
     if (entry.product?.id) previousAlerts.set(entry.product.id, prefs);
@@ -5358,6 +5415,7 @@ function applyServerList(body) {
       addedBy: item.addedBy,
       checkedBy: item.checkedBy,
       writtenAt: Number(item.writtenAt) || 0,
+      preferredStore: item.preferredStore || prefs?.preferredStore || "",
       ...alertFields(prefs, product),
     };
     list.set(entry.itemId, entry);
@@ -5811,7 +5869,10 @@ function rememberLocalRow(row) {
     checkedBy: row.checkedBy,
     writtenAt: Number(row.writtenAt) || 0,
     ...alertFields(row, product),
+    preferredStore: row.preferredStore || "",
   });
+  const restored = list.get(itemId);
+  if (restored && !restored.product.offers?.length && Array.isArray(row.offers)) restored.product.offers = row.offers;
 }
 
 async function restoreList() {
@@ -5853,7 +5914,12 @@ async function restoreList() {
           checkedBy: row.checkedBy,
           writtenAt: Number(row.writtenAt) || 0,
           ...alertFields(row, body.product),
+          preferredStore: row.preferredStore || "",
         });
+        const pinned = list.get(itemId);
+        if (pinned && !pinned.product.offers?.some((offer) => sameStoreName(offer.storeName, row.preferredStore)) && Array.isArray(row.offers)) {
+          pinned.product = { ...pinned.product, offers: [...(pinned.product.offers || []), ...row.offers] };
+        }
       } catch {
         if (row.name) rememberLocalRow(row);
       }
@@ -6775,7 +6841,42 @@ document.addEventListener("change", (event) => {
 });
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
-  const add = target?.closest("[data-fav-add]");
+  if (!target) return;
+  if (target.id === "fav-prev" || target.id === "fav-next") {
+    const steps = favoriteWizardSteps();
+    if (target.id === "fav-next" && favoriteStep >= steps.length - 1) {
+      closeFavorites();
+      return;
+    }
+    favoriteStep += target.id === "fav-next" ? 1 : -1;
+    paintFavorites();
+    return;
+  }
+  const brand = target.closest("[data-fav-brand]");
+  const flavor = target.closest("[data-fav-flavor]");
+  if (brand || flavor) {
+    const family = (brand || flavor).getAttribute("data-fav-family") || "";
+    const profile = getUserProfile(localStorage);
+    const current = profile.categoryPreferences?.[family] || {};
+    if (brand) {
+      const name = brand.getAttribute("data-fav-brand") || "";
+      const on = brand.getAttribute("aria-pressed") === "true";
+      saveFavoriteChoice(family, { brand: on ? "" : name, variant: current.variant || "" });
+    } else {
+      const id = flavor.getAttribute("data-fav-flavor") || "";
+      const attributes = new Set(current.attributes || []);
+      if (attributes.has(id)) attributes.delete(id);
+      else attributes.add(id);
+      const label = flavor.textContent?.trim() || id;
+      const variant = attributes.has(id)
+        ? [current.brand, label, current.variant].filter(Boolean).filter((part, index, all) => all.findIndex((row) => row.toLowerCase() === part.toLowerCase()) === index).join(" ")
+        : current.variant || "";
+      saveFavoriteChoice(family, { attributes: [...attributes], variant, brand: current.brand || "" });
+    }
+    paintFavorites();
+    return;
+  }
+  const add = target.closest("[data-fav-add]");
   if (!add) return;
   const name = add.getAttribute("data-fav-add");
   if (!name) return;
@@ -7984,19 +8085,41 @@ function openFavorites() {
   screen.querySelector("h2")?.focus();
 }
 
+let favoriteStep = 0;
+
 function paintFavorites() {
   const host = $("favorites-prefs");
   const profile = getUserProfile(localStorage);
-  if (host) {
-    host.innerHTML = preferenceCategories()
-      .map((category) => {
-        const pref = profile.categoryPreferences?.[category.id];
-        const value = pref?.variant || "";
-        return `<label class="favorites-row">${escapeHtml(category.label)}
-          <input data-fav-family="${escapeHtml(category.id)}" value="${escapeHtml(value)}" maxlength="80" placeholder="Brand and flavor" autocomplete="off" enterkeyhint="done" />
-        </label>`;
-      })
+  const steps = favoriteWizardSteps();
+  if (host && steps.length) {
+    favoriteStep = Math.max(0, Math.min(favoriteStep, steps.length - 1));
+    const step = steps[favoriteStep];
+    const pref = profile.categoryPreferences?.[step.id] || {};
+    const brand = pref.brand || "";
+    const flavors = new Set(pref.attributes || []);
+    const brandChips = step.brands
+      .map(
+        (name) =>
+          `<button type="button" class="choice-chip" data-fav-brand="${escapeHtml(name)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${name.toLowerCase() === String(brand).toLowerCase() ? "true" : "false"}">${escapeHtml(name)}</button>`
+      )
       .join("");
+    const flavorChips = step.flavors
+      .map(
+        (row) =>
+          `<button type="button" class="choice-chip" data-fav-flavor="${escapeHtml(row.id)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${flavors.has(row.id) ? "true" : "false"}">${escapeHtml(row.label)}</button>`
+      )
+      .join("");
+    host.innerHTML = `<p class="muted">Aisle ${favoriteStep + 1} of ${steps.length}</p>
+      <h3>${escapeHtml(step.label)}</h3>
+      ${brandChips ? `<p class="choice-label">Brand</p><div class="choice-row" role="group" aria-label="Brand for ${escapeHtml(step.label)}">${brandChips}</div>` : ""}
+      ${flavorChips ? `<p class="choice-label">Flavor</p><div class="choice-row" role="group" aria-label="Flavor for ${escapeHtml(step.label)}">${flavorChips}</div>` : ""}
+      <label class="favorites-row">Specific product
+        <input data-fav-family="${escapeHtml(step.id)}" value="${escapeHtml(pref.variant || "")}" maxlength="80" placeholder="Cherry Coke" autocomplete="off" enterkeyhint="done" />
+      </label>
+      <div class="starter-actions">
+        <button type="button" class="ghost" id="fav-prev" ${favoriteStep === 0 ? "disabled" : ""}>Previous aisle</button>
+        <button type="button" class="primary" id="fav-next">${favoriteStep === steps.length - 1 ? "Done" : "Next aisle"}</button>
+      </div>`;
   }
   const listHost = $("favorites-usuals");
   const usuals = readUsuals(localStorage);
@@ -8008,27 +8131,32 @@ function paintFavorites() {
               `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
           )
           .join("")
-      : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or type a brand above.</li>`;
+      : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or pick a brand above.</li>`;
   }
+}
+
+function saveFavoriteChoice(family, patch) {
+  const profile = getUserProfile(localStorage);
+  const current = profile.categoryPreferences?.[family] || {};
+  const next = {
+    ...current,
+    ...patch,
+    family,
+    source: "manual",
+    mode: patch.mode || (patch.variant || patch.brand || current.variant || current.brand ? "brand" : current.mode || "skip"),
+  };
+  saveUserProfile(localStorage, setCategoryPreference(profile, next, Date.now()));
 }
 
 function saveFavoriteVariant(family, value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   const profile = getUserProfile(localStorage);
   const current = profile.categoryPreferences?.[family] || {};
-  const next = setCategoryPreference(
-    profile,
-    {
-      ...current,
-      family,
-      mode: text ? "brand" : current.mode || "skip",
-      brand: text || current.brand || "",
-      variant: text,
-      source: "manual",
-    },
-    Date.now()
-  );
-  saveUserProfile(localStorage, next);
+  saveFavoriteChoice(family, {
+    variant: text,
+    brand: current.brand || "",
+    mode: text || current.brand ? "brand" : "skip",
+  });
 }
 
 function showStep(step, reason = "user") {
@@ -8325,13 +8453,15 @@ function lists() {
       guideSlot: (input) => {
         const profile = getUserProfile(localStorage);
         const slot = input?.slot || {};
-        const family = familyFromQuery(slot.id) || familyFromQuery(slot.search) || familyFromQuery(slot.label);
+        const flavor = savedFlavor(profile, slot);
+        const family = flavor?.family || familyFromQuery(slot.id) || familyFromQuery(slot.search) || familyFromQuery(slot.label);
         const base = guideSlot({ ...input, profile });
-        if (!family || (input?.override && input.override.cleared !== true)) return base;
+        if (input?.override && input.override.cleared !== true) return base;
+        if (!family) return base;
         const resolved = resolveCategoryPreference({
           profile,
           family,
-          query: slot.search || slot.label || "",
+          query: flavor?.name || slot.search || slot.label || "",
           products: input?.products || [],
         });
         if (resolved.declined) return { ...base, product: null, excluded: true, missing: true, status: "excluded" };
@@ -8346,6 +8476,7 @@ function lists() {
             status: resolved.status,
           };
         }
+        if (flavor?.name) return { ...base, product: null, missing: true, wanted: flavor.name, status: "ask" };
         return base;
       },
       onEditFavorites: () => profileUi?.openFavorites?.(),
@@ -9591,7 +9722,7 @@ matchSheet = mountMatchSheet({
       const labels = [entry?.product?.name, entry?.product?.familyName, entry?.product?.catalogName].filter(Boolean);
       if (labels.some((label) => guideNamesMatch(wanted, label))) list.delete(id);
     }
-    addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true });
+    addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true, preferredStore: store || "" });
     const added = findListEntry(product.id);
     if (added && store) added.preferredStore = store;
     if (wanted && Array.isArray(lastOptimize?.unavailable)) {

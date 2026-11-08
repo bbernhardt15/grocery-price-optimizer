@@ -167,5 +167,19 @@ describe("category preferences", () => {
     });
     assert.equal(miss.product, null);
     assert.equal(miss.ask, true);
+    const cherry = resolveCategoryPreference({
+      profile: setCategoryPreference(emptyProfile(), {
+        family: "soda",
+        mode: "brand",
+        brand: "Coca-Cola",
+        variant: "Cherry Coke",
+      }),
+      family: "soda",
+      products: [
+        product("classic", "Coca-Cola Classic 12 Pack", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 7.28 }),
+        product("cherry", "Coca-Cola Cherry", "Coca-Cola", { departmentId: "beverages", subcategory: "Soda", price: 6.48 }),
+      ],
+    });
+    assert.equal(cherry.product?.id, "cherry");
   });
 });

@@ -202,7 +202,7 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, "Want me to check which stores are cheaper?");
     assert.deepEqual(
       prompt.chips.map((chip) => chip.label),
-      ["Review", "Not yet"]
+      ["Check prices", "Keep building"]
     );
     assert.equal(prompt.chips[0].action, "review");
   });

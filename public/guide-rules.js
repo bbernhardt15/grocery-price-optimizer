@@ -393,8 +393,8 @@ function decideGuide(input = {}) {
       moment: "before-review",
       line: BEFORE_REVIEW_LINE,
       chips: [
-        { id: "review", label: "Review", action: "review" },
-        { id: "later", label: "Not yet", action: "later" }
+        { id: "review", label: "Check prices", action: "review" },
+        { id: "later", label: "Keep building", action: "later" }
       ]
     };
   }
