@@ -546,8 +546,7 @@ export function mountProfileOnboarding(deps = {}) {
     });
     const now = copy.showNow ? `<button type="button" class="primary" id="store-connect-now">${escapeText(copy.now)}</button>` : "";
     const walmart = copy.walmart ? `<p class="muted">${escapeText(copy.walmart)}</p>` : "";
-    host.innerHTML = `<section class="store-connect" aria-labelledby="store-connect-title">
-      <h3 id="store-connect-title">${escapeText(copy.title)}</h3>
+    host.innerHTML = `<section class="store-connect" aria-labelledby="profile-title">
       <p>${escapeText(copy.body)}</p>
       ${walmart}
       <div class="choice-stack">

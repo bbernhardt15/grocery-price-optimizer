@@ -180,7 +180,7 @@ html[data-keyboard="1"] .suggestions {
 }
 .app-drawer.is-open { transform: none; visibility: visible; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 body[data-drawer="open"],
-html[data-drawer="open"] { overflow: hidden; }
+html[data-drawer="open"] { overflow: hidden; overscroll-behavior: none; }
 .app-drawer .zip { width: 100%; }
 .app-drawer .zip > span {
   position: static; width: auto; height: auto; margin: 0; padding: 0;
@@ -1093,7 +1093,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between;
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; justify-content: space-between;
   max-width: min(28rem, calc(100% - 24px));
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
@@ -1686,8 +1686,13 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
 .value-store li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
 .trip-summary-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .trip-summary-list li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
-.toast { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.toast button { min-height: 36px; }
+.toast { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+#toast-text { white-space: nowrap; }
+.toast button { min-height: 36px; flex: none; }
+@media (max-width: 400px) {
+  .toast { font-size: 0.9rem; gap: 8px; padding: 8px 10px 8px 12px; }
+  .toast button, #toast-action { padding: 0 10px; }
+}
 .import-progress {
   display: flex;
   align-items: center;

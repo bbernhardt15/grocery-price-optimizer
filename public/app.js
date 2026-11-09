@@ -10307,7 +10307,7 @@ importer = mountImport({
   onStatus(importStatus) {
     const hint = $("ask-hint");
     if (hint && importStatus && importStatus.ai === false) {
-      hint.textContent = "Smart parsing is off; basic matching used. A product like milk, or a list like bread, milk, eggs.";
+      hint.textContent = "Smart parsing is off; basic matching used. Grocery Gitter learns what you buy over time.";
     }
   },
   offerDiets: () => Boolean(profileUi?.shouldAskDiets?.()),

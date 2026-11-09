@@ -49,6 +49,7 @@ const MAX_PDF = 8_000_000;
 
 export function resetImportForTests(): void {
   limiter.reset();
+  photoBursts.clear();
   importBudget.reset();
   resetReceiptCache();
   setImportRuntime(null);
@@ -70,6 +71,24 @@ function allowed(req: Request, res: Response): boolean {
 
 function tooFast(res: Response): void {
   res.status(429).json({ error: IMPORT_MESSAGES.rate });
+}
+
+/** Several photos from one tap are one list, not a burst of lists. */
+const photoBursts = new Map<string, { at: number; used: number }>();
+const PHOTO_BURST = 16;
+const PHOTO_BURST_MS = 15_000;
+
+function allowPhotoBatch(req: Request, res: Response): boolean {
+  const key = clientKey(req, res);
+  const now = Date.now();
+  const current = photoBursts.get(key);
+  if (current && now - current.at < PHOTO_BURST_MS && current.used < PHOTO_BURST) {
+    current.used += 1;
+    return true;
+  }
+  if (!allowed(req, res)) return false;
+  photoBursts.set(key, { at: now, used: 1 });
+  return true;
 }
 
 async function review(items: ParsedImportItem[]): Promise<ImportMatchResult> {
@@ -368,7 +387,6 @@ router.post("/import/file", async (req, res) => {
 });
 
 router.post("/import/photo", async (req, res) => {
-  if (!allowed(req, res)) return tooFast(res);
   const priceMode = importPriceMode(req.body);
   if (refuseImportZip(res, priceMode)) return;
   const config = importConfig();
@@ -376,6 +394,7 @@ router.post("/import/photo", async (req, res) => {
     res.status(503).json({ error: IMPORT_MESSAGES.photoOff, code: "unconfigured" });
     return;
   }
+  if (!allowPhotoBatch(req, res)) return tooFast(res);
   const mimeType = readText(req.body?.mimeType).toLowerCase() || "image/jpeg";
   if (!IMAGE_TYPES.has(mimeType)) {
     res.status(400).json({ error: IMPORT_MESSAGES.badImage });

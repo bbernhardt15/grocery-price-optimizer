@@ -247,6 +247,7 @@ export function mountImport(deps) {
         <button type="button" class="primary" id="import-heard-go">Find these items</button>
       </div>
       <div id="import-review" hidden></div>
+      <p id="import-photo-cap" class="import-status" role="status" hidden></p>
       <p id="import-status" class="import-status" role="status"></p>
     </form>`;
   document.body.appendChild(dialog);
@@ -270,6 +271,13 @@ export function mountImport(deps) {
   const transcript = $("import-transcript");
   const reviewHost = $("import-review");
   const statusEl = $("import-status");
+
+  function setPhotoCap(message) {
+    const cap = $("import-photo-cap");
+    if (!(cap instanceof HTMLElement)) return;
+    cap.hidden = !message;
+    cap.textContent = message || "";
+  }
 
   function setStatus(message, kind) {
     statusEl.textContent = message || "";
@@ -1113,7 +1121,7 @@ export function mountImport(deps) {
     const files = [...($("import-photo-input").files || [])].slice(0, 4);
     const extra = ($("import-photo-input").files?.length || 0) - files.length;
     $("import-photo-input").value = "";
-    if (extra > 0) setStatus(`Using the first 4 photos. ${extra} more were left out.`, "error");
+    setPhotoCap(extra > 0 ? `Using the first 4 photos. ${extra} more were left out.` : "");
     for (const file of files) void runPhoto(file);
   });
   $("import-file-input")?.addEventListener("change", () => {

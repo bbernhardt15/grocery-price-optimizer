@@ -28,6 +28,7 @@ import {
 } from "../pricing/flipp/client";
 import type { CatalogProduct } from "../optimizeGroceryList";
 import { searchTermsFor } from "./searchTerms";
+import { spokenTranscriptAliases } from "../productSearchQuery";
 import { ingestConfig } from "../ingest/config";
 import { noteCatalogDemand } from "../ingest/demand";
 import { readRecordsByUpc, readStoredById, readStoredRecords } from "../ingest/readStore";
@@ -493,7 +494,7 @@ export async function loadKnownProducts(hints?: { queries?: string[]; upcs?: str
 }
 
 export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
-  const query = request.query?.trim();
+  const query = request.query ? spokenTranscriptAliases(request.query).trim() : request.query?.trim();
   const departmentId = request.departmentId?.trim();
   const scope = await loadScope(
     {
@@ -565,7 +566,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
 }
 
 export async function suggestCatalog(query: string, limit = 8): Promise<BrowseProduct[]> {
-  const q = query.trim();
+  const q = spokenTranscriptAliases(query).trim();
   if (q.length < 1) {
     return [];
   }
