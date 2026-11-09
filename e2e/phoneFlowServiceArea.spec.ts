@@ -33,12 +33,35 @@ test("an in-area ZIP completes the normal path and a plan", async ({ page }) => 
   await expect(page.locator("#profile-onboard")).toBeHidden();
 
   await page.locator("#browse-toggle").click();
+  const details = page.getByRole("button", { name: /Details for/ }).first();
+  await expect(details).toBeVisible();
+  await details.click();
+  const productDialog = page.locator("#product-dialog");
+  await expect(productDialog).toBeVisible();
+  await expect(productDialog.locator("#dialog-title")).not.toHaveText("");
+  await expect(productDialog.locator(".price")).toContainText(/\$\d+\.\d{2}/);
+  await productDialog.locator("#dialog-close").click();
+  await expect(productDialog).toBeHidden();
+
+  await page.locator("#search").fill("milk");
+  const suggestion = page.locator("#suggestions [data-suggest]").first();
+  await expect(suggestion).toBeVisible();
+  await suggestion.click();
+  await expect(productDialog).toBeHidden();
+  await expect(page.locator("#grid .card").first()).toBeVisible();
+  await page.getByRole("button", { name: /Details for/ }).first().click();
+  await expect(productDialog).toBeVisible();
+  await expect(productDialog.locator(".price")).toContainText(/\$\d+\.\d{2}/);
+  await productDialog.locator("#dialog-close").click();
+
   const add = page.locator("#grid input[data-check]").first();
   await expect(add).toBeVisible();
   await add.check();
   const preference = page.locator("#profile-onboard");
   const opened = await preference.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false);
   if (opened) {
+    await expect(preference).toContainText(/How do you buy|What kind of/);
+    await expect(preference.locator("button").first()).toBeVisible();
     await page.locator("#profile-skip").click();
     await expect(preference).toBeHidden();
   }

@@ -21,6 +21,7 @@ import { parseCouponVision } from "../import/couponVision";
 import { aiAsk, aiParseText, aiReadCoupon, aiReadImage, aiReadShelf, ModelError, probeVision, transcribeAudio } from "../import/providers";
 import { parseShelfScan } from "../import/shelfScan";
 import { setImportRuntime } from "../import/runtime";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, PLAN_ZIP_ERROR, requirePlanZip } from "../serviceArea";
 
 const router = Router();
 const limiter = createRateLimiter({ windowMs: 10 * 60_000 });
@@ -169,6 +170,61 @@ function readText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+type ImportPriceMode = "priced" | "names";
+
+/**
+ * Store offers are returned only for an in-area ZIP.
+ * A missing ZIP stays on names (a receipt line may keep price: null).
+ * A malformed ZIP is 400. An out-of-area ZIP is 422.
+ */
+function importPriceMode(body: unknown): ImportPriceMode | "invalid" | "out" {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "names";
+  const record = body as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, "zipCode") && !Object.prototype.hasOwnProperty.call(record, "zip")) {
+    return "names";
+  }
+  const raw = record.zipCode !== undefined ? record.zipCode : record.zip;
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return "names";
+  const decision = requirePlanZip(raw);
+  if (decision.ok) return "priced";
+  return decision.status === 422 ? "out" : "invalid";
+}
+
+function refuseImportZip(res: Response, mode: ImportPriceMode | "invalid" | "out"): mode is "invalid" | "out" {
+  if (mode === "invalid") {
+    res.status(400).json({ error: PLAN_ZIP_ERROR });
+    return true;
+  }
+  if (mode === "out") {
+    res.status(422).json({ error: OUT_OF_AREA_MESSAGE, code: NOT_IN_SERVICE_AREA_CODE });
+    return true;
+  }
+  return false;
+}
+
+const PRICE_NULL_KEYS = new Set(["price", "regularPrice", "unitPrice", "priceFrom", "priceTo", "unitPriceText"]);
+const PRICE_DROP_KEYS = new Set(["offers", "bestOffer", "bestPrice", "bestStore", "storeName", "store"]);
+
+function redactStorePrices(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => redactStorePrices(entry));
+  if (typeof value === "string") return value.replace(/\$\s?\d+(?:\.\d{1,2})?/g, "").replace(/ {2,}/g, " ").trim();
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (PRICE_DROP_KEYS.has(key)) continue;
+    if (PRICE_NULL_KEYS.has(key)) {
+      out[key] = null;
+      continue;
+    }
+    out[key] = redactStorePrices(entry);
+  }
+  return out;
+}
+
+function sendImport(res: Response, body: unknown, mode: ImportPriceMode): void {
+  res.json(mode === "priced" ? body : redactStorePrices(body));
+}
+
 function decodeBase64(value: unknown, max: number): Buffer | null {
   if (typeof value !== "string") return null;
   const cleaned = value.replace(/^data:[^,]*,/, "").replace(/\s/g, "");
@@ -219,20 +275,26 @@ function receiptFor(text: string): ReturnType<typeof analyzeReceipt> | null {
 function sendMatch(
   res: Response,
   result: Awaited<ReturnType<typeof interpret>>,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  mode: ImportPriceMode = "names"
 ): void {
   if (!result.match.items.length) {
-    res.status(422).json({ error: IMPORT_MESSAGES.empty, parser: result.parser, ...extra });
+    const payload = { error: IMPORT_MESSAGES.empty, parser: result.parser, ...extra };
+    res.status(422).json(mode === "priced" ? payload : redactStorePrices(payload));
     return;
   }
-  res.json({
-    ...result.match,
-    parser: result.parser,
-    aiFallback: result.aiFallback,
-    paused: result.paused,
-    ...(result.suggested ? { suggested: true } : {}),
-    ...extra,
-  });
+  sendImport(
+    res,
+    {
+      ...result.match,
+      parser: result.parser,
+      aiFallback: result.aiFallback,
+      paused: result.paused,
+      ...(result.suggested ? { suggested: true } : {}),
+      ...extra,
+    },
+    mode
+  );
 }
 
 router.get("/health", (_req, res) => {
@@ -272,6 +334,8 @@ router.get("/import/status", (_req, res) => {
 
 router.post("/import/text", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const text = readText(req.body?.text);
   if (!text.trim()) {
     res.status(400).json({ error: IMPORT_MESSAGES.textMissing });
@@ -283,11 +347,13 @@ router.post("/import/text", async (req, res) => {
   }
   const allowAi = req.body?.preferAi !== false;
   const receipt = receiptFor(text);
-  sendMatch(res, await interpret(text, clientKey(req, res), allowAi), receipt ? { receipt } : {});
+  sendMatch(res, await interpret(text, clientKey(req, res), allowAi), receipt ? { receipt } : {}, priceMode);
 });
 
 router.post("/import/file", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const text = readText(req.body?.text);
   if (!text.trim()) {
     res.status(400).json({ error: IMPORT_MESSAGES.textMissing });
@@ -298,11 +364,13 @@ router.post("/import/file", async (req, res) => {
     return;
   }
   const receipt = receiptFor(text);
-  sendMatch(res, await interpret(text, clientKey(req, res), req.body?.preferAi === true), receipt ? { receipt } : {});
+  sendMatch(res, await interpret(text, clientKey(req, res), req.body?.preferAi === true), receipt ? { receipt } : {}, priceMode);
 });
 
 router.post("/import/photo", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const config = importConfig();
   if (!config.photo) {
     res.status(503).json({ error: IMPORT_MESSAGES.photoOff, code: "unconfigured" });
@@ -322,7 +390,7 @@ router.post("/import/photo", async (req, res) => {
   const cachedPhoto = readReceiptCache(photoKey);
   if (cachedPhoto) {
     console.info(`receipt stage=photo cache=hit ms=0 bytes=${image.length}`);
-    res.json(cachedPhoto);
+    sendImport(res, cachedPhoto, priceMode);
     return;
   }
   const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
@@ -349,7 +417,7 @@ router.post("/import/photo", async (req, res) => {
     }
     if (!match.items.length && receipt?.lines.length) {
       writeReceiptCache(photoKey, receipt);
-      res.json(receipt);
+      sendImport(res, receipt, priceMode);
       return;
     }
     const body = {
@@ -360,7 +428,7 @@ router.post("/import/photo", async (req, res) => {
       ...(receipt?.lines.length ? { receipt } : {}),
     };
     writeReceiptCache(photoKey, body);
-    res.json(body);
+    sendImport(res, body, priceMode);
   } catch (error) {
     const mapped = visionHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
@@ -369,6 +437,8 @@ router.post("/import/photo", async (req, res) => {
 
 router.post("/import/coupon", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const config = importConfig();
   if (!config.photo) {
     res.status(503).json({ error: IMPORT_MESSAGES.photoOff, code: "unconfigured" });
@@ -395,7 +465,7 @@ router.post("/import/coupon", async (req, res) => {
     const extracted = await aiReadCoupon(image.toString("base64"), mimeType, process.env, { detail });
     const coupon = parseCouponVision(extracted);
     console.info(`coupon stage=photo detail=${detail} ms=${Date.now() - started} bytes=${image.length} gaps=${coupon.gaps.join(",") || "none"}`);
-    res.json({ coupon, source: "screenshot" });
+    sendImport(res, { coupon, source: "screenshot" }, priceMode);
   } catch (error) {
     const mapped = visionHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
@@ -404,6 +474,8 @@ router.post("/import/coupon", async (req, res) => {
 
 router.post("/import/shelf", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const config = importConfig();
   if (!config.photo) {
     res.status(503).json({ error: IMPORT_MESSAGES.shelfOff, code: "unconfigured" });
@@ -436,7 +508,7 @@ router.post("/import/shelf", async (req, res) => {
       res.status(422).json({ error: IMPORT_MESSAGES.shelfEmpty, code: "empty" });
       return;
     }
-    res.json({ items });
+    sendImport(res, { items }, priceMode);
   } catch (error) {
     const mapped = shelfHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
@@ -445,6 +517,8 @@ router.post("/import/shelf", async (req, res) => {
 
 router.post("/import/audio", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const config = importConfig();
   if (!config.speech) {
     res.status(503).json({ error: IMPORT_MESSAGES.speechOff, code: "unconfigured" });
@@ -476,7 +550,7 @@ router.post("/import/audio", async (req, res) => {
       res.status(422).json({ error: IMPORT_MESSAGES.empty });
       return;
     }
-    res.json({ transcript });
+    sendImport(res, { transcript }, priceMode);
   } catch (error) {
     const status = error instanceof ModelError ? error.message : "failed";
     console.error(`Import voice failed (${status})`);
@@ -486,6 +560,8 @@ router.post("/import/audio", async (req, res) => {
 
 router.post("/import/link", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const url = readText(req.body?.url);
   if (!url.trim()) {
     res.status(400).json({ error: IMPORT_MESSAGES.urlMissing });
@@ -497,11 +573,13 @@ router.post("/import/link", async (req, res) => {
     return;
   }
   const text = read.text.slice(0, MAX_TEXT);
-  sendMatch(res, await interpret(text, clientKey(req, res), false));
+  sendMatch(res, await interpret(text, clientKey(req, res), false), {}, priceMode);
 });
 
 router.post("/import/ask", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const goal = readText(req.body?.goal).trim();
   if (!goal) {
     res.status(400).json({ error: IMPORT_MESSAGES.goalMissing });
@@ -528,7 +606,7 @@ router.post("/import/ask", async (req, res) => {
       return;
     }
     const match = await review(items);
-    res.json({ ...match, parser: "ai", suggested: true, aiFallback: false, paused: false });
+    sendImport(res, { ...match, parser: "ai", suggested: true, aiFallback: false, paused: false }, priceMode);
   } catch (error) {
     const status = error instanceof ModelError ? error.message : "failed";
     console.error(`Import suggestions failed (${status})`);
@@ -538,6 +616,8 @@ router.post("/import/ask", async (req, res) => {
 
 router.post("/import/receipt", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const text = readText(req.body?.text).slice(0, MAX_TEXT);
   const lines = Array.isArray(req.body?.lines) ? req.body.lines : null;
   const analysis = lines ? learnReceiptLines(lines) : text.trim() ? analyzeReceipt(text) : null;
@@ -549,11 +629,13 @@ router.post("/import/receipt", async (req, res) => {
     res.status(422).json({ error: IMPORT_MESSAGES.empty, paper: analysis.paper, paperNote: analysis.paperNote });
     return;
   }
-  res.json(analysis);
+  sendImport(res, analysis, priceMode);
 });
 
 router.post("/import/pdf", async (req, res) => {
   if (!allowed(req, res)) return tooFast(res);
+  const priceMode = importPriceMode(req.body);
+  if (refuseImportZip(res, priceMode)) return;
   const pdf = decodeBase64(req.body?.pdfBase64, MAX_PDF);
   if (!pdf) {
     res.status(400).json({ error: IMPORT_MESSAGES.tooBig });
@@ -573,12 +655,13 @@ router.post("/import/pdf", async (req, res) => {
     res.write(`${JSON.stringify(event)}\n`);
   };
   const finish = (analysis: ReceiptAnalysis) => {
+    const payload = (priceMode === "priced" ? analysis : redactStorePrices(analysis)) as ReceiptAnalysis;
     if (streaming) {
-      emit({ type: "result", analysis });
+      emit({ type: "result", analysis: payload });
       res.end();
       return;
     }
-    res.json(analysis);
+    res.json(payload);
   };
   const fail = (status: number, error: string, code: string) => {
     if (streaming) {

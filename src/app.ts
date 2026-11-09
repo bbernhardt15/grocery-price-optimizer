@@ -156,7 +156,7 @@ app.get("/api", (_req, res) => {
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "POST /api/import/text":
-        "Parses a pasted list into catalog matches. OPENAI_API_KEY alone turns on photo reading, voice transcription, and suggestions. IMPORT_VISION_PROVIDER, IMPORT_SPEECH_PROVIDER, and IMPORT_AI_PROVIDER are optional overrides. See docs/IMPORT.md.",
+        "Parses a pasted list into catalog matches. Store offers and prices are included only when zipCode is a 5-digit in-area ZIP. A missing ZIP returns names only. A malformed ZIP is 400. An out-of-area ZIP is 422 with code not_in_service_area. The same gate applies to the other import routes. OPENAI_API_KEY alone turns on photo reading, voice transcription, and suggestions. IMPORT_VISION_PROVIDER, IMPORT_SPEECH_PROVIDER, and IMPORT_AI_PROVIDER are optional overrides. See docs/IMPORT.md.",
       "GET /api/health/ready":
         "Mongo is connected. 503 when it is not. No secrets.",
       "GET /api/beta/gate":

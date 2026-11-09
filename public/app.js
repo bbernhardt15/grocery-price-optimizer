@@ -7196,7 +7196,11 @@ document.addEventListener("change", (event) => {
         const response = await fetch(apiUrl("/api/import/coupon"), {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ imageBase64, mimeType: file.type || "image/jpeg" }),
+          body: JSON.stringify({
+            imageBase64,
+            mimeType: file.type || "image/jpeg",
+            ...(currentCatalogZip() ? { zipCode: currentCatalogZip() } : {}),
+          }),
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -9888,13 +9892,15 @@ function finishProfile(profile) {
 }
 
 async function postImport(path, body, onProgress) {
+  const zip = currentCatalogZip();
+  const sent = zip && body && typeof body === "object" && !Array.isArray(body) ? { ...body, zipCode: zip } : body;
   const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-device-id": localStorage.getItem("gg-device") || "gg-device",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(sent),
   });
   const type = response.headers.get("content-type") || "";
   if (type.includes("ndjson")) {

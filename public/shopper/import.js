@@ -4,7 +4,7 @@
  */
 
 import { whenInviteAllowsApp } from "./beta.js";
-import { withServiceZip } from "./serviceArea.js";
+import { catalogZip, withServiceZip } from "./serviceArea.js";
 import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { armSheetHistory } from "./sheetHistory.js";
@@ -327,11 +327,21 @@ export function mountImport(deps) {
     setStatus("");
   }
 
+  function savedServiceZip() {
+    try {
+      return catalogZip(localStorage.getItem("gg-zip") || "");
+    } catch {
+      return "";
+    }
+  }
+
   async function post(path, body) {
+    const zip = savedServiceZip();
+    const sent = zip && body && typeof body === "object" && !Array.isArray(body) ? { ...body, zipCode: zip } : body;
     const response = await fetch(apiUrl(path), {
       method: "POST",
       headers: { "content-type": "application/json", "x-device-id": deviceId() },
-      body: JSON.stringify(body),
+      body: JSON.stringify(sent),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {

@@ -79,7 +79,7 @@ export async function runFreshAccountJourney({ origin, fetch: fetchImpl = fetch,
       "content-type": "application/json",
       "x-device-id": "fresh-shopper-01",
     },
-    body: JSON.stringify({ text, preferAi: false }),
+    body: JSON.stringify({ text, preferAi: false, zipCode: zip }),
   });
   const imported = await importedResponse.json();
   const importedItems = Array.isArray(imported?.items) ? imported.items : [];
