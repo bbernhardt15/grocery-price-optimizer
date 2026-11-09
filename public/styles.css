@@ -1082,6 +1082,20 @@ body[data-toast-clear="1"] #gitter-guide {
   padding-top: 8px;
   padding-bottom: 8px;
 }
+#gitter-guide[data-guide-scroll="1"] {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-items: start;
+  align-content: start;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#gitter-guide[data-guide-scroll="1"] .gitter-guide-copy {
+  min-height: 0;
+  min-width: 0;
+}
 .toast button, #toast-action {
   background: #fffdfb; color: #1c1917; border: 0; border-radius: 999px;
   min-height: 36px; padding: 0 14px; font-weight: 750;

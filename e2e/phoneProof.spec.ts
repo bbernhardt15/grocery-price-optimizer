@@ -586,6 +586,85 @@ test("coming back from a store opens the return sheet", async ({ page }) => {
   expect(result.still).toMatch(/Still shopping/);
 });
 
+async function bringGuideControlIntoReach(page: Page, selector: string) {
+  const moved = await page.evaluate((target) => {
+    const guide = document.getElementById("gitter-guide");
+    const control = document.querySelector(target);
+    const dock = document.getElementById("bottom-dock");
+    if (!(guide instanceof HTMLElement) || !(control instanceof HTMLElement) || !dock) return { ok: false, reason: "missing" };
+    const fits = () => {
+      const box = control.getBoundingClientRect();
+      const frame = guide.getBoundingClientRect();
+      const limit = Math.min(frame.bottom, dock.getBoundingClientRect().top) - 2;
+      const visible = Math.min(box.bottom, limit) - Math.max(box.top, frame.top);
+      return box.height > 12 && box.top >= frame.top - 2 && box.bottom <= limit + 3 && visible >= Math.min(box.height - 4, 24);
+    };
+    if (fits()) return { ok: true, scrolled: 0 };
+    const before = guide.scrollTop;
+    for (let step = 0; step < 8; step += 1) {
+      const box = control.getBoundingClientRect();
+      const frame = guide.getBoundingClientRect();
+      const limit = Math.min(frame.bottom, dock.getBoundingClientRect().top) - 2;
+      if (box.bottom > limit) guide.scrollTop += box.bottom - limit;
+      else if (box.top < frame.top) guide.scrollTop -= frame.top - box.top;
+      if (fits()) return { ok: true, scrolled: Math.round(guide.scrollTop - before) };
+    }
+    const box = control.getBoundingClientRect();
+    const frame = guide.getBoundingClientRect();
+    return {
+      ok: false,
+      scrolled: Math.round(guide.scrollTop - before),
+      scrollHeight: guide.scrollHeight,
+      clientHeight: guide.clientHeight,
+      top: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      guideTop: Math.round(frame.top),
+      guideBottom: Math.round(frame.bottom),
+      dockTop: Math.round(dock.getBoundingClientRect().top),
+    };
+  }, selector);
+  expect(moved.ok, JSON.stringify(moved)).toBe(true);
+  return moved;
+}
+
+async function guideControlReachable(page: Page, selector: string) {
+  await bringGuideControlIntoReach(page, selector);
+  return page.evaluate((target) => {
+    const control = document.querySelector(target);
+    const dock = document.getElementById("bottom-dock");
+    const toast = document.getElementById("toast");
+    if (!(control instanceof HTMLElement) || !dock || !toast) return { ok: false, reason: "missing" };
+    const box = control.getBoundingClientRect();
+    const dockBox = dock.getBoundingClientRect();
+    const toastBox = toast.getBoundingClientRect();
+    const x = Math.round(box.left + box.width / 2);
+    const y = Math.round(box.top + Math.min(18, box.height / 2));
+    const hit = document.elementFromPoint(x, y);
+    return {
+      ok: Boolean(hit && (hit === control || control.contains(hit))),
+      hitText: (hit?.textContent || "").trim().slice(0, 48),
+      y: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      dockTop: Math.round(dockBox.top),
+      toast: toast.classList.contains("show") && toastBox.height > 8,
+      dock: dockBox.height > 20 && dockBox.bottom > dockBox.top,
+    };
+  }, selector);
+}
+
+async function finishAnotherTrip(page: Page) {
+  await page.evaluate(() => {
+    localStorage.removeItem("gg-guide");
+  });
+  await page.reload();
+  await page.locator('[data-flow="plan"]').click();
+  await expect(page.getByRole("button", { name: "Complete trip" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Complete trip" }).first().click();
+  await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
+  await page.locator(".gitter-guide-off").waitFor({ timeout: 3000 });
+  await page.waitForTimeout(350);
+}
+
 for (const size of [
   { width: 390, height: 844 },
   { width: 375, height: 667 },
@@ -636,9 +715,47 @@ test(`the finished-trip toast stays clear at ${size.width}x${size.height}`, asyn
   expect(covered, JSON.stringify(hit)).toEqual([]);
   expect(hit.aisleUnderGuide, JSON.stringify(hit)).toBe(false);
   expect(hit.listsUnderHeader, JSON.stringify(hit)).toBe(false);
-  await page.screenshot({ path: `/opt/cursor/artifacts/complete-toast-${size.width}x${size.height}.png` });
+  const saveReach = await guideControlReachable(page, "[data-guide-action='save-list']");
+  if (size.height === 667) await page.screenshot({ path: "/opt/cursor/artifacts/guide-chips-375x667.png" });
+  const laterReach = await guideControlReachable(page, "[data-guide-action='later']");
+  const offReach = await guideControlReachable(page, ".gitter-guide-off");
+  expect(saveReach.ok, JSON.stringify(saveReach)).toBe(true);
+  expect(laterReach.ok, JSON.stringify(laterReach)).toBe(true);
+  expect(offReach.ok, JSON.stringify(offReach)).toBe(true);
+  expect(saveReach.toast && laterReach.toast && offReach.toast).toBe(true);
+  expect(saveReach.dock && laterReach.dock && offReach.dock).toBe(true);
+  await page.screenshot({ path: `/opt/cursor/artifacts/guide-reach-${size.width}x${size.height}.png` });
+  await page.locator("[data-guide-action='later']").click();
+  await page.waitForTimeout(600);
+  const laterState = await page.evaluate(() => ({
+    moment: document.getElementById("gitter-guide")?.dataset.moment || "",
+    hidden: document.getElementById("gitter-guide")?.hidden,
+    line: document.querySelector(".gitter-guide-line")?.textContent || "",
+    chips: [...document.querySelectorAll(".gitter-guide-chip")].map((button) => (button.textContent || "").trim()),
+  }));
+  expect(laterState.hidden, JSON.stringify(laterState)).toBe(true);
+  await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
+  await expect(page.locator("#bottom-dock")).toBeVisible();
   await page.locator("#toast-action").click();
   await expect(page.locator("#toast")).toContainText("Trip restored.");
   await expect(page.locator("#bar-count")).not.toHaveText("0 items");
+
+  await finishAnotherTrip(page);
+  const saveAgain = await guideControlReachable(page, "[data-guide-action='save-list']");
+  expect(saveAgain.ok, JSON.stringify(saveAgain)).toBe(true);
+  await page.locator("[data-guide-action='save-list']").click();
+  await expect(page.locator("#toast")).toContainText("Saved for the next Shopping list.");
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-usuals") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toContain("Whole Milk");
+  await expect(page.locator("#bottom-dock")).toBeVisible();
+
+  await finishAnotherTrip(page);
+  const offAgain = await guideControlReachable(page, ".gitter-guide-off");
+  expect(offAgain.ok, JSON.stringify(offAgain)).toBe(true);
+  await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
+  await page.locator(".gitter-guide-off").click();
+  await expect(page.locator("#gitter-guide")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-guide") || "{}").enabled)).toBe(false);
+  await expect(page.locator("#toast.show")).toBeVisible();
+  await expect(page.locator("#bottom-dock")).toBeVisible();
 });
 }

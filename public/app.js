@@ -830,6 +830,8 @@ function releaseToastClearance() {
     guide.style.bottom = "";
     guide.style.top = "";
     guide.style.maxHeight = "";
+    guide.style.minHeight = "";
+    guide.removeAttribute("data-guide-scroll");
   }
   clearToastOffset();
 }
@@ -871,10 +873,10 @@ function placePageToast() {
   toastEl.dataset.toastPlace = "after-aisle";
   const toastBox = toastEl.getBoundingClientRect();
   const nextGuide = guide.getBoundingClientRect();
+  const dockBox = document.getElementById("bottom-dock")?.getBoundingClientRect();
   const overlap = Math.ceil(toastBox.bottom + 4 - nextGuide.top);
   if (overlap > 0) {
-    const dock = document.querySelector(".step-bar")?.getBoundingClientRect();
-    const room = dock ? Math.floor(dock.top - nextGuide.bottom - 4) : overlap;
+    const room = dockBox ? Math.floor(dockBox.top - nextGuide.bottom - 8) : overlap;
     const computed = parseFloat(getComputedStyle(guide).bottom) || 0;
     const shift = Math.min(overlap, Math.max(0, room));
     if (shift > 0) guide.style.bottom = `${Math.max(0, computed - shift)}px`;
@@ -885,10 +887,12 @@ function placePageToast() {
   const blockBottom = Math.max(placed.bottom, aisle?.bottom || 0);
   const stillCovered = Math.ceil(blockBottom + 4 - guideNow.top);
   if (stillCovered > 1) {
-    const dockTop = document.querySelector(".step-bar")?.getBoundingClientRect().top ?? window.innerHeight;
+    const dockTop = document.getElementById("bottom-dock")?.getBoundingClientRect().top ?? window.innerHeight;
     guide.style.top = `${Math.ceil(blockBottom + 4)}px`;
-    guide.style.bottom = `${Math.max(8, Math.round(window.innerHeight - dockTop + 4))}px`;
+    guide.style.bottom = `${Math.max(8, Math.round(window.innerHeight - dockTop + 8))}px`;
     guide.style.maxHeight = "none";
+    guide.style.minHeight = "0";
+    guide.dataset.guideScroll = "1";
   }
 }
 
