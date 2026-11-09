@@ -38,6 +38,7 @@ import {
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
 import { ONBOARDING_KEY } from "./shopper/onboarding.js";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, catalogZip, outOfAreaMessage, withServiceZip } from "./shopper/serviceArea.js";
 import { getUserProfile, mergeProfiles, profileIsStored, saveUserProfile, shouldPromptProfile } from "./shopper/profile.js";
 import {
   defaultHeadcount,
@@ -768,14 +769,43 @@ function paintZipPlace() {
   el.textContent = ZIP_PATTERN.test(zip) ? zipPlaceLabel(zip) : "Add a ZIP for nearby stores";
 }
 
+function showOutOfArea(message = OUT_OF_AREA_MESSAGE) {
+  planning = false;
+  if (planErrorEl) {
+    planErrorEl.hidden = false;
+    planErrorEl.textContent = message;
+  }
+  if (tripEl) {
+    tripEl.innerHTML = emptyStateMarkup(
+      {
+        title: "Not available here yet",
+        body: message,
+        action: "Change ZIP",
+        actionId: "change-zip",
+      },
+      escapeHtml,
+      "alert"
+    );
+  }
+  paintPlanBar();
+}
+
 function applyZip(zip, { reload = true } = {}) {
   const normalized = normalizeZip(zip);
   zipEl.value = normalized;
   paintZipPlace();
-  if (!ZIP_PATTERN.test(normalized)) return;
+  if (!ZIP_PATTERN.test(normalized)) return { ok: false, reason: "invalid" };
   localStorage.setItem(ZIP_KEY, normalized);
+  const blocked = outOfAreaMessage(normalized);
+  if (blocked) {
+    showZipStatus(blocked, "error");
+    paintStorePicker();
+    if (flowStep === "plan" || flowStep === "shop") showOutOfArea(blocked);
+    return { ok: false, reason: "out", message: blocked };
+  }
   scheduleWatchSync();
   if (reload) void loadPage(true);
+  return { ok: true };
 }
 
 let toastTimer = 0;
@@ -2699,6 +2729,15 @@ function applyVariant(card, variantId) {
   syncCards();
 }
 
+function currentCatalogZip() {
+  return catalogZip(normalizeZip(zipEl?.value || localStorage.getItem(ZIP_KEY) || ""));
+}
+
+function pricedApi(path) {
+  const next = withServiceZip(path, currentCatalogZip());
+  return next ? apiUrl(next) : "";
+}
+
 function filterQuery() {
   const params = new URLSearchParams();
   if (activeDepartment !== "all") params.set("department", activeDepartment);
@@ -2708,8 +2747,8 @@ function filterQuery() {
   if ($("filter-sale").checked) params.set("onSale", "1");
   if ($("filter-budget").checked) params.set("storeBrand", "1");
   params.set("sort", sortEl.value || "relevance");
-  const zip = normalizeZip(zipEl.value);
-  if (ZIP_PATTERN.test(zip)) params.set("zip", zip.slice(0, 5));
+  const zip = currentCatalogZip();
+  if (zip) params.set("zip", zip);
   params.set("limit", "12");
   return params;
 }
@@ -2960,6 +2999,22 @@ async function loadPage(reset) {
   }
   showCatalogError("");
   const params = filterQuery();
+  if (!params.get("zip")) {
+    loading = false;
+    nextCursor = null;
+    if (reset && gridEl) {
+      const blocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+      const state = {
+        title: blocked ? "Not available here yet" : "Add a ZIP to see prices",
+        body: blocked || "Enter a ZIP so store prices can show up.",
+        action: "Change ZIP",
+        actionId: "change-zip",
+      };
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "status");
+      if (resultCountEl) resultCountEl.textContent = state.title;
+    }
+    return;
+  }
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
     const response = await fetchWithTimeout(
@@ -3263,14 +3318,19 @@ async function loadSuggestions(text) {
     if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
   }, 200);
   try {
-    const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`), { signal: controller.signal });
+    const priced = pricedApi(`/api/catalog/suggest?q=${encodeURIComponent(q)}`);
+    const response = await fetch(
+      priced || apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`),
+      { signal: controller.signal }
+    );
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
     const profile = getUserProfile(localStorage);
     const warning = exclusionWarning(profile, q);
     showProfileWarning(warning);
-    const matched = warning ? body.suggestions ?? [] : filterTiles(profile, body.suggestions ?? [], q);
+    const rows = Array.isArray(body) ? body : body.suggestions ?? [];
+    const matched = warning ? rows : filterTiles(profile, rows, q);
     suggestions = rankSearchResults(matched, searchRankContext(q));
     suggestionQuery = q;
     activeSuggest = -1;
@@ -4252,10 +4312,20 @@ function releaseRefreshScrollGuard(watchId) {
 
 function writeReviewScroll(y) {
   reviewScrollWriting = true;
-  window.scrollTo(0, y);
-  requestAnimationFrame(() => {
+  const top = Math.max(0, y);
+  window.scrollTo(0, top);
+  // WebKit can ignore scrollTo until the scrolling element is nudged.
+  if (Math.abs(window.scrollY - top) > 1) {
+    const root = document.scrollingElement || document.documentElement;
+    if (root) {
+      root.scrollTop = top + 1;
+      root.scrollTop = top;
+    }
+    if (document.body && document.body !== root) document.body.scrollTop = top;
+  }
+  window.setTimeout(() => {
     reviewScrollWriting = false;
-  });
+  }, 0);
 }
 
 function rememberReviewUserScroll() {
@@ -4270,12 +4340,16 @@ function rememberReviewUserScroll() {
  * A refresh can focus its button and the browser scrolls that control into view.
  * Correct that jump until the shopper actually scrolls. A wheel, touch, key, or
  * pointer gesture ends the correction immediately and keeps the new position.
+ * WebKit often does not run requestAnimationFrame while this page is busy, so
+ * the correction is on the task queue and lasts until the refresh finishes.
  */
 function beginRefreshScrollGuard(startY) {
   const watchId = ++refreshAnchorWatch;
   refreshHeldScroll = startY;
   let handedToUser = false;
+  let timer = 0;
   const detach = () => {
+    window.clearTimeout(timer);
     window.removeEventListener("wheel", onUser, true);
     window.removeEventListener("touchstart", onUser, true);
     window.removeEventListener("touchmove", onUser, true);
@@ -4300,22 +4374,20 @@ function beginRefreshScrollGuard(startY) {
     if (key !== " " && key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(key)) return;
     finishUser();
   };
-  window.addEventListener("wheel", onUser, { capture: true, passive: true });
-  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
-  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
-  window.addEventListener("pointerdown", onPointer, true);
-  window.addEventListener("keydown", onKey, true);
-  const until = performance.now() + 500;
-  const watch = () => {
+  const correct = () => {
     if (handedToUser || watchId !== refreshAnchorWatch) {
       detach();
       return;
     }
     if (Math.abs(window.scrollY - startY) > 1) writeReviewScroll(startY);
-    if (performance.now() < until) requestAnimationFrame(watch);
-    else detach();
+    timer = window.setTimeout(correct, 50);
   };
-  watch();
+  window.addEventListener("wheel", onUser, { capture: true, passive: true });
+  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
+  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
+  timer = window.setTimeout(correct, 0);
   return watchId;
 }
 
@@ -4589,7 +4661,12 @@ async function fillMissingSuggestions() {
     const host = [...tripEl.querySelectorAll("[data-missing-suggest]")].find((node) => node.getAttribute("data-missing-suggest") === name);
     if (!host) continue;
     try {
-      const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`), {}, 4000);
+      const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`);
+      if (!browse) {
+        host.innerHTML = `<p class="muted">Add a ZIP to see store prices.</p>`;
+        continue;
+      }
+      const response = await fetchWithTimeout(fetch, browse, {}, 4000);
       const body = await response.json().catch(() => ({}));
       if (fillMissingSuggestions.generation !== generation || !host.isConnected) return;
       const ranked = rankSwapSuggestions(name, body.items || []);
@@ -5184,6 +5261,16 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
     paintPlanBar();
     return "fail";
   }
+  const blocked = outOfAreaMessage(zip);
+  if (blocked) {
+    planning = false;
+    showOutOfArea(blocked);
+    showZipStatus(blocked, "error");
+    setBusy(trigger, false);
+    setBusy(document.querySelector('[data-flow="plan"]'), false);
+    toast(blocked, 5200);
+    return "fail";
+  }
   if (!list.size) {
     paintPlanNow();
     paintPlanBar();
@@ -5297,7 +5384,12 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       }
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     });
-    if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
+    if (!response.ok && !body.partial) {
+      const failure = new Error(body.error || `Trip plan failed (${response.status})`);
+      if (body.code) failure.code = body.code;
+      failure.status = response.status;
+      throw failure;
+    }
     const previousPlan =
       cachedPlan && cachedPlan.signature === signature && planReady(cachedPlan.payload)
         ? cachedPlan.payload
@@ -5342,6 +5434,15 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   } catch (error) {
     if (planAbort !== controller) return "replaced";
     result = "fail";
+    const failureCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    const failureStatus = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
+    const failureText = error instanceof Error ? error.message : "";
+    if (failureCode === NOT_IN_SERVICE_AREA_CODE || failureStatus === 422 || /available in your area/i.test(failureText)) {
+      showOutOfArea(OUT_OF_AREA_MESSAGE);
+      showZipStatus(OUT_OF_AREA_MESSAGE, "error");
+      toast(OUT_OF_AREA_MESSAGE, 5200);
+      return "fail";
+    }
     if (navigator.onLine === false && !lastOptimize && loadCachedTrip()) {
       showStep("shop", "restore");
       toast("You're offline. Showing the last plan on this phone.");
@@ -5666,7 +5767,9 @@ async function hydrateSharedProducts() {
       const known = productsById.get(id);
       if (known?.offers?.length) return;
       try {
-        const response = await apiFetch(`/api/catalog/products/${encodeURIComponent(id)}`);
+        const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(id)}`);
+        if (!productUrl) return;
+        const response = await apiFetch(productUrl);
         if (!response.ok) return;
         const body = await response.json();
         if (!body.product?.id) return;
@@ -6121,7 +6224,9 @@ async function restoreList() {
         return;
       }
       try {
-        const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`));
+        const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(id)}`);
+        if (!productUrl) return;
+        const response = await fetch(productUrl);
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !body.product?.id) {
           if (row.name) rememberLocalRow(row);
@@ -6163,7 +6268,12 @@ async function addSample() {
     toast("This list is view-only.");
     return;
   }
-  const response = await fetch(apiUrl("/api/catalog/browse?limit=48"));
+  const sampleUrl = pricedApi("/api/catalog/browse?limit=48");
+  if (!sampleUrl) {
+    toast("Add a ZIP to see store prices.");
+    return;
+  }
+  const response = await fetch(sampleUrl);
   const body = await response.json();
   const wanted = [
     { name: "Bananas", brand: "Fresh" },
@@ -7098,7 +7208,11 @@ document.addEventListener("change", (event) => {
         const response = await fetch(apiUrl("/api/import/coupon"), {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ imageBase64, mimeType: file.type || "image/jpeg" }),
+          body: JSON.stringify({
+            imageBase64,
+            mimeType: file.type || "image/jpeg",
+            ...(currentCatalogZip() ? { zipCode: currentCatalogZip() } : {}),
+          }),
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -7309,12 +7423,13 @@ $("magic-link-form")?.addEventListener("submit", (event) => {
 });
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
-  zipEl.value = zip;
-  paintZipPlace();
-  if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
+  const applied = applyZip(zip, { reload: false });
+  if (!applied.ok) {
+    if (applied.reason === "out") toast(applied.message, 5200);
+    return;
+  }
   paintStorePicker();
-  if (ZIP_PATTERN.test(zip)) showZipStatus(`Using ${zipPlaceLabel(zip) || zip.slice(0, 5)}.`);
-  scheduleWatchSync();
+  showZipStatus(`Using ${zipPlaceLabel(zip) || zip.slice(0, 5)}.`);
   if (shelfRequested()) void loadPage(true);
 });
 zipEl.addEventListener("input", paintZipPlace);
@@ -8511,7 +8626,11 @@ function showStep(step, reason = "user") {
   }
   if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
-    if (!list.size) paintPlanNow();
+    const planBlocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+    if (planBlocked) {
+      showOutOfArea(planBlocked);
+      showZipStatus(planBlocked, "error");
+    } else if (!list.size) paintPlanNow();
     else if (!reuseSettledReview()) {
       const tab = document.querySelector('[data-flow="plan"]');
       setBusy(tab, true);
@@ -8520,6 +8639,12 @@ function showStep(step, reason = "user") {
     }
   }
   if (flowStep === "shop") {
+    const shopBlocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+    if (shopBlocked) {
+      showOutOfArea(shopBlocked);
+      showZipStatus(shopBlocked, "error");
+      return;
+    }
     if (!planReady(lastOptimize)) {
       const hit = settledReviewPayload(listSignature(), normalizeZip(zipEl?.value || ""), false);
       if (hit) {
@@ -8755,7 +8880,9 @@ function lists() {
       addProduct,
       loadShelf: loadStarterShelf,
       searchTiles: async (query) => {
-        const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`), {}, PLAN_TIMEOUT_MS);
+        const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`);
+        if (!browse) return null;
+        const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
         for (const tile of body.items || []) rememberTile(tile);
@@ -8888,7 +9015,8 @@ async function openPreferenceChange(family) {
   const label = familyLabel(family) || "that item";
   let tiles = [];
   try {
-    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`));
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`);
+    const response = browse ? await fetch(browse) : null;
     const body = await response.json().catch(() => ({}));
     tiles = filterTiles(getUserProfile(localStorage), body.items || []);
     for (const tile of tiles) rememberTile(tile);
@@ -8940,7 +9068,9 @@ async function loadFamilyShelf(families) {
     const search = categorySearch(family) || family;
     if (seen.has(search)) continue;
     seen.add(search);
-    const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`), {}, PLAN_TIMEOUT_MS);
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
+    if (!browse) return flattenTiles([]);
+    const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
     const body = await response.json().catch(() => ({}));
     tiles = tiles.concat(body.items || []);
   }
@@ -9093,11 +9223,13 @@ async function loadStarterShelf(picks) {
     queries.push(name);
   }
   const pages = await Promise.all(
-    queries.slice(0, 12).map((name) =>
-      fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`), {}, 4000)
+    queries.slice(0, 12).map((name) => {
+      const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`);
+      if (!browse) return Promise.resolve({});
+      return fetchWithTimeout(fetch, browse, {}, 4000)
         .then((response) => response.json().catch(() => ({})))
-        .catch(() => ({}))
-    )
+        .catch(() => ({}));
+    })
   );
   const tiles = pages.flatMap((body) => body.items || []);
   for (const tile of tiles) rememberTile(tile);
@@ -9146,7 +9278,9 @@ async function resolveUsual(row) {
   if (row.catalogId && productsById.get(row.catalogId)) return productsById.get(row.catalogId);
   if (row.catalogId && !String(row.catalogId).startsWith("custom:")) {
     try {
-      const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`));
+      const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`);
+      if (!productUrl) return null;
+      const response = await fetch(productUrl);
       const body = await response.json().catch(() => ({}));
       if (response.ok && body.product?.id) {
         productsById.set(body.product.id, body.product);
@@ -9219,6 +9353,12 @@ function paintStorePicker() {
   const nearby = nearbyStoreChoice();
   const place = zipPlaceLabel(normalizeZip(zipEl?.value || ""));
   const note = $("store-picker-note");
+  const blocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+  if (blocked) {
+    if (note) note.textContent = blocked;
+    host.innerHTML = "";
+    return;
+  }
   if (nearby.source !== "nearby") {
     if (note) note.textContent = "Enter a ZIP to see stores within about 25 miles.";
     host.innerHTML = "";
@@ -9280,7 +9420,11 @@ async function findNearbyStores() {
   const button = $("find-stores");
   const typed = normalizeZip(zipEl.value);
   if (ZIP_PATTERN.test(typed)) {
-    applyZip(typed);
+    const applied = applyZip(typed);
+    if (!applied.ok) {
+      toast(applied.message || OUT_OF_AREA_MESSAGE);
+      return;
+    }
     const place = zipPlaceLabel(typed);
     showZipStatus(place ? `Using ${place}.` : `Using ZIP ${typed.slice(0, 5)}.`);
     paintStorePicker();
@@ -9296,7 +9440,11 @@ async function findNearbyStores() {
   try {
     const located = await zipFromLocation();
     const zip = located.zip;
-    applyZip(zip);
+    const applied = applyZip(zip);
+    if (!applied.ok) {
+      toast(applied.message || OUT_OF_AREA_MESSAGE);
+      return;
+    }
     const place = zipPlaceLabel(zip);
     const approx = located.approximate ? `${APPROXIMATE_ZIP_NOTE} ` : "";
     showZipStatus(`${approx}${place ? `Using ${place}.` : `Using ZIP ${String(zip).slice(0, 5)}.`}`);
@@ -9481,6 +9629,8 @@ async function bootApp() {
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   paintZipPlace();
   paintStorePicker();
+  const savedArea = outOfAreaMessage(normalizeZip(zipEl.value));
+  if (savedArea) showZipStatus(savedArea, "error");
   syncDrawerMode();
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
   if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
@@ -9674,6 +9824,8 @@ document.addEventListener("click", (event) => {
     searchEl.focus();
   } else if (action === "find-stores") {
     $("find-stores")?.click();
+  } else if (action === "change-zip") {
+    openDrawer({ focus: "zip" });
   } else if (action === "retry-aisle") {
     void loadPage(true);
   } else if (action === "clear-search") {
@@ -9752,13 +9904,15 @@ function finishProfile(profile) {
 }
 
 async function postImport(path, body, onProgress) {
+  const zip = currentCatalogZip();
+  const sent = zip && body && typeof body === "object" && !Array.isArray(body) ? { ...body, zipCode: zip } : body;
   const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-device-id": localStorage.getItem("gg-device") || "gg-device",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(sent),
   });
   const type = response.headers.get("content-type") || "";
   if (type.includes("ndjson")) {
@@ -9872,7 +10026,9 @@ profileUi = mountProfileOnboarding({
   },
   readLines: (lines) => postImport("/api/import/receipt", { lines }),
   loadStaple: async (search) => {
-    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`));
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
+    if (!browse) return [];
+    const response = await fetch(browse);
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return [];
     const want = familyFromQuery(search);

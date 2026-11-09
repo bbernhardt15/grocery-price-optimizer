@@ -633,4 +633,152 @@ trailer << /Root 1 0 R >>
       assert.equal(body.error, item.error, item.name);
     }
   });
+
+  it("withholds store offers unless the ZIP is in the service area", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const image = Buffer.from("zip-gate-photo").toString("base64");
+    const audio = Buffer.from("zip-gate-audio").toString("base64");
+    const pdfBody = "BT\n(MILK GALLON                 3.29) Tj\nET";
+    const pdf = Buffer.from(
+      `%PDF-1.1
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj
+4 0 obj << /Length ${pdfBody.length} >> stream
+${pdfBody}
+endstream
+endobj
+trailer << /Root 1 0 R >>
+%%EOF`,
+      "latin1"
+    ).toString("base64");
+    setImportRuntime({
+      lookup: async () => ["8.8.8.8"],
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        if (url.includes("/audio/transcriptions")) return jsonResponse({ text: "milk and bread" });
+        if (url.includes("walmart.com")) {
+          return new Response("<html><body><p>Organic Whole Milk</p><p>Bananas</p></body></html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          });
+        }
+        const raw = typeof init?.body === "string" ? init.body : "";
+        if (raw.includes("fridge") || raw.includes("pantry shelf")) {
+          return jsonResponse({
+            choices: [{ message: { content: JSON.stringify({ items: [{ name: "milk", confidence: "high", fullness: "half" }] }) } }],
+          });
+        }
+        if (raw.includes("coupon screenshot")) {
+          return jsonResponse({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    storeName: "Kroger",
+                    itemName: "Large eggs",
+                    kind: "dollars",
+                    amount: 1,
+                    conditions: "When you buy 2",
+                  }),
+                },
+              },
+            ],
+          });
+        }
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  items: [{ name: "Whole Milk", quantity: 1 }],
+                  text: "Whole Milk",
+                }),
+              },
+            },
+          ],
+          content: [{ text: JSON.stringify({ items: [{ name: "Organic Whole Milk", quantity: 1 }] }) }],
+        });
+      },
+    });
+
+    const cases: Array<{ path: string; body: Record<string, unknown>; priced: "offers" | "receipt" | "coupon" | "names" }> = [
+      { path: "/api/import/text", body: { text: "Whole Milk" }, priced: "offers" },
+      { path: "/api/import/file", body: { text: "Whole Milk" }, priced: "offers" },
+      { path: "/api/import/link", body: { url: "https://www.walmart.com/lists/shared" }, priced: "offers" },
+      { path: "/api/import/ask", body: { goal: "milk for the week" }, priced: "offers" },
+      { path: "/api/import/photo", body: { imageBase64: image, mimeType: "image/jpeg" }, priced: "offers" },
+      { path: "/api/import/receipt", body: { text: "MILK GALLON                 3.29" }, priced: "receipt" },
+      { path: "/api/import/pdf", body: { pdfBase64: pdf }, priced: "receipt" },
+      { path: "/api/import/coupon", body: { imageBase64: image, mimeType: "image/jpeg" }, priced: "coupon" },
+      { path: "/api/import/shelf", body: { imageBase64: image, mimeType: "image/jpeg" }, priced: "names" },
+      { path: "/api/import/audio", body: { audioBase64: audio, mimeType: "audio/webm", durationSec: 3 }, priced: "names" },
+    ];
+
+    for (const [index, item] of cases.entries()) {
+      const bare = await post(item.path, item.body, `device-zip-bare-${index}`);
+      const bareBody = await bare.json();
+      assert.equal(bare.status, 200, `${item.path} no zip status ${bare.status} ${JSON.stringify(bareBody)}`);
+      assert.deepEqual(storePriceLeaks(bareBody), [], `${item.path} no zip leaked ${storePriceLeaks(bareBody).join(",")}`);
+
+      const out = await post(item.path, { ...item.body, zipCode: "04101" }, `device-zip-out-${index}`);
+      const outBody = (await out.json()) as { code?: string };
+      assert.equal(out.status, 422, item.path);
+      assert.equal(outBody.code, "not_in_service_area", item.path);
+      assert.deepEqual(storePriceLeaks(outBody), [], item.path);
+
+      const bad = await post(item.path, { ...item.body, zipCode: "12" }, `device-zip-bad-${index}`);
+      assert.equal(bad.status, 400, item.path);
+      assert.deepEqual(storePriceLeaks(await bad.json()), [], item.path);
+
+      const inside = await post(item.path, { ...item.body, zipCode: "45202" }, `device-zip-in-${index}`);
+      const insideBody = await inside.json();
+      assert.equal(inside.status, 200, `${item.path} in area ${inside.status} ${JSON.stringify(insideBody).slice(0, 240)}`);
+      if (item.priced === "offers") assert.equal(hasOfferPrice(insideBody), true, item.path);
+      if (item.priced === "receipt") assert.equal(hasNumericPrice(insideBody), true, item.path);
+      if (item.priced === "coupon") {
+        const coupon = (insideBody as { coupon?: { storeName?: string; amount?: number } }).coupon;
+        assert.equal(coupon?.storeName, "Kroger");
+        assert.equal(coupon?.amount, 1);
+      }
+      if (item.priced === "names") assert.deepEqual(storePriceLeaks(insideBody), [], item.path);
+    }
+  });
 });
+
+function storePriceLeaks(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) return value.flatMap((entry, index) => storePriceLeaks(entry, `${path}[${index}]`));
+  if (!value || typeof value !== "object") return [];
+  const hits: string[] = [];
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const here = `${path}.${key}`;
+    if (key === "price" && typeof entry === "number") hits.push(here);
+    if (key === "bestPrice" && entry != null) hits.push(here);
+    if ((key === "offers" || key === "bestOffer") && entry != null) hits.push(here);
+    if ((key === "storeName" || key === "bestStore") && entry != null && entry !== "") hits.push(here);
+    if (key === "store" && entry != null && entry !== "" && typeof entry !== "boolean") hits.push(here);
+    if (entry && typeof entry === "object") hits.push(...storePriceLeaks(entry, here));
+  }
+  return hits;
+}
+
+function hasOfferPrice(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => hasOfferPrice(entry));
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.offers)) {
+    for (const offer of record.offers) {
+      if (offer && typeof offer === "object" && typeof (offer as { price?: unknown }).price === "number") return true;
+    }
+  }
+  return Object.values(record).some((entry) => entry && typeof entry === "object" && hasOfferPrice(entry));
+}
+
+function hasNumericPrice(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((entry) => hasNumericPrice(entry));
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.price === "number") return true;
+  return Object.values(record).some((entry) => entry && typeof entry === "object" && hasNumericPrice(entry));
+}

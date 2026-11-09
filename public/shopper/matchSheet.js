@@ -3,6 +3,7 @@
  */
 
 import { armSheetHistory } from "./sheetHistory.js";
+import { withServiceZip } from "./serviceArea.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -68,8 +69,19 @@ export function mountMatchSheet(deps) {
     paint([], `Searching Grocery Gitter${where}…`);
     const apiUrl = deps.apiUrl || ((path) => path);
     const storeQuery = storeName ? `&store=${encodeURIComponent(storeName)}` : "";
+    let saved = "";
     try {
-      const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12${storeQuery}`));
+      saved = localStorage.getItem("gg-zip") || "";
+    } catch {
+      saved = "";
+    }
+    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12${storeQuery}`, saved);
+    if (!priced) {
+      paint([], "Add a ZIP to see store prices.");
+      return;
+    }
+    try {
+      const response = await fetch(apiUrl(priced));
       const body = await response.json().catch(() => ({}));
       const items = Array.isArray(body.items) ? body.items : [];
       products.clear();

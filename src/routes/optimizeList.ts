@@ -15,6 +15,7 @@ import { accessFor } from "../billing/access";
 import { entitlementPayload, lockCartHandoffs } from "../billing/applyPlan";
 import { withDeadline } from "../withDeadline";
 import { scopeStoreNames } from "../pricing/storeScope";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, PLAN_ZIP_ERROR, requirePlanZip } from "../serviceArea";
 
 /** Nearby-store lookups must not hold the whole plan. Prices still return. */
 const STORE_LOOKUP_MS = 3000;
@@ -24,7 +25,7 @@ const router = Router();
 type OptimizeListRequest = {
   groceryList: string[];
   stores: string[];
-  zipCode?: string;
+  zipCode: string;
   allowSubstitutes?: boolean;
   selections?: BrowseSelection[];
 };
@@ -107,34 +108,18 @@ function toGroceryStrings(items: VerifiedProduct[]): string[] {
   });
 }
 
-function readZipCode(value: unknown): string | undefined | "invalid" {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const zip = String(Math.trunc(value));
-    return zip.length > 0 ? zip : "invalid";
-  }
-
-  if (typeof value !== "string") {
-    return "invalid";
-  }
-
-  const zip = value.trim();
-  return zip.length > 0 ? zip : "invalid";
-}
-
-function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "invalid-zip" {
-  if (isStringArray(body)) {
-    return { groceryList: body, stores: [] };
-  }
-
-  if (body === null || typeof body !== "object") {
+function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "invalid-zip" | "out-of-area" {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return null;
   }
 
   const record = body as Record<string, unknown>;
+  const zip = requirePlanZip(record.zipCode);
+  if (!zip.ok) {
+    return zip.status === 422 ? "out-of-area" : "invalid-zip";
+  }
+  const zipCode = zip.zip;
+
   const rawList = record.groceryList ?? record.items;
 
   let groceryList: string[];
@@ -144,11 +129,6 @@ function parseOptimizeListBody(body: unknown): OptimizeListRequest | null | "inv
     groceryList = toGroceryStrings(rawList);
   } else {
     return null;
-  }
-
-  const zipCode = readZipCode(record.zipCode);
-  if (zipCode === "invalid") {
-    return "invalid-zip";
   }
 
   const selections = readSelections(rawList);
@@ -196,16 +176,21 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
   const parsed = parseOptimizeListBody(req.body);
 
   if (parsed === "invalid-zip") {
-    res.status(400).json({
-      error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension.",
+    res.status(400).json({ error: PLAN_ZIP_ERROR });
+    return;
+  }
+
+  if (parsed === "out-of-area") {
+    res.status(422).json({
+      error: OUT_OF_AREA_MESSAGE,
+      code: NOT_IN_SERVICE_AREA_CODE,
     });
     return;
   }
 
   if (parsed === null) {
     res.status(400).json({
-      error:
-        "Request body must be an array of grocery strings, or an object with groceryList/items as strings or verified product objects.",
+      error: "Request body must be a JSON object with groceryList or items, and a 5-digit zipCode.",
     });
     return;
   }

@@ -66,17 +66,17 @@ app.get("/api", (_req, res) => {
     status: "ok",
     routes: {
       "GET /api/search-catalog":
-        "Accepts query and returns FatSecret catalog matches (id, name, brand).",
+        "Accepts query and returns name and brand only. No price, offer, or store.",
       "GET /api/catalog/browse":
-        "Browse the unified catalog by department, search, sort, and filters. Offers that share a UPC are one product. Products that share a brand and flavor are one tile, with pack, size, and container in variants[]. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
+        "Browse the unified catalog by department, search, sort, and filters. Requires zip or zipCode. Missing or malformed is 400. Outside the service area is 422 not_in_service_area. Offers that share a UPC are one product.",
       "GET /api/catalog/suggest":
-        "Typeahead over the cached and demo catalog, one row per product family. The id is the default variant. Does not call retailer APIs.",
+        "Typeahead with bestPrice and bestStore. Requires the same in-area ZIP as browse. Does not call retailer APIs.",
       "GET /api/catalog/departments":
         "Shared department tree.",
       "GET /api/catalog/coverage":
-        "Honest per-store catalog coverage (taxonomy sample, search-seeded, weekly ad, or demo).",
+        "Per-store catalog status. Requires an in-area ZIP. Missing or malformed is 400. Out of area is 422.",
       "GET /api/catalog/products/:id":
-        "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
+        "One grouped product and its store offers. Requires the same in-area ZIP as browse.",
       "GET /api/admin/catalog/family-sample":
         "How master products group into families (brand + flavor). Reports the share that collapsed into a multi-size tile and a few example groups. Same admin token as status. Optional department, q, limit, and scan.",
       "GET /api/admin/catalog/status":
@@ -96,7 +96,7 @@ app.get("/api", (_req, res) => {
       "POST /api/admin/catalog/exclude-nongrocery-refresh":
         'Marks offers for Other products that are still general merchandise so refresh skips them. Body { "confirm": "exclude-nongrocery-refresh" }. Nothing is deleted.',
       "POST /api/optimize-list":
-        "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
+        "JSON object with groceryList or items (optional catalogId/upc from browse), a required 5-digit zipCode, optional stores, and allowSubstitutes. Missing or malformed zipCode is 400. A ZIP outside the Kroger and Walmart service area is 422 not_in_service_area. A raw array is rejected. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":
         "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway), and whether this browser’s shopper cookie is still signed in.",
       "POST /api/kroger/connect":
@@ -156,7 +156,7 @@ app.get("/api", (_req, res) => {
       "GET /api/kroger/logout":
         "Revokes and clears the Kroger shopper cookie in this browser. Used by the iOS and Android shells, where that cookie lives in the system browser. Idempotent.",
       "POST /api/import/text":
-        "Parses a pasted list into catalog matches. OPENAI_API_KEY alone turns on photo reading, voice transcription, and suggestions. IMPORT_VISION_PROVIDER, IMPORT_SPEECH_PROVIDER, and IMPORT_AI_PROVIDER are optional overrides. See docs/IMPORT.md.",
+        "Parses a pasted list into catalog matches. Store offers and prices are included only when zipCode is a 5-digit in-area ZIP. A missing ZIP returns names only. A malformed ZIP is 400. An out-of-area ZIP is 422 with code not_in_service_area. The same gate applies to the other import routes. OPENAI_API_KEY alone turns on photo reading, voice transcription, and suggestions. IMPORT_VISION_PROVIDER, IMPORT_SPEECH_PROVIDER, and IMPORT_AI_PROVIDER are optional overrides. See docs/IMPORT.md.",
       "GET /api/health/ready":
         "Mongo is connected. 503 when it is not. No secrets.",
       "GET /api/beta/gate":

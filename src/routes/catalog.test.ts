@@ -49,6 +49,8 @@ describe("GET /api/search-catalog", () => {
     assert.equal(body[0].id, "50953");
     assert.equal(body[0].name, "Whole Milk");
     assert.equal(body[0].brand, "Friendly Farms");
+    const dumped = JSON.stringify(body);
+    assert.equal(/price|bestPrice|storeName|offers/i.test(dumped), false);
   });
 
   it("returns 400 when the query parameter is missing", async () => {

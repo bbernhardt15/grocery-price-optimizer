@@ -328,9 +328,8 @@ export class KrogerService {
 
   /**
    * GET /v1/locations?filter.zipCode.near={zip}&filter.limit=1
-   * Throws when credentials are missing or the API rejects the ZIP.
-   * A 401/403 drops the cached token and retries once. Shopper pricing then
-   * uses the last good store for that ZIP, and only then the demo location.
+   * Throws when credentials are missing, the ZIP is invalid, or no store is in range.
+   * A 401/403 drops the cached token and retries once.
    */
   private async lookupClosestStoreLocation(zipCode: string, attempt = 0): Promise<string> {
     const zip = normalizeZip(zipCode);
@@ -385,7 +384,10 @@ export class KrogerService {
 
   /**
    * Closest store for shopper pricing.
-   * Live id, then the last good id for this ZIP (kept for days), then the demo store.
+   * A configured lookup that finds no store does not reuse a saved id or the demo store.
+   * A configured lookup that fails for another reason (the API is down) may reuse the
+   * last real store saved for this same ZIP. It never substitutes the demo store.
+   * The demo id is only for a server that has no Kroger credentials.
    */
   async resolveClosestStore(zipCode: string): Promise<KrogerLocationResult> {
     const zip = normalizeZip(zipCode);
@@ -400,7 +402,18 @@ export class KrogerService {
         throw error;
       }
       const unconfigured = error instanceof KrogerPricingError && error.code === "missing_credentials";
-      if (!unconfigured) {
+      if (unconfigured) {
+        const result: KrogerLocationResult = {
+          locationId: demoLocationId(),
+          source: "demo",
+          zip,
+          lookupFailed: false,
+        };
+        this.lastLocationResult = result;
+        return result;
+      }
+      const noStore = /No Kroger store found/i.test(message);
+      if (!noStore) {
         const cached = await readKrogerStore(zip);
         const demo = demoLocationId();
         if (cached && cached !== demo) {
@@ -411,27 +424,13 @@ export class KrogerService {
           this.lastLocationResult = result;
           return result;
         }
-        console.warn(
-          `Kroger Locations API unavailable (${message}); using demo store ${demo} for ZIP ${zip}`
-        );
-        const result: KrogerLocationResult = { locationId: demo, source: "demo", zip, lookupFailed: true };
-        this.lastLocationResult = result;
-        return result;
       }
-      const result: KrogerLocationResult = {
-        locationId: demoLocationId(),
-        source: "demo",
-        zip,
-        lookupFailed: false,
-      };
-      this.lastLocationResult = result;
-      return result;
+      throw error instanceof Error ? error : new Error(message);
     }
   }
 
   /**
-   * Closest store for shopper pricing. Falls back to the last known store for
-   * the ZIP, then the seeded demo location, when the official API rejects the request.
+   * Closest store for shopper pricing. With credentials, a miss or a demo id is not returned.
    */
   async getClosestStoreLocation(zipCode: string): Promise<string> {
     const resolved = await this.resolveClosestStore(zipCode);

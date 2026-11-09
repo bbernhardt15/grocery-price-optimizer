@@ -9,6 +9,7 @@ import { parseNeedItems, resolveNeedList } from "./categoryPreference.js";
 import { imageBlobs } from "./receiptImages.js";
 import { mapPool } from "./receiptImport.js";
 import { familyLabel } from "./stapleFamilies.js";
+import { catalogZip } from "./serviceArea.js";
 
 export const SHELF_LANES = 4;
 export const SHELF_EMPTY = "We couldn't spot groceries in that photo, try a closer shot of one shelf";
@@ -367,10 +368,20 @@ export function mountShelfScan(deps) {
 
   async function postPhoto(blob) {
     const { fileToBase64 } = await import("./receiptImport.js");
+    let zip = "";
+    try {
+      zip = catalogZip(localStorage.getItem("gg-zip") || "");
+    } catch {
+      zip = "";
+    }
     const response = await fetch(apiUrl("/api/import/shelf"), {
       method: "POST",
       headers: { "content-type": "application/json", "x-device-id": deviceId() },
-      body: JSON.stringify({ imageBase64: await fileToBase64(blob), mimeType: blob.type || "image/jpeg" }),
+      body: JSON.stringify({
+        imageBase64: await fileToBase64(blob),
+        mimeType: blob.type || "image/jpeg",
+        ...(zip ? { zipCode: zip } : {}),
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {

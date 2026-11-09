@@ -54,7 +54,7 @@ describe("browse catalog routes", () => {
   });
 
   it("browses the demo catalog by department and reports demo coverage without API keys", async () => {
-    const response = await fetch(`${origin}/api/catalog/browse?department=dairy-eggs&sort=price`);
+    const response = await fetch(`${origin}/api/catalog/browse?department=dairy-eggs&sort=price&zip=45202`);
     assert.equal(response.status, 200);
     const body = (await response.json()) as {
       items: Array<{ name: string; bestOffer: { price: number }; gaps: Array<{ storeName: string; substitute: { name: string } | null }> }>;
@@ -74,13 +74,13 @@ describe("browse catalog routes", () => {
   });
 
   it("filters on sale and suggests matching names", async () => {
-    const sale = await fetch(`${origin}/api/catalog/browse?onSale=1`);
+    const sale = await fetch(`${origin}/api/catalog/browse?onSale=1&zip=45202`);
     assert.equal(sale.status, 200);
     const saleBody = (await sale.json()) as { items: Array<{ offers: Array<{ onSale: boolean }> }> };
     assert.ok(saleBody.items.length > 0);
     assert.ok(saleBody.items.every((item) => item.offers.some((offer) => offer.onSale)));
 
-    const suggest = await fetch(`${origin}/api/catalog/suggest?q=spaghetti`);
+    const suggest = await fetch(`${origin}/api/catalog/suggest?q=spaghetti&zip=45202`);
     assert.equal(suggest.status, 200);
     const suggestions = (await suggest.json()) as { suggestions: Array<{ name: string }> };
     assert.ok(suggestions.suggestions.some((item) => /spaghetti/i.test(item.name)));
@@ -170,9 +170,11 @@ describe("browse catalog routes", () => {
       );
 
       const missingZip = await fetch(`${origin}/api/catalog/browse?q=milk`);
-      assert.equal(missingZip.status, 200);
-      const missingBody = (await missingZip.json()) as { warnings?: string[] };
-      assert.ok(missingBody.warnings?.some((warning) => /5-digit US ZIP/i.test(warning)));
+      assert.equal(missingZip.status, 400);
+      const missingBody = (await missingZip.json()) as { error?: string; stores?: unknown; items?: unknown };
+      assert.match(missingBody.error || "", /5-digit ZIP/i);
+      assert.equal(missingBody.items, undefined);
+      assert.equal(missingBody.stores, undefined);
     } finally {
       globalThis.fetch = original;
       delete process.env.FLIPP_ENABLED;
@@ -190,5 +192,61 @@ describe("browse catalog routes", () => {
 
     const bad = await fetch(`${origin}/api/catalog/browse?zip=nope`);
     assert.equal(bad.status, 400);
+
+    const outside = await fetch(`${origin}/api/catalog/browse?q=milk&zip=04101`);
+    assert.equal(outside.status, 422);
+    const outsideBody = (await outside.json()) as { code?: string };
+    assert.equal(outsideBody.code, "not_in_service_area");
+
+    const coverage = await fetch(`${origin}/api/catalog/coverage?zip=05401`);
+    assert.equal(coverage.status, 422);
+  });
+
+  it("withholds store prices unless the ZIP is in the service area", async () => {
+    const priced = (body: unknown) => JSON.stringify(body);
+    const cases = [
+      ["/api/catalog/browse?q=milk", "browse"],
+      ["/api/catalog/suggest?q=milk", "suggest"],
+      ["/api/catalog/coverage", "coverage"],
+    ] as const;
+    for (const [path] of cases) {
+      const missing = await fetch(`${origin}${path}`);
+      assert.equal(missing.status, 400, path);
+      const bad = await fetch(`${origin}${path}${path.includes("?") ? "&" : "?"}zip=nope`);
+      assert.equal(bad.status, 400, path);
+      const outside = await fetch(`${origin}${path}${path.includes("?") ? "&" : "?"}zip=04101`);
+      assert.equal(outside.status, 422, path);
+      const outsideBody = (await outside.json()) as { code?: string };
+      assert.equal(outsideBody.code, "not_in_service_area");
+      assert.equal(/"price"|"bestPrice"|"offers"|"stores"/.test(priced(outsideBody)), false);
+    }
+
+    const shelf = await fetch(`${origin}/api/catalog/browse?q=milk&zip=45202`);
+    assert.equal(shelf.status, 200);
+    const shelfBody = (await shelf.json()) as { items: Array<{ id: string; bestOffer: { price: number; storeName: string } }> };
+    assert.ok(shelfBody.items[0].bestOffer.price > 0);
+    assert.ok(shelfBody.items[0].bestOffer.storeName);
+    const id = shelfBody.items[0].id;
+
+    const suggest = await fetch(`${origin}/api/catalog/suggest?q=milk&zip=45202`);
+    assert.equal(suggest.status, 200);
+    const suggestBody = (await suggest.json()) as { suggestions: Array<{ bestPrice: number; bestStore: string }> };
+    assert.ok(suggestBody.suggestions.some((row) => row.bestPrice > 0 && row.bestStore));
+
+    const productMissing = await fetch(`${origin}/api/catalog/products/${encodeURIComponent(id)}`);
+    assert.equal(productMissing.status, 400);
+    const productBad = await fetch(`${origin}/api/catalog/products/${encodeURIComponent(id)}?zip=12`);
+    assert.equal(productBad.status, 400);
+    const productOut = await fetch(`${origin}/api/catalog/products/${encodeURIComponent(id)}?zip=05401`);
+    assert.equal(productOut.status, 422);
+    const product = await fetch(`${origin}/api/catalog/products/${encodeURIComponent(id)}?zip=45202`);
+    assert.equal(product.status, 200);
+    const productBody = (await product.json()) as { product: { offers: Array<{ price: number; storeName: string }> } };
+    assert.ok(productBody.product.offers.some((offer) => offer.price > 0 && offer.storeName));
+
+    const covered = await fetch(`${origin}/api/catalog/coverage?zip=45202`);
+    assert.equal(covered.status, 200);
+    const coveredBody = (await covered.json()) as { stores: Array<{ storeName: string; mode: string }> };
+    assert.ok(coveredBody.stores.some((store) => store.storeName && store.mode));
   });
 });

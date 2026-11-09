@@ -42,7 +42,7 @@ describe("import entry on the phone dock", () => {
     const accept = parsed.share_target?.params?.files?.[0]?.accept || [];
     assert.ok(accept.includes("image/*"));
     assert.ok(accept.includes("audio/*"));
-    assert.match(sw, /grocery-gitter-shell-v69/);
+    assert.match(sw, /grocery-gitter-shell-v74/);
     assert.match(sw, /pathname === "\/import-share"/);
     assert.match(sw, /gg-import-share/);
   });
@@ -50,6 +50,8 @@ describe("import entry on the phone dock", () => {
   it("asks again for photo and push status after the invite is saved and when the sheet opens", () => {
     const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
     assert.match(importer, /cache: "no-store"/);
+    assert.match(importer, /zipCode: zip/);
+    assert.match(app, /zipCode: zip/);
     assert.match(importer, /gg-beta-unlocked/);
     const open = importer.slice(importer.indexOf("function open("), importer.indexOf("function close("));
     assert.match(open, /loadStatus\(\)/);

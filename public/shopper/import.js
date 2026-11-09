@@ -4,6 +4,7 @@
  */
 
 import { whenInviteAllowsApp } from "./beta.js";
+import { catalogZip, withServiceZip } from "./serviceArea.js";
 import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { armSheetHistory } from "./sheetHistory.js";
@@ -326,11 +327,21 @@ export function mountImport(deps) {
     setStatus("");
   }
 
+  function savedServiceZip() {
+    try {
+      return catalogZip(localStorage.getItem("gg-zip") || "");
+    } catch {
+      return "";
+    }
+  }
+
   async function post(path, body) {
+    const zip = savedServiceZip();
+    const sent = zip && body && typeof body === "object" && !Array.isArray(body) ? { ...body, zipCode: zip } : body;
     const response = await fetch(apiUrl(path), {
       method: "POST",
       headers: { "content-type": "application/json", "x-device-id": deviceId() },
-      body: JSON.stringify(body),
+      body: JSON.stringify(sent),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1299,11 +1310,19 @@ export function mountImport(deps) {
     item._searchRun = stamp;
     renderReview();
     try {
-      const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`));
+      let saved = "";
+      try {
+        saved = localStorage.getItem("gg-zip") || "";
+      } catch {
+        saved = "";
+      }
+      const priced = withServiceZip(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, saved);
+      const response = await fetch(priced ? apiUrl(priced) : apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`));
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "search failed");
       if (item._searchRun !== stamp) return;
-      item.searchHits = (body.suggestions || []).slice(0, 8).map((hit) => ({
+      const rows = Array.isArray(body) ? body : body.suggestions || [];
+      item.searchHits = rows.slice(0, 8).map((hit) => ({
         id: hit.id,
         name: hit.name,
         sizeLabel: hit.sizeLabel && !String(hit.sizeLabel).includes("$") ? hit.sizeLabel : "",
@@ -1320,8 +1339,15 @@ export function mountImport(deps) {
 
   async function pickSearch(item, hit) {
     try {
-      const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(hit.id)}`));
-      const body = await response.json();
+      let saved = "";
+      try {
+        saved = localStorage.getItem("gg-zip") || "";
+      } catch {
+        saved = "";
+      }
+      const priced = withServiceZip(`/api/catalog/products/${encodeURIComponent(hit.id)}`, saved);
+      const response = priced ? await fetch(apiUrl(priced)) : null;
+      const body = response ? await response.json() : {};
       const product = body.product || { id: hit.id, name: hit.name, familyName: hit.name, brand: "" };
       product.familyName = product.familyName || hit.name;
       item.choices = [{ product, score: 1 }];
