@@ -66,10 +66,10 @@ for (const size of [
     await ready(page);
     await page.locator("#menu-open").click();
     await expect(page.locator("#refresh-prices")).toHaveCount(1);
-    await expect(page.locator("#app-drawer details")).toHaveCount(0);
-    await expect(page.locator("#app-drawer h3", { hasText: "ZIP and stores" })).toBeVisible();
-    await page.locator("#drawer-close").click();
-    await page.locator("#tab-favorites").click();
+    await expect(page.locator("#app-drawer details, #app-drawer summary")).toHaveCount(0);
+    await expect(page.locator(".menu-row").first()).toBeVisible();
+    await expect(page.locator("#app-drawer")).toContainText("Where you shop");
+    await page.locator("#menu-favorites").click();
     await expect(page.locator("#favorites-prefs")).toContainText("Type and size");
     await expect(page.locator("#favorites-prefs")).toContainText("Kroger");
     await expect(page.locator("#favorites-prefs")).toContainText("Simple Truth");

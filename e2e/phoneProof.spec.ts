@@ -383,7 +383,7 @@ test("remembered favorites are grouped by department", async ({ page }) => {
     );
   });
   await unlock(page);
-  await page.locator("#tab-favorites").click();
+  await page.locator("#usuals-toggle").click();
   await expect(page.locator("#favorites-usuals .list-section-title", { hasText: "Dairy & Eggs" })).toBeVisible();
   await expect(page.locator("#favorites-usuals .list-section-title", { hasText: "Produce" })).toBeVisible();
 });

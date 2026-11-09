@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { facetsFor, filterProducts, paginateProducts, sizeClassOf, sortProducts } from "./browse";
+import { demoBrowseProducts } from "./demoCatalog";
+import { matchBrowseQuery } from "../../public/shopper/matchSheet.js";
 import type { BrowseProduct, CatalogOffer } from "./types";
 
 function offer(overrides: Partial<CatalogOffer> & Pick<CatalogOffer, "storeName" | "price">): CatalogOffer {
@@ -202,6 +204,14 @@ describe("filter and sort", () => {
     });
     const found = filterProducts([cheddar, parmesan], { query: "Kroger Parmesan Grated Cheese" });
     assert.deepEqual(found.map((row) => row.id), ["parm"]);
+    const shelf = filterProducts(demoBrowseProducts(), { query: "parmesan" });
+    assert.ok(shelf.length > 1, "parmesan matches more than one catalog product");
+    assert.ok(shelf.every((row) => /parmesan/i.test(`${row.brand} ${row.name}`)));
+    assert.ok(shelf.some((row) => /kroger/i.test(row.brand)));
+    assert.ok(new Set(shelf.map((row) => row.name.toLowerCase())).size > 1);
+    assert.equal(matchBrowseQuery("Kroger Basil & Oregano Parmesan"), "parmesan");
+    const broadened = filterProducts(demoBrowseProducts(), { query: matchBrowseQuery("Kroger Basil & Oregano Parmesan") });
+    assert.ok(broadened.length > 1);
   });
 
   it("matches Cherry Coke to a cola that says cherry", () => {

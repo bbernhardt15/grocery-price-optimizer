@@ -4596,9 +4596,6 @@ function paintTrip() {
       </div>
     </div>`;
   const reviewSnapshot = reviewScrollSnapshot();
-  if (reviewSnapshot && reviewSnapshot.scrollY > 40) {
-    tripEl.style.minHeight = `${Math.ceil(Math.max(reviewSnapshot.height, tripContentHeight()))}px`;
-  }
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
@@ -7008,8 +7005,7 @@ $("browse-toggle")?.addEventListener("click", () => {
   if (browseOpen) openBrowse();
 });
 $("usuals-toggle")?.addEventListener("click", () => {
-  usualsOpen = !usualsOpen;
-  paintUsuals();
+  openFavorites();
 });
 $("usuals-list")?.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-usual-key]") : null;
@@ -7181,13 +7177,7 @@ $("menu-brands")?.addEventListener("click", () => {
   profileUi?.openFavorites?.();
 });
 $("menu-favorites")?.addEventListener("click", () => {
-  openFavorites();
-});
-$("tab-favorites")?.addEventListener("click", () => {
-  if (document.body.dataset.favorites === "open") {
-    closeFavorites();
-    return;
-  }
+  closeDrawer();
   openFavorites();
 });
 $("favorites-close")?.addEventListener("click", () => closeFavorites());
@@ -8529,7 +8519,6 @@ function closeFavorites() {
   document.body.dataset.favorites = "";
   const screen = $("favorites-screen");
   if (screen) screen.hidden = true;
-  $("tab-favorites")?.removeAttribute("aria-current");
 }
 
 function openFavorites() {
@@ -8540,7 +8529,6 @@ function openFavorites() {
   paintFavorites();
   screen.hidden = false;
   document.body.dataset.favorites = "open";
-  $("tab-favorites")?.setAttribute("aria-current", "step");
   screen.querySelector("h2")?.focus();
 }
 
@@ -9011,14 +8999,9 @@ function paintUsuals() {
   const rows = readUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
   const summary = usualsSummary(rows.length);
   block.hidden = rows.length === 0;
-  block.dataset.open = usualsOpen ? "true" : "false";
+  block.dataset.open = "false";
   const toggle = $("usuals-toggle");
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", usualsOpen ? "true" : "false");
-    toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
-  }
-  const panel = $("usuals-panel");
-  if (panel) panel.hidden = !usualsOpen;
+  if (toggle) toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
   const count = $("usuals-count");
   if (count) count.textContent = String(summary.count);
   listEl.innerHTML = usualsRowHtml(

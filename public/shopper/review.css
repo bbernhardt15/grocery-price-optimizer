@@ -36,10 +36,13 @@ body[data-step="plan"] .savings-card {
   margin: 8px 0 0;
   color: var(--muted);
 }
-.review-skel-card,
-.review-store {
+.review-skel-card {
   box-sizing: border-box;
   min-height: 148px;
+}
+.review-store {
+  box-sizing: border-box;
+  min-height: 0;
 }
 .review-skel-card {
   display: flex;

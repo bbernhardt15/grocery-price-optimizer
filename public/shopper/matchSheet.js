@@ -13,6 +13,20 @@ function escapeText(value) {
     .replace(/"/g, "&quot;");
 }
 
+/** The food word, without the store or a single flavor, so every matching product can show. */
+export function matchBrowseQuery(name) {
+  const text = String(name || "").replace(/\s+/g, " ").trim();
+  const type = text.match(/\b(parmesan|mozzarella|cheddar|provolone|eggs?|milk|butter|yogurt|bacon|bread)\b/i);
+  if (type) {
+    const word = type[1].toLowerCase();
+    return word === "egg" ? "eggs" : word;
+  }
+  return text
+    .replace(/\b(kroger|walmart|target|aldi|simple truth|great value|good & gather)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function mountMatchSheet(deps) {
   if (!deps || typeof document === "undefined" || document.getElementById("match-sheet")) {
     return document.getElementById("match-sheet") ? { open() {} } : null;
@@ -74,7 +88,8 @@ export function mountMatchSheet(deps) {
     } catch {
       saved = "";
     }
-    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=24`, saved);
+    const query = matchBrowseQuery(name) || name;
+    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=48`, saved);
     if (!priced) {
       paint([], "Add a ZIP to see store prices.");
       return;
@@ -128,7 +143,13 @@ export function mountMatchSheet(deps) {
     holdPageScroll();
     history.push();
     if (title instanceof HTMLElement) title.focus({ preventScroll: true });
-    requestAnimationFrame(holdPageScroll);
+    let ticks = 0;
+    const pin = () => {
+      if (!dialog.open) return;
+      holdPageScroll();
+      if (ticks++ < 10) requestAnimationFrame(pin);
+    };
+    pin();
     if (query) void search(query);
     else paint([], "Type isn't needed. Close this and try the item again.");
   }

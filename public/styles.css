@@ -192,9 +192,43 @@ html[data-drawer="open"] { overflow: hidden; }
 .drawer-head h2, .drawer-help h2 { margin: 0; font-family: var(--display); font-size: 1.2rem; }
 .zip-place { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .drawer-help { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; }
-.drawer-fold { margin-top: 8px; }
-.drawer-fold summary { min-height: 44px; font-weight: 750; cursor: pointer; }
-.drawer-fold[open] { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.menu-sheet { display: flex; flex-direction: column; gap: 18px; padding-bottom: 24px; }
+.menu-group { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.menu-kicker {
+  margin: 8px 0 4px;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  text-decoration: none;
+}
+.menu-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
 .drawer-help p { margin: 0; color: var(--muted); }
 .drawer-links { flex-wrap: wrap; gap: 4px 16px; }
 .drawer-links a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ink); font-weight: 700; }
@@ -1590,6 +1624,11 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
   background: var(--accent-soft);
   color: var(--ink);
+}
+#usuals-block { margin: 0; }
+@media (max-height: 700px) {
+  #usuals-toggle.feature-card { min-height: 44px; padding: 0 12px; }
+  #usuals-toggle .feature-icon { width: 36px; height: 36px; }
 }
 .feature-icon {
   flex: none;

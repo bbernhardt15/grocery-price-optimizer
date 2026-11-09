@@ -141,8 +141,8 @@ describe("beta client", () => {
     const app = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
     const privacy = fs.readFileSync(path.join(root, "public/privacy.html"), "utf8");
     const terms = fs.readFileSync(path.join(root, "public/terms.html"), "utf8");
-    assert.match(html, /id="menu-feedback"[^>]*>Send feedback/);
-    assert.match(html, /id="help-feedback"[^>]*>Send feedback/);
+    assert.match(html, /id="menu-feedback"[\s\S]*?Send feedback/);
+    assert.match(html, /id="help-feedback"[\s\S]*?Send feedback/);
     assert.match(html, /id="onboard-legal"[\s\S]*href="\/privacy"[\s\S]*href="\/terms"/);
     assert.match(html, /id="delete-account-btn"[^>]*>Delete my account and data/);
     assert.match(beta, /window\.onerror|root\.onerror/);

@@ -730,6 +730,9 @@ export function mountProfileOnboarding(deps = {}) {
       seen.add(key);
       names.push(name);
     }
+    if (!names.length && !isProduceFamily(row?.family)) {
+      for (const name of ["Kroger", "Simple Truth", "Great Value"]) names.push(name);
+    }
     return names.slice(0, 24);
   }
 

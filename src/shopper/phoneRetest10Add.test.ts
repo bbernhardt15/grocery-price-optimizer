@@ -54,11 +54,9 @@ describe("tenth phone test — Add tab", () => {
     assert.match(html, /Your favorites/);
     assert.match(html, /id="usuals-toggle"/);
     assert.match(html, /id="usuals-count"/);
-    assert.match(html, /id="usuals-panel"/);
-    assert.match(html, /class="usuals-list usuals-scroll"/);
-    assert.match(css, /max-height:\s*min\(8\.75rem,\s*25dvh\)/);
-    assert.match(css, /\.usuals-list\.usuals-scroll\s*\{[^}]*flex-wrap:\s*nowrap/s);
-    assert.match(css, /overflow-x:\s*auto/);
+    assert.match(html, /class="feature-card"/);
+    assert.equal(html.includes('id="tab-favorites"'), false);
+    assert.equal(html.includes('id="usuals-panel"'), false);
     assert.equal(usualsSummary(0).label, "0 usuals");
     assert.equal(usualsSummary(1).label, "1 usual");
     assert.equal(usualsSummary(6).count, 6);
@@ -169,7 +167,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v75/);
+    assert.match(sw, /grocery-gitter-shell-v76/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);
@@ -286,30 +284,21 @@ describe("Add tab at 390px on Chrome", { timeout: 60_000, skip: chrome ? false :
 
       await page.click("#usuals-toggle");
       const opened = await inPage<any>(page, `
-        const block = document.getElementById("usuals-block");
-        const list = document.getElementById("usuals-list");
-        const chips = Array.from(list.querySelectorAll("button"));
-        const tops = chips.map((chip) => Math.round(chip.getBoundingClientRect().top));
+        const screen = document.getElementById("favorites-screen");
+        const card = document.getElementById("usuals-toggle");
         return {
-          open: block.dataset.open,
-          hidden: document.getElementById("usuals-panel").hidden,
-          height: Math.round(block.getBoundingClientRect().height),
-          quarter: Math.round(window.innerHeight / 4),
+          hidden: screen.hidden,
+          card: card.classList.contains("feature-card"),
           count: document.getElementById("usuals-count").textContent,
-          chips: chips.length,
-          oneRow: tops.every((top) => top === tops[0]),
-          scrolls: list.scrollWidth > list.clientWidth,
+          title: document.getElementById("favorites-title").textContent,
           pageScroll: document.documentElement.scrollWidth,
           inner: window.innerWidth,
         };
       `);
-      assert.equal(opened.open, "true");
       assert.equal(opened.hidden, false);
+      assert.equal(opened.card, true);
       assert.equal(opened.count, "10");
-      assert.equal(opened.chips, 10);
-      assert.equal(opened.oneRow, true);
-      assert.equal(opened.scrolls, true);
-      assert.ok(opened.height <= opened.quarter, `open usuals ${opened.height}px exceeds a quarter of the screen`);
+      assert.equal(opened.title, "Your favorites");
       assert.ok(opened.pageScroll <= opened.inner + 1);
 
       await page.click("[data-lists-open]");
