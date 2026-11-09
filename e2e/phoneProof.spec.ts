@@ -355,7 +355,7 @@ test("a split of catalog prices shows a savings callout versus one store", async
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
   const callout = page.locator(".savings-callout");
-  await expect(callout).toContainText("You save $0.08 versus Kroger");
+  await expect(callout).toContainText("You saved $0.08 using Grocery Gitter");
   await expect(page.locator(".savings-card h2")).toHaveText("One store or this plan");
   const savingsBox = await page.locator(".savings-card").evaluate((el) => ({
     height: el.getBoundingClientRect().height,

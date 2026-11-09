@@ -118,7 +118,7 @@ export function savingsCard(comparison) {
   }
   const saved = roundMoney(Number(comparison?.savings) || 0);
   let savedText = "Same total as one store.";
-  if (saved > 0.009) savedText = `You save ${priceFigure(saved)} versus ${one.storeName}.`;
+  if (saved > 0.009) savedText = `You saved ${priceFigure(saved)} using Grocery Gitter`;
   else if (saved < -0.009) savedText = `This plan costs ${priceFigure(Math.abs(saved))} more than one store.`;
   return {
     title: "One store or this plan",

@@ -4361,8 +4361,8 @@ function beginRefreshScrollGuard(startY) {
   const detach = () => {
     window.clearTimeout(timer);
     window.removeEventListener("wheel", onUser, true);
-    window.removeEventListener("touchstart", onUser, true);
-    window.removeEventListener("touchmove", onUser, true);
+    document.removeEventListener("touchstart", onTouch, true);
+    document.removeEventListener("touchmove", onTouch, true);
     window.removeEventListener("pointerdown", onPointer, true);
     window.removeEventListener("keydown", onKey, true);
   };
@@ -4374,6 +4374,11 @@ function beginRefreshScrollGuard(startY) {
     detach();
   };
   const onUser = () => finishUser();
+  const onTouch = () => {
+    reviewUserOwned = true;
+    reviewUserScroll = window.scrollY;
+    finishUser();
+  };
   const onPointer = (event) => {
     const target = event.target;
     if (target instanceof Element && target.closest("#plan-refresh")) return;
@@ -4393,8 +4398,8 @@ function beginRefreshScrollGuard(startY) {
     timer = window.setTimeout(correct, 50);
   };
   window.addEventListener("wheel", onUser, { capture: true, passive: true });
-  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
-  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  document.addEventListener("touchstart", onTouch, { capture: true, passive: true });
+  document.addEventListener("touchmove", onTouch, { capture: true, passive: true });
   window.addEventListener("pointerdown", onPointer, true);
   window.addEventListener("keydown", onKey, true);
   timer = window.setTimeout(correct, 0);
@@ -4456,12 +4461,21 @@ function placeReviewAnchor(snapshot) {
   if (Math.abs(delta) > 1 && Math.abs(delta) < 140) writeReviewScroll(Math.max(0, window.scrollY + delta));
 }
 
+let reviewUserOwned = false;
+
 function restoreReviewScroll(snapshot) {
   refreshAnchorWatch += 1;
   if (!snapshot || !tripEl) return;
   for (const name of snapshot.openStores) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
     if (fold instanceof HTMLDetailsElement) fold.open = true;
+  }
+  if (reviewUserOwned) {
+    const keep = window.scrollY;
+    reviewUserOwned = false;
+    writeReviewScroll(keep);
+    clearTripFloor();
+    return;
   }
   const intended = Math.max(0, snapshot.scrollY || 0);
   writeReviewScroll(intended);
@@ -4527,7 +4541,7 @@ function paintTrip() {
     card.lines = [];
     card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
     card.note = "";
-  } else if (plans && !/^You save /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
+  } else if (plans && !/^You saved /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -4605,7 +4619,7 @@ function paintTrip() {
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${/^You save /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${/^You saved /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
       ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -7236,35 +7250,43 @@ document.addEventListener("change", (event) => {
           if (note) note.textContent = body.error || "Photo reading isn't available. Type the amount you can see.";
           return;
         }
-        const fields = couponDraftFields(body.coupon);
-        const formStore = String(form.dataset.couponStore || "");
-        if (fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase()) {
-          form.dataset.couponHold = "store";
-          if (note) note.textContent = `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`;
-          return;
+        const fields = couponDraftFields(body.coupon || body);
+        const live = form.isConnected ? form : document.querySelector(`form.coupon-form[data-coupon-store="${CSS.escape(form.dataset.couponStore || "")}"]`);
+        const host = live instanceof HTMLFormElement ? live : form;
+        const liveNote = host.querySelector("[data-coupon-shot-note]") || note;
+        const formStore = String(host.dataset.couponStore || "");
+        const mismatch = Boolean(fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase());
+        host.dataset.couponHold = mismatch ? "store" : "";
+        const wrap = host.closest(".coupon-form-wrap");
+        if (wrap instanceof HTMLElement) wrap.hidden = false;
+        host.closest(".coupon-body")?.querySelector("[data-show-coupon-form]")?.setAttribute("hidden", "");
+        if (liveNote) {
+          liveNote.hidden = false;
+          liveNote.textContent = mismatch
+            ? `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`
+            : fields.review;
         }
-        form.dataset.couponHold = "";
-        const line = form.querySelector("[data-coupon-line]");
+        if (mismatch) return;
+        const line = host.querySelector("[data-coupon-line]");
         if (line instanceof HTMLSelectElement && fields.itemName) {
           const wanted = fields.itemName.toLowerCase();
           const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
           if (match) line.value = match.value;
         }
-        const amount = form.querySelector("[data-coupon-amount]");
-        const kind = form.querySelector("[data-coupon-kind]");
-        const expires = form.querySelector("[data-coupon-expires]");
+        const amount = host.querySelector("[data-coupon-amount]");
+        const kind = host.querySelector("[data-coupon-kind]");
+        const expires = host.querySelector("[data-coupon-expires]");
         if (amount instanceof HTMLInputElement && fields.amount) amount.value = fields.amount;
         if (kind instanceof HTMLSelectElement && fields.kind) kind.value = fields.kind;
         if (expires instanceof HTMLInputElement && fields.expiresOn) expires.value = fields.expiresOn;
-        const minQty = form.querySelector("[data-coupon-min-qty]");
-        const minSpend = form.querySelector("[data-coupon-min-spend]");
-        const conditions = form.querySelector("[data-coupon-conditions]");
-        const source = form.querySelector("[data-coupon-source]");
+        const minQty = host.querySelector("[data-coupon-min-qty]");
+        const minSpend = host.querySelector("[data-coupon-min-spend]");
+        const conditions = host.querySelector("[data-coupon-conditions]");
+        const source = host.querySelector("[data-coupon-source]");
         if (minQty instanceof HTMLInputElement) minQty.value = fields.minQuantity ? String(fields.minQuantity) : "";
         if (minSpend instanceof HTMLInputElement) minSpend.value = fields.minSpend ? String(fields.minSpend) : "";
         if (conditions instanceof HTMLInputElement) conditions.value = fields.conditions || "";
         if (source instanceof HTMLInputElement) source.value = "screenshot";
-        if (note) note.textContent = fields.review;
       } catch {
         if (note) note.textContent = "Photo reading didn't answer. Type the amount you can see.";
       }
