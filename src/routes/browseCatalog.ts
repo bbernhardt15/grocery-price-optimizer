@@ -10,6 +10,7 @@ import { catalogCoverage } from "../catalog/coverage";
 import type { BrowseSort, SizeClass } from "../catalog/types";
 import { noteShopperZip } from "../ingest/runner";
 import { flippConsumerEnabled, listWeeklyAdBanners } from "../pricing/flipp/client";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, serviceAreaFor } from "../serviceArea";
 
 const router = Router();
 
@@ -37,6 +38,18 @@ function readNumber(value: unknown): number | undefined {
 
 function flag(value: unknown): boolean {
   return value === true || value === "1" || value === "true" || value === "on";
+}
+
+/** A supplied ZIP that is outside the launch area cannot pull store prices. A missing ZIP stays the shelf. */
+function rejectOutOfAreaZip(zipCode: string | undefined, res: Response): boolean {
+  if (!zipCode) return false;
+  const area = serviceAreaFor(zipCode);
+  if (area.ok || area.reason !== "out_of_area") return false;
+  res.status(422).json({
+    error: OUT_OF_AREA_MESSAGE,
+    code: NOT_IN_SERVICE_AREA_CODE,
+  });
+  return true;
 }
 
 const DEPT_COLORS: Record<string, string> = {
@@ -74,6 +87,7 @@ router.get("/catalog/coverage", async (req, res) => {
     res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
     return;
   }
+  if (rejectOutOfAreaZip(zipCode, res)) return;
   let weeklyAdBanners: Awaited<ReturnType<typeof listWeeklyAdBanners>> | undefined;
   let weeklyAdWarning: string | undefined;
   if (zipCode && flippConsumerEnabled()) {
@@ -154,6 +168,7 @@ router.get("/catalog/browse", async (req, res) => {
     res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
     return;
   }
+  if (rejectOutOfAreaZip(zipCode, res)) return;
   if (zipCode) {
     void noteShopperZip(zipCode).catch(() => undefined);
   }

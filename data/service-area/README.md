@@ -45,4 +45,4 @@ A blank ZIP is not in the service area. The phone asks for a 5-digit ZIP and wil
 
 ## Shoppers
 
-An out-of-area ZIP, including one already saved on the phone, shows: "Grocery Gitter isn’t available in your area yet — we need a Kroger-family store and a Walmart nearby." The plan is not built. `POST /api/optimize-list` answers `422` with `code: "not_in_service_area"` for the same ZIPs.
+An out-of-area ZIP, including one already saved on the phone, shows: "Grocery Gitter isn’t available in your area yet — we need a Kroger-family store and a Walmart nearby." The plan is not built. `POST /api/optimize-list` requires a JSON object and a 5-digit `zipCode`. A missing or malformed ZIP is `400`. An out-of-area ZIP is `422` with `code: "not_in_service_area"`. A raw array body is rejected. Catalog browse still works without a ZIP (that is the shelf, not a trip). A ZIP sent to browse or coverage that is outside the service area gets the same `422`.

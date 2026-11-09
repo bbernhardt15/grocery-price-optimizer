@@ -190,5 +190,13 @@ describe("browse catalog routes", () => {
 
     const bad = await fetch(`${origin}/api/catalog/browse?zip=nope`);
     assert.equal(bad.status, 400);
+
+    const outside = await fetch(`${origin}/api/catalog/browse?q=milk&zip=04101`);
+    assert.equal(outside.status, 422);
+    const outsideBody = (await outside.json()) as { code?: string };
+    assert.equal(outsideBody.code, "not_in_service_area");
+
+    const coverage = await fetch(`${origin}/api/catalog/coverage?zip=05401`);
+    assert.equal(coverage.status, 422);
   });
 });

@@ -99,6 +99,7 @@ describe("POST /api/optimize-list", () => {
 
   it("regex-matches each grocery string and returns lists grouped by cheapest store", async () => {
     const { status, json } = await optimize({
+      zipCode: "45202",
       groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
       stores: ["Walmart", "Target", "Kroger"],
     });
@@ -129,6 +130,7 @@ describe("POST /api/optimize-list", () => {
 
   it("matches partial strings such as milk against Gallon of Milk", async () => {
     const { status, json } = await optimize({
+      zipCode: "45202",
       groceryList: ["milk"],
       stores: ["Kroger"],
     });
@@ -142,14 +144,12 @@ describe("POST /api/optimize-list", () => {
     assert.equal(body.stores[0].items[0].price, 2.89);
   });
 
-  it("accepts a raw string array as the grocery list", async () => {
-    const { status, json } = await optimize(["Dozen Eggs"]);
-    assert.equal(status, 200);
-    const body = json as {
-      stores: Array<{ storeName: string; items: Array<{ price: number }> }>;
-    };
-    assert.equal(body.stores[0].storeName, "Target");
-    assert.equal(body.stores[0].items[0].price, 1.99);
+  it("rejects a raw array body instead of pricing it", async () => {
+    const { status, json } = await optimize(["Whole Milk"]);
+    assert.equal(status, 400);
+    const body = json as { error: string; code?: string };
+    assert.match(body.error, /JSON object/i);
+    assert.equal(body.code, undefined);
   });
 
   it("leaves Target unchecked when GG_SHOW_AD_STORES is off", async () => {
@@ -157,6 +157,7 @@ describe("POST /api/optimize-list", () => {
     delete process.env.GG_SHOW_AD_STORES;
     try {
       const { status, json } = await optimize({
+      zipCode: "45202",
         groceryList: ["Dozen Eggs"],
         stores: ["Target", "Kroger", "Walmart"],
       });
@@ -197,6 +198,7 @@ describe("POST /api/optimize-list", () => {
     assert.equal(matches[0].price, 2.89);
 
     const { status, json } = await optimize({
+      zipCode: "45202",
       groceryList: ["milk"],
       stores: ["Kroger"],
     });
@@ -210,6 +212,7 @@ describe("POST /api/optimize-list", () => {
 
   it("multiplies matched prices by parsed quantities in the JSON response", async () => {
     const { status, json } = await optimize({
+      zipCode: "45202",
       groceryList: ["2 milk", "Bread x2"],
       stores: ["Walmart", "Target", "Kroger"],
     });
@@ -323,6 +326,22 @@ describe("POST /api/optimize-list", () => {
     assert.match(body.error, /zipCode/i);
   });
 
+  it("rejects a plan that omits zipCode", async () => {
+    const missing = await optimize({ groceryList: ["Whole Milk"] });
+    assert.equal(missing.status, 400);
+    assert.match((missing.json as { error: string }).error, /5-digit ZIP/i);
+
+    const malformed = await optimize({ groceryList: ["Whole Milk"], zipCode: "4520" });
+    assert.equal(malformed.status, 400);
+    assert.match((malformed.json as { error: string }).error, /5-digit ZIP/i);
+
+    const letters = await optimize({ groceryList: ["Whole Milk"], zipCode: "abc" });
+    assert.equal(letters.status, 400);
+
+    const nothing = await optimize(null);
+    assert.equal(nothing.status, 400);
+  });
+
   it("refuses a ZIP outside the Kroger and Walmart service area", async () => {
     let lookups = 0;
     const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
@@ -357,6 +376,13 @@ describe("POST /api/optimize-list", () => {
     setKrogerCreds();
     let liveCalls = 0;
     const originalSearch = krogerService.searchProducts.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live",
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => {
       liveCalls += 1;
       return [];
@@ -376,6 +402,7 @@ describe("POST /api/optimize-list", () => {
       });
 
       const { status, json } = await optimize({
+      zipCode: "45202",
         groceryList: ["Cached Live Milk"],
         stores: ["Kroger"],
       });
@@ -393,6 +420,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(liveCalls, 0);
     } finally {
       krogerService.searchProducts = originalSearch;
+      krogerService.resolveClosestStore = originalLookup;
       delete process.env.KROGER_CLIENT_ID;
       delete process.env.KROGER_CLIENT_SECRET;
       await Product.deleteMany({ name: "Cached Live Milk" });
@@ -409,6 +437,7 @@ describe("POST /api/optimize-list", () => {
 
     try {
       const { status, json } = await optimize({
+      zipCode: "45202",
         groceryList: ["milk"],
         stores: ["Kroger"],
       });
@@ -563,6 +592,7 @@ describe("POST /api/optimize-list", () => {
     });
 
     const { status, json } = await optimize({
+      zipCode: "45202",
       items: [
         {
           name: "Honey Nut Cheerios Cereal",
@@ -745,6 +775,7 @@ describe("POST /api/optimize-list", () => {
 
   it("accepts verified product objects with quantities on items", async () => {
     const { status, json } = await optimize({
+      zipCode: "45202",
       items: [
         {
           name: "Gallon of Milk",
@@ -769,6 +800,7 @@ describe("POST /api/optimize-list", () => {
 
   it("includes a trip plan and per-store checkout handoff", async () => {
     const { status, json } = await optimize({
+      zipCode: "45202",
       groceryList: ["Gallon of Milk", "Loaf of Bread", "Dozen Eggs"],
       stores: ["Walmart", "Target", "Kroger"],
     });
@@ -832,10 +864,26 @@ describe("POST /api/optimize-list", () => {
     process.env.KROGER_CLIENT_SECRET = "secret";
     process.env.KROGER_REDIRECT_URI =
       "https://grocery-gitter.up.railway.app/api/kroger/oauth/callback";
-    const { status, json } = await optimize({
-      groceryList: ["Gallon of Milk"],
-      stores: ["Kroger"],
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live",
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
     });
+    let status = 0;
+    let json: unknown = null;
+    try {
+      const result = await optimize({
+        zipCode: "45202",
+        groceryList: ["Gallon of Milk"],
+        stores: ["Kroger"],
+      });
+      status = result.status;
+      json = result.json;
+    } finally {
+      krogerService.resolveClosestStore = originalLookup;
+    }
     await Product.updateOne(
       { name: "Gallon of Milk", storeName: "Kroger" },
       { $unset: { upc: 1, productId: 1 } }
@@ -1534,14 +1582,16 @@ describe("POST /api/optimize-list", () => {
     const previous = process.env.REVENUECAT_WEBHOOK_SECRET;
     delete process.env.REVENUECAT_WEBHOOK_SECRET;
     try {
-      const open = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      const open = await optimize({
+      zipCode: "45202", groceryList: ["milk", "bread", "bananas"] });
       assert.equal(open.status, 200);
       const openBody = open.json as { stores: Array<{ storeName: string }>; entitlement?: { plan: string } };
       assert.ok(openBody.stores.length > 1);
       assert.equal(openBody.entitlement, undefined);
 
       process.env.REVENUECAT_WEBHOOK_SECRET = "webhook-secret";
-      const free = await optimize({ groceryList: ["milk", "bread", "bananas"] });
+      const free = await optimize({
+      zipCode: "45202", groceryList: ["milk", "bread", "bananas"] });
       assert.equal(free.status, 200);
       const body = free.json as {
         stores: Array<{

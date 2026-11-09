@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   eligibleCount,
   inServiceArea,
   OUT_OF_AREA_MESSAGE,
+  PLAN_ZIP_ERROR,
+  requirePlanZip,
   serviceAreaFor,
   zctaCount,
 } from "./serviceArea";
@@ -58,6 +61,28 @@ describe("service area", () => {
     }
     assert.notEqual(blocked, "");
     assert.equal(serviceAreaFor(blocked).reason, "out_of_area");
+  });
+
+  it("requires a 5-digit in-area ZIP before a plan", () => {
+    assert.deepEqual(requirePlanZip(undefined), { ok: false, status: 400, error: PLAN_ZIP_ERROR });
+    assert.deepEqual(requirePlanZip(""), { ok: false, status: 400, error: PLAN_ZIP_ERROR });
+    assert.deepEqual(requirePlanZip("   "), { ok: false, status: 400, error: PLAN_ZIP_ERROR });
+    assert.deepEqual(requirePlanZip("4520"), { ok: false, status: 400, error: PLAN_ZIP_ERROR });
+    assert.deepEqual(requirePlanZip("abc"), { ok: false, status: 400, error: PLAN_ZIP_ERROR });
+    const maine = requirePlanZip("04101");
+    assert.equal(maine.ok, false);
+    if (maine.ok) throw new Error("expected an out-of-area ZIP");
+    assert.equal(maine.status, 422);
+    assert.equal(maine.code, "not_in_service_area");
+    assert.deepEqual(requirePlanZip("45202"), { ok: true, zip: "45202" });
+    assert.deepEqual(requirePlanZip("45202-1234"), { ok: true, zip: "45202" });
+    assert.deepEqual(requirePlanZip(45202), { ok: true, zip: "45202" });
+  });
+
+  it("the phone plan request includes zipCode", () => {
+    const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+    const call = app.slice(app.indexOf('"/api/optimize-list"'));
+    assert.match(call.slice(0, 600), /zipCode:\s*zip/);
   });
 
   it("does not treat a blank or partial ZIP as in the service area", () => {

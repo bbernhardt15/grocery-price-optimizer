@@ -74,3 +74,37 @@ export function outOfAreaMessage(value: unknown): string {
   if (area.ok || area.reason !== "out_of_area") return "";
   return OUT_OF_AREA_MESSAGE;
 }
+
+export const PLAN_ZIP_ERROR = "zipCode must be a 5-digit ZIP, optionally with a +4 extension.";
+
+const PLAN_ZIP_PATTERN = /^\d{5}(?:-\d{4})?$/;
+
+export type PlanZip =
+  | { ok: true; zip: string }
+  | { ok: false; status: 400; error: string }
+  | { ok: false; status: 422; error: string; code: typeof NOT_IN_SERVICE_AREA_CODE };
+
+/** A plan request needs a real 5-digit ZIP inside the service area. */
+export function requirePlanZip(value: unknown): PlanZip {
+  let text = "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    text = String(Math.trunc(value));
+  } else if (typeof value === "string") {
+    text = value.trim();
+  } else if (value !== undefined && value !== null) {
+    return { ok: false, status: 400, error: PLAN_ZIP_ERROR };
+  }
+  if (!PLAN_ZIP_PATTERN.test(text)) {
+    return { ok: false, status: 400, error: PLAN_ZIP_ERROR };
+  }
+  const area = serviceAreaFor(text);
+  if (!area.ok) {
+    return {
+      ok: false,
+      status: 422,
+      error: OUT_OF_AREA_MESSAGE,
+      code: NOT_IN_SERVICE_AREA_CODE,
+    };
+  }
+  return { ok: true, zip: area.zip };
+}

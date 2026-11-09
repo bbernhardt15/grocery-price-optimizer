@@ -96,7 +96,7 @@ app.get("/api", (_req, res) => {
       "POST /api/admin/catalog/exclude-nongrocery-refresh":
         'Marks offers for Other products that are still general merchandise so refresh skips them. Body { "confirm": "exclude-nongrocery-refresh" }. Nothing is deleted.',
       "POST /api/optimize-list":
-        "Accepts groceryList or verified product objects (optional catalogId/upc from browse), zipCode, optional stores, and allowSubstitutes. Prices Kroger, Walmart, Target, partner feeds, and Flipp as before. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
+        "JSON object with groceryList or items (optional catalogId/upc from browse), a required 5-digit zipCode, optional stores, and allowSubstitutes. Missing or malformed zipCode is 400. A ZIP outside the Kroger and Walmart service area is 422 not_in_service_area. A raw array is rejected. Browse selections are pinned so the chosen product is priced; substitutes are labeled and used only when allowSubstitutes is true.",
       "GET /api/kroger/auth-status":
         "Whether authorization-code OAuth for Kroger Cart API is configured (requires KROGER_REDIRECT_URI registered on the Kroger developer app and Railway), and whether this browser’s shopper cookie is still signed in.",
       "POST /api/kroger/connect":
