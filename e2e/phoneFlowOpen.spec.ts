@@ -170,6 +170,51 @@ test("a delayed brand shelf shows Loading brands before the pills", async ({ pag
   await expect(page.locator(".brand-pick").first()).toBeVisible();
 });
 
+for (const size of [
+  { width: 390, height: 844 },
+  { width: 375, height: 667 },
+]) {
+  test(`Not this time dismisses the saved-trip prompt at ${size.width}x${size.height}`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await page.route("**/api/optimize-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 3.29,
+          partial: false,
+          pendingStores: [],
+          pricingByStore: [{ storeName: "Kroger", check: "ok" }],
+          stores: [
+            {
+              storeName: "Kroger",
+              subtotal: 3.29,
+              items: [{ lineId: "milk", name: "Whole Milk", price: 3.29, quantity: 1, itemTotal: 3.29, storeName: "Kroger" }],
+            },
+          ],
+        }),
+      });
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("gg-onboarding-done", "1");
+      localStorage.setItem("gg-zip", "45103");
+      localStorage.setItem("gg-list", JSON.stringify([{ id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 }]));
+    });
+    await unlock(page);
+    await page.locator('[data-flow="plan"]').click();
+    await page.getByRole("button", { name: "Save this trip" }).first().click();
+    const guide = page.locator("#gitter-guide");
+    await expect(guide).toBeVisible();
+    await expect(guide).toHaveAttribute("data-moment", "trip-saved");
+    await expect(guide.getByRole("button", { name: "Remember these items" })).toBeVisible();
+    await guide.getByRole("button", { name: "Not this time" }).click();
+    await expect(guide).toBeHidden();
+    await expect(guide).not.toHaveAttribute("data-moment", "trip-saved");
+    await expect(guide.getByRole("button", { name: "Remember these items" })).toHaveCount(0);
+    await expect(guide.getByRole("button", { name: "Not this time" })).toHaveCount(0);
+  });
+}
+
 test("a coupon photo fills the amount and the note", async ({ page }) => {
   await page.route("**/api/optimize-list", async (route) => {
     await route.fulfill({
