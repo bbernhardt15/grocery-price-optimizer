@@ -41,7 +41,7 @@ describe("trip completion", () => {
     assert.equal(FINISH_TRIP_UNDO_MS, 4_500);
     assert.equal(clearTripAction().event, CLEAR_TRIP_EVENT);
     assert.equal(clearTripAction().label, "Clear trip");
-    assert.equal(completeTripAction().label, "Complete trip");
+    assert.equal(completeTripAction().label, "Save this trip");
     const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
     assert.match(app, /finishCurrentTrip/);
     assert.match(app, /id="clear-trip-open"/);

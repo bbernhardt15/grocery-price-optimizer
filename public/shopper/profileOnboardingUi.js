@@ -364,7 +364,7 @@ export function mountProfileOnboarding(deps = {}) {
     const readingBusy = reading && (importGate.parsing || importGate.grouping || readCards.some((card) => card.status === "reading"));
     const readingReady = reading && !readingBusy && !beatMarkup && learnedViewReady({ ...importGate, revealed: true }) && (learnedRows.length > 0 || receiptLines.length > 0);
     if (next) {
-      next.hidden = tripChoice || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
+      next.hidden = tripChoice || step.id === "connect" || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
       next.textContent = returnTo ? "Save" : learned || reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     }
     if (skip) {

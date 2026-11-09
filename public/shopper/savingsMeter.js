@@ -209,7 +209,7 @@ export function describeSavings(meter, options = {}) {
 
   if (meter.saved > 0) {
     const badge = `Save ${formatMoney(meter.saved)}`;
-    let note = `You saved ${formatMoney(meter.saved)} with Grocery Gitter, versus ${formatMoney(expensive.total)} at ${expensive.storeName}.`;
+    let note = `You saved ${formatMoney(meter.saved)} using Grocery Gitter, versus ${formatMoney(expensive.total)} at ${expensive.storeName}.`;
     if (meter.savedVsBaseline >= 0.05 && baseline.storeName !== expensive.storeName) {
       note += ` That is also ${formatMoney(meter.savedVsBaseline)} under ${baseline.storeName}.`;
     }

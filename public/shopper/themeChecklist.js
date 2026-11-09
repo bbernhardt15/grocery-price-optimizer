@@ -235,7 +235,7 @@ export function checklistHtml(state, escapeHtml, options = {}) {
       <h2 id="list-sheet-title"><span class="theme-icon" aria-hidden="true">${themeIcon(state.listId)}</span> ${text(escapeHtml, state.title)}</h2>
       <button type="button" class="text-btn" data-sheet-close>Close</button>
     </div>
-    <p class="theme-lead">Untick anything you don't need. Change a quantity, or add your own.</p>
+    <p class="theme-lead">Untick anything you don't need. A saved brand for this list sits under each line.</p>
     ${diet}
     <div class="party" role="group" aria-label="How many people">
       <span id="theme-party-label">How many people</span>
@@ -245,11 +245,6 @@ export function checklistHtml(state, escapeHtml, options = {}) {
     </div>
     ${empty}
     <ul class="theme-checks">${rows}</ul>
-    <form id="theme-add-form" class="theme-add-form">
-      <label class="sr-only" for="theme-add-input">Add an item</label>
-      <input id="theme-add-input" maxlength="40" placeholder="Add your own" autocomplete="off" enterkeyhint="done" value="${text(escapeHtml, state.draft || "")}" />
-      <button type="submit" class="ghost">Add</button>
-    </form>
     <div class="sheet-actions">
       <button type="button" class="primary theme-check-add" data-sheet-add="${text(escapeHtml, state.listId)}" ${disabled}>
         <span class="theme-check-label">${text(escapeHtml, addTripLabel(count))}</span>

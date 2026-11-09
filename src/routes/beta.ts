@@ -5,7 +5,6 @@ import {
   adminCodeFilter,
   eventSummary,
   feedbackCsv,
-  inviteCodes,
   listFeedback,
   readFeedbackShot,
   readyPayload,
@@ -28,7 +27,7 @@ router.get("/health/ready", (_req, res) => {
 
 router.get("/beta/gate", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ required: inviteCodes().length > 0 });
+  res.json({ required: false });
 });
 
 router.post("/beta/invite", async (req, res) => {

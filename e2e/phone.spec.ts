@@ -28,11 +28,8 @@ function watch(page: Page) {
   };
 }
 
-async function unlock(page: Page, code = "Brandon-50y4") {
+async function unlock(page: Page, _code = "Brandon-50y4") {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeVisible();
-  await page.locator("#beta-code").first().fill(code);
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
   await expect(page.locator("#beta-gate")).toBeHidden();
 }
 
@@ -40,17 +37,13 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `e2e-artifacts/${name}.png`, fullPage: false });
 }
 
-test("invite gate rejects a wrong code, accepts mixed case, and stays in after reload", async ({ page }) => {
+test("shoppers are not asked for an invite code", async ({ page }) => {
   const net = watch(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeVisible();
-  await shot(page, "01-invite");
-  await page.locator("#beta-code").first().fill("not-a-code");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
-  await expect(page.locator("#beta-gate-error").first()).toBeVisible();
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
+  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeHidden();
+  await expect(page.locator("#beta-gate")).toBeHidden();
   await expect(page.getByRole("button", { name: "Get started" })).toBeVisible();
+  await shot(page, "01-invite");
   await page.reload();
   await expect(page.locator("#beta-gate")).toBeHidden();
   await expect(page.getByRole("button", { name: "Get started" })).toBeVisible();
@@ -72,7 +65,7 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#profile-next").click();
+    await page.locator("#store-connect-later").click();
   }
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
   await page.locator("#profile-receipt-input").setInputFiles(receipt);

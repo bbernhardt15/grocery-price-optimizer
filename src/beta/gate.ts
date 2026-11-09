@@ -27,7 +27,9 @@ export function betaGateOpen(method: string, path: string): boolean {
 }
 
 export async function enforceBetaInvite(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (!inviteCodes().length || betaGateOpen(req.method, req.path)) {
+  // The shopper-facing invite step is retired. Shopper APIs stay open.
+  // Admin routes keep their own token check and never rely on this code.
+  if (!inviteCodes().length || betaGateOpen(req.method, req.path) || !req.path.startsWith("/api/admin")) {
     next();
     return;
   }

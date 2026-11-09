@@ -68,14 +68,13 @@ export function mountMatchSheet(deps) {
     const where = storeName ? ` at ${storeName}` : "";
     paint([], `Searching Grocery Gitter${where}…`);
     const apiUrl = deps.apiUrl || ((path) => path);
-    const storeQuery = storeName ? `&store=${encodeURIComponent(storeName)}` : "";
     let saved = "";
     try {
       saved = localStorage.getItem("gg-zip") || "";
     } catch {
       saved = "";
     }
-    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12${storeQuery}`, saved);
+    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=24`, saved);
     if (!priced) {
       paint([], "Add a ZIP to see store prices.");
       return;
@@ -89,8 +88,7 @@ export function mountMatchSheet(deps) {
       for (const item of items) {
         const id = String(item?.id || item?.defaultVariantId || "");
         if (!id) continue;
-        const offer = offerFor(item, storeName);
-        if (storeName && !offer) continue;
+        const offer = offerFor(item, storeName) || offerFor(item, "");
         products.set(id, item);
         const label = String(item.familyName || item.name || "Item");
         const brand = String(item.brand || "").trim();

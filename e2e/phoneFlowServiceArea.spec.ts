@@ -5,9 +5,12 @@ test.use({ viewport: { width: 390, height: 844 } });
 
 async function unlock(page: Page) {
   await page.goto("/");
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
-  await expect(page.locator("#beta-gate")).toBeHidden();
+  const invite = page.locator("#beta-code").first();
+  if (await invite.isVisible().catch(() => false)) {
+    await invite.fill("Brandon-50y4");
+    await page.locator("#beta-gate-form button[type=submit]").first().click();
+    await expect(page.locator("#beta-gate")).toBeHidden();
+  }
 }
 
 function shot(page: Page, name: string) {

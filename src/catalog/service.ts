@@ -251,20 +251,24 @@ async function departmentFeed(
   warnings: string[]
 ): Promise<RawCatalogRecord[]> {
   const records: RawCatalogRecord[] = [];
+  const firstWave: Array<Promise<RawCatalogRecord[]>> = [];
   if (walmartPricingProvider.isConfigured()) {
-    try {
-      records.push(...(await fetchWalmartDepartment(departmentId, zipCode)));
-    } catch (error) {
-      warnings.push(`Walmart category browse failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    firstWave.push(
+      fetchWalmartDepartment(departmentId, zipCode).catch((error) => {
+        warnings.push(`Walmart category browse failed: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      })
+    );
   }
   if (krogerApiConfigured()) {
-    try {
-      records.push(...(await fetchKrogerDepartment(departmentId, locationId)));
-    } catch (error) {
-      warnings.push(`Kroger department search failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    firstWave.push(
+      fetchKrogerDepartment(departmentId, locationId).catch((error) => {
+        warnings.push(`Kroger department search failed: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      })
+    );
   }
+  for (const batch of await Promise.all(firstWave)) records.push(...batch);
   const terms = searchTermsFor(departmentId);
   if (targetPricingProvider.isConfigured()) {
     for (const term of terms) {

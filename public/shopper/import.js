@@ -227,7 +227,7 @@ export function mountImport(deps) {
           <textarea id="import-goal" class="import-goal" maxlength="400" placeholder="Taco night for 6"></textarea>
           <button type="button" class="ghost" id="import-ask-go">Suggest a list</button>
         </details>
-        <input id="import-photo-input" type="file" accept="image/*" hidden />
+        <input id="import-photo-input" type="file" accept="image/*" multiple hidden />
         <input id="import-file-input" type="file" accept="image/*,audio/*,.pdf,application/pdf,.txt,.csv,text/plain,text/csv" hidden />
       </div>
       <div id="import-listen" hidden>
@@ -553,7 +553,7 @@ export function mountImport(deps) {
           missingCards.push(`<li class="import-tile import-missing" data-key="${escapeHtml(item.key)}">
             ${kicker}
             <h3>${escapeHtml(item.raw || item.name)}</h3>
-            <p class="import-note">Not on the shelf.</p>
+            <p class="import-note">${/\b(?:kotex|tampax|always|head\s*&?\s*shoulders|shampoo|conditioner|deodorant|toothpaste|lotion)\b/i.test(`${item.raw || ""} ${item.name || ""}`) ? "Not in this grocery catalog. Skip it or add it as your own item." : "Not on the shelf."}</p>
             <div class="import-tools">
               <button type="button" class="ghost" data-custom="${escapeHtml(item.key)}">Add as your own item</button>
               <button type="button" class="ghost" data-search="${escapeHtml(item.key)}">Search for it</button>
@@ -634,7 +634,7 @@ export function mountImport(deps) {
       ${missingNote}
       ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
       </div>
-      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Remember these items on this phone.</span></label>
+      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save these for next time on this phone. They are not sent to a store.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
         <button type="button" class="primary" id="import-accept" ${count ? "" : "disabled"}>${escapeHtml(acceptLabel(count))}</button>
@@ -1110,9 +1110,11 @@ export function mountImport(deps) {
   $("import-photo")?.addEventListener("click", () => $("import-photo-input").click());
   $("import-file")?.addEventListener("click", () => $("import-file-input").click());
   $("import-photo-input")?.addEventListener("change", () => {
-    const file = $("import-photo-input").files?.[0];
+    const files = [...($("import-photo-input").files || [])].slice(0, 4);
+    const extra = ($("import-photo-input").files?.length || 0) - files.length;
     $("import-photo-input").value = "";
-    if (file) void runPhoto(file);
+    if (extra > 0) setStatus(`Using the first 4 photos. ${extra} more were left out.`, "error");
+    for (const file of files) void runPhoto(file);
   });
   $("import-file-input")?.addEventListener("change", () => {
     const file = $("import-file-input").files?.[0];
@@ -1150,6 +1152,13 @@ export function mountImport(deps) {
   });
 
   reviewHost.addEventListener("click", (event) => {
+    const link = event.target instanceof Element ? event.target.closest("[data-search-stores]") : null;
+    if (link instanceof HTMLAnchorElement) {
+      event.preventDefault();
+      deps.persistList?.();
+      window.open(link.href, "_blank", "noopener");
+      return;
+    }
     const origin = event.target instanceof Element ? event.target : event.target?.parentElement;
     const target = origin?.closest?.("button, [data-pick-search]");
     if (!target || !review) return;

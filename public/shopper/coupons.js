@@ -494,7 +494,7 @@ function couponFormMarkup(store) {
   return `<form class="coupon-form" data-coupon-store="${storeName}">
     <p class="coupon-form-title">Add a coupon you already have</p>
     <p class="muted">Clip it at the store first. A screenshot is read with the same photo reader as a receipt. You confirm the result before it changes the estimate. An expired coupon, the wrong store, or a buy-more rule that is not met stays out.</p>
-    <label>Screenshot
+    <label>Upload a coupon photo
       <input data-coupon-shot type="file" accept="image/*" />
     </label>
     <p class="coupon-shot-note" data-coupon-shot-note hidden></p>

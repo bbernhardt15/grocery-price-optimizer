@@ -189,7 +189,7 @@ function tripLine(saved, total) {
   const estimate = Number(total);
   const estimateText = Number.isFinite(estimate) && estimate > 9e-3 ? ` Estimated ${formatDollars(estimate)}.` : "";
   if (!(amount > 9e-3)) {
-    return estimateText ? `Trip saved.${estimateText} The receipt is in Past trips.` : "Trip saved. The receipt is in Past trips.";
+    return estimateText ? `Trip saved.${estimateText}` : "Trip saved.";
   }
   return `Nice, you saved ${formatDollars(amount)}.${estimateText} Save this Shopping list for next time?`;
 }

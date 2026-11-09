@@ -7,9 +7,12 @@ test.use({ viewport: { width: 390, height: 844 } });
 
 async function unlock(page: Page) {
   await page.goto("/");
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
-  await expect(page.locator("#beta-gate")).toBeHidden();
+  const invite = page.locator("#beta-code").first();
+  if (await invite.isVisible().catch(() => false)) {
+    await invite.fill("Brandon-50y4");
+    await page.locator("#beta-gate-form button[type=submit]").first().click();
+    await expect(page.locator("#beta-gate")).toBeHidden();
+  }
 }
 
 async function reachStores(page: Page) {
@@ -24,7 +27,7 @@ async function reachReceipts(page: Page) {
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#profile-next").click();
+    await page.locator("#store-connect-later").click();
   }
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
 }

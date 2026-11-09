@@ -4,9 +4,12 @@ test.use({ viewport: { width: 390, height: 844 } });
 
 async function unlock(page: Page) {
   await page.goto("/");
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
-  await expect(page.locator("#beta-gate")).toBeHidden();
+  const invite = page.locator("#beta-code").first();
+  if (await invite.isVisible().catch(() => false)) {
+    await invite.fill("Brandon-50y4");
+    await page.locator("#beta-gate-form button[type=submit]").first().click();
+    await expect(page.locator("#beta-gate")).toBeHidden();
+  }
 }
 
 const plan = {
@@ -123,7 +126,6 @@ test("skip rest leaves the product wizard and does not ask for another receipt",
   });
   await unlock(page);
   await page.locator("#menu-open").click();
-  await page.locator("#app-drawer summary", { hasText: "Preferences" }).click();
   await page.locator("#menu-brands").click();
   await expect(page.locator("#profile-onboard")).toBeVisible();
   await page.locator("#profile-next").click();
@@ -175,7 +177,7 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   await page.screenshot({ path: "/opt/cursor/artifacts/onboarding-zip.png" });
   await page.locator("#profile-next").click();
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#profile-next").click();
+    await page.locator("#store-connect-later").click();
   }
   const nextBox = await page.locator("#profile-next").boundingBox();
   const stageBox = await page.locator("#profile-stage").boundingBox();
@@ -658,8 +660,8 @@ async function finishAnotherTrip(page: Page) {
   });
   await page.reload();
   await page.locator('[data-flow="plan"]').click();
-  await expect(page.getByRole("button", { name: "Complete trip" }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Complete trip" }).first().click();
+  await expect(page.getByRole("button", { name: "Save this trip" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Save this trip" }).first().click();
   await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
   await page.locator(".gitter-guide-off").waitFor({ timeout: 3000 });
   await page.waitForTimeout(350);
@@ -678,8 +680,8 @@ test(`the finished-trip toast stays clear at ${size.width}x${size.height}`, asyn
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await expect(page.getByRole("button", { name: "Complete trip" }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Complete trip" }).first().click();
+  await expect(page.getByRole("button", { name: "Save this trip" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Save this trip" }).first().click();
   await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
   await page.getByRole("button", { name: "Turn off" }).waitFor({ timeout: 3000 }).catch(() => undefined);
   await page.waitForTimeout(300);

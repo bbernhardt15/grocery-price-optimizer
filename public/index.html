@@ -88,8 +88,8 @@
             <button type="button" id="drawer-close" class="text-btn">Close</button>
           </div>
           <button id="refresh-prices" type="button" class="ghost">Refresh prices</button>
-          <details class="drawer-fold" id="where-you-shop" open>
-            <summary>ZIP and stores</summary>
+          <section class="drawer-fold" id="where-you-shop">
+            <h3>ZIP and stores</h3>
             <p id="zip-place" class="zip-place">Add a ZIP for nearby stores</p>
             <label class="zip">
               <span>ZIP</span>
@@ -103,7 +103,7 @@
             <p id="store-picker-note" class="muted">Uncheck a store to leave it out of the plan.</p>
             <div id="store-picker-list"></div>
           </fieldset>
-          </details>
+          </section>
           <section id="kroger-card" class="kroger-card" hidden>
             <h2 id="kroger-card-title">Kroger connected</h2>
             <button type="button" id="kroger-send" class="primary">Send to Kroger cart</button>
@@ -120,16 +120,16 @@
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
           <button id="drawer-profile" type="button" class="ghost">Stores, allergies, and diets</button>
           <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">Locked products</button>
-          <details class="drawer-fold" open>
-            <summary>This trip</summary>
+          <section class="drawer-fold">
+            <h3>This trip</h3>
             <nav class="menu-nav" aria-label="Menu">
               <button type="button" id="menu-home">Home</button>
               <button type="button" id="menu-past">Past trips</button>
               <button type="button" id="menu-new-trip">Start a new trip</button>
             </nav>
-          </details>
-          <details class="drawer-fold">
-            <summary>Preferences</summary>
+          </section>
+          <section class="drawer-fold">
+            <h3>Preferences</h3>
             <nav class="menu-nav" aria-label="Preferences">
               <button type="button" id="menu-brands">Brands for each category</button>
               <button type="button" id="menu-favorites">Your favorites</button>
@@ -137,9 +137,9 @@
               <button type="button" id="menu-settings" hidden>Settings</button>
               <button type="button" id="menu-redo">Redo setup</button>
             </nav>
-          </details>
-          <details class="drawer-fold" id="menu-help">
-            <summary id="help-title">Help</summary>
+          </section>
+          <section class="drawer-fold" id="menu-help">
+            <h3 id="help-title">Help</h3>
             <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
             <nav class="drawer-links" aria-label="About">
               <button type="button" id="menu-feedback" hidden>Send feedback</button>
@@ -147,7 +147,7 @@
               <a id="help-privacy" href="/privacy">Privacy</a>
               <a id="help-terms" href="/terms">Terms</a>
             </nav>
-          </details>
+          </section>
         </aside>
       </div>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -159,7 +159,7 @@
 
         <main id="catalog" class="catalog" tabindex="-1">
           <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
-          <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs.</p>
+          <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs. Grocery Gitter learns what you buy over time.</p>
           <div id="shelf-entry" class="feature-cards">
             <button type="button" id="shelf-scan" class="feature-card" hidden>
               <span class="feature-icon feature-icon-word" aria-hidden="true">Scan</span>

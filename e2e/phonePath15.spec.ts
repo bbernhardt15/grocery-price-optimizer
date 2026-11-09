@@ -3,11 +3,8 @@ import path from "node:path";
 
 const receipt = path.join(process.cwd(), "e2e/fixtures/sample-order.pdf");
 
-async function unlock(page: Page, code = "Brandon-50y4") {
+async function unlock(page: Page, _code = "Brandon-50y4") {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeVisible();
-  await page.locator("#beta-code").first().fill(code);
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
   await expect(page.locator("#beta-gate")).toBeHidden();
 }
 
@@ -20,7 +17,9 @@ test("teaching receipt keeps Name brand tappable, hides store-brand name chips, 
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#profile-next").click();
+    const later = page.locator("#store-connect-later");
+    if (await later.isVisible()) await later.click();
+    else await page.locator("#profile-next").click();
   }
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
