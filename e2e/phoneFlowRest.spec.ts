@@ -837,6 +837,11 @@ test("an eight item import review can reach the last row and the add button", as
   });
   expect(fit.button).toBe(true);
   expect(fit.row).toBe(true);
+  await page.getByRole("button", { name: /^Remove/ }).first().click();
+  await expect(page.locator("[data-key^='row-']")).toHaveCount(7);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.locator("[data-key^='row-']")).toHaveCount(8);
+  await expect(page.locator("[data-key='row-0']")).toBeVisible();
 });
 
 test("unresolved rows remove by swipe or button and can be undone", async ({ page }) => {

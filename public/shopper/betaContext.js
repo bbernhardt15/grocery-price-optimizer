@@ -1,6 +1,6 @@
 /** Non-sensitive context for beta feedback. Item names and receipt text stay out. */
 
-export const SHELL_CACHE = "v67";
+export const SHELL_CACHE = "v68";
 export const APP_VERSION = "1.0.0";
 export const INVITE_KEY = "gg-beta-code";
 

@@ -1057,6 +1057,31 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   max-width: min(28rem, calc(100% - 24px));
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+body[data-toast-clear="1"] #catalog {
+  gap: 0;
+}
+body[data-toast-clear="1"] #start-here {
+  gap: 0;
+}
+body[data-toast-clear="1"] #shelf-entry[data-toast-hide="1"] {
+  display: none !important;
+}
+body[data-toast-clear="1"] #toast.show {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  width: 100%;
+  max-width: none;
+  margin: 8px 0 0;
+  z-index: 4;
+}
+body[data-toast-clear="1"] #gitter-guide {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
 .toast button, #toast-action {
   background: #fffdfb; color: #1c1917; border: 0; border-radius: 999px;
   min-height: 36px; padding: 0 14px; font-weight: 750;

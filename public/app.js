@@ -811,41 +811,85 @@ function parkToast() {
   toastEl.dataset.place = "page";
 }
 
+function clearToastOffset() {
+  if (!toastEl) return;
+  toastEl.style.top = "";
+  toastEl.style.bottom = "";
+  toastEl.style.left = "";
+  toastEl.style.right = "";
+  toastEl.style.width = "";
+  toastEl.style.maxWidth = "";
+  toastEl.style.transform = "";
+}
+
+function releaseToastClearance() {
+  document.body.removeAttribute("data-toast-clear");
+  document.getElementById("shelf-entry")?.removeAttribute("data-toast-hide");
+  const guide = document.getElementById("gitter-guide");
+  if (guide) {
+    guide.style.bottom = "";
+    guide.style.top = "";
+    guide.style.maxHeight = "";
+  }
+  clearToastOffset();
+}
+
 function placePageToast() {
   if (!toastEl || toastEl.dataset.place === "sheet") {
-    if (toastEl) {
-      toastEl.style.top = "";
-      toastEl.style.bottom = "";
-      toastEl.style.left = "";
-      toastEl.style.right = "";
-      toastEl.style.width = "";
-      toastEl.style.maxWidth = "";
-      toastEl.style.transform = "";
-    }
+    releaseToastClearance();
     return;
   }
   const guide = document.getElementById("gitter-guide");
   const guideBox = guide instanceof HTMLElement && !guide.hidden ? guide.getBoundingClientRect() : null;
   const guideOpen = Boolean(guideBox && guideBox.height > 24);
-  toastEl.dataset.toastPlace = guideOpen ? "above-guide" : toastEl.dataset.place || "page";
-  if (!guideOpen) {
-    toastEl.style.top = "";
-    toastEl.style.bottom = "";
-    toastEl.style.left = "";
-    toastEl.style.right = "";
-    toastEl.style.width = "";
-    toastEl.style.maxWidth = "";
-    toastEl.style.transform = "";
+  const browse = document.getElementById("browse");
+  const onAdd = document.body.dataset.step === "add" && browse instanceof HTMLElement;
+  if (!guideOpen || !onAdd) {
+    releaseToastClearance();
+    if (!guideOpen) {
+      toastEl.dataset.toastPlace = toastEl.dataset.place || "page";
+      return;
+    }
+    const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
+    toastEl.style.top = "auto";
+    toastEl.style.left = "50%";
+    toastEl.style.right = "auto";
+    toastEl.style.width = "min(28rem, calc(100% - 24px))";
+    toastEl.style.maxWidth = "min(28rem, calc(100% - 24px))";
+    toastEl.style.transform = "translateX(-50%)";
+    toastEl.style.bottom = `${gap}px`;
+    toastEl.dataset.toastPlace = "above-guide";
     return;
   }
-  const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
-  toastEl.style.top = "auto";
-  toastEl.style.left = "50%";
-  toastEl.style.right = "auto";
-  toastEl.style.width = "min(28rem, calc(100% - 24px))";
-  toastEl.style.maxWidth = "min(28rem, calc(100% - 24px))";
-  toastEl.style.transform = "translateX(-50%)";
-  toastEl.style.bottom = `${gap}px`;
+  const shelf = document.getElementById("shelf-entry");
+  if (shelf && shelf.getBoundingClientRect().height < 1) shelf.dataset.toastHide = "1";
+  document.body.dataset.toastClear = "1";
+  if (toastEl.parentElement !== browse.parentElement || toastEl.previousElementSibling !== browse) {
+    browse.insertAdjacentElement("afterend", toastEl);
+  }
+  clearToastOffset();
+  toastEl.dataset.toastPlace = "after-aisle";
+  const toastBox = toastEl.getBoundingClientRect();
+  const nextGuide = guide.getBoundingClientRect();
+  const overlap = Math.ceil(toastBox.bottom + 4 - nextGuide.top);
+  if (overlap > 0) {
+    const dock = document.querySelector(".step-bar")?.getBoundingClientRect();
+    const room = dock ? Math.floor(dock.top - nextGuide.bottom - 4) : overlap;
+    const computed = parseFloat(getComputedStyle(guide).bottom) || 0;
+    const shift = Math.min(overlap, Math.max(0, room));
+    if (shift > 0) guide.style.bottom = `${Math.max(0, computed - shift)}px`;
+  }
+  const placed = toastEl.getBoundingClientRect();
+  const aisle = document.getElementById("browse-toggle")?.getBoundingClientRect();
+  const guideNow = guide.getBoundingClientRect();
+  const blockBottom = Math.max(placed.bottom, aisle?.bottom || 0);
+  const stillCovered = Math.ceil(blockBottom + 4 - guideNow.top);
+  if (stillCovered > 1) {
+    const dockTop = document.querySelector(".step-bar")?.getBoundingClientRect().top ?? window.innerHeight;
+    guide.style.top = `${Math.ceil(blockBottom + 4)}px`;
+    guide.style.bottom = `${Math.max(8, Math.round(window.innerHeight - dockTop + 4))}px`;
+    guide.style.maxHeight = "none";
+  }
 }
 
 function toast(message, durationMs = 1600) {
@@ -868,7 +912,11 @@ function toast(message, durationMs = 1600) {
   };
   requestAnimationFrame(followGuide);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+  toastTimer = window.setTimeout(() => {
+    toastEl.classList.remove("show");
+    parkToast();
+    releaseToastClearance();
+  }, durationMs);
 }
 
 function toastAction(message, label, onClick, durationMs = 4500) {

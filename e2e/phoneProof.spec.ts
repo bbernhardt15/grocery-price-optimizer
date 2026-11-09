@@ -412,6 +412,13 @@ test("a tailgate bun brand is kept and adds the catalog bun", async ({ page }) =
   const summary = page.locator("#trip-summary");
   await expect(summary).toContainText("Sesame Burger Buns");
   await expect(summary).not.toContainText("Hot Dog Buns");
+  const bun = await page.evaluate(() => {
+    const rows = JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ id?: string; name?: string; brand?: string }>;
+    return rows.find((row) => /sesame burger buns/i.test(row.name || "")) || null;
+  });
+  expect(bun?.name).toBe("Sesame Burger Buns");
+  expect(bun?.brand).toBe("Martin's");
+  expect(bun?.id).toBe("upc:99999600116");
   await page.screenshot({ path: "/opt/cursor/artifacts/tailgate-buns.png" });
 });
 
@@ -579,7 +586,12 @@ test("coming back from a store opens the return sheet", async ({ page }) => {
   expect(result.still).toMatch(/Still shopping/);
 });
 
-test("the finished-trip toast stays off the header and can be undone", async ({ page }) => {
+for (const size of [
+  { width: 390, height: 844 },
+  { width: 375, height: 667 },
+]) {
+test(`the finished-trip toast stays clear at ${size.width}x${size.height}`, async ({ page }) => {
+  await page.setViewportSize(size);
   await page.addInitScript(() => {
     localStorage.setItem("gg-onboarding-done", "1");
     localStorage.setItem("gg-zip", "45103");
@@ -593,33 +605,40 @@ test("the finished-trip toast stays off the header and can be undone", async ({ 
   await page.getByRole("button", { name: "Turn off" }).waitFor({ timeout: 3000 }).catch(() => undefined);
   await page.waitForTimeout(300);
   const hit = await page.evaluate(() => {
-    const box = (el) => {
+    const box = (el: Element | null | undefined) => {
       if (!el) return null;
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return null;
-      return rect;
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom };
     };
-    const intersects = (left, right) =>
+    const intersects = (left: { x: number; y: number; width: number; height: number } | null, right: ReturnType<typeof box>) =>
       Boolean(left && right && left.x < right.x + right.width && left.x + left.width > right.x && left.y < right.y + right.height && left.y + left.height > right.y);
     const toast = box(document.querySelector("#toast"));
-    const header = box(document.querySelector(".topbar"));
-    const off = box([...document.querySelectorAll("button")].find((button) => /turn off/i.test(button.textContent || "")));
-    const favorites = box([...document.querySelectorAll("button, .usuals-title")].find((node) => /your favorites/i.test(node.textContent || "")));
-    return {
-      header: intersects(toast, header),
-      off: intersects(toast, off),
-      favorites: intersects(toast, favorites),
-      toast,
-      guideTop: off?.y ?? null,
-      placed: document.querySelector("#toast")?.getAttribute("data-toast-place") || "",
-      bottom: document.querySelector("#toast") ? getComputedStyle(document.querySelector("#toast")).bottom : "",
+    const targets = {
+      header: box(document.querySelector(".topbar")),
+      ask: box(document.querySelector("#ask-hint")),
+      favorites: box(document.querySelector("#usuals-toggle")),
+      lists: box(document.querySelector("#starter-lists")),
+      past: box(document.querySelector("#past-trips-home")),
+      aisle: box(document.querySelector("#browse-toggle")),
+      guide: box(document.querySelector("#gitter-guide")),
+      off: box([...document.querySelectorAll("button")].find((button) => /turn off/i.test(button.textContent || "")) || null),
+      dock: box(document.querySelector(".step-bar")),
+      count: box(document.querySelector("#list-bar")),
+      privacy: box(document.querySelector(".site-footer")),
     };
+    const hits = Object.fromEntries(Object.entries(targets).map(([name, rect]) => [name, intersects(toast, rect)]));
+    const aisleUnderGuide = intersects(targets.aisle, targets.guide);
+    const listsUnderHeader = Boolean(targets.lists && targets.header && targets.lists.top < targets.header.bottom - 1);
+    return { hits, aisleUnderGuide, listsUnderHeader, toast, targets, placed: document.querySelector("#toast")?.getAttribute("data-toast-place") || "" };
   });
-  expect(hit.header, JSON.stringify(hit)).toBe(false);
-  expect(hit.off, JSON.stringify(hit)).toBe(false);
-  expect(hit.favorites, JSON.stringify(hit)).toBe(false);
-  await page.screenshot({ path: "/opt/cursor/artifacts/complete-toast.png" });
+  const covered = Object.entries(hit.hits).filter(([, value]) => value).map(([name]) => name);
+  expect(covered, JSON.stringify(hit)).toEqual([]);
+  expect(hit.aisleUnderGuide, JSON.stringify(hit)).toBe(false);
+  expect(hit.listsUnderHeader, JSON.stringify(hit)).toBe(false);
+  await page.screenshot({ path: `/opt/cursor/artifacts/complete-toast-${size.width}x${size.height}.png` });
   await page.locator("#toast-action").click();
   await expect(page.locator("#toast")).toContainText("Trip restored.");
   await expect(page.locator("#bar-count")).not.toHaveText("0 items");
 });
+}
