@@ -72,3 +72,17 @@ export function outOfAreaMessage(value) {
   if (area.ok || area.reason !== "out_of_area") return "";
   return OUT_OF_AREA_MESSAGE;
 }
+
+/** Five-digit ZIP when it is in the service area, otherwise "". */
+export function catalogZip(value) {
+  const area = serviceAreaFor(value);
+  return area.ok ? area.zip : "";
+}
+
+/** Path plus zip=, or "" when the ZIP cannot see store prices. */
+export function withServiceZip(path, value) {
+  const zip = catalogZip(value);
+  if (!zip) return "";
+  const join = String(path).includes("?") ? "&" : "?";
+  return `${path}${join}zip=${encodeURIComponent(zip)}`;
+}

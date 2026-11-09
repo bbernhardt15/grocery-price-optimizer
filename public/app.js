@@ -38,7 +38,7 @@ import {
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
 import { ONBOARDING_KEY } from "./shopper/onboarding.js";
-import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, outOfAreaMessage } from "./shopper/serviceArea.js";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, catalogZip, outOfAreaMessage, withServiceZip } from "./shopper/serviceArea.js";
 import { getUserProfile, mergeProfiles, profileIsStored, saveUserProfile, shouldPromptProfile } from "./shopper/profile.js";
 import {
   defaultHeadcount,
@@ -2729,6 +2729,15 @@ function applyVariant(card, variantId) {
   syncCards();
 }
 
+function currentCatalogZip() {
+  return catalogZip(normalizeZip(zipEl?.value || localStorage.getItem(ZIP_KEY) || ""));
+}
+
+function pricedApi(path) {
+  const next = withServiceZip(path, currentCatalogZip());
+  return next ? apiUrl(next) : "";
+}
+
 function filterQuery() {
   const params = new URLSearchParams();
   if (activeDepartment !== "all") params.set("department", activeDepartment);
@@ -2738,8 +2747,8 @@ function filterQuery() {
   if ($("filter-sale").checked) params.set("onSale", "1");
   if ($("filter-budget").checked) params.set("storeBrand", "1");
   params.set("sort", sortEl.value || "relevance");
-  const zip = normalizeZip(zipEl.value);
-  if (ZIP_PATTERN.test(zip)) params.set("zip", zip.slice(0, 5));
+  const zip = currentCatalogZip();
+  if (zip) params.set("zip", zip);
   params.set("limit", "12");
   return params;
 }
@@ -2990,6 +2999,22 @@ async function loadPage(reset) {
   }
   showCatalogError("");
   const params = filterQuery();
+  if (!params.get("zip")) {
+    loading = false;
+    nextCursor = null;
+    if (reset && gridEl) {
+      const blocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+      const state = {
+        title: blocked ? "Not available here yet" : "Add a ZIP to see prices",
+        body: blocked || "Enter a ZIP so store prices can show up.",
+        action: "Change ZIP",
+        actionId: "change-zip",
+      };
+      gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "status");
+      if (resultCountEl) resultCountEl.textContent = state.title;
+    }
+    return;
+  }
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
     const response = await fetchWithTimeout(
@@ -3293,14 +3318,19 @@ async function loadSuggestions(text) {
     if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
   }, 200);
   try {
-    const response = await fetch(apiUrl(`/api/catalog/suggest?q=${encodeURIComponent(q)}`), { signal: controller.signal });
+    const priced = pricedApi(`/api/catalog/suggest?q=${encodeURIComponent(q)}`);
+    const response = await fetch(
+      priced || apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`),
+      { signal: controller.signal }
+    );
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
     const profile = getUserProfile(localStorage);
     const warning = exclusionWarning(profile, q);
     showProfileWarning(warning);
-    const matched = warning ? body.suggestions ?? [] : filterTiles(profile, body.suggestions ?? [], q);
+    const rows = Array.isArray(body) ? body : body.suggestions ?? [];
+    const matched = warning ? rows : filterTiles(profile, rows, q);
     suggestions = rankSearchResults(matched, searchRankContext(q));
     suggestionQuery = q;
     activeSuggest = -1;
@@ -4619,7 +4649,12 @@ async function fillMissingSuggestions() {
     const host = [...tripEl.querySelectorAll("[data-missing-suggest]")].find((node) => node.getAttribute("data-missing-suggest") === name);
     if (!host) continue;
     try {
-      const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`), {}, 4000);
+      const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`);
+      if (!browse) {
+        host.innerHTML = `<p class="muted">Add a ZIP to see store prices.</p>`;
+        continue;
+      }
+      const response = await fetchWithTimeout(fetch, browse, {}, 4000);
       const body = await response.json().catch(() => ({}));
       if (fillMissingSuggestions.generation !== generation || !host.isConnected) return;
       const ranked = rankSwapSuggestions(name, body.items || []);
@@ -5720,7 +5755,9 @@ async function hydrateSharedProducts() {
       const known = productsById.get(id);
       if (known?.offers?.length) return;
       try {
-        const response = await apiFetch(`/api/catalog/products/${encodeURIComponent(id)}`);
+        const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(id)}`);
+        if (!productUrl) return;
+        const response = await apiFetch(productUrl);
         if (!response.ok) return;
         const body = await response.json();
         if (!body.product?.id) return;
@@ -6175,7 +6212,9 @@ async function restoreList() {
         return;
       }
       try {
-        const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(id)}`));
+        const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(id)}`);
+        if (!productUrl) return;
+        const response = await fetch(productUrl);
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !body.product?.id) {
           if (row.name) rememberLocalRow(row);
@@ -6217,7 +6256,12 @@ async function addSample() {
     toast("This list is view-only.");
     return;
   }
-  const response = await fetch(apiUrl("/api/catalog/browse?limit=48"));
+  const sampleUrl = pricedApi("/api/catalog/browse?limit=48");
+  if (!sampleUrl) {
+    toast("Add a ZIP to see store prices.");
+    return;
+  }
+  const response = await fetch(sampleUrl);
   const body = await response.json();
   const wanted = [
     { name: "Bananas", brand: "Fresh" },
@@ -8820,7 +8864,9 @@ function lists() {
       addProduct,
       loadShelf: loadStarterShelf,
       searchTiles: async (query) => {
-        const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`), {}, PLAN_TIMEOUT_MS);
+        const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`);
+        if (!browse) return null;
+        const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
         for (const tile of body.items || []) rememberTile(tile);
@@ -8953,7 +8999,8 @@ async function openPreferenceChange(family) {
   const label = familyLabel(family) || "that item";
   let tiles = [];
   try {
-    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`));
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`);
+    const response = browse ? await fetch(browse) : null;
     const body = await response.json().catch(() => ({}));
     tiles = filterTiles(getUserProfile(localStorage), body.items || []);
     for (const tile of tiles) rememberTile(tile);
@@ -9005,7 +9052,9 @@ async function loadFamilyShelf(families) {
     const search = categorySearch(family) || family;
     if (seen.has(search)) continue;
     seen.add(search);
-    const response = await fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`), {}, PLAN_TIMEOUT_MS);
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
+    if (!browse) return flattenTiles([]);
+    const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
     const body = await response.json().catch(() => ({}));
     tiles = tiles.concat(body.items || []);
   }
@@ -9158,11 +9207,13 @@ async function loadStarterShelf(picks) {
     queries.push(name);
   }
   const pages = await Promise.all(
-    queries.slice(0, 12).map((name) =>
-      fetchWithTimeout(fetch, apiUrl(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`), {}, 4000)
+    queries.slice(0, 12).map((name) => {
+      const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`);
+      if (!browse) return Promise.resolve({});
+      return fetchWithTimeout(fetch, browse, {}, 4000)
         .then((response) => response.json().catch(() => ({})))
-        .catch(() => ({}))
-    )
+        .catch(() => ({}));
+    })
   );
   const tiles = pages.flatMap((body) => body.items || []);
   for (const tile of tiles) rememberTile(tile);
@@ -9211,7 +9262,9 @@ async function resolveUsual(row) {
   if (row.catalogId && productsById.get(row.catalogId)) return productsById.get(row.catalogId);
   if (row.catalogId && !String(row.catalogId).startsWith("custom:")) {
     try {
-      const response = await fetch(apiUrl(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`));
+      const productUrl = pricedApi(`/api/catalog/products/${encodeURIComponent(row.catalogId)}`);
+      if (!productUrl) return null;
+      const response = await fetch(productUrl);
       const body = await response.json().catch(() => ({}));
       if (response.ok && body.product?.id) {
         productsById.set(body.product.id, body.product);
@@ -9955,7 +10008,9 @@ profileUi = mountProfileOnboarding({
   },
   readLines: (lines) => postImport("/api/import/receipt", { lines }),
   loadStaple: async (search) => {
-    const response = await fetch(apiUrl(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`));
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
+    if (!browse) return [];
+    const response = await fetch(browse);
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return [];
     const want = familyFromQuery(search);

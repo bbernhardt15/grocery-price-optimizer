@@ -10,23 +10,12 @@ import { catalogCoverage } from "../catalog/coverage";
 import type { BrowseSort, SizeClass } from "../catalog/types";
 import { noteShopperZip } from "../ingest/runner";
 import { flippConsumerEnabled, listWeeklyAdBanners } from "../pricing/flipp/client";
-import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, serviceAreaFor } from "../serviceArea";
+import { requirePlanZip } from "../serviceArea";
 
 const router = Router();
 
 const SORTS = new Set<BrowseSort>(["relevance", "price", "unitPrice", "name", "onSale"]);
 const SIZE_CLASSES = new Set<SizeClass>(["any", "small", "standard", "bulk"]);
-
-function readZip(value: unknown): string | undefined | "invalid" {
-  if (value === undefined || value === "") {
-    return undefined;
-  }
-  const zip = String(value).trim();
-  if (!/^\d{5}(?:-\d{4})?$/.test(zip)) {
-    return "invalid";
-  }
-  return zip.slice(0, 5);
-}
 
 function readNumber(value: unknown): number | undefined {
   if (value === undefined || value === "") {
@@ -40,16 +29,17 @@ function flag(value: unknown): boolean {
   return value === true || value === "1" || value === "true" || value === "on";
 }
 
-/** A supplied ZIP that is outside the launch area cannot pull store prices. A missing ZIP stays the shelf. */
-function rejectOutOfAreaZip(zipCode: string | undefined, res: Response): boolean {
-  if (!zipCode) return false;
-  const area = serviceAreaFor(zipCode);
-  if (area.ok || area.reason !== "out_of_area") return false;
-  res.status(422).json({
-    error: OUT_OF_AREA_MESSAGE,
-    code: NOT_IN_SERVICE_AREA_CODE,
-  });
-  return true;
+/** Store prices, offers, and store status require an in-area ZIP. */
+function takeZip(value: unknown, res: Response): string | undefined {
+  const decision = requirePlanZip(value === "" ? undefined : value);
+  if (!decision.ok) {
+    res.status(decision.status).json({
+      error: decision.error,
+      ...(decision.status === 422 ? { code: decision.code } : {}),
+    });
+    return undefined;
+  }
+  return decision.zip;
 }
 
 const DEPT_COLORS: Record<string, string> = {
@@ -82,12 +72,8 @@ router.get("/catalog/departments", (_req, res) => {
 });
 
 router.get("/catalog/coverage", async (req, res) => {
-  const zipCode = readZip(req.query.zip ?? req.query.zipCode);
-  if (zipCode === "invalid") {
-    res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
-    return;
-  }
-  if (rejectOutOfAreaZip(zipCode, res)) return;
+  const zipCode = takeZip(req.query.zip ?? req.query.zipCode, res);
+  if (!zipCode) return;
   let weeklyAdBanners: Awaited<ReturnType<typeof listWeeklyAdBanners>> | undefined;
   let weeklyAdWarning: string | undefined;
   if (zipCode && flippConsumerEnabled()) {
@@ -129,6 +115,8 @@ router.get("/catalog/placeholder.svg", (req, res) => {
 });
 
 router.get("/catalog/suggest", async (req, res) => {
+  const zipCode = takeZip(req.query.zip ?? req.query.zipCode, res);
+  if (!zipCode) return;
   const query = String(req.query.q ?? req.query.query ?? "").trim();
   if (!query) {
     res.json({ suggestions: [] });
@@ -163,12 +151,8 @@ router.get("/catalog/suggest", async (req, res) => {
 });
 
 router.get("/catalog/browse", async (req, res) => {
-  const zipCode = readZip(req.query.zip ?? req.query.zipCode);
-  if (zipCode === "invalid") {
-    res.status(400).json({ error: "zipCode must be a 5-digit ZIP, optionally with a +4 extension." });
-    return;
-  }
-  if (rejectOutOfAreaZip(zipCode, res)) return;
+  const zipCode = takeZip(req.query.zip ?? req.query.zipCode, res);
+  if (!zipCode) return;
   if (zipCode) {
     void noteShopperZip(zipCode).catch(() => undefined);
   }
@@ -199,6 +183,8 @@ router.get("/catalog/browse", async (req, res) => {
 });
 
 router.get("/catalog/products/:id", async (req, res) => {
+  const zipCode = takeZip(req.query.zip ?? req.query.zipCode, res);
+  if (!zipCode) return;
   const product = await getBrowseProduct(req.params.id);
   if (!product) {
     res.status(404).json({ error: "Product not found in the catalog." });

@@ -66,17 +66,17 @@ app.get("/api", (_req, res) => {
     status: "ok",
     routes: {
       "GET /api/search-catalog":
-        "Accepts query and returns FatSecret catalog matches (id, name, brand).",
+        "Accepts query and returns name and brand only. No price, offer, or store.",
       "GET /api/catalog/browse":
-        "Browse the unified catalog by department, search, sort, and filters. Offers that share a UPC are one product. Products that share a brand and flavor are one tile, with pack, size, and container in variants[]. Weekly-ad rows appear for a ZIP when Flipp is enabled. Demo catalog otherwise.",
+        "Browse the unified catalog by department, search, sort, and filters. Requires zip or zipCode. Missing or malformed is 400. Outside the service area is 422 not_in_service_area. Offers that share a UPC are one product.",
       "GET /api/catalog/suggest":
-        "Typeahead over the cached and demo catalog, one row per product family. The id is the default variant. Does not call retailer APIs.",
+        "Typeahead with bestPrice and bestStore. Requires the same in-area ZIP as browse. Does not call retailer APIs.",
       "GET /api/catalog/departments":
         "Shared department tree.",
       "GET /api/catalog/coverage":
-        "Honest per-store catalog coverage (taxonomy sample, search-seeded, weekly ad, or demo).",
+        "Per-store catalog status. Requires an in-area ZIP. Missing or malformed is 400. Out of area is 422.",
       "GET /api/catalog/products/:id":
-        "One grouped product plus substitute suggestions for stores that do not carry its UPC.",
+        "One grouped product and its store offers. Requires the same in-area ZIP as browse.",
       "GET /api/admin/catalog/family-sample":
         "How master products group into families (brand + flavor). Reports the share that collapsed into a multi-size tile and a few example groups. Same admin token as status. Optional department, q, limit, and scan.",
       "GET /api/admin/catalog/status":
