@@ -105,7 +105,9 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
   await unlock(page);
   await reachReceipts(page);
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
-  await page.getByRole("button", { name: "Read my receipts" }).click();
+  const read = page.getByRole("button", { name: "Read my receipts" });
+  await expect(read).toBeEnabled();
+  await read.click();
   await expect(page.locator("[data-reading-screen], .read-live").first()).toBeVisible();
   await page.locator("#profile-back").click();
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toHaveCount(0);
