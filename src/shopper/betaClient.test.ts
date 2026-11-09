@@ -9,6 +9,7 @@ import {
   fetchInitWithDevice,
   installClientErrors,
   inviteScreenHtml,
+  feedbackScreenshotNote,
   feedbackSheetHtml,
   isShopperApi,
   reportClientFailure,
@@ -58,6 +59,18 @@ describe("beta client", () => {
     assert.equal(context.tab, "plan");
     assert.equal(context.timestamp, "2026-11-04T01:02:03.000Z");
     const body = feedbackBody({ rating: 4, message: "Nice", screen: "Review", context, deviceId: "device-beta-01" });
+    const sheet = feedbackSheetHtml();
+    assert.match(sheet, /id="beta-feedback-shots"/);
+    assert.match(sheet, /type="file"/);
+    assert.match(sheet, /accept="image\/\*"/);
+    assert.match(sheet, /class="beta-rating"/);
+    assert.equal(
+      feedbackScreenshotNote([
+        { name: "cart.png", type: "image/png", size: 12 },
+        { name: "list.png", type: "image/png", size: 12 },
+      ]),
+      "2 screenshots will be sent with this note: cart.png, list.png."
+    );
     assert.equal(JSON.stringify(body).includes("Secret"), false);
   });
 

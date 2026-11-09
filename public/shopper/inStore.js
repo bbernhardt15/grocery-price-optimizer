@@ -62,9 +62,11 @@ export function inStoreRoute(stores, checks = {}) {
       /** @type {Array<{ label: string, items: object[] }>} */
       const groups = [];
       if (known) {
-        const sorted = [...open].sort((a, b) => String(a.aisle || "zzz").localeCompare(String(b.aisle || "zzz"), undefined, { numeric: true }) || String(a.name || "").localeCompare(String(b.name || "")));
+        const sorted = [...open].sort((a, b) => departmentLabel(a).localeCompare(departmentLabel(b)) || String(a.aisle || "zzz").localeCompare(String(b.aisle || "zzz"), undefined, { numeric: true }) || String(a.name || "").localeCompare(String(b.name || "")));
         for (const item of sorted) {
-          const label = aisleIsKnown(item) ? String(item.aisle || "Aisle") : departmentLabel(item);
+          const dept = departmentLabel(item);
+          const aisle = aisleIsKnown(item) ? String(item.aisle || "").trim() : "";
+          const label = dept !== "Other" && aisle ? `${dept} · ${aisle}` : aisle || dept;
           const last = groups[groups.length - 1];
           if (last && last.label === label) last.items.push(item);
           else groups.push({ label, items: [item] });

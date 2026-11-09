@@ -4,6 +4,7 @@ import {
   basketTeaser,
   foundLabel,
   readCardHtml,
+  readingPhaseText,
   storeChoiceHtml,
 } from "../../public/shopper/intakePresent.js";
 import { learnedSummaryHtml } from "../../public/shopper/receiptCopy.js";
@@ -37,6 +38,12 @@ describe("intake presentation", () => {
       items: ["Large eggs"],
     });
     assert.match(html, /<progress max="1" value="0.4"><\/progress>/);
+    assert.match(html, /read-cart-track/);
+    assert.equal(readingPhaseText({ status: "reading" }, 1), "Looking for item names…");
+    assert.equal(readingPhaseText({ status: "reading" }, 2), "Working through the receipt…");
+    assert.equal(readingPhaseText({ status: "reading" }, 8), "Almost through the receipt…");
+    assert.equal(readingPhaseText({ message: "Still reading…" }, 3), "Almost through the receipt…");
+    assert.equal(/still reading/i.test(readingPhaseText({ message: "Still reading…" }, 4)), false);
     const reading = readCardHtml({
       index: 2,
       name: "kroger.pdf",

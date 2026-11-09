@@ -76,6 +76,7 @@ dialog.beta-gate::backdrop {
 }
 
 .beta-ratings label {
+  position: relative;
   flex: 1;
   min-height: 48px;
   display: grid;
@@ -83,12 +84,34 @@ dialog.beta-gate::backdrop {
   border-radius: 14px;
   border: 1px solid var(--line, #e4d9c8);
   font-weight: 750;
+  cursor: pointer;
 }
 
 .beta-ratings input {
   position: absolute;
-  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
   pointer-events: none;
+}
+
+.beta-shot-preview {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.beta-shot-preview img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e4d9c8);
+  background: var(--bg, #f4efe6);
 }
 
 .beta-ratings label:has(input:checked) {
@@ -112,8 +135,10 @@ dialog.beta-gate::backdrop {
 
 .beta-legal {
   display: flex;
-  gap: 14px;
-  margin-top: 18px;
+  gap: 16px;
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line, #e7e5e4);
 }
 
 body.beta-gated .shell,

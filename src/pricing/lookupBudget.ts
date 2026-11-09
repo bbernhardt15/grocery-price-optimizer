@@ -136,7 +136,35 @@ export async function runPricedLookup<T>(input: {
   return { status: "failed", kind, message, error: lastError };
 }
 
-export function couldntCheckNote(storeName: string): string {
+export function couldntCheckNote(storeName: string, kind?: string): string {
   const name = String(storeName || "This store").trim() || "This store";
+  if (kind === "rate_limit") return `${name} asked us to slow down. Retry in a moment.`;
+  if (kind === "timeout") return `${name} ran out of time on this check. Retry checks the lines still waiting.`;
   return `${name} couldn't check right now, retry`;
+}
+
+/** One line from each store before the next line, so a slow first store cannot spend the whole budget. */
+export function interleaveByStore<T extends { storeName: string }>(jobs: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  const order: string[] = [];
+  for (const job of jobs) {
+    const name = String(job?.storeName || "");
+    if (!groups.has(name)) {
+      groups.set(name, []);
+      order.push(name);
+    }
+    groups.get(name)?.push(job);
+  }
+  const out: T[] = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const name of order) {
+      const next = groups.get(name)?.shift();
+      if (!next) continue;
+      out.push(next);
+      added = true;
+    }
+  }
+  return out;
 }

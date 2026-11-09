@@ -212,6 +212,95 @@ describe("beta tester routes", { concurrency: false }, () => {
     assert.ok(csv.indexOf("Review was clear") < csv.indexOf("Add was fine"));
   });
 
+  it("stores a feedback screenshot and serves the same bytes to an admin", async () => {
+    process.env.GG_ADMIN_TOKEN = "beta-admin";
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64"
+    );
+    const sent = await post(
+      "/api/beta/feedback",
+      {
+        rating: 4,
+        message: "Cart popup",
+        deviceId: DEVICE,
+        shots: [{ name: "cart.png", mimeType: "image/png", data: png.toString("base64") }],
+      },
+      { "x-device-id": DEVICE }
+    );
+    assert.equal(sent.status, 201);
+    const listed = await fetch(`${origin}/api/admin/beta/feedback`, { headers: { authorization: "Bearer beta-admin" } });
+    const body = (await listed.json()) as { feedback: Array<{ id: string; message: string; shots: Array<{ byteLength: number; mimeType: string }> }> };
+    assert.equal(body.feedback[0].message, "Cart popup");
+    assert.equal(body.feedback[0].shots[0].mimeType, "image/png");
+    assert.equal(body.feedback[0].shots[0].byteLength, png.length);
+    assert.equal(JSON.stringify(body).includes(png.toString("base64")), false);
+    const image = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`, {
+      headers: { authorization: "Bearer beta-admin" },
+    });
+    assert.equal(image.status, 200);
+    const missingShot = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/3`, {
+      headers: { authorization: "Bearer beta-admin" },
+    });
+    assert.equal(missingShot.status, 404);
+    assert.equal(image.headers.get("content-type"), "image/png");
+    assert.equal(Buffer.from(await image.arrayBuffer()).equals(png), true);
+    const fake = await post(
+      "/api/beta/feedback",
+      {
+        rating: 4,
+        message: "Nope",
+        deviceId: OTHER,
+        shots: [{ name: "note.png", mimeType: "image/png", data: Buffer.from("not-a-real-image").toString("base64") }],
+      },
+      { "x-device-id": OTHER }
+    );
+    assert.equal(fake.status, 400);
+    const over = Buffer.alloc(1_200_001, 7);
+    over[0] = 0x89;
+    over[1] = 0x50;
+    over[2] = 0x4e;
+    over[3] = 0x47;
+    const tooBig = await post(
+      "/api/beta/feedback",
+      {
+        rating: 4,
+        message: "Too big",
+        deviceId: THIRD,
+        shots: [{ name: "big.png", mimeType: "image/png", data: over.toString("base64") }],
+      },
+      { "x-device-id": THIRD }
+    );
+    assert.equal(tooBig.status, 400);
+    const open = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`);
+    assert.equal(open.status, 401);
+    const wrong = await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`, {
+      headers: { authorization: "Bearer not-the-admin" },
+    });
+    assert.equal(wrong.status, 401);
+    const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+    const other = await post(
+      "/api/beta/feedback",
+      {
+        rating: 2,
+        message: "Other note",
+        deviceId: OTHER,
+        shots: [{ name: "other.gif", mimeType: "image/gif", data: gif.toString("base64") }],
+      },
+      { "x-device-id": OTHER }
+    );
+    assert.equal(other.status, 201);
+    const again = await fetch(`${origin}/api/admin/beta/feedback`, { headers: { authorization: "Bearer beta-admin" } });
+    const rows = ((await again.json()) as { feedback: Array<{ id: string; message: string }> }).feedback;
+    const otherNote = rows.find((row) => row.message === "Other note");
+    const crossed = await fetch(`${origin}/api/admin/beta/feedback/${otherNote?.id}/shots/0`, {
+      headers: { authorization: "Bearer beta-admin" },
+    });
+    assert.equal(crossed.status, 200);
+    assert.equal(Buffer.from(await crossed.arrayBuffer()).equals(png), false);
+    assert.equal(Buffer.from(await (await fetch(`${origin}/api/admin/beta/feedback/${body.feedback[0].id}/shots/0`, { headers: { authorization: "Bearer beta-admin" } })).arrayBuffer()).equals(gif), false);
+  });
+
   it("rejects receipt contents, a missing device, and a burst of notes", async () => {
     const anonymous = await post("/api/beta/feedback", { rating: 4, message: "Hello" });
     assert.equal(anonymous.status, 401);

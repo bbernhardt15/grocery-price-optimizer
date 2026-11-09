@@ -601,13 +601,13 @@ export function mountImport(deps) {
           ${sizes}
           <div class="import-entry-row">
             <label class="import-check"><input type="checkbox" data-accept="${escapeHtml(item.key)}" ${item.accepted ? "checked" : ""} /> Add</label>
-            <button type="button" class="text-btn" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(title)}">×</button>
             <div class="import-stepper">
               <button type="button" data-qty="${escapeHtml(item.key)}" data-delta="-1" aria-label="Decrease ${escapeHtml(title)}">−</button>
               <output>${item.quantity}</output>
               <button type="button" data-qty="${escapeHtml(item.key)}" data-delta="1" aria-label="Increase ${escapeHtml(title)}">+</button>
             </div>
             ${change}
+            <button type="button" class="text-btn import-remove" data-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(title)}">Remove</button>
           </div>
         </li>`);
     }
@@ -617,10 +617,12 @@ export function mountImport(deps) {
     const missingHtml = missingCards.join("");
     reviewHeading();
     reviewHost.innerHTML = `
+      <div class="import-review-scroll">
       ${reviewLead()}
       ${foundHtml ? `<ul class="import-review">${foundHtml}</ul>` : ""}
       ${missingNote}
       ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
+      </div>
       <label class="import-save"><input type="checkbox" id="import-save" /> <span>Remember these items on this phone.</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
@@ -1137,8 +1139,13 @@ export function mountImport(deps) {
   });
 
   reviewHost.addEventListener("click", (event) => {
-    const target = event.target.closest("button, [data-pick-search]");
+    const origin = event.target instanceof Element ? event.target : event.target?.parentElement;
+    const target = origin?.closest?.("button, [data-pick-search]");
     if (!target || !review) return;
+    if (target.dataset.importUndo) {
+      restoreDropped();
+      return;
+    }
     const key =
       target.dataset.accept ||
       target.dataset.qty ||
@@ -1247,12 +1254,32 @@ export function mountImport(deps) {
     }
   });
 
+  let droppedReview = null;
+  function restoreDropped() {
+    if (!droppedReview || !review) return;
+    review.items = droppedReview.items;
+    review.total = droppedReview.total;
+    review.found = droppedReview.found;
+    droppedReview = null;
+    renderReview();
+  }
   function dropItem(item) {
+    droppedReview = {
+      items: (review.items || []).slice(),
+      total: review.total,
+      found: review.found,
+    };
     review.items = (review.items || []).filter((row) => row.key !== item.key);
     review.total = review.items.length;
     review.found = review.items.filter((row) => row.status !== "missing").length;
     if (!review.items.length) setStatus("Nothing left to add.", "error");
     renderReview();
+    const name = item.raw || item.name || "that item";
+    reviewHost.insertAdjacentHTML(
+      "afterbegin",
+      `<p class="import-undo" role="status">Removed ${escapeHtml(name)}. <button type="button" data-import-undo="1">Undo</button></p>`
+    );
+    window.setTimeout(() => reviewHost.querySelector(".import-undo")?.remove(), 4500);
   }
 
   async function searchItem(item, query) {

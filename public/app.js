@@ -102,6 +102,7 @@ import {
 import { dedupeReviewLines } from "./shopper/reviewList.js";
 import { missingAccordionHtml, rankSwapSuggestions } from "./shopper/reviewMissing.js";
 import { customizeRowsHtml } from "./shopper/reviewCustomize.js";
+import { placePickedLine } from "./shopper/pickedCart.js";
 import { reviewCheckoutLabel, reviewStoreCardHtml, withCheckoutLabel } from "./shopper/reviewStoreCard.js";
 import { planStatusHtml, planStatusModel } from "./shopper/reviewProgress.js";
 import {
@@ -122,6 +123,7 @@ import {
   readCoupons,
   removeCoupon,
   saleBadgeMarkup,
+  couponDraftFields,
   couponLineLabel,
   shopCouponHint,
   storeCouponMarkup,
@@ -172,9 +174,9 @@ import { rankSearchResults } from "./shopper/searchRank.js";
 import { completionHook, finishCheckedOut, sentItemsHtml } from "./shopper/krogerReady.js";
 import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreList } from "./shopper/inStoreShare.js";
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
-import { groupListEntries } from "./shopper/listSections.js";
+import { groupListEntries, sectionForEntry } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
-import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
+import { REVIEW_FAILED_STATUS, REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, REVIEW_REFRESH_TIMEOUT_STATUS, reviewCardMinPx, reviewGaveUpHtml, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan, storeLineLabel } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
@@ -809,6 +811,91 @@ function parkToast() {
   toastEl.dataset.place = "page";
 }
 
+function clearToastOffset() {
+  if (!toastEl) return;
+  toastEl.style.top = "";
+  toastEl.style.bottom = "";
+  toastEl.style.left = "";
+  toastEl.style.right = "";
+  toastEl.style.width = "";
+  toastEl.style.maxWidth = "";
+  toastEl.style.transform = "";
+}
+
+function releaseToastClearance() {
+  document.body.removeAttribute("data-toast-clear");
+  document.getElementById("shelf-entry")?.removeAttribute("data-toast-hide");
+  const guide = document.getElementById("gitter-guide");
+  if (guide) {
+    guide.style.bottom = "";
+    guide.style.top = "";
+    guide.style.maxHeight = "";
+    guide.style.minHeight = "";
+    guide.removeAttribute("data-guide-scroll");
+  }
+  clearToastOffset();
+}
+
+function placePageToast() {
+  if (!toastEl || toastEl.dataset.place === "sheet") {
+    releaseToastClearance();
+    return;
+  }
+  const guide = document.getElementById("gitter-guide");
+  const guideBox = guide instanceof HTMLElement && !guide.hidden ? guide.getBoundingClientRect() : null;
+  const guideOpen = Boolean(guideBox && guideBox.height > 24);
+  const browse = document.getElementById("browse");
+  const onAdd = document.body.dataset.step === "add" && browse instanceof HTMLElement;
+  if (!guideOpen || !onAdd) {
+    releaseToastClearance();
+    if (!guideOpen) {
+      toastEl.dataset.toastPlace = toastEl.dataset.place || "page";
+      return;
+    }
+    const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
+    toastEl.style.top = "auto";
+    toastEl.style.left = "50%";
+    toastEl.style.right = "auto";
+    toastEl.style.width = "min(28rem, calc(100% - 24px))";
+    toastEl.style.maxWidth = "min(28rem, calc(100% - 24px))";
+    toastEl.style.transform = "translateX(-50%)";
+    toastEl.style.bottom = `${gap}px`;
+    toastEl.dataset.toastPlace = "above-guide";
+    return;
+  }
+  const shelf = document.getElementById("shelf-entry");
+  if (shelf && shelf.getBoundingClientRect().height < 1) shelf.dataset.toastHide = "1";
+  document.body.dataset.toastClear = "1";
+  if (toastEl.parentElement !== browse.parentElement || toastEl.previousElementSibling !== browse) {
+    browse.insertAdjacentElement("afterend", toastEl);
+  }
+  clearToastOffset();
+  toastEl.dataset.toastPlace = "after-aisle";
+  const toastBox = toastEl.getBoundingClientRect();
+  const nextGuide = guide.getBoundingClientRect();
+  const dockBox = document.getElementById("bottom-dock")?.getBoundingClientRect();
+  const overlap = Math.ceil(toastBox.bottom + 4 - nextGuide.top);
+  if (overlap > 0) {
+    const room = dockBox ? Math.floor(dockBox.top - nextGuide.bottom - 8) : overlap;
+    const computed = parseFloat(getComputedStyle(guide).bottom) || 0;
+    const shift = Math.min(overlap, Math.max(0, room));
+    if (shift > 0) guide.style.bottom = `${Math.max(0, computed - shift)}px`;
+  }
+  const placed = toastEl.getBoundingClientRect();
+  const aisle = document.getElementById("browse-toggle")?.getBoundingClientRect();
+  const guideNow = guide.getBoundingClientRect();
+  const blockBottom = Math.max(placed.bottom, aisle?.bottom || 0);
+  const stillCovered = Math.ceil(blockBottom + 4 - guideNow.top);
+  if (stillCovered > 1) {
+    const dockTop = document.getElementById("bottom-dock")?.getBoundingClientRect().top ?? window.innerHeight;
+    guide.style.top = `${Math.ceil(blockBottom + 4)}px`;
+    guide.style.bottom = `${Math.max(8, Math.round(window.innerHeight - dockTop + 8))}px`;
+    guide.style.maxHeight = "none";
+    guide.style.minHeight = "0";
+    guide.dataset.guideScroll = "1";
+  }
+}
+
 function toast(message, durationMs = 1600) {
   parkToast();
   const text = $("toast-text");
@@ -820,8 +907,20 @@ function toast(message, durationMs = 1600) {
     action.onclick = null;
   }
   toastEl.classList.add("show");
+  placePageToast();
+  const started = performance.now();
+  const followGuide = () => {
+    if (!toastEl.classList.contains("show")) return;
+    placePageToast();
+    if (performance.now() - started < 1000) requestAnimationFrame(followGuide);
+  };
+  requestAnimationFrame(followGuide);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
+  toastTimer = window.setTimeout(() => {
+    toastEl.classList.remove("show");
+    parkToast();
+    releaseToastClearance();
+  }, durationMs);
 }
 
 function toastAction(message, label, onClick, durationMs = 4500) {
@@ -1092,7 +1191,7 @@ function finishCurrentTrip() {
   paintTrip();
   renderShop();
   showStep("add", "user");
-  toastAction("Trip saved to Past trips.", "Undo", () => {
+  toastAction("Saved this trip to Past trips.", "Undo", () => {
     guide?.clearTrip?.();
     clearCompletedTrip(localStorage);
     for (const [id, entry] of snapshot.entries) {
@@ -2695,6 +2794,7 @@ function cardHtml(tile) {
         ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
         <h3>${escapeHtml(title)}</h3>
         <p class="price" data-price>${escapeHtml(priceText(selected))}</p>
+        ${entry ? `<p class="on-list" role="status">On your list.</p>` : ""}
         <div class="card-actions">
           <label class="check card-add">
             <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
@@ -2778,6 +2878,7 @@ function bindKeyboardInset() {
     const next = `${insets.keyboard}|${insets.toolbar}|${viewport ? Math.round(viewport.height) : 0}`;
     if (next === last) return;
     last = next;
+    document.documentElement.dataset.keyboard = insets.keyboard > 80 ? "1" : "0";
     document.documentElement.style.setProperty("--keyboard", `${insets.keyboard}px`);
     document.documentElement.style.setProperty("--browser-bottom", `${insets.toolbar}px`);
     if (viewport) document.documentElement.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
@@ -2835,6 +2936,8 @@ function searchRankContext(text) {
 }
 
 let catalogGeneration = 0;
+let catalogAbort = null;
+const AISLE_TIMEOUT_MS = 12000;
 
 function discontinuedTitle(product) {
   const text = [product?.name, product?.familyName, product?.catalogName, product?.brand].filter(Boolean).join(" ");
@@ -2844,6 +2947,9 @@ function discontinuedTitle(product) {
 async function loadPage(reset) {
   if (loading && !reset) return;
   if (!reset && !nextCursor) return;
+  if (reset) catalogAbort?.abort();
+  const controller = reset ? new AbortController() : null;
+  if (controller) catalogAbort = controller;
   const generation = (catalogGeneration += 1);
   const requestedDepartment = activeDepartment;
   const requestedQuery = query;
@@ -2856,7 +2962,12 @@ async function loadPage(reset) {
   const params = filterQuery();
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
-    const response = await fetch(apiUrl(`/api/catalog/browse?${params.toString()}`));
+    const response = await fetchWithTimeout(
+      fetch,
+      apiUrl(`/api/catalog/browse?${params.toString()}`),
+      controller ? { signal: controller.signal } : {},
+      AISLE_TIMEOUT_MS
+    );
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Browse failed (${response.status})`);
     if (generation !== catalogGeneration || requestedDepartment !== activeDepartment || requestedQuery !== query) return;
@@ -2911,6 +3022,12 @@ async function loadPage(reset) {
     }
   } catch (error) {
     if (generation !== catalogGeneration) return;
+    if (reset && planTimedOut(error) && catalogAbort === controller) {
+      showCatalogError("");
+      gridEl.innerHTML = `<div class="empty-state" role="alert"><h3>This aisle is taking a while</h3><p>The catalog didn't answer. Nothing new was added.</p><button type="button" class="primary" data-empty-action="retry-aisle">Try this aisle again</button></div>`;
+      if (resultCountEl) resultCountEl.textContent = "This aisle is taking a while";
+      return;
+    }
     const kind = networkKind(error, navigator.onLine);
     if (reset && kind) {
       showCatalogError("");
@@ -2955,11 +3072,10 @@ function selectDepartment(id) {
   window.addEventListener("touchstart", releaseShelfHold, { capture: true, passive: true, once: true });
   window.addEventListener("wheel", releaseShelfHold, { capture: true, passive: true, once: true });
   window.addEventListener("keydown", releaseShelfHold, { capture: true, once: true });
+  window.scrollTo(0, 0);
+  shelfHoldScroll = false;
   if (gridEl) {
-    const top = gridEl.getBoundingClientRect().top + window.scrollY;
-    const visual = gridEl.getBoundingClientRect().height;
-    const hold = window.scrollY > 80 ? Math.ceil(window.scrollY + window.innerHeight - top + 24) : Math.min(Math.max(visual, 1), 720);
-    gridEl.style.minHeight = `${Math.max(1, hold)}px`;
+    gridEl.style.minHeight = "";
     gridEl.innerHTML = `<p class="shelf-loading" role="status">Loading this aisle…</p>`;
     if (resultCountEl) resultCountEl.textContent = "Loading…";
   }
@@ -3194,7 +3310,11 @@ function openFilters(open) {
   $("filters-open").setAttribute("aria-expanded", String(open));
   document.body.dataset.refine = open ? "1" : "";
   paintRefine();
-  if (open) $("refine-title")?.focus();
+  if (open) {
+    const panel = $("filters");
+    if (panel) panel.scrollTop = 0;
+    $("refine-title")?.focus();
+  }
 }
 
 function openProduct(product) {
@@ -3654,6 +3774,13 @@ function addOwnCoupon(button) {
   const error = form?.querySelector("[data-coupon-error]");
   const line = form?.querySelector("[data-coupon-line]");
   const selected = line?.selectedOptions?.[0];
+  if (form?.dataset.couponHold === "store") {
+    if (error) {
+      error.hidden = false;
+      error.textContent = "This coupon is for a different store, so it is not applied here.";
+    }
+    return;
+  }
   const parsed = parseCouponForm({
     storeName: form?.dataset.couponStore || "",
     lineId: line?.value || "",
@@ -3661,6 +3788,10 @@ function addOwnCoupon(button) {
     kind: form?.querySelector("[data-coupon-kind]")?.value,
     amount: form?.querySelector("[data-coupon-amount]")?.value,
     expiresOn: form?.querySelector("[data-coupon-expires]")?.value,
+    minQuantity: form?.querySelector("[data-coupon-min-qty]")?.value,
+    minSpend: form?.querySelector("[data-coupon-min-spend]")?.value,
+    conditions: form?.querySelector("[data-coupon-conditions]")?.value,
+    source: form?.querySelector("[data-coupon-source]")?.value,
   });
   if (!parsed.ok) {
     if (error) {
@@ -3988,8 +4119,25 @@ function settleEntryScroll(extra = false) {
   scrollPageTop();
 }
 
+function reviewListLabels() {
+  const names = [];
+  for (const entry of list.values()) {
+    const product = entry?.product || {};
+    const label = String(product.familyName || product.catalogName || product.name || entry?.name || "").replace(/\s+/g, " ").trim();
+    if (label) names.push(label);
+  }
+  return names;
+}
+
 function paintReviewLoading(status) {
   if (!tripEl || flowStep !== "plan") return;
+  if (status === REVIEW_GAVE_UP_STATUS || status === REVIEW_FAILED_STATUS) {
+    clearReviewRefresh();
+    tripEl.innerHTML = `${krogerBannerHtml()}${reviewGaveUpHtml(reviewListLabels(), status)}`;
+    paintPlanBar();
+    settleEntryScroll();
+    return;
+  }
   if (holdVisibleReview(status)) return;
   const existing = tripEl.querySelector("[data-review-stable='loading']");
   if (existing) {
@@ -4094,6 +4242,7 @@ function selectReviewMode(mode) {
 }
 
 let refreshAnchorWatch = 0;
+let refreshHeldScroll = null;
 let reviewUserScroll = null;
 let reviewScrollWriting = false;
 
@@ -4124,6 +4273,7 @@ function rememberReviewUserScroll() {
  */
 function beginRefreshScrollGuard(startY) {
   const watchId = ++refreshAnchorWatch;
+  refreshHeldScroll = startY;
   let handedToUser = false;
   const detach = () => {
     window.removeEventListener("wheel", onUser, true);
@@ -4135,6 +4285,7 @@ function beginRefreshScrollGuard(startY) {
   const finishUser = () => {
     if (handedToUser || watchId !== refreshAnchorWatch) return;
     handedToUser = true;
+    refreshHeldScroll = null;
     refreshAnchorWatch += 1;
     detach();
   };
@@ -4288,11 +4439,13 @@ function paintTrip() {
   }
   const checksOpen = !savingsClaimAllowed(lastOptimize);
   if (checksOpen) {
-    card.title = "Checking store prices";
+    const pending = Array.isArray(lastOptimize?.pendingStores) ? lastOptimize.pendingStores.filter(Boolean) : [];
+    const waiting = pending.length > 0 || !(lastOptimize?.pricingByStore || []).length;
+    card.title = waiting ? "Checking store prices" : "Savings aren't available yet";
     card.lines = [];
-    card.saved = "";
+    card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
     card.note = "";
-  } else if (plans) card.saved = savingsVersusBaseline(plans);
+  } else if (plans && !/^You save /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -4373,7 +4526,7 @@ function paintTrip() {
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${/^You save /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
       ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -4974,10 +5127,10 @@ function pinPreferredStores(payload) {
 
 function commitDisplayedPlan(payload, { zip } = {}) {
   if (!payload) return false;
-  quietRetryAttempt = 0;
   pinPreferredStores(payload);
   renderTrip(payload, { keepEdits: true, force: true });
   if (!planReady(lastOptimize)) return false;
+  quietRetryAttempt = 0;
   writePlanCache(localStorage, {
     signature: listSignature(),
     zip,
@@ -4992,7 +5145,11 @@ function listPlanFallback() {
   return listDisplayPlan([...list.values()], selectedStoreNames());
 }
 
-async function planTrip({ stay = false, trigger = null, force = false } = {}) {
+async function planTrip({ stay = false, trigger = null, force = false, quiet = false } = {}) {
+  if (!quiet) quietRetryAttempt = 0;
+  if (stay && document.activeElement instanceof HTMLElement && document.activeElement.id === "plan-refresh") {
+    document.activeElement.blur();
+  }
   const anchorScroll = stay && force ? window.scrollY : null;
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
@@ -5102,6 +5259,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     });
   let result = "ok";
   let streamedPlan = null;
+  let timeoutNote = "";
   try {
     const response = await fetchWithTimeout(
       fetch,
@@ -5130,7 +5288,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
         streamedPlan = shown;
-        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell], [data-review-stable]")) {
+        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell]")) {
           holdVisibleReview("Checking store prices");
           return;
         }
@@ -5191,13 +5349,22 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     }
     const timedOut = planTimedOut(error);
     const recovered = chooseDisplayedPlan(planReady(lastOptimize) ? lastOptimize : null, streamedPlan);
-    if (recovered && commitDisplayedPlan(recovered, { zip })) {
-      if (timedOut) toast(PLAN_PARTIAL_NOTE);
+    if (recovered && planIsShowable(recovered) && tripEl?.querySelector("[data-review-shell]")) {
+      if (timedOut) timeoutNote = REVIEW_REFRESH_TIMEOUT_STATUS;
       rememberListAsUsuals();
       return "ok";
     }
+    if (recovered && planIsShowable(recovered) && commitDisplayedPlan(recovered, { zip })) {
+      if (timedOut) timeoutNote = REVIEW_REFRESH_TIMEOUT_STATUS;
+      rememberListAsUsuals();
+      return "ok";
+    }
+    if (timedOut) {
+      planning = false;
+      paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+      return "fail";
+    }
     if (commitDisplayedPlan(listPlanFallback(), { zip })) {
-      if (timedOut) toast(PLAN_PARTIAL_NOTE);
       rememberListAsUsuals();
       return "ok";
     }
@@ -5223,7 +5390,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       }, retry.delayMs || 1600);
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     } else if (!heldError && flowStep === "plan" && !planReady(lastOptimize)) {
-      paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+      paintReviewLoading(timedOut ? REVIEW_GAVE_UP_STATUS : REVIEW_FAILED_STATUS);
     } else if (!heldError && !lastOptimize && !list.size) {
       const state = emptyState(kind || "network");
       tripEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
@@ -5242,6 +5409,10 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       planTicker = 0;
       const statusBlock = document.getElementById("plan-status-block");
       if (statusBlock) statusBlock.remove();
+      if (timeoutNote && tripEl?.querySelector("[data-review-shell]")) {
+        holdVisibleReview(timeoutNote);
+        if (refreshHeldScroll != null) writeReviewScroll(refreshHeldScroll);
+      }
       planAbort = null;
       planBtn.disabled = list.size === 0;
       planBtn.textContent = "Review the split";
@@ -6638,6 +6809,9 @@ searchEl.addEventListener("input", () => {
 });
 
 searchEl.addEventListener("focus", () => {
+  if (document.documentElement.dataset.keyboard === "1") {
+    requestAnimationFrame(() => searchEl.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  }
   if (!searchEl.value.trim()) showSuggestStatus("Type a product, or a list like bread, milk, eggs.");
   else if (askIntent(searchEl.value) === "list" || quietMeal(searchEl.value)) showListAsk(searchEl.value);
   else if (suggestions.length > 0 && suggestionQuery === searchEl.value.trim()) renderSuggestionRows(suggestionQuery);
@@ -6873,7 +7047,7 @@ $("menu-home")?.addEventListener("click", () => {
 });
 $("menu-brands")?.addEventListener("click", () => {
   closeDrawer();
-  profileUi?.openEditor?.();
+  profileUi?.openFavorites?.();
 });
 $("menu-favorites")?.addEventListener("click", () => {
   openFavorites();
@@ -6900,6 +7074,72 @@ document.addEventListener("change", (event) => {
   }
   const family = target.getAttribute("data-fav-family");
   if (family) saveFavoriteVariant(family, target.value);
+  if (target.matches("[data-coupon-shot]")) {
+    const form = target.closest("form");
+    const note = form?.querySelector("[data-coupon-shot-note]");
+    const file = target.files?.[0];
+    if (!file || !form) {
+      if (note) note.hidden = true;
+      return;
+    }
+    if (note) {
+      note.hidden = false;
+      note.textContent = "Reading the coupon…";
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const data = String(reader.result || "");
+      const imageBase64 = data.includes(",") ? data.split(",")[1] : "";
+      if (!imageBase64) {
+        if (note) note.textContent = "That screenshot could not be read. Type the amount you can see.";
+        return;
+      }
+      try {
+        const response = await fetch(apiUrl("/api/import/coupon"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ imageBase64, mimeType: file.type || "image/jpeg" }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (note) note.textContent = body.error || "Photo reading isn't available. Type the amount you can see.";
+          return;
+        }
+        const fields = couponDraftFields(body.coupon);
+        const formStore = String(form.dataset.couponStore || "");
+        if (fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase()) {
+          form.dataset.couponHold = "store";
+          if (note) note.textContent = `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`;
+          return;
+        }
+        form.dataset.couponHold = "";
+        const line = form.querySelector("[data-coupon-line]");
+        if (line instanceof HTMLSelectElement && fields.itemName) {
+          const wanted = fields.itemName.toLowerCase();
+          const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
+          if (match) line.value = match.value;
+        }
+        const amount = form.querySelector("[data-coupon-amount]");
+        const kind = form.querySelector("[data-coupon-kind]");
+        const expires = form.querySelector("[data-coupon-expires]");
+        if (amount instanceof HTMLInputElement && fields.amount) amount.value = fields.amount;
+        if (kind instanceof HTMLSelectElement && fields.kind) kind.value = fields.kind;
+        if (expires instanceof HTMLInputElement && fields.expiresOn) expires.value = fields.expiresOn;
+        const minQty = form.querySelector("[data-coupon-min-qty]");
+        const minSpend = form.querySelector("[data-coupon-min-spend]");
+        const conditions = form.querySelector("[data-coupon-conditions]");
+        const source = form.querySelector("[data-coupon-source]");
+        if (minQty instanceof HTMLInputElement) minQty.value = fields.minQuantity ? String(fields.minQuantity) : "";
+        if (minSpend instanceof HTMLInputElement) minSpend.value = fields.minSpend ? String(fields.minSpend) : "";
+        if (conditions instanceof HTMLInputElement) conditions.value = fields.conditions || "";
+        if (source instanceof HTMLInputElement) source.value = "screenshot";
+        if (note) note.textContent = fields.review;
+      } catch {
+        if (note) note.textContent = "Photo reading didn't answer. Type the amount you can see.";
+      }
+    };
+    reader.readAsDataURL(file);
+  }
 });
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
@@ -6924,6 +7164,7 @@ document.addEventListener("click", (event) => {
       const name = brand.getAttribute("data-fav-brand") || "";
       const on = brand.getAttribute("aria-pressed") === "true";
       saveFavoriteChoice(family, { brand: on ? "" : name, variant: current.variant || "" });
+      toast(on ? "Cleared that brand." : `Saved ${name}.`);
     } else {
       const id = flavor.getAttribute("data-fav-flavor") || "";
       const attributes = new Set(current.attributes || []);
@@ -6935,6 +7176,7 @@ document.addEventListener("click", (event) => {
       const typedIsChip = flavorLabels.has(typed.toLowerCase());
       const variant = attributes.has(id) ? (typed && !typedIsChip ? typed : label) : typedIsChip ? "" : typed;
       saveFavoriteChoice(family, { attributes: [...attributes], variant, brand: current.brand || "" });
+      toast(attributes.has(id) ? `Saved ${label}.` : "Cleared that flavor.");
     }
     paintFavorites();
     return;
@@ -8188,12 +8430,24 @@ function paintFavorites() {
   const listHost = $("favorites-usuals");
   const usuals = readUsuals(localStorage);
   if (listHost) {
+    const grouped = new Map();
+    for (const row of usuals) {
+      const section = sectionForEntry({ product: { name: row.name, familyName: row.name, departmentName: row.department } });
+      const rows = grouped.get(section) || [];
+      rows.push(row);
+      grouped.set(section, rows);
+    }
     listHost.innerHTML = usuals.length
-      ? usuals
-          .map(
-            (row) =>
-              `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
-          )
+      ? [...grouped.entries()]
+          .map(([section, rows]) => {
+            const items = rows
+              .map(
+                (row) =>
+                  `<li><span>${escapeHtml([row.brand, row.name].filter(Boolean).join(" "))}</span> <button type="button" data-fav-add="${escapeHtml(row.name)}">Add</button></li>`
+              )
+              .join("");
+            return `<li class="list-section" role="presentation"><h3 class="list-section-title">${escapeHtml(section)}</h3></li>${items}`;
+          })
           .join("")
       : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or pick a brand above.</li>`;
   }
@@ -8341,15 +8595,20 @@ function paintPlanBar() {
 }
 
 function listShopHtml() {
-  const rows = [...list.values()]
-    .map((entry) => {
-      const name = entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "Item";
-      const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
-      return `<div class="shop-line"><div class="shop-row"><span class="shop-copy"><span class="shop-name">${escapeHtml(qty)}</span><span class="shop-where">Your list</span></span></div></div>`;
-    })
+  const groups = new Map();
+  for (const entry of list.values()) {
+    const name = entry.product?.familyName || entry.product?.catalogName || entry.product?.name || "Item";
+    const qty = entry.quantity > 1 ? `${name} x${entry.quantity}` : name;
+    const section = entry.product?.departmentName || entry.product?.departmentId || "Other";
+    const rows = groups.get(section) || [];
+    rows.push(`<div class="shop-line"><div class="shop-row"><span class="shop-copy"><span class="shop-name">${escapeHtml(qty)}</span><span class="shop-where">${escapeHtml(section)}</span></span></div></div>`);
+    groups.set(section, rows);
+  }
+  const body = [...groups.entries()]
+    .map(([section, rows]) => `<h3 class="list-section-title">${escapeHtml(section)}</h3>${rows.join("")}`)
     .join("");
   const count = list.size === 1 ? "1 item" : `${list.size} items`;
-  return `<section class="shop-store" data-walking-list="1"><h2>Your list</h2><p class="muted">${escapeHtml(count)}. Review the split to sort these by store.</p>${rows}</section>`;
+  return `<section class="shop-store" data-walking-list="1"><h2>Your list</h2><p class="muted">${escapeHtml(count)}. Grouped by department until a store split is ready.</p>${body}</section>`;
 }
 
 function renderShop() {
@@ -9376,6 +9635,27 @@ document.addEventListener("focusin", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const popup = event.target instanceof Element ? event.target.closest("[data-cart-popup]") : null;
+  if (popup) {
+    event.preventDefault();
+    event.stopPropagation();
+    const name = popup.getAttribute("data-cart-popup") || "Cart";
+    const lines = document.querySelector(`[data-store="${CSS.escape(name)}"] .review-lines`);
+    let dialog = document.getElementById("cart-popup");
+    if (!(dialog instanceof HTMLDialogElement)) {
+      dialog = document.createElement("dialog");
+      dialog.id = "cart-popup";
+      dialog.className = "sheet cart-popup";
+      dialog.innerHTML = `<form method="dialog" class="sheet-body"><div class="list-head"><h2 id="cart-popup-title"></h2><button type="submit" class="text-btn">Close</button></div><ul id="cart-popup-body" class="review-lines"></ul></form>`;
+      document.body.appendChild(dialog);
+    }
+    const title = dialog.querySelector("#cart-popup-title");
+    const body = dialog.querySelector("#cart-popup-body");
+    if (title) title.textContent = `${name} cart`;
+    if (body) body.innerHTML = lines?.innerHTML || `<li class="muted">Nothing in this cart yet.</li>`;
+    if (!dialog.open) dialog.showModal();
+    return;
+  }
   const button = event.target instanceof Element ? event.target.closest("[data-empty-action]") : null;
   if (!button) return;
   const action = button.getAttribute("data-empty-action");
@@ -9394,6 +9674,8 @@ document.addEventListener("click", (event) => {
     searchEl.focus();
   } else if (action === "find-stores") {
     $("find-stores")?.click();
+  } else if (action === "retry-aisle") {
+    void loadPage(true);
   } else if (action === "clear-search") {
     query = "";
     searchEl.value = "";
@@ -9789,11 +10071,33 @@ matchSheet = mountMatchSheet({
     addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true, preferredStore: store || "" });
     const added = findListEntry(product.id);
     if (added && store) added.preferredStore = store;
-    if (wanted && Array.isArray(lastOptimize?.unavailable)) {
+    const offer = (Array.isArray(product.offers) ? product.offers : product.bestOffer ? [product.bestOffer] : []).find((row) =>
+      store ? String(row?.storeName || "").trim().toLowerCase() === String(store).trim().toLowerCase() : Number(row?.price) > 0
+    );
+    const catalogPrice = Number(offer?.price ?? product.bestOffer?.price ?? product.price);
+    const title = String(product.familyName || product.name || wanted || "Item");
+    const lineId = `pref-${product.id || title}`;
+    const placed = placePickedLine(document, {
+      storeName: store || offer?.storeName || "",
+      lineId,
+      title,
+      price: Number.isFinite(catalogPrice) && catalogPrice > 0 ? catalogPrice : undefined,
+      quantity: 1,
+    });
+    if (placed.placed && wanted && Array.isArray(lastOptimize?.unavailable)) {
       lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => !guideNamesMatch(wanted, row));
       lastOptimize.toFindInStore = toFindRecords(lastOptimize.unavailable);
+      const unfound = document.querySelector("[data-unfound]");
+      if (unfound instanceof HTMLElement) {
+        const needle = wanted.toLowerCase();
+        for (const row of [...unfound.querySelectorAll("li")]) {
+          if ((row.textContent || "").toLowerCase().includes(needle)) row.remove();
+        }
+        if (!unfound.querySelector("li")) unfound.remove();
+      }
     }
     saveList();
+    if (lastOptimize) pinPreferredStores(lastOptimize);
     if (flowStep === "plan") void planTrip({ stay: true });
     else if (flowStep === "shop") renderShop();
     toast(store ? `Added to the ${store} cart.` : "Added that match.");

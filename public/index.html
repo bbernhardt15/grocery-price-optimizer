@@ -87,20 +87,23 @@
             <h2 id="drawer-title" tabindex="-1">Menu</h2>
             <button type="button" id="drawer-close" class="text-btn">Close</button>
           </div>
-          <p id="zip-place" class="zip-place">Add a ZIP for nearby stores</p>
-          <label class="zip">
-            <span>ZIP</span>
-            <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="5-digit ZIP" aria-describedby="zip-hint" />
-          </label>
-          <p id="zip-hint" class="sr-only">Saved on this phone. Location is used only when you ask to find nearby stores.</p>
-          <button id="find-stores" type="button" class="ghost">Find nearby stores</button>
-          <p id="zip-status" class="status" role="status" hidden></p>
           <button id="refresh-prices" type="button" class="ghost">Refresh prices</button>
+          <details class="drawer-fold" id="where-you-shop" open>
+            <summary>ZIP and stores</summary>
+            <p id="zip-place" class="zip-place">Add a ZIP for nearby stores</p>
+            <label class="zip">
+              <span>ZIP</span>
+              <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="5-digit ZIP" aria-describedby="zip-hint" />
+            </label>
+            <p id="zip-hint" class="sr-only">Saved on this phone. Location is used only when you ask to find nearby stores.</p>
+            <button id="find-stores" type="button" class="ghost">Find nearby stores</button>
+            <p id="zip-status" class="status" role="status" hidden></p>
           <fieldset id="store-picker" class="store-picker">
             <legend>Stores to shop</legend>
             <p id="store-picker-note" class="muted">Uncheck a store to leave it out of the plan.</p>
             <div id="store-picker-list"></div>
           </fieldset>
+          </details>
           <section id="kroger-card" class="kroger-card" hidden>
             <h2 id="kroger-card-title">Kroger connected</h2>
             <button type="button" id="kroger-send" class="primary">Send to Kroger cart</button>
@@ -115,8 +118,8 @@
             <span id="theme-label">Match device</span>
           </button>
           <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
-          <button id="drawer-profile" type="button" class="ghost">Edit my taste profile</button>
-          <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">My products</button>
+          <button id="drawer-profile" type="button" class="ghost">Stores, allergies, and diets</button>
+          <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">Locked products</button>
           <details class="drawer-fold" open>
             <summary>This trip</summary>
             <nav class="menu-nav" aria-label="Menu">
@@ -128,7 +131,7 @@
           <details class="drawer-fold">
             <summary>Preferences</summary>
             <nav class="menu-nav" aria-label="Preferences">
-              <button type="button" id="menu-brands">My brands and preferences</button>
+              <button type="button" id="menu-brands">Brands for each category</button>
               <button type="button" id="menu-favorites">Your favorites</button>
               <button type="button" id="menu-zip" hidden>Edit ZIP and stores</button>
               <button type="button" id="menu-settings" hidden>Settings</button>
@@ -590,7 +593,7 @@
           <button type="button" class="text-btn" id="products-close">Close</button>
         </div>
         <div id="products-body"></div>
-        <button type="button" class="ghost" id="products-edit-profile">Edit my taste profile</button>
+        <button type="button" class="ghost" id="products-edit-profile">Stores, allergies, and diets</button>
       </div>
     </dialog>
     <dialog id="always-prompt" class="sheet always-prompt" aria-labelledby="always-title">
@@ -615,11 +618,11 @@
     <dialog id="store-return" class="sheet handoff-sheet" aria-labelledby="store-return-title">
       <form class="sheet-body" id="store-return-form">
         <h2 id="store-return-title">Did you finish at the store?</h2>
-        <p>The store opened in the browser. Grocery Gitter can't put their sign-in inside this app. Still shopping keeps this screen. Open Review goes to the store split.</p>
+        <p>The store opened in the browser. Grocery Gitter can't put their sign-in inside this app. Still shopping keeps this trip. I finished saves it to Past trips.</p>
         <div class="onboard-actions">
           <button type="button" class="ghost" id="store-return-no">Still shopping</button>
-          <button type="button" class="ghost" id="store-return-trip">Open Review</button>
-          <button type="submit" class="primary" id="store-return-yes">Yes, I finished</button>
+          <button type="submit" class="primary" id="store-return-yes">I finished</button>
+          <button type="button" class="text-btn" id="store-return-trip">Open Review</button>
         </div>
       </form>
     </dialog>

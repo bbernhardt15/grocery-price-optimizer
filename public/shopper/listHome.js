@@ -57,6 +57,7 @@ import {
   checklistAddMessage,
   checklistFromList,
   checklistHtml,
+  setChecklistBrand,
   onChecklistClick,
   setDraft,
 } from "./themeChecklist.js";
@@ -350,8 +351,10 @@ export function createListHome(deps) {
       const shelf = await deps.loadShelf(
         picks.flatMap((pick) => {
           const flavor = flavorFor(pick.slot);
-          const names = [flavor?.name, pick.title, pick.slot?.search, pick.slot?.suggested?.name, pick.slot?.label].filter(Boolean);
-          return [...new Set(names)].map((name) => ({ name, brand: flavor?.brand || "" }));
+          const override = book.overrides[checklist.listId]?.[pick.slot?.id];
+          const names = [override?.name, flavor?.name, pick.title, pick.slot?.search, pick.slot?.suggested?.name, pick.slot?.label].filter(Boolean);
+          const brand = override?.brand || flavor?.brand || "";
+          return [...new Set(names)].map((name) => ({ name, brand }));
         })
       );
       let added = 0;
@@ -529,6 +532,23 @@ export function createListHome(deps) {
     }
     if (target.id === "theme-add-input" && view?.checklist) {
       view.checklist = setDraft(view.checklist, target.value);
+    }
+    if (target instanceof HTMLInputElement && target.hasAttribute("data-theme-brand") && view?.checklist) {
+      const slotId = target.getAttribute("data-theme-brand") || "";
+      const model = listModel(view.listId, book);
+      const slotDef = model?.slots?.find((slot) => slot.id === slotId);
+      if (!slotDef) return;
+      const picked = activeChoice(book, view.listId, slotDef);
+      book = persist(
+        setOverride(
+          book,
+          view.listId,
+          slotId,
+          { ...picked.choice, brand: target.value, name: picked.choice?.name || slotDef.suggested?.name || slotDef.label },
+          Date.now()
+        )
+      );
+      view.checklist = setChecklistBrand(view.checklist, slotId, target.value);
     }
     if (target instanceof HTMLInputElement && target.hasAttribute("data-slot-brand") && view.kind === "list") {
       const slotId = target.getAttribute("data-slot-brand") || "";

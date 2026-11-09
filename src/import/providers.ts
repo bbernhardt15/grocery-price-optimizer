@@ -41,6 +41,20 @@ const VISION_SYSTEM = [
   "Do not transcribe addresses, card numbers, loyalty numbers, or order numbers.",
 ].join(" ");
 
+const COUPON_SYSTEM = [
+  "Read one clipped grocery coupon. Return JSON only.",
+  '{"storeName":"","itemName":"","kind":"","amount":null,"expiresOn":"","minQuantity":null,"minSpend":null,"conditions":""}',
+  "kind is dollars when the coupon prints a dollar amount off, or percent when it prints a percent off.",
+  "amount is the printed number, or null when no discount is printed.",
+  "expiresOn is YYYY-MM-DD only when a date is printed, otherwise an empty string.",
+  "minQuantity and minSpend are printed buy-quantity or spend requirements, or null.",
+  "conditions is the printed requirement in the coupon's own words, or an empty string.",
+  "Do not guess a store, a product, a discount, or a date that is not printed.",
+  "Do not copy card numbers or loyalty ids.",
+].join(" ");
+
+const COUPON_USER = "Read this coupon screenshot. Copy only what is printed. Leave unknown fields empty or null.";
+
 const FAST_VISION_FALLBACK = "gpt-4o-mini";
 
 export class ModelError extends Error {
@@ -194,6 +208,28 @@ export async function aiReadImage(
     if (config.visionProvider === "openai" && !explicit && config.visionModel !== FAST_VISION_FALLBACK && modelMissing(error)) {
       console.info("receipt vision model fallback gpt-4o-mini");
       return readImage({ ...config, visionModel: FAST_VISION_FALLBACK }, imageBase64, mimeType, detail);
+    }
+    throw error;
+  }
+}
+
+export async function aiReadCoupon(
+  imageBase64: string,
+  mimeType: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { detail?: "low" | "high" }
+): Promise<string> {
+  const config = importConfig(env);
+  if (!config.visionProvider) throw new ModelError("unconfigured");
+  const detail = options?.detail === "low" ? "low" : "high";
+  const prompt = { system: COUPON_SYSTEM, text: COUPON_USER };
+  try {
+    return await readImage(config, imageBase64, mimeType, detail, prompt);
+  } catch (error) {
+    const explicit = Boolean((env.IMPORT_VISION_MODEL || "").trim());
+    if (config.visionProvider === "openai" && !explicit && config.visionModel !== FAST_VISION_FALLBACK && modelMissing(error)) {
+      console.info("coupon vision model fallback gpt-4o-mini");
+      return readImage({ ...config, visionModel: FAST_VISION_FALLBACK }, imageBase64, mimeType, detail, prompt);
     }
     throw error;
   }

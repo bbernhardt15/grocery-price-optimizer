@@ -226,6 +226,8 @@
   color: var(--muted);
   text-decoration: line-through;
 }
+.theme-brand { display: flex; flex-direction: column; gap: 4px; margin: 0; grid-column: 1 / -1; font-size: 0.85rem; font-weight: 750; }
+.theme-brand input { min-height: 44px; width: 100%; }
 .theme-check-hit {
   display: flex;
   align-items: center;

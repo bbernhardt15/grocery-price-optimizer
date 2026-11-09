@@ -26,6 +26,12 @@ const FLOW = [
     kind: "place",
   },
   {
+    id: "connect",
+    title: "Connect a store?",
+    hint: "Optional. You can skip this and connect at checkout.",
+    kind: "connect",
+  },
+  {
     id: "receipts",
     title: "Teach Gitter your usual groceries",
     hint: "We'll learn the brands you already buy.",
@@ -179,7 +185,8 @@ export function stepById(id) {
 export function nextStepId(id) {
   const steps = profileSteps();
   const index = steps.findIndex((step) => step.id === id);
-  if (index < 0 || index >= steps.length - 1) return steps[steps.length - 1].id;
+  if (index < 0) return "summary";
+  if (index >= steps.length - 1) return steps[steps.length - 1].id;
   return steps[index + 1].id;
 }
 
@@ -204,7 +211,7 @@ export function primaryLabel(id) {
   if (id === "summary") return "Start shopping";
   if (id === "welcome") return "Get started";
   if (id === "zip") return "Find stores";
-  if (id === "place") return "Continue";
+  if (id === "place" || id === "connect") return "Continue";
   return "Next";
 }
 

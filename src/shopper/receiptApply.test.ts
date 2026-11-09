@@ -41,7 +41,8 @@ describe("receipt preferences", () => {
     assert.match(html, /multiple/);
     assert.match(html, /<summary>Where do I find it\?<\/summary>/);
     assert.match(html, /<details class="store-find"><summary>Kroger<\/summary>/);
-    assert.equal((html.match(/<details/g) || []).length, STORE_HINTS.length + 1);
+    assert.equal((html.match(/<details/g) || []).length, STORE_HINTS.length + 2);
+    assert.match(html, /Paste order text instead/);
     const app = fs.readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
     const ui = fs.readFileSync(new URL("../../public/shopper/profileOnboardingUi.js", import.meta.url), "utf8");
     assert.match(app, /\/api\/import\/photo/);

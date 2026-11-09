@@ -6,6 +6,7 @@ import {
   COUPON_PAGES,
   checklistSentence,
   couponChecklist,
+  couponDraftFields,
   couponExpired,
   couponLineLabel,
   couponPageFor,
@@ -168,6 +169,38 @@ describe("coupon checklist and savings", () => {
     assert.equal(summary.savings, 0);
     assert.equal(summary.estimatedTotal, 5);
     assert.match(couponLineLabel(summary.byStore[0].rows[0]), /expired Oct 1/);
+  });
+
+  it("does not apply a screenshot coupon until the printed quantity is in the cart", () => {
+    const fields = couponDraftFields({
+      storeName: "Kroger",
+      itemName: "Large eggs",
+      kind: "dollars",
+      amount: 1.5,
+      minQuantity: 2,
+      conditions: "When you buy 2",
+      gaps: [],
+    });
+    assert.equal(fields.amount, "1.5");
+    assert.match(fields.review, /screenshot/);
+    const blank = couponDraftFields({ storeName: "Kroger", itemName: "Milk", gaps: ["amount"] });
+    assert.equal(blank.amount, "");
+    const coupon = {
+      id: "c-eggs",
+      storeName: "Kroger",
+      lineId: "0:eggs",
+      itemName: "Large eggs",
+      kind: "dollars" as const,
+      amount: 1.5,
+      minQuantity: 2,
+      conditions: "When you buy 2",
+      source: "screenshot",
+    };
+    const one = { ...kroger, items: [{ lineId: "0:eggs", name: "Large eggs", price: 2.19, quantity: 1, itemTotal: 2.19 }] };
+    const two = { ...kroger, items: [{ lineId: "0:eggs", name: "Large eggs", price: 2.19, quantity: 2, itemTotal: 4.38 }] };
+    assert.equal(couponSavingsSummary([one], [coupon], "2026-11-08").savings, 0);
+    assert.match(couponLineLabel(couponSavingsSummary([one], [coupon], "2026-11-08").byStore[0].rows[0]), /not applied/);
+    assert.equal(couponSavingsSummary([two], [coupon], "2026-11-08").savings, 1.5);
   });
 
   it("accepts a trip line id that includes the item words", () => {

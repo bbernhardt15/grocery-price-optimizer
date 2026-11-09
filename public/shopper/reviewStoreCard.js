@@ -48,10 +48,11 @@ export function reviewStoreCardHtml(card) {
   return `<article class="calm-store review-store" data-store="${escapeText(card.name)}"${style}>
     <header class="review-store-head">
       <h3 class="store-fold-name">${escapeText(card.name)}</h3>
+      <button type="button" class="ghost" data-cart-popup="${escapeText(card.name)}">Open cart</button>
       <p class="review-store-meta"><span>${escapeText(card.countLabel)}</span>${total}</p>
     </header>
     <div class="review-store-main">
-      <details class="store-fold" open>
+      <details class="store-fold">
         <summary>Items in this cart</summary>
         ${card.markHtml || ""}
         <p class="price-source">Shelf estimates from ${escapeText(card.name)}. Not a checkout total.</p>

@@ -165,6 +165,9 @@ describe("import routes", () => {
     const photo = await post("/api/import/photo", { imageBase64: Buffer.from("nope").toString("base64"), mimeType: "image/jpeg" });
     assert.equal(photo.status, 503);
     assert.equal(((await photo.json()) as { error: string }).error, IMPORT_MESSAGES.photoOff);
+    const couponOff = await post("/api/import/coupon", { imageBase64: Buffer.from("nope").toString("base64"), mimeType: "image/jpeg" });
+    assert.equal(couponOff.status, 503);
+    assert.equal(((await couponOff.json()) as { code: string }).code, "unconfigured");
 
     const audio = await post("/api/import/audio", { audioBase64: Buffer.from("nope").toString("base64"), mimeType: "audio/webm" });
     assert.equal(audio.status, 503);
@@ -239,6 +242,58 @@ describe("import routes", () => {
     assert.match(failBody.error, /didn't answer/i);
     assert.equal(/isn't switched on/i.test(failBody.error), false);
     assert.equal(logs.some((line) => line.includes("test-key")), false);
+  });
+
+  it("reads a coupon screenshot through the vision reader and leaves a missing amount blank", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    const shot = Buffer.from("coupon-shot-marker").toString("base64");
+    const blank = Buffer.from("coupon-no-amount").toString("base64");
+    setImportRuntime({
+      lookup: async () => ["8.8.8.8"],
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        const raw = typeof init?.body === "string" ? init.body : "";
+        if (raw.includes(blank)) {
+          return jsonResponse({
+            choices: [{ message: { content: JSON.stringify({ storeName: "Kroger", itemName: "Milk", kind: "dollars", amount: null, conditions: "Clip to save" }) } }],
+          });
+        }
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  storeName: "Kroger",
+                  itemName: "Large eggs",
+                  kind: "dollars",
+                  amount: 1,
+                  expiresOn: "2026-12-01",
+                  minQuantity: 2,
+                  conditions: "When you buy 2",
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+    const read = await post("/api/import/coupon", { imageBase64: shot, mimeType: "image/jpeg" }, "device-coupon");
+    assert.equal(read.status, 200);
+    const body = (await read.json()) as { source: string; coupon: { amount: number; minQuantity: number; conditions: string; gaps: string[] } };
+    assert.equal(body.source, "screenshot");
+    assert.equal(body.coupon.amount, 1);
+    assert.equal(body.coupon.minQuantity, 2);
+    assert.equal(body.coupon.conditions, "When you buy 2");
+    assert.deepEqual(body.coupon.gaps, []);
+    assert.ok(calls.some((url) => url.includes("/chat/completions")));
+    const missing = await post("/api/import/coupon", { imageBase64: blank, mimeType: "image/jpeg" }, "device-coupon-blank");
+    const missingBody = (await missing.json()) as { coupon: { amount: number | null; gaps: string[] } };
+    assert.equal(missingBody.coupon.amount, null);
+    assert.ok(missingBody.coupon.gaps.includes("amount"));
   });
 
   it("reads a photo and a voice memo when a key is set, without logging them", async () => {

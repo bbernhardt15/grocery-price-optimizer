@@ -10,8 +10,10 @@ import {
   reviewFramesMatch,
   reviewHeadlineReady,
   reviewLayoutFrames,
+  reviewGaveUpHtml,
   reviewLoadingHtml,
   reviewSkeletonHtml,
+  REVIEW_GAVE_UP_STATUS,
 } from "../../public/shopper/reviewStable.js";
 import {
   cartCardFigures,
@@ -71,9 +73,21 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v62", () => {
-    assert.equal(SHELL_CACHE, "v62");
-    assert.match(sw, /grocery-gitter-shell-v62/);
+  it("bumps the shell cache to v69", () => {
+    assert.equal(SHELL_CACHE, "v69");
+    assert.match(sw, /grocery-gitter-shell-v69/);
+  });
+
+  it("ends a cold review with a retry instead of an endless checking shell", () => {
+    const html = reviewGaveUpHtml(["Milk", "Milk"], REVIEW_GAVE_UP_STATUS);
+    assert.match(html, /No store price came back/);
+    assert.match(html, /stopped after 22 seconds/);
+    assert.match(html, /data-plan-retry="1"/);
+    assert.match(html, /Try this check again/);
+    assert.match(html, />Milk</);
+    assert.equal(html.includes("Checking store prices"), false);
+    assert.equal(html.includes("$"), false);
+    assert.match(html, /data-review-stable="gave-up"/);
   });
 
   it("keeps Review card heights stable and withholds the headline while prices load", () => {

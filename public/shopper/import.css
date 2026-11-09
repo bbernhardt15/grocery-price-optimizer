@@ -135,6 +135,8 @@
   50% { transform: scale(0.7); opacity: 0.55; }
 }
 .import-tile .import-entry-row { flex-wrap: wrap; }
+.import-remove { margin-left: 12px; }
+.import-undo { margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--ink); color: var(--bg); }
 .import-count { margin: 0; font-weight: 700; }
 .import-idea-lead { margin: 0; color: var(--muted); }
 .import-kicker { margin: 0; color: var(--muted); font-size: 0.82rem; font-weight: 650; letter-spacing: 0.01em; }
@@ -174,7 +176,13 @@
 .import-check { display: flex; gap: 8px; align-items: center; font-weight: 700; min-height: 44px; }
 .import-stepper { display: flex; align-items: center; gap: 8px; }
 .import-stepper button { min-width: 44px; min-height: 44px; }
-.import-save { display: flex; gap: 8px; align-items: flex-start; }
+.import-save {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 16px 0 8px;
+  padding: 8px 0;
+}
 #onboard-import { width: 100%; }
 
 @media (max-width: 1099px) {
@@ -215,18 +223,30 @@
   dialog.import-sheet[open] .import-paste {
     max-height: min(28vh, 140px);
   }
-  dialog.import-sheet[open] #import-find,
-  dialog.import-sheet[open] .import-review-actions {
+  dialog.import-sheet[open] #import-find {
     position: sticky;
     bottom: 0;
     z-index: 2;
     background: var(--bg);
   }
   dialog.import-sheet[open] #import-review {
+    display: flex;
+    flex-direction: column;
     overflow: auto;
-    max-height: min(52vh, 420px);
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
     touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
+  }
+  dialog.import-sheet[open] .import-review-scroll {
+    overflow: visible;
+  }
+  dialog.import-sheet[open] .import-save,
+  dialog.import-sheet[open] .import-review-actions {
+    position: static;
+    flex: none;
+    background: var(--bg);
   }
   dialog.match-sheet[open] .sheet-body {
     max-height: 100%;

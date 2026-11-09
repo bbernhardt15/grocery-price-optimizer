@@ -16,6 +16,7 @@ import {
   emptyGuideSettings,
   formatDollars,
   guideIsOff,
+  holdVisiblePrompt,
   importReceiptUrl,
   linesFromImportBody,
   linesFromReceipt,
@@ -527,5 +528,14 @@ describe("Gitter guide rules", () => {
     assert.match(card, /Say or type my list/);
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
     assert.doesNotMatch(`${guide}\n${css}`, /meal plan|recipe ideas|dinner idea/i);
+  });
+
+  it("keeps a visible prompt up before a different one can replace it", () => {
+    const current = { moment: "before-review" as const, line: "Check prices", chips: [] };
+    const next = { moment: "review-next" as const, line: "Lysol", chips: [] };
+    assert.equal(holdVisiblePrompt(current, next, 1_000, 2_000), true);
+    assert.equal(holdVisiblePrompt(current, next, 1_000, 6_000), false);
+    assert.equal(holdVisiblePrompt(current, { ...next, moment: "trip-saved" }, 1_000, 1_200), false);
+    assert.equal(holdVisiblePrompt(current, current, 1_000, 1_200), false);
   });
 });

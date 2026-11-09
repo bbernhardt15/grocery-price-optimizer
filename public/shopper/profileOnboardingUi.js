@@ -220,8 +220,10 @@ export function mountProfileOnboarding(deps = {}) {
         <p id="profile-zip-error" class="status" role="alert" hidden></p>
         <button type="button" class="ghost" id="profile-use-location">Use my location</button>
         <p id="profile-store-note" class="muted">Stores within about 25 miles show up here.</p>
-        <div id="profile-store-list" class="store-choices"></div>
-        <div id="store-connect"></div>`;
+        <div id="profile-store-list" class="store-choices"></div>`;
+    }
+    if (step.kind === "connect") {
+      return `<div id="store-connect"></div>`;
     }
     if (step.kind === "receipts") {
       const importing = importGate.parsing || importGate.grouping || receiptPhase === "reading" || (receiptPhase === "learned" && !learnedViewReady(importGate));
@@ -375,6 +377,12 @@ export function mountProfileOnboarding(deps = {}) {
     bindReceiptInput();
     if ((step.kind === "place" || step.kind === "zip") && !options.deferStores) paintStoreList();
     else if (options.deferStores) showStoreSkeleton();
+    if (step.kind === "connect") {
+      const zip = normalizeZipInput(currentZipRaw());
+      const nearby = /^\d{5}/.test(zip) ? storesForZip(zip) : { stores: [] };
+      const names = visibleStoreNames(nearby.stores);
+      paintStoreConnect(names.length ? names : draft.shopStores || []);
+    }
     if (step.kind === "welcome") warmStores();
     if (next && !(dietMode && step.id === "diets")) {
       if (reading) next.disabled = !readingReady;
@@ -534,17 +542,19 @@ export function mountProfileOnboarding(deps = {}) {
     } catch {
       connectStatus = { oauthConfigured: false, connected: false };
     }
-    if (stepId === "place" || stepId === "zip") paintStoreConnect(names);
+    if (stepId === "place" || stepId === "zip" || stepId === "connect") paintStoreConnect(names);
   }
 
   async function connectStoresNow() {
-    const zip = readZip();
-    if (!zip) return;
-    const place = readPlace();
-    if (place) draft.shopStores = place.stores;
+    const zip = normalizeZipInput(currentZipRaw());
+    if (!/^\d{5}/.test(zip)) return;
+    if (document.querySelector("[data-place-store]")) {
+      const place = readPlace();
+      if (place) draft.shopStores = place.stores;
+    }
     draft = persist({
       ...draft,
-      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "place", updatedAt: Date.now() },
+      onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "connect", updatedAt: Date.now() },
     });
     try {
       sessionStorage.setItem(PROFILE_CONNECT_KEY, "connected");
@@ -1012,9 +1022,12 @@ export function mountProfileOnboarding(deps = {}) {
       }
       readTick += 1;
       for (const card of readCards) {
-        if (card.status === "reading") patchReadCard(card);
+        if (card.status !== "reading") continue;
+        const floor = Math.max(0, Math.min(0.92, Number(card.ratio) || 0));
+        card.walk = Math.min(0.92, Math.max(floor, Number(card.walk) || 0) + 0.2);
+        patchReadCard(card);
       }
-    }, 2200);
+    }, 800);
   }
 
   function applyReadProgress(event) {
@@ -1085,10 +1098,15 @@ export function mountProfileOnboarding(deps = {}) {
       stage.textContent = phase;
     }
     const meter = node.querySelector("progress");
+    const ratio = Math.max(0, Math.min(1, Number(card.ratio) || 0));
     if (meter) {
-      const ratio = Math.max(0, Math.min(1, Number(card.ratio) || 0));
       if (ratio > 0) meter.value = String(ratio);
       else meter.removeAttribute("value");
+    }
+    const track = node.querySelector(".read-cart-track");
+    if (track instanceof HTMLElement) {
+      const walked = card.status === "reading" ? Math.max(ratio, Math.min(0.92, Number(card.walk) || 0)) : ratio;
+      track.style.setProperty("--read-ratio", String(Math.round(walked * 1000) / 1000));
     }
     const list = node.querySelector(".read-items");
     if (list && !card.hideItems) {
@@ -1550,6 +1568,9 @@ export function mountProfileOnboarding(deps = {}) {
 
   $("profile-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const submitter = event.submitter;
+    if (submitter && submitter.id !== "profile-next") return;
+    if (stepId === "products" && phase === "gate" && event.target instanceof Element && event.target.closest("[data-gate]")) return;
     void advance(false);
   });
   $("profile-skip")?.addEventListener("click", () => {
@@ -1637,6 +1658,15 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.dataset.missingDept) {
+      const family = target.dataset.missingDept;
+      const label = target.dataset.missingLabel || family;
+      draft = setCategoryPreference(draft, { family, mode: "cheapest", brand: "", productId: "", size: "", attributes: [], label }, Date.now());
+      persist(draft);
+      target.textContent = `${label} saved: cheapest`;
+      target.setAttribute("aria-pressed", "true");
+      return;
+    }
     if (target.id === "receipt-restore") {
       if (!learnedRows.length) return;
       importGate = { parsing: false, grouping: false, revealed: true };
@@ -1644,8 +1674,7 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.id === "store-connect-later") {
-      const host = $("store-connect");
-      if (host) host.innerHTML = `<p class="muted">You can connect Kroger at checkout. That sign-in still opens on Kroger's site.</p>`;
+      void advance(false);
       return;
     }
     if (target.id === "store-connect-now") {
@@ -1824,10 +1853,14 @@ export function mountProfileOnboarding(deps = {}) {
       return;
     }
     if (target.dataset.gate) {
-      if (neverIds.has(target.dataset.gate)) neverIds.delete(target.dataset.gate);
-      else neverIds.add(target.dataset.gate);
+      const id = target.dataset.gate;
+      if (neverIds.has(id)) neverIds.delete(id);
+      else neverIds.add(id);
       const stage = $("profile-stage");
-      if (stage) stage.innerHTML = stageHtml(stepById("products"));
+      requestAnimationFrame(() => {
+        if (stepId !== "products" || phase !== "gate" || !stage) return;
+        stage.innerHTML = stageHtml(stepById("products"));
+      });
       return;
     }
     if (target.dataset.buy) {

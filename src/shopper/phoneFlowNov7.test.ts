@@ -52,6 +52,28 @@ describe("savings claims", () => {
       }),
       true
     );
+    assert.equal(
+      savingsClaimAllowed({
+        pendingStores: [],
+        coverageOpen: false,
+        pricingByStore: [
+          { storeName: "Kroger", source: "seed" },
+          { storeName: "Walmart", source: "seed" },
+        ],
+      }),
+      true
+    );
+    assert.equal(
+      savingsClaimAllowed({
+        pendingStores: [],
+        coverageOpen: false,
+        pricingByStore: [
+          { storeName: "Kroger", source: "seed" },
+          { storeName: "Walmart", check: "timeout", source: "seed" },
+        ],
+      }),
+      false
+    );
   });
 });
 

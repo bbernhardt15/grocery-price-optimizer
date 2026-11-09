@@ -181,6 +181,52 @@ describe("filter and sort", () => {
     assert.equal(milkFirst[0]?.id, "half");
   });
 
+  it("does not treat every cheese as parmesan", () => {
+    const cheddar = product({
+      id: "cheddar",
+      name: "Kraft Shredded Cheddar",
+      brand: "Kraft",
+      departmentId: "dairy-eggs",
+      departmentName: "Dairy",
+      subcategory: "Cheese",
+      offers: [offer({ storeName: "Kroger", price: 3.48 })],
+    });
+    const parmesan = product({
+      id: "parm",
+      name: "Grated Parmesan Cheese",
+      brand: "Kroger",
+      departmentId: "dairy-eggs",
+      departmentName: "Dairy",
+      subcategory: "Cheese",
+      offers: [offer({ storeName: "Kroger", price: 4.29 })],
+    });
+    const found = filterProducts([cheddar, parmesan], { query: "Kroger Parmesan Grated Cheese" });
+    assert.deepEqual(found.map((row) => row.id), ["parm"]);
+  });
+
+  it("matches Cherry Coke to a cola that says cherry", () => {
+    const classic = product({
+      id: "classic",
+      name: "Coca-Cola Classic",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      departmentName: "Beverages",
+      subcategory: "Soda",
+      offers: [offer({ storeName: "Kroger", price: 7 })],
+    });
+    const cherry = product({
+      id: "cherry",
+      name: "Coca-Cola Cherry",
+      brand: "Coca-Cola",
+      departmentId: "beverages",
+      departmentName: "Beverages",
+      subcategory: "Soda",
+      offers: [offer({ storeName: "Kroger", price: 7.99 })],
+    });
+    const found = filterProducts([classic, cherry], { query: "Cherry Coke" });
+    assert.deepEqual(found.map((row) => row.id), ["cherry"]);
+  });
+
   it("paginates with an offset cursor", () => {
     const page = paginateProducts([1, 2, 3, 4, 5], 2, 2);
     assert.deepEqual(page.items, [3, 4]);

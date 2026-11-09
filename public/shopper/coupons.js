@@ -175,6 +175,10 @@ export function normalizeCoupon(value) {
   if (!id || !storeName || !itemName || !lineId || !kind || !(amount > 0)) return null;
   if (kind === "percent" && amount > 100) return null;
   if (kind === "dollars" && amount > 500) return null;
+  const qty = Number(value.minQuantity);
+  const minQuantity = Number.isInteger(qty) && qty > 1 && qty <= 20 ? qty : 0;
+  const minSpend = roundMoney(value.minSpend);
+  const conditions = String(value.conditions || "").replace(/\s+/g, " ").trim().slice(0, 160);
   return {
     id,
     storeName,
@@ -183,6 +187,10 @@ export function normalizeCoupon(value) {
     kind,
     amount,
     ...(expiresOn ? { expiresOn } : {}),
+    ...(minQuantity ? { minQuantity } : {}),
+    ...(minSpend > 0 && minSpend <= 500 ? { minSpend } : {}),
+    ...(conditions ? { conditions } : {}),
+    ...(value.source === "screenshot" ? { source: "screenshot" } : {}),
   };
 }
 
@@ -217,6 +225,10 @@ export function parseCouponForm(input) {
     kind,
     amount,
     expiresOn: expiresRaw,
+    minQuantity: input?.minQuantity,
+    minSpend: input?.minSpend,
+    conditions: input?.conditions,
+    source: input?.source,
   });
   if (!coupon) return { ok: false, error: "That coupon could not be saved." };
   return { ok: true, coupon };
@@ -238,8 +250,18 @@ function matchesLine(coupon, item) {
   return String(coupon.itemName || "").trim().toLowerCase() === String(item?.name || "").trim().toLowerCase();
 }
 
-export function lineDiscount(coupon, itemTotal, today = todayKey()) {
-  if (!coupon || couponExpired(coupon, today)) return 0;
+export function couponBlockReason(coupon, item, itemTotal, today = todayKey()) {
+  if (!coupon) return "missing";
+  if (couponExpired(coupon, today)) return "expired";
+  const qty = Math.max(1, Math.floor(Number(item?.quantity) || 1));
+  if (coupon.minQuantity && qty < coupon.minQuantity) return "quantity";
+  const total = roundMoney(Math.max(0, Number(itemTotal) || 0));
+  if (coupon.minSpend && total + 0.009 < coupon.minSpend) return "spend";
+  return "";
+}
+
+export function lineDiscount(coupon, itemTotal, today = todayKey(), item) {
+  if (!coupon || couponBlockReason(coupon, item, itemTotal, today)) return 0;
   const total = roundMoney(Math.max(0, Number(itemTotal) || 0));
   if (coupon.kind === "percent") {
     const pct = Math.min(100, Math.max(0, Number(coupon.amount) || 0));
@@ -260,11 +282,13 @@ export function couponsForStore(store, coupons, today = todayKey()) {
     if (!item) continue;
     used.add(item.lineId || item.name);
     const itemTotal = roundMoney(item.itemTotal ?? Number(item.price) * Number(item.quantity || 1));
+    const reason = couponBlockReason(coupon, item, itemTotal, today);
     rows.push({
       coupon,
       item,
-      amount: lineDiscount(coupon, itemTotal, today),
-      expired: couponExpired(coupon, today),
+      amount: reason ? 0 : lineDiscount(coupon, itemTotal, today, item),
+      expired: reason === "expired",
+      reason,
     });
   }
   let left = roundMoney(Math.max(0, Number(store?.subtotal) || 0));
@@ -309,14 +333,37 @@ export function couponSavingsSummary(stores, coupons, today = todayKey()) {
 
 export function couponLineLabel(row) {
   const name = row?.coupon?.itemName || row?.item?.name || "Item";
-  if (row?.expired) {
+  const printed = row?.coupon?.conditions ? ` · ${row.coupon.conditions}` : "";
+  if (row?.expired || row?.reason === "expired") {
     const when = friendlyDay(row.coupon?.expiresOn);
-    return `Your coupon · ${name} · expired${when ? ` ${when}` : ""}`;
+    return `Your coupon · ${name} · expired${when ? ` ${when}` : ""}${printed}`;
   }
+  if (row?.reason === "quantity") return `Your coupon · ${name} · needs ${row.coupon.minQuantity} · not applied${printed}`;
+  if (row?.reason === "spend") return `Your coupon · ${name} · needs ${money(row.coupon.minSpend)} · not applied${printed}`;
   if (row?.coupon?.kind === "percent") {
-    return `Your coupon · ${name} · ${row.coupon.amount}% off (${money(row.amount)})`;
+    return `Your coupon · ${name} · ${row.coupon.amount}% off (${money(row.amount)})${printed}`;
   }
-  return `Your coupon · ${name} · ${money(row.amount)} off`;
+  return `Your coupon · ${name} · ${money(row.amount)} off${printed}`;
+}
+
+/** Fill the coupon form from a vision read. A missing amount is not filled in. */
+export function couponDraftFields(read) {
+  const gaps = Array.isArray(read?.gaps) ? read.gaps : [];
+  const amount = gaps.includes("amount") || !(Number(read?.amount) > 0) ? "" : String(read.amount);
+  return {
+    storeName: read?.storeName || "",
+    itemName: read?.itemName || "",
+    kind: read?.kind === "percent" ? "percent" : "dollars",
+    amount,
+    expiresOn: read?.expiresOn || "",
+    minQuantity: read?.minQuantity || "",
+    minSpend: read?.minSpend || "",
+    conditions: read?.conditions || "",
+    gaps,
+    review: gaps.length
+      ? `Read from the screenshot. Still needed: ${gaps.join(", ")}. Nothing was guessed.`
+      : "Read from the screenshot. Check it, then add the coupon.",
+  };
 }
 
 export function readCoupons(storage) {
@@ -446,6 +493,15 @@ function couponFormMarkup(store) {
   const storeName = escapeHtml(store.storeName || "");
   return `<form class="coupon-form" data-coupon-store="${storeName}">
     <p class="coupon-form-title">Add a coupon you already have</p>
+    <p class="muted">Clip it at the store first. A screenshot is read with the same photo reader as a receipt. You confirm the result before it changes the estimate. An expired coupon, the wrong store, or a buy-more rule that is not met stays out.</p>
+    <label>Screenshot
+      <input data-coupon-shot type="file" accept="image/*" />
+    </label>
+    <p class="coupon-shot-note" data-coupon-shot-note hidden></p>
+    <input type="hidden" data-coupon-min-qty value="" />
+    <input type="hidden" data-coupon-min-spend value="" />
+    <input type="hidden" data-coupon-conditions value="" />
+    <input type="hidden" data-coupon-source value="" />
     <label>Item
       <select data-coupon-line required>${options}</select>
     </label>

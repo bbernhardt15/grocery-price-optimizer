@@ -88,6 +88,8 @@ describe("taste profile storage", () => {
     const store = memory();
     let profile = answerStep(emptyProfile(), "place", { stores: ["Kroger", "Walmart"] }, 20);
     assert.equal(profile.onboarding.status, "in_progress");
+    assert.equal(profile.onboarding.step, "connect");
+    profile = answerStep(profile, "connect", null, 21);
     assert.equal(profile.onboarding.step, "receipts");
     assert.deepEqual(profile.shopStores, ["Kroger", "Walmart"]);
     assert.deepEqual(profile.allergies, []);
@@ -102,7 +104,7 @@ describe("taste profile storage", () => {
     assert.equal(shouldPromptProfile(legacy), true);
     assert.deepEqual(
       profileSteps().map((step) => step.id),
-      ["welcome", "place", "receipts"]
+      ["welcome", "place", "connect", "receipts"]
     );
     assert.equal(profileSteps().some((step) => step.id === "products"), false);
     assert.equal(SKIP_LABEL, "Skip for now");

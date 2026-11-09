@@ -144,7 +144,7 @@ describe("tenth phone test", () => {
       ],
       {}
     );
-    assert.equal(known[0].groups[0].label, "Aisle 12");
+    assert.equal(known[0].groups[0].label, "Dairy · Aisle 12");
     assert.equal(known[0].note, "");
     const shop = sliceFn(app, "renderShop", "paintShopChrome");
     assert.match(shop, /dedupeTripStores/);

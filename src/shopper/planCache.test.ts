@@ -151,7 +151,7 @@ describe("review price cache", () => {
         { storeName: "Kroger", check: "ok" },
       ]
     );
-    assert.equal(notes.unchecked[0].text, "Walmart couldn't check right now, retry");
+    assert.equal(notes.unchecked[0].text, "Walmart ran out of time on this check. Retry checks the lines still waiting.");
     assert.deepEqual(notes.missing.map((note: { text: string }) => note.text), ["Kroger is missing 1 item"]);
     assert.deepEqual(genuineUnfound(["Milk"], [{ check: "timeout" }, { check: "error" }]), []);
     assert.deepEqual(genuineUnfound(["Milk"], [{ storeName: "Kroger", check: "ok" }]), ["Milk"]);

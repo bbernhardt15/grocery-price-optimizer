@@ -14,11 +14,21 @@ const contextSchema = new Schema(
   { _id: false }
 );
 
+const feedbackShotSchema = new Schema(
+  {
+    name: { type: String, default: "screenshot" },
+    mimeType: { type: String, required: true },
+    data: { type: Buffer, required: true },
+  },
+  { _id: false }
+);
+
 const feedbackSchema = new Schema(
   {
     rating: { type: Number, required: true, min: 1, max: 5 },
     message: { type: String, default: "" },
     screen: { type: String, default: "" },
+    shots: { type: [feedbackShotSchema], default: () => [] },
     context: { type: contextSchema, default: () => ({}) },
     deviceId: { type: String, required: true, index: true },
     accountId: { type: String },

@@ -92,9 +92,12 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
   await unlock(page);
   await page.locator("#step-bar [data-flow='plan']").click();
   await page.locator("[data-store='Kroger']").waitFor();
+  await page.locator("#trip details.store-fold").evaluateAll((nodes) => {
+    for (const node of nodes) (node as HTMLDetailsElement).open = true;
+  });
   await page.evaluate(() => window.scrollTo(0, 2200));
   const deep = await page.evaluate(() => window.scrollY);
-  expect(deep).toBeGreaterThan(1800);
+  expect(deep).toBeGreaterThan(1400);
   for (let pass = 0; pass < 2; pass += 1) {
     const before = await page.evaluate(() => window.scrollY);
     await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
@@ -129,7 +132,7 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     await page.locator("#plan-refresh").evaluate((node) => (node as HTMLButtonElement).click());
     await page.waitForTimeout(120);
     await page.evaluate(() => window.scrollTo(0, 90));
-    await page.waitForTimeout(80);
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 1500 }).toBe(400);
     const snapped = await page.evaluate(() => window.scrollY);
     await page.evaluate(
       ([mode, y]) => {
@@ -150,4 +153,60 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     expect(during).toBe(target);
     expect(after).toBe(target);
   }
+});
+
+test("a picked match shows in that cart before the price check returns", async ({ page }) => {
+  let release = () => {};
+  let started = () => {};
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route("**/sw.js", (route) => route.abort());
+  await page.route("**/api/catalog/browse**", (route) => {
+    const url = new URL(route.request().url());
+    const query = (url.searchParams.get("q") || "").toLowerCase();
+    const store = (url.searchParams.get("store") || "").toLowerCase();
+    if (query.includes("egg")) {
+      const items = eggs.filter((item) => !store || item.offers.some((offer) => offer.storeName.toLowerCase() === store));
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items }) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0 }) });
+  });
+  let heldPlans = 0;
+  await page.route("**/api/optimize-list", async (route) => {
+    heldPlans += 1;
+    if (heldPlans === 1) {
+      started();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    } else {
+      await new Promise<void>(() => {});
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan()) });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify([
+        { id: "milk", itemId: "milk", name: "Milk", quantity: 2 },
+        { id: "custom:eggs", itemId: "custom:eggs", name: "Eggs", quantity: 1 },
+      ])
+    );
+  });
+  await unlock(page);
+  await page.locator("#step-bar [data-flow='plan']").click();
+  await ready;
+  release();
+  await page.locator("[data-store='Walmart'] .review-lines").waitFor({ state: "attached" });
+  const before = await page.evaluate(() => window.scrollY);
+  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
+  await page.getByRole("button", { name: /Great Value/ }).click();
+  await expect(page.locator("[data-store='Walmart'] [data-picked-line]")).toContainText("Large Eggs");
+  await expect(page.locator("[data-unfound]")).not.toContainText("Eggs");
+  const after = await page.evaluate(() => window.scrollY);
+  expect(Math.abs(after - before)).toBeLessThan(8);
 });

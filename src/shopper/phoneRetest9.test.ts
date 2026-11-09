@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v62", () => {
-    assert.match(sw, /grocery-gitter-shell-v62/);
+  it("bumps the shell cache to v69", () => {
+    assert.match(sw, /grocery-gitter-shell-v69/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -205,7 +205,7 @@ describe("ninth phone test", () => {
       { bananas: true }
     );
     assert.equal(route[0].cart[0].name, "Bananas");
-    assert.equal(route[0].groups[0].label, "Aisle 12");
+    assert.equal(route[0].groups[0].label, "Dairy · Aisle 12");
     assert.equal(route[0].note, "");
     assert.equal(route[1].note, LAYOUT_NOTE);
     assert.equal(route[1].groups[0].label, "Bakery");

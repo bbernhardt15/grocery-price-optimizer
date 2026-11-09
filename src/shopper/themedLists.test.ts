@@ -174,6 +174,29 @@ describe("themed list slots", () => {
     assert.equal(nothing.swapped, null);
   });
 
+  it("keeps a tailgate brand off a different brand's bun", () => {
+    const buns = slotById("burger-buns");
+    assert.ok(buns);
+    const wrong = resolveSlot({
+      slot: buns,
+      people: 4,
+      favorite: null,
+      override: { name: "Sesame Burger Buns", brand: "Pepperidge Farm", updatedAt: 1 },
+      products: [{ id: "martins", name: "Sesame Burger Buns", brand: "Martin's", familyName: "Sesame Burger Buns" }],
+    });
+    assert.equal(wrong.product, null);
+    assert.equal(wrong.missing, true);
+    const kept = resolveSlot({
+      slot: buns,
+      people: 4,
+      favorite: null,
+      override: { name: "Sesame Burger Buns", brand: "Martin's", updatedAt: 1 },
+      products: [{ id: "martins", name: "Sesame Burger Buns", brand: "Martin's", familyName: "Sesame Burger Buns" }],
+    });
+    assert.equal(kept.product?.id, "martins");
+    assert.equal(kept.missing, false);
+  });
+
   it("remembers a favorite without a price and shares it across lists", () => {
     const storage = memoryStorage();
     assert.equal(readParty(storage), 4);

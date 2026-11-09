@@ -17,7 +17,8 @@ import { extractPdfText } from "../import/pdfText";
 import { analyzeReceipt, applyCatalogBrands, learnReceiptLines, receiptFromVision, relearnReceipt, type ReceiptAnalysis, type ReceiptLine } from "../import/receiptLearn";
 import { parseImportText, type ParsedImportItem } from "../import/parseImportText";
 import { contentHash, readReceiptCache, resetReceiptCache, writeReceiptCache } from "../import/receiptCache";
-import { aiAsk, aiParseText, aiReadImage, aiReadShelf, ModelError, probeVision, transcribeAudio } from "../import/providers";
+import { parseCouponVision } from "../import/couponVision";
+import { aiAsk, aiParseText, aiReadCoupon, aiReadImage, aiReadShelf, ModelError, probeVision, transcribeAudio } from "../import/providers";
 import { parseShelfScan } from "../import/shelfScan";
 import { setImportRuntime } from "../import/runtime";
 
@@ -360,6 +361,41 @@ router.post("/import/photo", async (req, res) => {
     };
     writeReceiptCache(photoKey, body);
     res.json(body);
+  } catch (error) {
+    const mapped = visionHttp(error);
+    res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  }
+});
+
+router.post("/import/coupon", async (req, res) => {
+  if (!allowed(req, res)) return tooFast(res);
+  const config = importConfig();
+  if (!config.photo) {
+    res.status(503).json({ error: IMPORT_MESSAGES.photoOff, code: "unconfigured" });
+    return;
+  }
+  const mimeType = readText(req.body?.mimeType).toLowerCase() || "image/jpeg";
+  if (!IMAGE_TYPES.has(mimeType)) {
+    res.status(400).json({ error: IMPORT_MESSAGES.badImage, code: "unreadable" });
+    return;
+  }
+  const image = decodeBase64(req.body?.imageBase64, MAX_IMAGE);
+  if (!image) {
+    res.status(400).json({ error: IMPORT_MESSAGES.tooBig, code: "too_large" });
+    return;
+  }
+  const budget = importBudget.take(clientKey(req, res), config.dailyLimit, config.globalDailyCap);
+  if (!budget.ok) {
+    res.status(429).json({ error: IMPORT_MESSAGES.daily, code: "daily" });
+    return;
+  }
+  const started = Date.now();
+  try {
+    const detail = visionDetail(image);
+    const extracted = await aiReadCoupon(image.toString("base64"), mimeType, process.env, { detail });
+    const coupon = parseCouponVision(extracted);
+    console.info(`coupon stage=photo detail=${detail} ms=${Date.now() - started} bytes=${image.length} gaps=${coupon.gaps.join(",") || "none"}`);
+    res.json({ coupon, source: "screenshot" });
   } catch (error) {
     const mapped = visionHttp(error);
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });

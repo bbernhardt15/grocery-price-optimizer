@@ -115,9 +115,12 @@ export function receiptUploadHtml() {
       <div class="store-finds">${hints}</div>
     </details>
     <p class="receipt-privacy">${escapeText(PRIVACY_NOTE)}</p>
-    <label class="profile-field">Or paste the order text
-      <textarea id="profile-receipt-paste" maxlength="50000" placeholder="Paste a Kroger, Walmart, Target, Instacart, or emailed order"></textarea>
-    </label>
+    <details class="receipt-paste">
+      <summary>Paste order text instead</summary>
+      <label class="profile-field">Order text
+        <textarea id="profile-receipt-paste" maxlength="50000" placeholder="Paste a Kroger, Walmart, Target, Instacart, or emailed order"></textarea>
+      </label>
+    </details>
   </div>`;
 }
 
@@ -226,7 +229,19 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines)}</div>`;
+  const covered = new Set([...groups.keys()]);
+  const missingDepts = [
+    ["produce", "Produce"],
+    ["meat", "Meat & Seafood"],
+    ["frozen", "Frozen"],
+    ["household", "Household"],
+  ].filter(([, label]) => !covered.has(label));
+  const missing = missingDepts.length
+    ? `<section class="missing-depts"><p class="paper-note">Not on this receipt. Save a default now, or leave it unset.</p><div class="mini-row">${missingDepts
+        .map(([id, label]) => `<button type="button" class="mini-chip" data-missing-dept="${escapeText(id)}" data-missing-label="${escapeText(label)}">${escapeText(label)}: cheapest</button>`)
+        .join("")}</div></section>`
+    : "";
+  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${missing}${basketTeaserHtml(options.lines)}</div>`;
 }
 
 /** After Confirm: pick which learned lines join this trip. */

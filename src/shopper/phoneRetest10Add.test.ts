@@ -138,6 +138,7 @@ describe("tenth phone test — Add tab", () => {
     const markup = checklistHtml(added.state, escapeHtml);
     assert.match(markup, /Add \d+ items to my trip/);
     assert.match(markup, /data-theme-check="stuffing"/);
+    assert.match(markup, /data-theme-brand="stuffing"/);
     assert.match(markup, /Pie &amp; cream/);
     assert.match(markup, /id="theme-add-input"/);
     assert.match(markup, /class="inline-loader"/);
@@ -167,7 +168,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v62/);
+    assert.match(sw, /grocery-gitter-shell-v69/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);

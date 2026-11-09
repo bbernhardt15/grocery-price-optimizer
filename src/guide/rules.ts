@@ -12,6 +12,8 @@
 export const GUIDE_KEY = "gg-guide";
 export const DISMISS_LIMIT = 3;
 export const GUIDE_QUIET_MS = 280;
+/** A visible prompt stays up this long before a different one can replace it. */
+export const GUIDE_DWELL_MS = 4000;
 
 export const GUIDE_LABEL = "Gitter guide";
 export const DISMISS_LABEL = "Dismiss guide";
@@ -612,6 +614,27 @@ export function momentStillFits(input: GuideInput, moment: Moment): boolean {
     if (id !== moment) shown[id] = true;
   }
   return decideGuide({ ...input, session: { ...session, shown } })?.moment === moment;
+}
+
+/**
+ * Two prompts were landing back to back, each with its own Turn off.
+ * Keep the one already on screen until the dwell passes. A saved-trip
+ * prompt still replaces it, because that is the completion of the shop.
+ */
+export function holdVisiblePrompt(
+  current: Prompt | null,
+  next: Prompt | null,
+  shownAt: number,
+  now: number,
+  dwellMs = GUIDE_DWELL_MS
+): boolean {
+  if (!current || !next) return false;
+  if (current.moment === next.moment) return false;
+  if (next.moment === "trip-saved") return false;
+  const started = Number(shownAt) || 0;
+  const clock = Number(now) || 0;
+  if (started <= 0 || clock <= 0) return false;
+  return clock - started < dwellMs;
 }
 
 /** Show a moment once, keep it on screen until it no longer fits, and don't swap mid-tap. */

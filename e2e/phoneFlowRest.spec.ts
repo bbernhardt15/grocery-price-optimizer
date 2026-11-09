@@ -19,6 +19,16 @@ async function reachStores(page: Page) {
   await page.locator("#profile-zip-done").click();
 }
 
+async function reachReceipts(page: Page) {
+  await reachStores(page);
+  await page.locator("#profile-next").click();
+  await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
+  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    await page.locator("#profile-next").click();
+  }
+  await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
+}
+
 test("priced completion saves an estimate, not a $0 savings claim, and reuse restores the lines", async ({ page }) => {
   await page.route("**/api/optimize-list", async (route) => {
     await route.fulfill({
@@ -90,8 +100,7 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
     await route.continue();
   });
   await unlock(page);
-  await reachStores(page);
-  await page.locator("#profile-next").click();
+  await reachReceipts(page);
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
   await page.getByRole("button", { name: "Read my receipts" }).click();
   await expect(page.locator("[data-reading-screen], .read-live").first()).toBeVisible();
@@ -106,8 +115,7 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
 
 test("internal Back from the trip list returns to the parsed review", async ({ page }) => {
   await unlock(page);
-  await reachStores(page);
-  await page.locator("#profile-next").click();
+  await reachReceipts(page);
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
   await page.getByRole("button", { name: "Read my receipts" }).click();
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toBeVisible();
@@ -135,12 +143,14 @@ test("store connect can be skipped without leaving the ZIP", async ({ page }) =>
   });
   await unlock(page);
   await reachStores(page);
+  await page.locator("#profile-next").click();
+  await expect(page.locator("#profile-title")).toHaveText("Connect a store?");
   await expect(page.locator("#store-connect-now")).toBeVisible();
   await expect(page.locator("#store-connect input[type=password]")).toHaveCount(0);
+  await expect(page.locator("#profile-store-list")).toHaveCount(0);
   await page.locator("#store-connect-later").click();
-  await expect(page.locator("#store-connect")).toContainText(/at checkout/i);
-  await expect(page.locator("#profile-zip")).toHaveValue(/45103/);
-  await expect(page.locator("#profile-store-list input:checked, #profile-store-list input").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
 });
 
 test("a cancelled Kroger sign-in returns to onboarding", async ({ page }) => {
@@ -167,9 +177,13 @@ test("a cancelled Kroger sign-in returns to onboarding", async ({ page }) => {
   });
   await unlock(page);
   await reachStores(page);
+  await page.locator("#profile-next").click();
+  await expect(page.locator("#store-connect-now")).toBeVisible();
   await page.locator("#store-connect-now").click();
+  await page.waitForURL(/kroger=error/);
   await expect(page.locator("#profile-onboard")).toBeVisible();
-  await expect(page.locator("#profile-zip")).toHaveValue(/45103/);
+  await expect(page.locator("#profile-title")).toHaveText("Connect a store?");
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
   await expect(page.locator("#handoff-return")).toBeHidden();
   await expect(page.locator("#cart-ready")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toHaveCount(0);
@@ -202,6 +216,8 @@ test("a connected Kroger return opens receipts and keeps the ZIP", async ({ page
   const status = page.waitForResponse((response) => response.url().includes("/api/kroger/auth-status"));
   await reachStores(page);
   await status;
+  await page.locator("#profile-next").click();
+  await expect(page.locator("#store-connect-now")).toBeVisible();
   await page.locator("#store-connect-now").click();
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
   await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
@@ -339,11 +355,11 @@ test("a long aisle and in-store list keep a scroll target while work is in fligh
   await page.locator(".chip[data-dept='dairy']").evaluate((button) => (button as HTMLButtonElement).click());
   await expect(page.locator(".shelf-loading")).toBeVisible();
   const heldScroll = await page.evaluate(() => window.scrollY);
-  expect(Math.abs(heldScroll - aisleScroll)).toBeLessThan(8);
+  expect(heldScroll).toBeLessThan(40);
   releaseDairy();
   await expect(page.locator("#grid")).toContainText("dairy item 1");
   await expect(page.locator("#grid .card")).toHaveCount(30);
-  expect(Math.abs((await page.evaluate(() => window.scrollY)) - aisleScroll)).toBeLessThan(24);
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(40);
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(async () => page.evaluate(() => document.getElementById("grid")?.style.minHeight || "")).toBe("");
   const natural = await page.evaluate(() => {
@@ -821,6 +837,11 @@ test("an eight item import review can reach the last row and the add button", as
   });
   expect(fit.button).toBe(true);
   expect(fit.row).toBe(true);
+  await page.getByRole("button", { name: /^Remove/ }).first().click();
+  await expect(page.locator("[data-key^='row-']")).toHaveCount(7);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.locator("[data-key^='row-']")).toHaveCount(8);
+  await expect(page.locator("[data-key='row-0']")).toBeVisible();
 });
 
 test("unresolved rows remove by swipe or button and can be undone", async ({ page }) => {

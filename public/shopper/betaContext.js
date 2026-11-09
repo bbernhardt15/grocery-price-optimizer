@@ -1,6 +1,6 @@
 /** Non-sensitive context for beta feedback. Item names and receipt text stay out. */
 
-export const SHELL_CACHE = "v62";
+export const SHELL_CACHE = "v69";
 export const APP_VERSION = "1.0.0";
 export const INVITE_KEY = "gg-beta-code";
 
@@ -59,13 +59,24 @@ export function feedbackContext({ storage, userAgent, pathname, tab, now } = {})
   };
 }
 
-export function feedbackBody({ rating, message, screen, context, deviceId }) {
+export function feedbackBody({ rating, message, screen, context, deviceId, shots }) {
+  const images = Array.isArray(shots)
+    ? shots
+        .filter((shot) => shot && typeof shot.data === "string" && shot.data && typeof shot.mimeType === "string")
+        .slice(0, 3)
+        .map((shot) => ({
+          name: clip(shot.name || "screenshot", 80),
+          mimeType: clip(shot.mimeType, 40),
+          data: String(shot.data).replace(/\s/g, ""),
+        }))
+    : [];
   return {
     rating,
     message: clip(message, 2000),
     screen: clip(screen, 80),
     context,
     deviceId,
+    ...(images.length ? { shots: images } : {}),
   };
 }
 
