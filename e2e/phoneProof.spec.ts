@@ -225,9 +225,29 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   await expect(missing).toBeVisible();
   await missing.click();
   await expect(missing).toHaveAttribute("aria-pressed", "true");
-  const footer = await page.locator("#profile-next").boundingBox();
-  const rowBox = await page.locator("[data-learned-row], [data-missing-dept]").last().boundingBox();
-  expect(footer && rowBox && (footer.y >= rowBox.y + rowBox.height - 1 || rowBox.y >= footer.y + footer.height - 1)).toBeTruthy();
+  const stage = page.locator("#profile-stage");
+  await stage.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const learnedFit = await page.evaluate(() => {
+    const scroller = document.querySelector("#profile-stage");
+    const next = document.querySelector("#profile-next");
+    const last = document.querySelector(".missing-depts [data-missing-dept]:last-of-type");
+    if (!scroller || !next || !last) return null;
+    const frame = scroller.getBoundingClientRect();
+    const nextBox = next.getBoundingClientRect();
+    const lastBox = last.getBoundingClientRect();
+    const intersects = lastBox.bottom > nextBox.top + 1 && lastBox.top < nextBox.bottom && lastBox.right > nextBox.left && lastBox.left < nextBox.right;
+    return {
+      intersects,
+      lastVisible: lastBox.top >= frame.top - 1 && lastBox.bottom <= frame.bottom + 1,
+      lastAboveButton: lastBox.bottom <= nextBox.top + 1,
+    };
+  });
+  expect(learnedFit).not.toBeNull();
+  expect(learnedFit?.intersects).toBe(false);
+  expect(learnedFit?.lastVisible).toBe(true);
+  expect(learnedFit?.lastAboveButton).toBe(true);
   await page.screenshot({ path: "/opt/cursor/artifacts/onboarding-learned.png" });
 });
 
@@ -566,6 +586,7 @@ test("the finished-trip toast stays off the header and can be undone", async ({ 
   await page.getByRole("button", { name: "Complete trip" }).first().click();
   await expect(page.locator("#toast")).toContainText("Saved this trip to Past trips.");
   await page.getByRole("button", { name: "Turn off" }).waitFor({ timeout: 3000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
   const hit = await page.evaluate(() => {
     const box = (el) => {
       if (!el) return null;
@@ -578,10 +599,20 @@ test("the finished-trip toast stays off the header and can be undone", async ({ 
     const toast = box(document.querySelector("#toast"));
     const header = box(document.querySelector(".topbar"));
     const off = box([...document.querySelectorAll("button")].find((button) => /turn off/i.test(button.textContent || "")));
-    return { header: intersects(toast, header), off: intersects(toast, off) };
+    const favorites = box([...document.querySelectorAll("button, .usuals-title")].find((node) => /your favorites/i.test(node.textContent || "")));
+    return {
+      header: intersects(toast, header),
+      off: intersects(toast, off),
+      favorites: intersects(toast, favorites),
+      toast,
+      guideTop: off?.y ?? null,
+      placed: document.querySelector("#toast")?.getAttribute("data-toast-place") || "",
+      bottom: document.querySelector("#toast") ? getComputedStyle(document.querySelector("#toast")).bottom : "",
+    };
   });
-  expect(hit.header).toBe(false);
-  expect(hit.off).toBe(false);
+  expect(hit.header, JSON.stringify(hit)).toBe(false);
+  expect(hit.off, JSON.stringify(hit)).toBe(false);
+  expect(hit.favorites, JSON.stringify(hit)).toBe(false);
   await page.screenshot({ path: "/opt/cursor/artifacts/complete-toast.png" });
   await page.locator("#toast-action").click();
   await expect(page.locator("#toast")).toContainText("Trip restored.");

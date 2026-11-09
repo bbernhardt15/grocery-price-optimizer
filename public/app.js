@@ -176,7 +176,7 @@ import { fillPrintRoot, inStoreShareActionsHtml, inStoreShareText, shareInStoreL
 import { catalogTripEstimate } from "./shopper/catalogEstimate.js";
 import { groupListEntries, sectionForEntry } from "./shopper/listSections.js";
 import { planChecklist, planChecklistHtml } from "./shopper/planProgress.js";
-import { REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, reviewCardMinPx, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
+import { REVIEW_FAILED_STATUS, REVIEW_GAVE_UP_STATUS, REVIEW_LOADING_STATUS, REVIEW_REFRESH_TIMEOUT_STATUS, reviewCardMinPx, reviewGaveUpHtml, reviewHeadlineReady, reviewLoadingHtml, reviewPendingCardsHtml } from "./shopper/reviewStable.js";
 import { cartCardFigures, coverageVisible, createDisplayedTotal, quietRetryPlan, storeLineLabel } from "./shopper/reviewSettle.js";
 import { applyInStoreScroll } from "./shopper/inStoreEntry.js";
 import { cartCouponCallout } from "./shopper/cartCouponNote.js";
@@ -811,6 +811,43 @@ function parkToast() {
   toastEl.dataset.place = "page";
 }
 
+function placePageToast() {
+  if (!toastEl || toastEl.dataset.place === "sheet") {
+    if (toastEl) {
+      toastEl.style.top = "";
+      toastEl.style.bottom = "";
+      toastEl.style.left = "";
+      toastEl.style.right = "";
+      toastEl.style.width = "";
+      toastEl.style.maxWidth = "";
+      toastEl.style.transform = "";
+    }
+    return;
+  }
+  const guide = document.getElementById("gitter-guide");
+  const guideBox = guide instanceof HTMLElement && !guide.hidden ? guide.getBoundingClientRect() : null;
+  const guideOpen = Boolean(guideBox && guideBox.height > 24);
+  toastEl.dataset.toastPlace = guideOpen ? "above-guide" : toastEl.dataset.place || "page";
+  if (!guideOpen) {
+    toastEl.style.top = "";
+    toastEl.style.bottom = "";
+    toastEl.style.left = "";
+    toastEl.style.right = "";
+    toastEl.style.width = "";
+    toastEl.style.maxWidth = "";
+    toastEl.style.transform = "";
+    return;
+  }
+  const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
+  toastEl.style.top = "auto";
+  toastEl.style.left = "50%";
+  toastEl.style.right = "auto";
+  toastEl.style.width = "min(28rem, calc(100% - 24px))";
+  toastEl.style.maxWidth = "min(28rem, calc(100% - 24px))";
+  toastEl.style.transform = "translateX(-50%)";
+  toastEl.style.bottom = `${gap}px`;
+}
+
 function toast(message, durationMs = 1600) {
   parkToast();
   const text = $("toast-text");
@@ -822,6 +859,14 @@ function toast(message, durationMs = 1600) {
     action.onclick = null;
   }
   toastEl.classList.add("show");
+  placePageToast();
+  const started = performance.now();
+  const followGuide = () => {
+    if (!toastEl.classList.contains("show")) return;
+    placePageToast();
+    if (performance.now() - started < 1000) requestAnimationFrame(followGuide);
+  };
+  requestAnimationFrame(followGuide);
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), durationMs);
 }
@@ -4022,8 +4067,25 @@ function settleEntryScroll(extra = false) {
   scrollPageTop();
 }
 
+function reviewListLabels() {
+  const names = [];
+  for (const entry of list.values()) {
+    const product = entry?.product || {};
+    const label = String(product.familyName || product.catalogName || product.name || entry?.name || "").replace(/\s+/g, " ").trim();
+    if (label) names.push(label);
+  }
+  return names;
+}
+
 function paintReviewLoading(status) {
   if (!tripEl || flowStep !== "plan") return;
+  if (status === REVIEW_GAVE_UP_STATUS || status === REVIEW_FAILED_STATUS) {
+    clearReviewRefresh();
+    tripEl.innerHTML = `${krogerBannerHtml()}${reviewGaveUpHtml(reviewListLabels(), status)}`;
+    paintPlanBar();
+    settleEntryScroll();
+    return;
+  }
   if (holdVisibleReview(status)) return;
   const existing = tripEl.querySelector("[data-review-stable='loading']");
   if (existing) {
@@ -4128,6 +4190,7 @@ function selectReviewMode(mode) {
 }
 
 let refreshAnchorWatch = 0;
+let refreshHeldScroll = null;
 let reviewUserScroll = null;
 let reviewScrollWriting = false;
 
@@ -4158,6 +4221,7 @@ function rememberReviewUserScroll() {
  */
 function beginRefreshScrollGuard(startY) {
   const watchId = ++refreshAnchorWatch;
+  refreshHeldScroll = startY;
   let handedToUser = false;
   const detach = () => {
     window.removeEventListener("wheel", onUser, true);
@@ -4169,6 +4233,7 @@ function beginRefreshScrollGuard(startY) {
   const finishUser = () => {
     if (handedToUser || watchId !== refreshAnchorWatch) return;
     handedToUser = true;
+    refreshHeldScroll = null;
     refreshAnchorWatch += 1;
     detach();
   };
@@ -5010,10 +5075,10 @@ function pinPreferredStores(payload) {
 
 function commitDisplayedPlan(payload, { zip } = {}) {
   if (!payload) return false;
-  quietRetryAttempt = 0;
   pinPreferredStores(payload);
   renderTrip(payload, { keepEdits: true, force: true });
   if (!planReady(lastOptimize)) return false;
+  quietRetryAttempt = 0;
   writePlanCache(localStorage, {
     signature: listSignature(),
     zip,
@@ -5028,7 +5093,11 @@ function listPlanFallback() {
   return listDisplayPlan([...list.values()], selectedStoreNames());
 }
 
-async function planTrip({ stay = false, trigger = null, force = false } = {}) {
+async function planTrip({ stay = false, trigger = null, force = false, quiet = false } = {}) {
+  if (!quiet) quietRetryAttempt = 0;
+  if (stay && document.activeElement instanceof HTMLElement && document.activeElement.id === "plan-refresh") {
+    document.activeElement.blur();
+  }
   const anchorScroll = stay && force ? window.scrollY : null;
   planErrorEl.hidden = true;
   const zip = normalizeZip(zipEl.value);
@@ -5138,6 +5207,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     });
   let result = "ok";
   let streamedPlan = null;
+  let timeoutNote = "";
   try {
     const response = await fetchWithTimeout(
       fetch,
@@ -5227,13 +5297,22 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
     }
     const timedOut = planTimedOut(error);
     const recovered = chooseDisplayedPlan(planReady(lastOptimize) ? lastOptimize : null, streamedPlan);
-    if (recovered && commitDisplayedPlan(recovered, { zip })) {
-      if (timedOut) toast(PLAN_PARTIAL_NOTE);
+    if (recovered && planIsShowable(recovered) && tripEl?.querySelector("[data-review-shell]")) {
+      if (timedOut) timeoutNote = REVIEW_REFRESH_TIMEOUT_STATUS;
       rememberListAsUsuals();
       return "ok";
     }
+    if (recovered && planIsShowable(recovered) && commitDisplayedPlan(recovered, { zip })) {
+      if (timedOut) timeoutNote = REVIEW_REFRESH_TIMEOUT_STATUS;
+      rememberListAsUsuals();
+      return "ok";
+    }
+    if (timedOut) {
+      planning = false;
+      paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+      return "fail";
+    }
     if (commitDisplayedPlan(listPlanFallback(), { zip })) {
-      if (timedOut) toast(PLAN_PARTIAL_NOTE);
       rememberListAsUsuals();
       return "ok";
     }
@@ -5259,7 +5338,7 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       }, retry.delayMs || 1600);
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     } else if (!heldError && flowStep === "plan" && !planReady(lastOptimize)) {
-      paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+      paintReviewLoading(timedOut ? REVIEW_GAVE_UP_STATUS : REVIEW_FAILED_STATUS);
     } else if (!heldError && !lastOptimize && !list.size) {
       const state = emptyState(kind || "network");
       tripEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
@@ -5278,6 +5357,10 @@ async function planTrip({ stay = false, trigger = null, force = false } = {}) {
       planTicker = 0;
       const statusBlock = document.getElementById("plan-status-block");
       if (statusBlock) statusBlock.remove();
+      if (timeoutNote && tripEl?.querySelector("[data-review-shell]")) {
+        holdVisibleReview(timeoutNote);
+        if (refreshHeldScroll != null) writeReviewScroll(refreshHeldScroll);
+      }
       planAbort = null;
       planBtn.disabled = list.size === 0;
       planBtn.textContent = "Review the split";

@@ -1056,11 +1056,6 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between;
   max-width: min(28rem, calc(100% - 24px));
 }
-body:has(#gitter-guide:not([hidden])) .toast.show {
-  bottom: auto;
-  top: calc(72px + var(--safe-top));
-  transform: translateX(-50%);
-}
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast button, #toast-action {
   background: #fffdfb; color: #1c1917; border: 0; border-radius: 999px;
@@ -1463,13 +1458,29 @@ dialog.profile-onboard .profile-actions {
 dialog.profile-onboard[data-step="receipts"] #profile-stage,
 dialog.profile-onboard[data-step="learned"] #profile-stage { padding-bottom: 8px; }
 dialog.profile-onboard[data-step="receipts"] .profile-actions,
-dialog.profile-onboard[data-step="learned"] .profile-actions,
 dialog.profile-onboard[data-step="trip"] .profile-actions,
 dialog.profile-onboard[data-step="place"] .profile-actions,
 dialog.profile-onboard[data-step="zip"] .profile-actions,
 dialog.profile-onboard[data-step="connect"] .profile-actions {
   position: sticky;
   bottom: 0;
+  background: var(--bg);
+  z-index: 4;
+}
+dialog.profile-onboard[data-step="learned"] .sheet-body {
+  min-height: 0;
+}
+dialog.profile-onboard[data-step="learned"] #profile-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 20px;
+  scroll-padding-bottom: 20px;
+}
+dialog.profile-onboard[data-step="learned"] .profile-actions {
+  position: relative;
+  bottom: auto;
+  flex: none;
   background: var(--bg);
   z-index: 4;
 }

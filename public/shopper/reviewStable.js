@@ -5,6 +5,7 @@
  */
 
 import { planIsShowable } from "./planCache.js";
+import { PLAN_TIMEOUT_MS } from "./planLoad.js";
 
 export const REVIEW_CARD_MIN_PX = 148;
 /** Room for the coupon callout and the cart button on a phone width. */
@@ -13,7 +14,10 @@ export const REVIEW_KROGER_MIN_PX = 256;
 export const REVIEW_WALMART_MIN_PX = 304;
 export const REVIEW_HEAD_MIN_PX = 196;
 export const REVIEW_LOADING_STATUS = "Checking store prices";
-export const REVIEW_GAVE_UP_STATUS = "Couldn't check every store. Pull to try again.";
+export const REVIEW_TIMEOUT_SECONDS = Math.round(PLAN_TIMEOUT_MS / 1000);
+export const REVIEW_GAVE_UP_STATUS = `No store price came back. This check stopped after ${REVIEW_TIMEOUT_SECONDS} seconds.`;
+export const REVIEW_FAILED_STATUS = "The price check didn't finish. Try it again.";
+export const REVIEW_REFRESH_TIMEOUT_STATUS = `This refresh stopped after ${REVIEW_TIMEOUT_SECONDS} seconds. These are the last prices.`;
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -111,6 +115,35 @@ export function reviewLoadingHtml(storeNames, status = REVIEW_LOADING_STATUS) {
     <div class="review-head-slot" data-review-head-slot style="min-height:${frames.headMinHeight}px"></div>
     ${reviewSkeletonHtml(storeNames)}
     <p class="review-loading-status">${escapeText(line)}</p>
+  </div>`;
+}
+
+/**
+ * A cold check that ended with no prices. Names stay so the list is not a
+ * blank skeleton, and nothing here is a savings total.
+ * @param {string[] | null | undefined} itemNames
+ * @param {string} [status]
+ */
+export function reviewGaveUpHtml(itemNames, status = REVIEW_GAVE_UP_STATUS) {
+  const names = [];
+  const seen = new Set();
+  for (const name of itemNames || []) {
+    const label = clean(name);
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    names.push(label);
+  }
+  const rows = names.map((name) => `<li>${escapeText(name)}</li>`).join("");
+  const list = rows ? `<ul class="review-gave-up-list">${rows}</ul>` : "";
+  return `<div class="review-stable" data-review-stable="gave-up">
+    <section class="savings-card">
+      <h2>No store price came back</h2>
+      <p class="review-loading-status">${escapeText(status)}</p>
+      <p class="muted">Nothing on this screen is a savings total.</p>
+      <button type="button" class="ghost" data-plan-retry="1">Try this check again</button>
+    </section>
+    ${list}
   </div>`;
 }
 
