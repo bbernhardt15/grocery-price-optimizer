@@ -15,6 +15,7 @@ import { accessFor } from "../billing/access";
 import { entitlementPayload, lockCartHandoffs } from "../billing/applyPlan";
 import { withDeadline } from "../withDeadline";
 import { scopeStoreNames } from "../pricing/storeScope";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, serviceAreaFor } from "../serviceArea";
 
 /** Nearby-store lookups must not hold the whole plan. Prices still return. */
 const STORE_LOOKUP_MS = 3000;
@@ -208,6 +209,17 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
         "Request body must be an array of grocery strings, or an object with groceryList/items as strings or verified product objects.",
     });
     return;
+  }
+
+  if (parsed.zipCode) {
+    const area = serviceAreaFor(parsed.zipCode);
+    if (!area.ok && area.reason === "out_of_area") {
+      res.status(422).json({
+        error: OUT_OF_AREA_MESSAGE,
+        code: NOT_IN_SERVICE_AREA_CODE,
+      });
+      return;
+    }
   }
 
   if (mongoose.connection.readyState !== 1) {

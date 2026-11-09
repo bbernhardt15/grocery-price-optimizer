@@ -50,6 +50,7 @@ describe("onboarding steps", () => {
     assert.equal(normalizeZipInput("45202-1234"), "45202-1234");
     assert.equal(normalizeZipInput("452021234"), "45202-1234");
     assert.equal(zipAdvanceError("45202"), "");
+    assert.match(zipAdvanceError("04101"), /isn’t available in your area yet/);
     assert.equal(zipAdvanceError("4520"), "Enter a 5-digit ZIP, or leave it blank.");
     assert.equal(zipAdvanceError("abc"), "Enter a 5-digit ZIP, or leave it blank.");
   });

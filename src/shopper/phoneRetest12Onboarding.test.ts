@@ -32,8 +32,8 @@ function chromeExecutable() {
 const chrome = chromeExecutable();
 
 describe("twelfth phone test — onboarding and receipt import", () => {
-  it("bumps the shell cache to v69", () => {
-    assert.equal(SHELL_CACHE, "v69");
+  it("bumps the shell cache to v70", () => {
+    assert.equal(SHELL_CACHE, "v70");
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
   });
 

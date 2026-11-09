@@ -28,6 +28,7 @@ import { applyCheapestDefaults, asksNameBrand, categorySearch, nameBrandsFor, pr
 import { brandKey, displayBrand, isProduceFamily } from "./brandNames.js";
 import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
+import { outOfAreaMessage } from "./serviceArea.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
 import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml, rememberedNameBrand } from "./receiptCopy.js";
 import { importStageHtml, learnedViewReady } from "./learnedGate.js";
@@ -496,9 +497,31 @@ export function mountProfileOnboarding(deps = {}) {
     if (!/^\d{5}/.test(zip)) {
       host.innerHTML = "";
       placeStoresState = "need-zip";
-      if (note) note.textContent = "Stores within about 25 miles show up here.";
+      if (note) {
+        note.hidden = false;
+        note.textContent = "Stores within about 25 miles show up here.";
+      }
       return;
     }
+    const blocked = outOfAreaMessage(zip);
+    if (blocked) {
+      host.innerHTML = "";
+      placeStoresState = "out";
+      if (note) note.hidden = true;
+      const zipError = $("profile-zip-error");
+      if (zipError) {
+        zipError.hidden = false;
+        zipError.textContent = blocked;
+      }
+      const field = $("profile-zip");
+      if (field) field.setAttribute("aria-invalid", "true");
+      return;
+    }
+    if (note) note.hidden = false;
+    const field = $("profile-zip");
+    if (field) field.setAttribute("aria-invalid", "false");
+    const zipError = $("profile-zip-error");
+    if (zipError && /available in your area/i.test(zipError.textContent || "")) zipError.hidden = true;
     const nearby = storesForZip(zip);
     const names = visibleStoreNames(nearby.stores);
     placeStoresState = names.length ? "ready" : "empty";
@@ -590,10 +613,12 @@ export function mountProfileOnboarding(deps = {}) {
     const onZip = stepId === "zip" || stepId === "place";
     if (dialog) dialog.dataset.zipTyping = onZip && (!fiveDigitZip(field?.value) || document.activeElement === field) ? "1" : "0";
     if (!next || !onZip) return;
-    const ready = Boolean(fiveDigitZip(field?.value)) && document.activeElement !== field;
+    const five = fiveDigitZip(field?.value);
+    const blocked = Boolean(five && outOfAreaMessage(five));
+    const ready = Boolean(five) && !blocked && document.activeElement !== field;
     next.hidden = !ready;
     const chip = $("profile-zip-done");
-    if (chip) chip.classList.toggle("is-set", Boolean(fiveDigitZip(field?.value)));
+    if (chip) chip.classList.toggle("is-set", Boolean(five) && !blocked);
   }
 
   function paintZipChoices(choices) {
@@ -782,6 +807,7 @@ export function mountProfileOnboarding(deps = {}) {
         zipError.hidden = false;
         zipError.textContent = error;
       }
+      if (outOfAreaMessage(raw)) deps.setZip?.(normalizeZipInput(raw));
       zipInput?.focus();
       return null;
     }

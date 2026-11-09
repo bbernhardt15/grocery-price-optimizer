@@ -9,6 +9,7 @@ import { Product } from "../models/Product";
 import { mockProducts } from "../seed";
 import { fetchMatchingProducts } from "../fetchMatchingProducts";
 import { krogerService } from "../krogerService";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE } from "../serviceArea";
 import { walmartPricingProvider } from "../pricing/walmartProvider";
 import { targetPricingProvider } from "../pricing/targetProvider";
 import { flippProviderForStore, type FlippDealsProvider } from "../pricing/flipp/flippProvider";
@@ -239,10 +240,10 @@ describe("POST /api/optimize-list", () => {
   });
 
   it("looks up the nearest Kroger from zipCode and only prices that store", async () => {
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async (zipCode: string) => {
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => {
       assert.equal(zipCode, "45202");
-      return "01400441";
+      return { locationId: "01400441", source: "live", zip: "45202", lookupFailed: false };
     };
 
     try {
@@ -276,14 +277,19 @@ describe("POST /api/optimize-list", () => {
       assert.equal(body.stores[0].items[0].name, "Gallon of Milk");
       assert.equal(body.stores[0].items[0].price, 2.89);
     } finally {
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       await Product.deleteMany({ brand: "Faraway Farms" });
     }
   });
 
   it("still splits the trip across Walmart and Target when a ZIP selects a Kroger store", async () => {
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
 
     try {
       const { status, json } = await optimize({
@@ -303,7 +309,7 @@ describe("POST /api/optimize-list", () => {
       assert.match(body.tripPlan.summary, /Walmart/);
       assert.match(body.tripPlan.summary, /Target/);
     } finally {
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
     }
   });
 
@@ -315,6 +321,36 @@ describe("POST /api/optimize-list", () => {
     assert.equal(status, 400);
     const body = json as { error: string };
     assert.match(body.error, /zipCode/i);
+  });
+
+  it("refuses a ZIP outside the Kroger and Walmart service area", async () => {
+    let lookups = 0;
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async () => {
+      lookups += 1;
+      return { locationId: "01400441", source: "live", zip: "04101", lookupFailed: false };
+    };
+    try {
+      const { status, json } = await optimize({
+        groceryList: ["milk"],
+        zipCode: "04101",
+      });
+      assert.equal(status, 422);
+      const body = json as { error: string; code: string };
+      assert.equal(body.error, OUT_OF_AREA_MESSAGE);
+      assert.equal(body.code, NOT_IN_SERVICE_AREA_CODE);
+      assert.equal(lookups, 0);
+
+      const vermont = await optimize({ groceryList: ["milk"], zipCode: "05401" });
+      assert.equal(vermont.status, 422);
+      assert.equal((vermont.json as { code: string }).code, NOT_IN_SERVICE_AREA_CODE);
+
+      const poBox = await optimize({ groceryList: ["Gallon of Milk"], zipCode: "45201" });
+      assert.equal(poBox.status, 200);
+      assert.equal(lookups, 1);
+    } finally {
+      krogerService.resolveClosestStore = originalLookup;
+    }
   });
 
   it("skips the live Products API when matching live rows are fresher than 24 hours", async () => {
@@ -397,8 +433,13 @@ describe("POST /api/optimize-list", () => {
   it("on a cache miss, fetches live Kroger prices and upserts them before optimizing", async () => {
     setKrogerCreds();
     const originalSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async (term: string, locationId?: string) => {
       assert.equal(term, "quinoa");
       assert.equal(locationId, "01400441");
@@ -438,7 +479,7 @@ describe("POST /api/optimize-list", () => {
       assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
     } finally {
       krogerService.searchProducts = originalSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       delete process.env.KROGER_CLIENT_ID;
       delete process.env.KROGER_CLIENT_SECRET;
     }
@@ -447,8 +488,13 @@ describe("POST /api/optimize-list", () => {
   it("treats rows older than 24 hours as a cache miss and refreshes them", async () => {
     setKrogerCreds();
     const originalSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => [
       {
         name: "Smoked Paprika",
@@ -497,7 +543,7 @@ describe("POST /api/optimize-list", () => {
       assert.ok(Date.now() - new Date(saved.updatedAt).getTime() < 60_000);
     } finally {
       krogerService.searchProducts = originalSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       delete process.env.KROGER_CLIENT_ID;
       delete process.env.KROGER_CLIENT_SECRET;
     }
@@ -546,8 +592,13 @@ describe("POST /api/optimize-list", () => {
       name: /cheerios|honey|sandwich bread/i,
     });
     const originalSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async (term: string, locationId?: string) => {
       assert.equal(locationId, "01400441");
       const catalog: Record<string, Array<{ name: string; brand: string; price: number }>> = {
@@ -602,7 +653,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(body.total, 11.37);
     } finally {
       krogerService.searchProducts = originalSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       delete process.env.KROGER_CLIENT_ID;
       delete process.env.KROGER_CLIENT_SECRET;
       await Product.deleteMany({
@@ -657,8 +708,13 @@ describe("POST /api/optimize-list", () => {
       name: /cheerios|honey/i,
     });
     const originalSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => {
       throw new Error(
         "Kroger API credentials are missing. Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the server."
@@ -681,7 +737,7 @@ describe("POST /api/optimize-list", () => {
       assert.deepEqual(body.unavailable, ["Cheerios", "Honey"]);
     } finally {
       krogerService.searchProducts = originalSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       delete process.env.KROGER_CLIENT_ID;
       delete process.env.KROGER_CLIENT_SECRET;
     }
@@ -824,7 +880,7 @@ describe("POST /api/optimize-list", () => {
     process.env.TARGET_PARTNER_API_KEY = "partner-key";
 
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const originalWalmart = walmartPricingProvider.searchProducts.bind(
       walmartPricingProvider
     );
@@ -835,7 +891,12 @@ describe("POST /api/optimize-list", () => {
       targetPricingProvider
     );
 
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async (term: string) => {
       const catalog: Record<string, { name: string; price: number }> = {
         "Oat Milk": { name: "Simple Truth Oat Milk", price: 2.1 },
@@ -974,7 +1035,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(liveReports.Target.source, "live");
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       walmartPricingProvider.searchProducts = originalWalmart;
       walmartPricingProvider.getNearestStore = originalNearest;
       targetPricingProvider.searchProducts = originalTarget;
@@ -988,11 +1049,16 @@ describe("POST /api/optimize-list", () => {
     process.env.TARGET_PARTNER_API_KEY = "partner-key";
 
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const originalTarget = targetPricingProvider.searchProducts.bind(
       targetPricingProvider
     );
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => [];
     targetPricingProvider.searchProducts = async () => {
       throw new Error("Target partner feed failed (503)");
@@ -1040,7 +1106,7 @@ describe("POST /api/optimize-list", () => {
       assert.match(targetReport?.error ?? "", /503/);
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       targetPricingProvider.searchProducts = originalTarget;
       clearPricingEnv();
     }
@@ -1051,7 +1117,7 @@ describe("POST /api/optimize-list", () => {
     setKrogerCreds();
 
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const stubs: Array<{
       store: string;
       original: FlippDealsProvider["searchProducts"];
@@ -1070,7 +1136,12 @@ describe("POST /api/optimize-list", () => {
       provider.searchProducts = search;
     }
 
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async (term: string) => {
       if (term !== "FlippAmaranth") {
         return [];
@@ -1176,7 +1247,7 @@ describe("POST /api/optimize-list", () => {
       assert.doesNotMatch(body.pricingWarning ?? "", /TARGET_PARTNER/);
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       for (const stub of stubs) {
         const provider = flippProviderForStore(stub.store);
         if (provider) {
@@ -1191,12 +1262,17 @@ describe("POST /api/optimize-list", () => {
     process.env.FLIPP_ENABLED = "true";
     setKrogerCreds();
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const krogerFlipp = flippProviderForStore("Kroger");
     const originalFlipp = krogerFlipp?.searchProducts.bind(krogerFlipp);
     let flippCalls = 0;
 
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => [
       {
         name: "Kroger FlippGuard Teff",
@@ -1237,7 +1313,7 @@ describe("POST /api/optimize-list", () => {
       assert.equal(flippCalls, 0);
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       if (krogerFlipp && originalFlipp) {
         krogerFlipp.searchProducts = originalFlipp;
       }
@@ -1251,13 +1327,18 @@ describe("POST /api/optimize-list", () => {
     setKrogerCreds();
 
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const stubs: Array<{
       store: string;
       original: FlippDealsProvider["searchProducts"];
     }> = [];
 
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async (term: string) => {
       if (term !== "FlippMissDurian") {
         return [];
@@ -1317,7 +1398,7 @@ describe("POST /api/optimize-list", () => {
       }
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       for (const stub of stubs) {
         const provider = flippProviderForStore(stub.store);
         if (provider) {
@@ -1332,12 +1413,17 @@ describe("POST /api/optimize-list", () => {
     process.env.FLIPP_ENABLED = "true";
     setKrogerCreds();
     const originalKrogerSearch = krogerService.searchProducts.bind(krogerService);
-    const originalLookup = krogerService.getClosestStoreLocation.bind(krogerService);
+    const originalLookup = krogerService.resolveClosestStore.bind(krogerService);
     const stubs: Array<{
       store: string;
       original: FlippDealsProvider["searchProducts"];
     }> = [];
-    krogerService.getClosestStoreLocation = async () => "01400441";
+    krogerService.resolveClosestStore = async (zipCode: string) => ({
+      locationId: "01400441",
+      source: "live" as const,
+      zip: zipCode.slice(0, 5),
+      lookupFailed: false,
+    });
     krogerService.searchProducts = async () => [];
     try {
     await Product.create({
@@ -1432,7 +1518,7 @@ describe("POST /api/optimize-list", () => {
       );
     } finally {
       krogerService.searchProducts = originalKrogerSearch;
-      krogerService.getClosestStoreLocation = originalLookup;
+      krogerService.resolveClosestStore = originalLookup;
       await Product.deleteMany({ storeName: { $in: ["Publix", "Sprouts"] } });
       for (const stub of stubs) {
         const provider = flippProviderForStore(stub.store);

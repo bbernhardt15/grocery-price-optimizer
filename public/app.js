@@ -38,6 +38,7 @@ import {
 } from "./shopper/emptyStates.js";
 import { mountWelcome } from "./shopper/onboardingUi.js";
 import { ONBOARDING_KEY } from "./shopper/onboarding.js";
+import { NOT_IN_SERVICE_AREA_CODE, OUT_OF_AREA_MESSAGE, outOfAreaMessage } from "./shopper/serviceArea.js";
 import { getUserProfile, mergeProfiles, profileIsStored, saveUserProfile, shouldPromptProfile } from "./shopper/profile.js";
 import {
   defaultHeadcount,
@@ -768,14 +769,43 @@ function paintZipPlace() {
   el.textContent = ZIP_PATTERN.test(zip) ? zipPlaceLabel(zip) : "Add a ZIP for nearby stores";
 }
 
+function showOutOfArea(message = OUT_OF_AREA_MESSAGE) {
+  planning = false;
+  if (planErrorEl) {
+    planErrorEl.hidden = false;
+    planErrorEl.textContent = message;
+  }
+  if (tripEl) {
+    tripEl.innerHTML = emptyStateMarkup(
+      {
+        title: "Not available here yet",
+        body: message,
+        action: "Change ZIP",
+        actionId: "change-zip",
+      },
+      escapeHtml,
+      "alert"
+    );
+  }
+  paintPlanBar();
+}
+
 function applyZip(zip, { reload = true } = {}) {
   const normalized = normalizeZip(zip);
   zipEl.value = normalized;
   paintZipPlace();
-  if (!ZIP_PATTERN.test(normalized)) return;
+  if (!ZIP_PATTERN.test(normalized)) return { ok: false, reason: "invalid" };
   localStorage.setItem(ZIP_KEY, normalized);
+  const blocked = outOfAreaMessage(normalized);
+  if (blocked) {
+    showZipStatus(blocked, "error");
+    paintStorePicker();
+    if (flowStep === "plan" || flowStep === "shop") showOutOfArea(blocked);
+    return { ok: false, reason: "out", message: blocked };
+  }
   scheduleWatchSync();
   if (reload) void loadPage(true);
+  return { ok: true };
 }
 
 let toastTimer = 0;
@@ -5184,6 +5214,16 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
     paintPlanBar();
     return "fail";
   }
+  const blocked = outOfAreaMessage(zip);
+  if (blocked) {
+    planning = false;
+    showOutOfArea(blocked);
+    showZipStatus(blocked, "error");
+    setBusy(trigger, false);
+    setBusy(document.querySelector('[data-flow="plan"]'), false);
+    toast(blocked, 5200);
+    return "fail";
+  }
   if (!list.size) {
     paintPlanNow();
     paintPlanBar();
@@ -5297,7 +5337,12 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       }
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
     });
-    if (!response.ok && !body.partial) throw new Error(body.error || `Trip plan failed (${response.status})`);
+    if (!response.ok && !body.partial) {
+      const failure = new Error(body.error || `Trip plan failed (${response.status})`);
+      if (body.code) failure.code = body.code;
+      failure.status = response.status;
+      throw failure;
+    }
     const previousPlan =
       cachedPlan && cachedPlan.signature === signature && planReady(cachedPlan.payload)
         ? cachedPlan.payload
@@ -5342,6 +5387,15 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   } catch (error) {
     if (planAbort !== controller) return "replaced";
     result = "fail";
+    const failureCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    const failureStatus = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
+    const failureText = error instanceof Error ? error.message : "";
+    if (failureCode === NOT_IN_SERVICE_AREA_CODE || failureStatus === 422 || /available in your area/i.test(failureText)) {
+      showOutOfArea(OUT_OF_AREA_MESSAGE);
+      showZipStatus(OUT_OF_AREA_MESSAGE, "error");
+      toast(OUT_OF_AREA_MESSAGE, 5200);
+      return "fail";
+    }
     if (navigator.onLine === false && !lastOptimize && loadCachedTrip()) {
       showStep("shop", "restore");
       toast("You're offline. Showing the last plan on this phone.");
@@ -7309,12 +7363,13 @@ $("magic-link-form")?.addEventListener("submit", (event) => {
 });
 zipEl.addEventListener("change", () => {
   const zip = normalizeZip(zipEl.value);
-  zipEl.value = zip;
-  paintZipPlace();
-  if (ZIP_PATTERN.test(zip)) localStorage.setItem(ZIP_KEY, zip);
+  const applied = applyZip(zip, { reload: false });
+  if (!applied.ok) {
+    if (applied.reason === "out") toast(applied.message, 5200);
+    return;
+  }
   paintStorePicker();
-  if (ZIP_PATTERN.test(zip)) showZipStatus(`Using ${zipPlaceLabel(zip) || zip.slice(0, 5)}.`);
-  scheduleWatchSync();
+  showZipStatus(`Using ${zipPlaceLabel(zip) || zip.slice(0, 5)}.`);
   if (shelfRequested()) void loadPage(true);
 });
 zipEl.addEventListener("input", paintZipPlace);
@@ -8511,7 +8566,11 @@ function showStep(step, reason = "user") {
   }
   if ((flowStep === "plan" || flowStep === "shop") && priorStep !== flowStep) pinTabTop = true;
   if (flowStep === "plan") {
-    if (!list.size) paintPlanNow();
+    const planBlocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+    if (planBlocked) {
+      showOutOfArea(planBlocked);
+      showZipStatus(planBlocked, "error");
+    } else if (!list.size) paintPlanNow();
     else if (!reuseSettledReview()) {
       const tab = document.querySelector('[data-flow="plan"]');
       setBusy(tab, true);
@@ -8520,6 +8579,12 @@ function showStep(step, reason = "user") {
     }
   }
   if (flowStep === "shop") {
+    const shopBlocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+    if (shopBlocked) {
+      showOutOfArea(shopBlocked);
+      showZipStatus(shopBlocked, "error");
+      return;
+    }
     if (!planReady(lastOptimize)) {
       const hit = settledReviewPayload(listSignature(), normalizeZip(zipEl?.value || ""), false);
       if (hit) {
@@ -9219,6 +9284,12 @@ function paintStorePicker() {
   const nearby = nearbyStoreChoice();
   const place = zipPlaceLabel(normalizeZip(zipEl?.value || ""));
   const note = $("store-picker-note");
+  const blocked = outOfAreaMessage(normalizeZip(zipEl?.value || ""));
+  if (blocked) {
+    if (note) note.textContent = blocked;
+    host.innerHTML = "";
+    return;
+  }
   if (nearby.source !== "nearby") {
     if (note) note.textContent = "Enter a ZIP to see stores within about 25 miles.";
     host.innerHTML = "";
@@ -9280,7 +9351,11 @@ async function findNearbyStores() {
   const button = $("find-stores");
   const typed = normalizeZip(zipEl.value);
   if (ZIP_PATTERN.test(typed)) {
-    applyZip(typed);
+    const applied = applyZip(typed);
+    if (!applied.ok) {
+      toast(applied.message || OUT_OF_AREA_MESSAGE);
+      return;
+    }
     const place = zipPlaceLabel(typed);
     showZipStatus(place ? `Using ${place}.` : `Using ZIP ${typed.slice(0, 5)}.`);
     paintStorePicker();
@@ -9296,7 +9371,11 @@ async function findNearbyStores() {
   try {
     const located = await zipFromLocation();
     const zip = located.zip;
-    applyZip(zip);
+    const applied = applyZip(zip);
+    if (!applied.ok) {
+      toast(applied.message || OUT_OF_AREA_MESSAGE);
+      return;
+    }
     const place = zipPlaceLabel(zip);
     const approx = located.approximate ? `${APPROXIMATE_ZIP_NOTE} ` : "";
     showZipStatus(`${approx}${place ? `Using ${place}.` : `Using ZIP ${String(zip).slice(0, 5)}.`}`);
@@ -9481,6 +9560,8 @@ async function bootApp() {
   zipEl.value = localStorage.getItem(ZIP_KEY) || "";
   paintZipPlace();
   paintStorePicker();
+  const savedArea = outOfAreaMessage(normalizeZip(zipEl.value));
+  if (savedArea) showZipStatus(savedArea, "error");
   syncDrawerMode();
   allowSubsEl.checked = localStorage.getItem(SUBS_KEY) === "1";
   if (listAlertsEl) listAlertsEl.checked = localStorage.getItem(ALERTS_KEY) === "1";
@@ -9674,6 +9755,8 @@ document.addEventListener("click", (event) => {
     searchEl.focus();
   } else if (action === "find-stores") {
     $("find-stores")?.click();
+  } else if (action === "change-zip") {
+    openDrawer({ focus: "zip" });
   } else if (action === "retry-aisle") {
     void loadPage(true);
   } else if (action === "clear-search") {

@@ -1,4 +1,6 @@
 /** First-run welcome. The stored flag is "1" after Skip, Done, or Escape. */
+import { outOfAreaMessage } from "./serviceArea.js";
+
 export const ONBOARDING_KEY = "gg-onboarding-done";
 
 const WELCOME_ADD = {
@@ -139,13 +141,17 @@ export function normalizeZipInput(value) {
   return digits;
 }
 
-/** Blank is allowed. Letters or a partial ZIP are not. */
+/**
+ * Blank is not a service-area pass. Callers that build a plan must require an
+ * in-area ZIP. This check still allows a blank field so a half-typed ZIP is the
+ * only format error; the place step asks for five digits before it continues.
+ */
 export function zipAdvanceError(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   const zip = normalizeZipInput(raw);
-  if (ZIP_PATTERN.test(zip)) return "";
-  return "Enter a 5-digit ZIP, or leave it blank.";
+  if (!ZIP_PATTERN.test(zip)) return "Enter a 5-digit ZIP, or leave it blank.";
+  return outOfAreaMessage(zip);
 }
 
 /**

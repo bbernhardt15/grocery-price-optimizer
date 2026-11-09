@@ -70,7 +70,7 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(called, false);
   });
 
-  it("falls back to the demo locationId when the token request is rejected", async () => {
+  it("does not use the demo store when the token request is rejected", async () => {
     process.env.KROGER_CLIENT_ID = "client-id";
     process.env.KROGER_CLIENT_SECRET = "client-secret";
     mockFetch(async () =>
@@ -78,8 +78,7 @@ describe("KrogerService.getClosestStoreLocation", () => {
     );
 
     const service = new KrogerService();
-    const locationId = await service.getClosestStoreLocation("45202");
-    assert.equal(locationId, "01400441");
+    await assert.rejects(() => service.getClosestStoreLocation("45202"), /token request failed|invalid credentials/i);
   });
 
   it("returns null from the strict lookup when the locations call fails", async () => {
@@ -94,7 +93,7 @@ describe("KrogerService.getClosestStoreLocation", () => {
     });
     const service = new KrogerService();
     assert.equal(await service.getClosestStoreLocationStrict("45202"), null);
-    assert.equal(await service.getClosestStoreLocation("45202"), "01400441");
+    await assert.rejects(() => service.getClosestStoreLocation("45202"), /locations request failed/);
   });
 
   it("refreshes a product.compact token after a locations 403, then uses the last store for that ZIP", async () => {
@@ -124,7 +123,7 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.doesNotMatch(scopes[0], /cart\.basic/);
   });
 
-  it("uses the demo store only after a 403 when that ZIP has no saved store", async () => {
+  it("does not use the demo store after a 403 when that ZIP has no saved store", async () => {
     process.env.KROGER_CLIENT_ID = "client-id";
     process.env.KROGER_CLIENT_SECRET = "client-secret";
     mockFetch(async (input) => {
@@ -135,10 +134,22 @@ describe("KrogerService.getClosestStoreLocation", () => {
       return Response.json({ error: "forbidden" }, { status: 403 });
     });
     const service = new KrogerService();
-    const resolved = await service.resolveClosestStore("45103");
-    assert.equal(resolved.locationId, "01400441");
-    assert.equal(resolved.source, "demo");
-    assert.equal(resolved.lookupFailed, true);
+    await assert.rejects(() => service.resolveClosestStore("45103"), /locations request failed \(403\)/);
+  });
+
+  it("does not price a ZIP with no Kroger in range from a saved store or the demo store", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    await rememberKrogerStore("04101", "01400999");
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({ data: [] });
+    });
+    const service = new KrogerService();
+    await assert.rejects(() => service.resolveClosestStore("04101"), /No Kroger store found near ZIP 04101/);
   });
 
   it("rejects an invalid ZIP before calling the API", async () => {

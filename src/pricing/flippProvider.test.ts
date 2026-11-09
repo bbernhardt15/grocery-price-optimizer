@@ -150,7 +150,7 @@ describe("FlippDealsProvider", () => {
               name: "Oreo Cookies",
               current_price: 3.29,
               original_price: 4.19,
-              valid_to: "2026-11-08T23:59:00-05:00",
+              valid_to: "2026-12-31T23:59:00-05:00",
               flyer_item_id: 1,
             }),
             flippItem({
@@ -184,7 +184,7 @@ describe("FlippDealsProvider", () => {
     const chex = await provider.searchProducts("Chex", { zipCode: "45202" });
     assert.equal(oreo[0].onSale, true);
     assert.equal(oreo[0].regularPrice, 4.19);
-    assert.equal(oreo[0].saleEndsOn, "2026-11-08");
+    assert.equal(oreo[0].saleEndsOn, "2026-12-31");
     assert.equal(cola[0].onSale, true);
     assert.equal(cola[0].regularPrice, undefined);
     assert.equal(ritz[0].regularPrice, undefined);
