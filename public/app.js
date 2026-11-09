@@ -4312,10 +4312,20 @@ function releaseRefreshScrollGuard(watchId) {
 
 function writeReviewScroll(y) {
   reviewScrollWriting = true;
-  window.scrollTo(0, y);
-  requestAnimationFrame(() => {
+  const top = Math.max(0, y);
+  window.scrollTo(0, top);
+  // WebKit can ignore scrollTo until the scrolling element is nudged.
+  if (Math.abs(window.scrollY - top) > 1) {
+    const root = document.scrollingElement || document.documentElement;
+    if (root) {
+      root.scrollTop = top + 1;
+      root.scrollTop = top;
+    }
+    if (document.body && document.body !== root) document.body.scrollTop = top;
+  }
+  window.setTimeout(() => {
     reviewScrollWriting = false;
-  });
+  }, 0);
 }
 
 function rememberReviewUserScroll() {
@@ -4330,12 +4340,16 @@ function rememberReviewUserScroll() {
  * A refresh can focus its button and the browser scrolls that control into view.
  * Correct that jump until the shopper actually scrolls. A wheel, touch, key, or
  * pointer gesture ends the correction immediately and keeps the new position.
+ * WebKit often does not run requestAnimationFrame while this page is busy, so
+ * the correction is on the task queue and lasts until the refresh finishes.
  */
 function beginRefreshScrollGuard(startY) {
   const watchId = ++refreshAnchorWatch;
   refreshHeldScroll = startY;
   let handedToUser = false;
+  let timer = 0;
   const detach = () => {
+    window.clearTimeout(timer);
     window.removeEventListener("wheel", onUser, true);
     window.removeEventListener("touchstart", onUser, true);
     window.removeEventListener("touchmove", onUser, true);
@@ -4360,22 +4374,20 @@ function beginRefreshScrollGuard(startY) {
     if (key !== " " && key !== "Spacebar" && !/^(Arrow|Page|Home|End)/.test(key)) return;
     finishUser();
   };
-  window.addEventListener("wheel", onUser, { capture: true, passive: true });
-  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
-  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
-  window.addEventListener("pointerdown", onPointer, true);
-  window.addEventListener("keydown", onKey, true);
-  const until = performance.now() + 500;
-  const watch = () => {
+  const correct = () => {
     if (handedToUser || watchId !== refreshAnchorWatch) {
       detach();
       return;
     }
     if (Math.abs(window.scrollY - startY) > 1) writeReviewScroll(startY);
-    if (performance.now() < until) requestAnimationFrame(watch);
-    else detach();
+    timer = window.setTimeout(correct, 50);
   };
-  watch();
+  window.addEventListener("wheel", onUser, { capture: true, passive: true });
+  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
+  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
+  timer = window.setTimeout(correct, 0);
   return watchId;
 }
 
