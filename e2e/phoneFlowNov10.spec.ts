@@ -541,6 +541,43 @@ for (const size of [
 
   test(`Coke is one family with Diet and a 12-pack at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
+    const offer = { storeName: "Kroger", price: 2.48 };
+    await page.route("**/api/catalog/browse**", async (route) => {
+      const query = new URL(route.request().url()).searchParams.get("q") || "";
+      if (!/coke/i.test(query)) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "classic-2",
+              name: "Coca-Cola",
+              familyName: "Coca-Cola",
+              familyKey: "beverages|coca cola|line:soda",
+              brand: "Coca-Cola",
+              defaultVariantId: "classic-2",
+              imageUrls: [],
+              offers: [offer],
+              bestOffer: offer,
+              flavors: [
+                { key: "", label: "Classic" },
+                { key: "diet", label: "Diet" },
+              ],
+              variants: [
+                { id: "classic-2", name: "Coca-Cola", label: "2 L bottle", flavorKey: "", flavorLabel: "Classic", variantLabel: "2 L bottle", price: 2.48, bestOffer: offer, offers: [offer] },
+                { id: "classic-12", name: "Coca-Cola", label: "12 pk · 12 fl oz cans", flavorKey: "", flavorLabel: "Classic", variantLabel: "12 pk · 12 fl oz cans", price: 7.48, bestOffer: { storeName: "Kroger", price: 7.48 }, offers: [{ storeName: "Kroger", price: 7.48 }] },
+                { id: "diet-12", name: "Diet Coke", label: "12 pk · 12 fl oz cans", flavorKey: "diet", flavorLabel: "Diet", variantLabel: "Diet · 12 pk · 12 fl oz cans", price: 7.28, bestOffer: { storeName: "Kroger", price: 7.28 }, offers: [{ storeName: "Kroger", price: 7.28 }] },
+              ],
+            },
+          ],
+          total: 1,
+        }),
+      });
+    });
     await page.addInitScript(() => {
       localStorage.setItem("gg-onboarding-done", "1");
       localStorage.setItem("gg-zip", "45103");
@@ -552,13 +589,13 @@ for (const size of [
     const card = page.locator("#grid .card").first();
     await expect(card).toBeVisible();
     await expect(page.locator("#grid .card")).toHaveCount(1);
-    const diet = card.getByRole("radio", { name: "Diet" });
-    await diet.evaluate((node) => (node as HTMLButtonElement).click());
+    const diet = card.locator("[data-flavor='diet']");
+    await diet.evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     await expect(diet).toHaveAttribute("aria-checked", "true");
-    const pack = card.locator("[data-size-id]").filter({ hasText: "12 pk" }).first();
-    await expect(pack).toBeAttached();
-    await pack.evaluate((node) => (node as HTMLButtonElement).click());
-    await expect(card.locator("[data-size-id][aria-checked='true']")).toContainText("12 pk");
+    const pack = card.locator("[data-size-id='diet-12']");
+    await expect(pack).toContainText("12 pk");
+    await pack.evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await expect(card.locator("[data-size-id][aria-checked='true']")).toHaveAttribute("data-size-id", "diet-12");
   });
 
   test(`the menu shows the shell version and commit at ${size.width}x${size.height}`, async ({ page }) => {
