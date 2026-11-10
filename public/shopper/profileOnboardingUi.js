@@ -599,6 +599,12 @@ export function mountProfileOnboarding(deps = {}) {
         deps.toast?.(body.error || "Kroger sign-in isn't available. You can do this at checkout.");
         return;
       }
+      try {
+        sessionStorage.setItem("gg-oauth-left", "connect");
+      } catch {
+        /* private browsing */
+      }
+      history.pushState({ ggPreConnect: 1 }, "", window.location.href);
       window.location.replace(body.authorizeUrl);
     } catch {
       try {

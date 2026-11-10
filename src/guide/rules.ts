@@ -514,7 +514,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
         name: unfound[0],
       });
     }
-    if (chips.length < 3) chips.push({ id: "keep", label: "Keep these", action: "later" });
+    chips.push({ id: "no", label: "No thanks", action: "later" });
     return {
       moment: "review-next",
       line: reviewLine(unfound),
@@ -531,6 +531,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
         chips: [
           ...names.map((name) => ({ id: `usual:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           { id: "add", label: "Add selected", action: "commit-picks" },
+          { id: "no", label: "No thanks", action: "later" },
         ],
       };
     }

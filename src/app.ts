@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import express, { type ErrorRequestHandler } from "express";
+import { commitSha } from "./buildInfo";
 import cors from "cors";
 import { observabilityResponse } from "./observability/config";
 import { scrubString } from "./observability/scrub";
@@ -208,6 +210,14 @@ app.use("/api", betaRouter);
 app.get(["/privacy", "/privacy/", "/terms", "/terms/"], (req, res) => {
   const file = req.path.startsWith("/terms") ? "terms.html" : "privacy.html";
   res.sendFile(path.join(publicDir, file));
+});
+
+app.get(["/", "/index.html"], (_req, res) => {
+  const file = path.join(publicDir, "index.html");
+  const sha = commitSha();
+  const html = fs.readFileSync(file, "utf8").replace('name="gg-build" content=""', `name="gg-build" content="${sha}"`);
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.type("html").send(html);
 });
 
 app.use(

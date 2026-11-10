@@ -12,7 +12,7 @@ export const REVIEW_CARD_MIN_PX = 148;
 export const REVIEW_KROGER_MIN_PX = 256;
 /** Coupon callout, cart button, and the Walmart handoff note. */
 export const REVIEW_WALMART_MIN_PX = 304;
-export const REVIEW_HEAD_MIN_PX = 196;
+export const REVIEW_HEAD_MIN_PX = 0;
 export const REVIEW_LOADING_STATUS = "Checking store prices";
 export const REVIEW_TIMEOUT_SECONDS = Math.round(PLAN_TIMEOUT_MS / 1000);
 export const REVIEW_GAVE_UP_STATUS = `No store price came back. This check stopped after ${REVIEW_TIMEOUT_SECONDS} seconds.`;

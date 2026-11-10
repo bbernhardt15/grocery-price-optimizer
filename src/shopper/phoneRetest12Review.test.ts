@@ -73,9 +73,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v80", () => {
-    assert.equal(SHELL_CACHE, "v80");
-    assert.match(sw, /grocery-gitter-shell-v80/);
+  it("bumps the shell cache to v81", () => {
+    assert.equal(SHELL_CACHE, "v81");
+    assert.match(sw, /grocery-gitter-shell-v81/);
   });
 
   it("ends a cold review with a retry instead of an endless checking shell", () => {
@@ -103,7 +103,7 @@ describe("twelfth phone test, Review and In-store", () => {
     assert.equal(frames.loading[0].minHeight, 256);
     assert.equal(frames.loading[1].minHeight, 304);
     assert.equal(frames.loading[2].minHeight, 148);
-    assert.equal(frames.headMinHeight, 196);
+    assert.equal(frames.headMinHeight, 0);
     const loading = reviewLoadingHtml(["Kroger", "Walmart"]);
     assert.equal((loading.match(/data-review-skel=/g) || []).length, 2);
     assert.match(loading, /min-height:256px;height:256px/);

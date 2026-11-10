@@ -180,10 +180,10 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, runningLowLine(["Eggs", "Bread", "Bananas"]));
     assert.equal(prompt.line, "Looks like you might be low on Eggs, Bread, Bananas. Want me to add them?");
     assert.equal(runningLowLine(["Milk"]), "Looks like you might be low on Milk. Want me to add Milk?");
-    assert.equal(prompt.chips.length, 4);
+    assert.equal(prompt.chips.length, 5);
     assert.deepEqual(
       prompt.chips.map((chip) => chip.action),
-      ["toggle-pick", "toggle-pick", "toggle-pick", "commit-picks"]
+      ["toggle-pick", "toggle-pick", "toggle-pick", "commit-picks", "later"]
     );
     assert.equal(namesMatch("egg", "eggplant"), false);
     assert.equal(namesMatch("milk", "whole milk"), true);
@@ -292,7 +292,7 @@ describe("Gitter guide rules", () => {
       [
         [links.kroger.label, "open-search", links.kroger.url],
         [links.walmart.label, "open-search", links.walmart.url],
-        ["Keep these", "later", undefined],
+        ["No thanks", "later", undefined],
       ]
     );
     assert.equal(

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Kroger sign-in</title>
+    <script>
+      const next = new URLSearchParams(window.location.search).get("next") || "/?kroger=connected&message=Kroger%20connected.";
+      location.replace(next);
+    </script>
+  </head>
+  <body>
+    <p>Returning to Grocery Gitter.</p>
+  </body>
+</html>

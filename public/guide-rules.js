@@ -370,7 +370,7 @@ function decideGuide(input = {}) {
         name: unfound[0]
       });
     }
-    if (chips.length < 3) chips.push({ id: "keep", label: "Keep these", action: "later" });
+    chips.push({ id: "no", label: "No thanks", action: "later" });
     return {
       moment: "review-next",
       line: reviewLine(unfound),
@@ -385,7 +385,8 @@ function decideGuide(input = {}) {
         line: runningLowLine(names),
         chips: [
           ...names.map((name) => ({ id: `usual:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
-          { id: "add", label: "Add selected", action: "commit-picks" }
+          { id: "add", label: "Add selected", action: "commit-picks" },
+          { id: "no", label: "No thanks", action: "later" }
         ]
       };
     }

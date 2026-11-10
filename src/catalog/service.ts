@@ -133,6 +133,12 @@ function queryTokens(query: string): string[] {
     .filter((token) => token.length > 1);
 }
 
+/** Test hook. A positive delay stands in for a slow live department feed. */
+let departmentFeedDelayMs = 0;
+export function setDepartmentFeedDelayForTests(ms: number): void {
+  departmentFeedDelayMs = Math.max(0, ms);
+}
+
 function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCatalogRecord[] {
   const tokens = queryTokens(scope.query ?? "");
   const family = familyFromQuery(scope.query ?? "");
@@ -406,7 +412,7 @@ async function loadScope(
 
   const wantsLive = liveConfigured() && scopeNeedsFeed({ departmentId, query });
   const wantsWeekly = flippEnabled() && scopeNeedsFeed({ departmentId, query });
-  if (!wantsLive && !wantsWeekly) {
+  if (!wantsLive && !wantsWeekly && departmentFeedDelayMs === 0) {
     return { products: groupOffersByUpc(demo), warnings: [], cached: false, fromDatabase: false };
   }
 
@@ -423,6 +429,22 @@ async function loadScope(
   }
 
   const warnings: string[] = [];
+  const warm = !query && departmentId ? groupOffersByUpc(demo) : [];
+  if ((wantsLive || departmentFeedDelayMs > 0) && warm.length >= 12) {
+    warnings.push("Showing the saved aisle page. Newer store prices are still loading.");
+    const refreshKey = cacheKey;
+    void (async () => {
+      if (departmentFeedDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, departmentFeedDelayMs));
+      const locationId = await krogerLocation(zipCode);
+      const live = wantsLive
+        ? await firstPageFeed(departmentFeed(departmentId ?? "", zipCode, locationId, warnings), warnings)
+        : [];
+      if (!live.length && departmentFeedDelayMs === 0) return;
+      const refreshed = groupOffersByUpc([...demo, ...live]);
+      if (refreshed.length) await writeCache(refreshKey, refreshed, warnings, ttlMs("CATALOG_DEPT_TTL_MINUTES", 10));
+    })().catch(() => undefined);
+    return { products: warm, warnings, cached: true, fromDatabase: false };
+  }
   const locationId = await krogerLocation(zipCode);
   const live = wantsLive
     ? await firstPageFeed(

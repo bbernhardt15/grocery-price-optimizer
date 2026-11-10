@@ -5534,10 +5534,6 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
         streamedPlan = shown;
-        if (flowStep === "plan" && tripEl?.querySelector("[data-review-shell]")) {
-          holdVisibleReview("Checking store prices");
-          return;
-        }
         if (commitDisplayedPlan(shown, { zip })) clearPlanTabBusy();
         return;
       }
@@ -9804,7 +9800,24 @@ async function loadStoreScope() {
   }
 }
 
+function restoreConnectAfterOAuthBack() {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0];
+    if (!nav || nav.type !== "back_forward" || sessionStorage.getItem("gg-oauth-left") !== "connect") return;
+    sessionStorage.removeItem("gg-oauth-left");
+    const profile = JSON.parse(localStorage.getItem("gg-profile") || "{}");
+    if (profile?.onboarding) {
+      profile.onboarding.step = "connect";
+      profile.onboarding.status = "in_progress";
+      localStorage.setItem("gg-profile", JSON.stringify(profile));
+    }
+  } catch {
+    /* a normal visit keeps the saved step */
+  }
+}
+
 async function boot() {
+  restoreConnectAfterOAuthBack();
   const pending = window.__ggInviteGate;
   const allowed = pending ? await pending : true;
   if (!allowed) {
@@ -9847,6 +9860,54 @@ async function boot() {
   }
 }
 
+function rememberResolvedNeed(name) {
+  const clean = String(name || "").replace(/\s+/g, " ").trim();
+  if (!clean) return;
+  const names = resolvedNeedNames();
+  if (!names.some((row) => row.toLowerCase() === clean.toLowerCase())) names.push(clean);
+  try {
+    sessionStorage.setItem("gg-needs-resolved", JSON.stringify(names));
+  } catch {
+    /* private browsing */
+  }
+}
+
+function resolvedNeedNames() {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem("gg-needs-resolved") || "[]");
+    return Array.isArray(parsed) ? parsed.map((name) => String(name || "").trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function fillNeedsSearch(name, store, listId, host) {
+  host.hidden = false;
+  host.innerHTML = `<p class="muted">Searching ${escapeHtml(store)}…</p>`;
+  try {
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=6`);
+    const response = browse ? await fetch(browse) : null;
+    const body = await response?.json().catch(() => ({}));
+    const tiles = Array.isArray(body?.items) ? body.items.slice(0, 4) : [];
+    if (!tiles.length) {
+      host.innerHTML = `<p class="muted">Nothing at ${escapeHtml(store)} for that name.</p>`;
+      return;
+    }
+    host.innerHTML = tiles
+      .map((tile) => {
+        const variant = (Array.isArray(tile.variants) && tile.variants.find((item) => item.id === tile.defaultVariantId)) || tile.variants?.[0] || tile;
+        const id = variant.id || tile.id;
+        if (!id) return "";
+        productsById.set(id, { ...tile, ...variant, id, familyName: tile.familyName || variant.name });
+        const label = variant.variantLabel || variant.name || tile.familyName || tile.name;
+        return `<button type="button" data-needs-pick="${escapeHtml(id)}" data-needs-id="${escapeHtml(listId)}">${escapeHtml(label)} at ${escapeHtml(store)}</button>`;
+      })
+      .join("");
+  } catch {
+    host.innerHTML = `<p class="muted">Couldn't search ${escapeHtml(store)}.</p>`;
+  }
+}
+
 function openNeedsInput() {
   const rows = [...list.values()].filter((entry) => entry.needsInput === true);
   if (!rows.length || sessionStorage.getItem("gg-needs-skip") === "1") return false;
@@ -9861,10 +9922,15 @@ function openNeedsInput() {
     .map((entry) => {
       const name = entry.product?.familyName || entry.product?.name || "Item";
       const id = entry.itemId || entry.product?.id;
-      return `<li class="needs-row"><span>${escapeHtml(name)}</span><button type="button" data-needs-remove="${escapeHtml(id)}">Remove</button><button type="button" data-needs-keep="${escapeHtml(id)}">Keep as-is</button></li>`;
+      return `<li class="needs-row" data-needs-row="${escapeHtml(id)}"><span>${escapeHtml(name)}</span>
+        <button type="button" data-needs-search="Kroger" data-needs-name="${escapeHtml(name)}" data-needs-id="${escapeHtml(id)}">Search at Kroger</button>
+        <button type="button" data-needs-search="Walmart" data-needs-name="${escapeHtml(name)}" data-needs-id="${escapeHtml(id)}">Search at Walmart</button>
+        <div class="needs-results" hidden></div>
+        <button type="button" data-needs-remove="${escapeHtml(id)}">Remove</button>
+        <button type="button" data-needs-keep="${escapeHtml(id)}">Keep as-is</button></li>`;
     })
     .join("");
-  dialog.innerHTML = `<div class="sheet-body"><h2>Needs your input</h2><p>These items are not matched yet. Resolve them, then continue to Review.</p><ul>${items}</ul><button type="button" class="primary" id="needs-continue">Continue to Review</button></div>`;
+  dialog.innerHTML = `<div class="sheet-body"><h2>Needs your input</h2><p>These items are not matched yet. Search a store, keep them, or remove them, then continue to Review.</p><ul>${items}</ul><button type="button" class="primary" id="needs-continue">Continue to Review</button></div>`;
   dialog.showModal();
   dialog.querySelector("#needs-continue")?.addEventListener("click", () => {
     sessionStorage.setItem("gg-needs-skip", "1");
@@ -9873,8 +9939,49 @@ function openNeedsInput() {
   });
   dialog.onclick = (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const search = target?.closest("[data-needs-search]");
+    if (search) {
+      const name = search.getAttribute("data-needs-name") || "";
+      const store = search.getAttribute("data-needs-search") || "";
+      const row = search.closest(".needs-row");
+      const host = row?.querySelector(".needs-results");
+      if (host) void fillNeedsSearch(name, store, search.getAttribute("data-needs-id") || "", host);
+      return;
+    }
+    const pick = target?.closest("[data-needs-pick]");
+    if (pick) {
+      const id = pick.getAttribute("data-needs-id") || "";
+      const productId = pick.getAttribute("data-needs-pick") || "";
+      const product = productsById.get(productId);
+      const entry = list.get(id);
+      if (product && entry) {
+        const name = entry.product?.familyName || entry.product?.name || "";
+        entry.needsInput = false;
+        entry.product = { ...entry.product, ...product, id: product.id };
+        rememberResolvedNeed(name);
+        if (lastOptimize?.unavailable) {
+          lastOptimize.unavailable = lastOptimize.unavailable.filter((row) => !guideNamesMatch(name, row));
+        }
+        saveList();
+      }
+      const left = [...list.values()].filter((row) => row.needsInput === true);
+      if (!left.length) {
+        sessionStorage.setItem("gg-needs-skip", "1");
+        dialog.close();
+        showStep("plan");
+      } else openNeedsInput();
+      return;
+    }
     const remove = target?.closest("[data-needs-remove]")?.getAttribute("data-needs-remove");
     const keep = target?.closest("[data-needs-keep]")?.getAttribute("data-needs-keep");
+    if (keep) {
+      const entry = list.get(keep);
+      if (entry) {
+        entry.needsInput = false;
+        rememberResolvedNeed(entry.product?.familyName || entry.product?.name || "");
+        saveList();
+      }
+    }
     if (remove) setQuantity(remove, 0);
     if (keep || remove) {
       const left = [...list.values()].filter((entry) => entry.needsInput === true);
@@ -9997,11 +10104,14 @@ async function bootApp() {
   }
   const version = document.getElementById("app-version");
   if (version) {
-    version.textContent = SHELL_CACHE;
+    const baked = String(document.querySelector('meta[name="gg-build"]')?.getAttribute("content") || "").trim();
+    const bakedSha = /^[0-9a-f]{7,}$/i.test(baked) ? baked.slice(0, 7) : "";
+    version.textContent = bakedSha ? `${SHELL_CACHE} · ${bakedSha}` : SHELL_CACHE;
     void fetch(apiUrl("/api/version"))
       .then((response) => response.json())
       .then((body) => {
-        const sha = String(body?.sha || "local").slice(0, 7);
+        const sha = String(body?.sha || "").trim();
+        if (!/^[0-9a-f]{7}$/i.test(sha)) return;
         version.textContent = `${body?.shell || SHELL_CACHE} · ${sha}`;
       })
       .catch(() => undefined);
@@ -10418,7 +10528,10 @@ function guideView() {
   }
   const showingSavingsCard = flowStep === "plan" && mode !== "single" && !tripEdits.keepSplit && Boolean(savingsNudge(plans));
   const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
-  const unfound = genuineUnfound(lastOptimize?.unavailable, lastOptimize?.pricingByStore);
+  const resolved = resolvedNeedNames();
+  const unfound = genuineUnfound(lastOptimize?.unavailable, lastOptimize?.pricingByStore).filter(
+    (name) => !resolved.some((saved) => guideNamesMatch(saved, name))
+  );
   return {
     step: flowStep,
     itemCount: list.size,

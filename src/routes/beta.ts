@@ -1,4 +1,5 @@
 import { Router, type Request } from "express";
+import { versionPayload } from "../buildInfo";
 import { betaAdminOk } from "../beta/adminAuth";
 import {
   acceptProductEvent,
@@ -27,8 +28,7 @@ router.get("/health/ready", (_req, res) => {
 
 router.get("/version", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  const sha = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_SHA || "local";
-  res.json({ shell: "v80", sha });
+  res.json(versionPayload());
 });
 
 router.get("/beta/gate", (_req, res) => {
