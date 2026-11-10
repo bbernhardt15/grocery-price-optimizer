@@ -1334,7 +1334,14 @@ export function mountImport(deps) {
         saved = "";
       }
       const priced = withServiceZip(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, saved);
-      const response = await fetch(priced ? apiUrl(priced) : apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`));
+      if (!priced) {
+        if (item._searchRun !== stamp) return;
+        item.searchState = "empty";
+        item.searchHits = [];
+        renderReview();
+        return;
+      }
+      const response = await fetch(apiUrl(priced));
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "search failed");
       if (item._searchRun !== stamp) return;

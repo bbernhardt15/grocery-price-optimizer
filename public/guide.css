@@ -38,6 +38,12 @@ body:has(#gitter-guide:not([hidden]))::before {
   overflow: auto;
 }
 
+@media (max-height: 740px) {
+  .gitter-guide {
+    max-height: min(34vh, 220px);
+    bottom: calc(var(--bar-h) + 8px);
+  }
+}
 .gitter-guide[hidden],
 body:has(dialog[open]) #gitter-guide,
 body:has(.filters.open) #gitter-guide {
@@ -45,7 +51,7 @@ body:has(.filters.open) #gitter-guide {
 }
 
 body:has(#gitter-guide:not([hidden])) .body {
-  padding-bottom: calc(var(--bar-h) + 16px);
+  padding-bottom: calc(var(--bar-h) + 280px);
 }
 
 .gitter-guide-avatar {

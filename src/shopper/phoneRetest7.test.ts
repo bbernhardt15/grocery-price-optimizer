@@ -12,8 +12,8 @@ const profile = readFileSync(new URL("../../public/shopper/profileOnboardingUi.j
 const kroger = readFileSync(new URL("../../public/shopper/krogerReturn.js", import.meta.url), "utf8");
 
 describe("seventh phone retest regressions", () => {
-  it("bumps the shell cache to v82 and keeps the Walmart cart button", () => {
-    assert.match(sw, /grocery-gitter-shell-v82/);
+  it("bumps the shell cache to v83 and keeps the Walmart cart button", () => {
+    assert.match(sw, /grocery-gitter-shell-v83/);
     assert.match(app, /data-walmart-cart/);
     assert.match(app, /Open in Walmart cart/);
     assert.match(app, /startsWith\("custom:"\)/);

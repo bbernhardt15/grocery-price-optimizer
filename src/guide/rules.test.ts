@@ -340,6 +340,10 @@ describe("Gitter guide rules", () => {
       decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: noteShown(withReceipt, "trip-saved") }),
       null
     );
+    assert.equal(
+      decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: noteDeclined(quiet, "trip-saved") })?.line,
+      undefined
+    );
     assert.equal(prompt.chips[0].label, "Save Shopping list");
     assert.deepEqual(prompt.chips[0].names, ["Whole Milk"]);
     assert.equal(prompt.chips[0].action, "save-list");

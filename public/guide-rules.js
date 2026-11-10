@@ -414,7 +414,7 @@ function decideGuide(input = {}) {
       ]
     };
   }
-  if (step === "build" && itemCount === 0 && !session.shown.welcome) {
+  if (step === "build" && itemCount === 0 && !session.shown.welcome && !session.declined?.["trip-saved"]) {
     return {
       moment: "welcome",
       line: WELCOME_LINE,

@@ -8,6 +8,7 @@ const unreadable = path.join(process.cwd(), "e2e/fixtures/vision-fail.png");
 async function unlock(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
   });
   await page.goto("/");
   await expect(page.locator("#browse-toggle")).toBeVisible();

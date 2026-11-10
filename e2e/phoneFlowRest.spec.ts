@@ -98,7 +98,11 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/import/pdf**", async (route) => {
+  await page.route("**/api/import/**", async (route) => {
+    if (!/\/api\/import\/(?:pdf|photo|receipt|file)(?:\?|$)/.test(route.request().url())) {
+      await route.continue();
+      return;
+    }
     await held;
     await route.continue();
   });
@@ -602,7 +606,6 @@ test("store editor saves and stays with an 85 item trip", async ({ page }) => {
   const walmart = page.locator("[data-place-store='Walmart']");
   await expect(walmart).toBeVisible();
   if (await walmart.isChecked()) await walmart.uncheck();
-  await page.screenshot({ path: "/opt/cursor/artifacts/profile-stores-edit.png", fullPage: false });
   await page.locator("#profile-next").click();
   await expect(stores).toContainText("Kroger");
   await expect(stores).not.toContainText("Walmart");

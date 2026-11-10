@@ -685,6 +685,7 @@ function syncBrowse() {
   document.body.dataset.browse = browseOpen ? "open" : "closed";
   document.body.dataset.results = query ? "search" : "";
   paintRefine();
+  if (showShelf) requestAnimationFrame(syncChipHint);
 }
 
 function openBrowse() {
@@ -971,6 +972,8 @@ function toastAction(message, label, onClick, durationMs = 4500) {
 const PURCHASE_MARKS_KEY = "gg-purchase-marks";
 let undoTrip = null;
 let explicitClear = false;
+let tripEpoch = 0;
+let tripWriteChain = Promise.resolve();
 let planProgress = {};
 const shopChecked = new Set();
 let tripChannel = null;
@@ -1208,6 +1211,7 @@ function finishCurrentTrip() {
     })),
   });
   explicitClear = true;
+  tripEpoch += 1;
   list.clear();
   lastOptimize = null;
   clearPlanCache(localStorage);
@@ -1218,8 +1222,7 @@ function finishCurrentTrip() {
     /* private browsing */
   }
   saveList();
-  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
-  void writeTripDb(factory, { items: [], plan: null, step: "add", savedAt: at, completedAt: at });
+  enqueueTripWrite({ items: [], plan: null, step: "add", savedAt: at, completedAt: at, clearedAt: at });
   showStep("add", "user");
   renderEstimate();
   toastAction("Saved this trip to Past trips.", "Undo", () => {
@@ -1240,7 +1243,7 @@ function finishCurrentTrip() {
         savedAt: snapshot.plan.pricedAt || Date.now(),
       });
     }
-    void writeTripDb(factory, {
+    enqueueTripWrite({
       items: snapshot.entries.map(([, entry]) => ({
         id: entry.product?.id,
         itemId: entry.itemId || entry.product?.id,
@@ -1258,6 +1261,7 @@ function finishCurrentTrip() {
 
 function clearTripItems() {
   closeProductDetail(false);
+  tripEpoch += 1;
   explicitClear = true;
   undoTrip = [...list.entries()];
   for (const [id, entry] of undoTrip) {
@@ -1277,6 +1281,7 @@ function clearTripItems() {
     /* private browsing */
   }
   publishTripState();
+  void pushAccountList();
   renderEstimate();
   if (flowStep === "plan") paintTrip();
   if (flowStep === "shop") renderShop();
@@ -2627,8 +2632,26 @@ function variantChoices(tile) {
   return Array.isArray(tile?.variants) ? tile.variants : [];
 }
 
+function packCountOf(variant) {
+  const count = Number(variant?.count);
+  if (Number.isFinite(count) && count > 1) return count;
+  const match = `${variant?.variantLabel || ""} ${variant?.label || ""} ${variant?.sizeLabel || ""}`.match(/\b(\d{1,2})\s*(?:pk|pack)\b/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function packWanted(text) {
+  const match = String(text || "").match(/\b(6|8|12|18|24|30|32|36)\b/);
+  return match ? Number(match[1]) : 0;
+}
+
 function selectedVariant(tile) {
   const variants = variantChoices(tile);
+  const wanted = packWanted(query);
+  if (wanted) {
+    const matches = variants.filter((variant) => packCountOf(variant) === wanted);
+    const classic = matches.find((variant) => !variant.flavorKey || variant.flavorLabel === "Classic" || variant.flavorLabel === "Original");
+    if (classic || matches[0]) return classic || matches[0];
+  }
   return variants.find((variant) => variant.id === tile.defaultVariantId) || variants[0] || tile;
 }
 
@@ -2677,10 +2700,12 @@ function applyFlavor(card, flavorKey) {
   if (!family) return;
   const choices = flavorVariants(family, flavorKey);
   const current = productsById.get(card.dataset.productId);
+  const wanted = packCountOf(current) || packWanted(`${current?.variantLabel || ""} ${current?.label || ""} ${current?.sizeLabel || ""}`);
+  const samePack = wanted ? choices.find((variant) => packCountOf(variant) === wanted) : null;
   const sameSize = choices.find((variant) => variant.label && variant.label === current?.label);
-  const verdict = selectBestValue(choices.map(valueRow), card.dataset.sizeSort || "unit");
-  const best = choices.find((variant) => variant.id === verdict.winnerId);
-  const next = sameSize || best || choices[0];
+  const next = samePack || sameSize || choices.find((variant) => (variant.flavorKey || "") === (flavorKey || "")) || choices[0];
+  card.dataset.selectedFlavor = flavorKey || "";
+  paintChoice(card, "[data-flavor]", flavorKey || "");
   if (next) applyVariant(card, next.id);
   settleCard(card);
 }
@@ -2904,7 +2929,9 @@ function syncChipHint() {
   const row = $("dept-chips");
   const hint = $("chip-hint");
   if (!row || !hint) return;
-  hint.hidden = !moreChips(row.scrollLeft, row.clientWidth, row.scrollWidth);
+  const bounds = row.getBoundingClientRect();
+  const view = Math.min(row.clientWidth || window.innerWidth, Math.max(0, window.innerWidth - bounds.left));
+  hint.hidden = !moreChips(row.scrollLeft, view, row.scrollWidth);
 }
 
 function bindKeyboardInset() {
@@ -3356,10 +3383,14 @@ async function loadSuggestions(text) {
   }, 200);
   try {
     const priced = pricedApi(`/api/catalog/suggest?q=${encodeURIComponent(q)}`);
-    const response = await fetch(
-      priced || apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`),
-      { signal: controller.signal }
-    );
+    if (!priced) {
+      window.clearTimeout(suggestLoadingTimer);
+      suggestions = [];
+      suggestionQuery = q;
+      showSuggestStatus("Add a ZIP to see store prices.");
+      return;
+    }
+    const response = await fetch(priced, { signal: controller.signal });
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
@@ -3477,7 +3508,7 @@ function openProduct(product, choices = []) {
     </label>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
   </div>`;
-  if (!productDialog.open) productDialog.showModal();
+  if (!productDialog.open) productDialog.show();
   if (!detailHistory) {
     history.pushState({ ggDetail: 1 }, "");
     detailHistory = true;
@@ -4048,6 +4079,44 @@ function renderTrip(payload, options = {}) {
   else paintTrip();
 }
 
+function tripMarkerAt() {
+  try {
+    return Math.max(
+      Number(JSON.parse(localStorage.getItem("gg-trip-cleared") || "null")?.at) || 0,
+      Number(JSON.parse(localStorage.getItem("gg-trip-completed") || "null")?.at) || 0
+    );
+  } catch {
+    return 0;
+  }
+}
+
+function snapshotTripRecord(savedAt = Date.now()) {
+  const cleared = explicitClear && list.size === 0;
+  const marker = cleared ? tripMarkerAt() || savedAt : 0;
+  return {
+    items: [...list.values()].map((entry) => ({
+      id: entry.product?.id,
+      itemId: entry.itemId || entry.product?.id,
+      name: entry.product?.familyName || entry.product?.name,
+      brand: entry.product?.brand || "",
+      quantity: entry.quantity,
+      sizeLabel: entry.product?.sizeLabel || "",
+    })),
+    plan: cleared ? null : lastOptimize,
+    step: cleared ? "add" : flowStep,
+    savedAt,
+    clearedAt: marker,
+    completedAt: cleared ? marker : 0,
+  };
+}
+
+function enqueueTripWrite(record) {
+  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
+  const build = typeof record === "function" ? record : () => record;
+  tripWriteChain = tripWriteChain.catch(() => false).then(() => writeTripDb(factory, build()));
+  return tripWriteChain;
+}
+
 function publishTripState() {
   const record = {
     type: "gg-state",
@@ -4060,20 +4129,7 @@ function publishTripState() {
   } catch {
     /* this browser has no BroadcastChannel */
   }
-  const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
-  void writeTripDb(factory, {
-    items: [...list.values()].map((entry) => ({
-      id: entry.product?.id,
-      itemId: entry.itemId || entry.product?.id,
-      name: entry.product?.familyName || entry.product?.name,
-      brand: entry.product?.brand || "",
-      quantity: entry.quantity,
-      sizeLabel: entry.product?.sizeLabel || "",
-    })),
-    plan: lastOptimize,
-    step: flowStep,
-    savedAt: record.savedAt,
-  });
+  enqueueTripWrite(() => snapshotTripRecord(record.savedAt));
 }
 
 function hydrateListFromStorage() {
@@ -6361,6 +6417,7 @@ function rememberLocalRow(row) {
 }
 
 async function restoreList() {
+  const epoch = tripEpoch;
   let saved = [];
   try {
     saved = JSON.parse(localStorage.getItem(LIST_KEY) || "[]");
@@ -6372,6 +6429,7 @@ async function restoreList() {
       if (!row?.id && !row?.itemId) return;
       const id = row.id || row.itemId;
       if (String(id).startsWith("custom:")) {
+        if (epoch !== tripEpoch) return;
         if (row.name) rememberLocalRow(row);
         return;
       }
@@ -6381,9 +6439,11 @@ async function restoreList() {
         const response = await fetch(productUrl);
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !body.product?.id) {
+          if (epoch !== tripEpoch) return;
           if (row.name) rememberLocalRow(row);
           return;
         }
+        if (epoch !== tripEpoch) return;
         const restored = {
           ...body.product,
           familyName: body.product.familyName || row.name,
@@ -6408,6 +6468,7 @@ async function restoreList() {
           pinned.product = { ...pinned.product, offers: [...(pinned.product.offers || []), ...row.offers] };
         }
       } catch {
+        if (epoch !== tripEpoch) return;
         if (row.name) rememberLocalRow(row);
       }
     })
@@ -6488,8 +6549,24 @@ function saveWalkingListPdf() {
   window.print();
 }
 
+function eventElement(event) {
+  const raw = event.target;
+  return raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+}
+
+function chooseFlavor(event) {
+  const target = eventElement(event);
+  const flavorPick = target?.closest?.("[data-flavor]");
+  const card = flavorPick?.closest?.(".card");
+  if (!flavorPick || !card || !card.closest("#grid")) return;
+  const flavorKey = flavorPick.getAttribute("data-flavor") || "";
+  paintChoice(card, "[data-flavor]", flavorKey);
+  applyFlavor(card, flavorKey);
+}
+document.addEventListener("pointerup", chooseFlavor, true);
+document.addEventListener("click", chooseFlavor, true);
 document.addEventListener("click", (event) => {
-  const target = event.target instanceof Element ? event.target : null;
+  const target = eventElement(event);
   if (!target) return;
   if (target.closest("[data-share-list]")) {
     event.preventDefault();
@@ -7046,6 +7123,8 @@ $("search-form").addEventListener("submit", (event) => {
     else toast("Paste the list from Import.");
     return;
   }
+  window.clearTimeout(shelfTimer);
+  window.clearTimeout(searchTimer);
   query = text;
   activeDepartment = "all";
   renderDepartments();
@@ -7697,11 +7776,20 @@ $("menu-open")?.addEventListener("click", () => {
 });
 $("drawer-close")?.addEventListener("click", () => closeDrawer());
 $("drawer-scrim")?.addEventListener("click", () => closeDrawer());
+let drawerScrollLock = 0;
+document.addEventListener(
+  "pointerdown",
+  () => {
+    if (document.body.dataset.drawer === "open") drawerScrollLock = window.scrollY;
+  },
+  true
+);
 document.addEventListener(
   "pointermove",
   (event) => {
-    if (document.body.dataset.drawer !== "open" || event.pointerType !== "mouse" || !event.buttons) return;
-    event.preventDefault();
+    if (document.body.dataset.drawer !== "open" || !event.buttons) return;
+    if (event.cancelable) event.preventDefault();
+    if (window.scrollY !== drawerScrollLock) window.scrollTo(0, drawerScrollLock);
   },
   { passive: false }
 );

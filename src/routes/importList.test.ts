@@ -102,10 +102,18 @@ describe("import routes", () => {
   });
 
   function post(path: string, body: unknown, device = "device-import-1") {
+    const record = body && typeof body === "object" && !Array.isArray(body) ? { ...(body as Record<string, unknown>) } : null;
+    let payload = body;
+    if (record) {
+      const bare = record.__bare === true;
+      delete record.__bare;
+      if (!bare && !("zipCode" in record) && !("zip" in record)) record.zipCode = "45202";
+      payload = record;
+    }
     return fetch(`${origin}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-device-id": device },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
   }
 
@@ -717,9 +725,10 @@ trailer << /Root 1 0 R >>
     ];
 
     for (const [index, item] of cases.entries()) {
-      const bare = await post(item.path, item.body, `device-zip-bare-${index}`);
+      const bare = await post(item.path, { ...item.body, __bare: true }, `device-zip-bare-${index}`);
       const bareBody = await bare.json();
-      assert.equal(bare.status, 200, `${item.path} no zip status ${bare.status} ${JSON.stringify(bareBody)}`);
+      assert.equal(bare.status, 400, `${item.path} no zip status ${bare.status} ${JSON.stringify(bareBody)}`);
+      assert.equal(/typicalPrice|valuePer/.test(JSON.stringify(bareBody)), false, item.path);
       assert.deepEqual(storePriceLeaks(bareBody), [], `${item.path} no zip leaked ${storePriceLeaks(bareBody).join(",")}`);
 
       const out = await post(item.path, { ...item.body, zipCode: "04101" }, `device-zip-out-${index}`);

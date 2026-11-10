@@ -42,7 +42,8 @@ export function restoreWouldResurrect(record, completedAt) {
   const marker = Math.max(Number(completedAt) || 0, Number(record?.completedAt) || 0);
   if (!marker) return false;
   const savedAt = Number(record?.savedAt) || Number(record?.at) || 0;
-  return savedAt > 0 && savedAt <= marker;
+  if (!savedAt) return true;
+  return savedAt <= marker;
 }
 
 /**

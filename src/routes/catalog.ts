@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { demoBrowseProducts } from "../catalog/demoCatalog";
 import { spokenTranscriptAliases } from "../productSearchQuery";
 import { seedCatalog } from "../seedProducts";
+import { NOT_IN_SERVICE_AREA_CODE, PLAN_ZIP_ERROR, requirePlanZip } from "../serviceArea";
 import {
   FatSecretService,
   type FatSecretProduct,
@@ -73,6 +74,14 @@ router.get("/search-catalog", async (req: Request, res: Response) => {
   if (!query) {
     res.status(400).json({
       error: "Missing query parameter. Use /api/search-catalog?query=milk",
+    });
+    return;
+  }
+  const decision = requirePlanZip(req.query.zip ?? req.query.zipCode);
+  if (!decision.ok) {
+    res.status(decision.status).json({
+      error: decision.status === 400 ? PLAN_ZIP_ERROR : decision.error,
+      ...(decision.status === 422 ? { code: NOT_IN_SERVICE_AREA_CODE } : {}),
     });
     return;
   }

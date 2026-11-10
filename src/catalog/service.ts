@@ -7,7 +7,7 @@ import { rankSearchResults } from "../shopper/searchRank";
 import { groupOffersByUpc, krogerLookupCodes, upcForStorage, walmartLookupCodes } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
-import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, type BrowseTile } from "./family";
+import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, preferPackFromQuery, type BrowseTile } from "./family";
 import { gapsForProduct } from "./substitutes";
 import type { BrowseProduct, BrowseSort, CatalogGap, RawCatalogRecord, SizeClass, StoreCoverage } from "./types";
 import { CatalogCache } from "../models/CatalogCache";
@@ -570,7 +570,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
       filtered = filterProducts(scope.products, { ...filters, query: broader });
     }
   }
-  const families = groupBrowseFamilies(filtered);
+  const families = groupBrowseFamilies(filtered).map((tile) => preferPackFromQuery(tile, query || ""));
   const sort = request.sort ?? "relevance";
   const ranked = rankSearchResults(families, { query: query || "", family: familyId });
   const sorted =
@@ -616,12 +616,16 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
     const stored = await readStoredRecords({ query: q });
     if (stored.records.length > 0) {
       const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
-      return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) }).slice(0, Math.min(Math.max(limit, 1), 12));
+      return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
+        .slice(0, Math.min(Math.max(limit, 1), 12))
+        .map((tile) => preferPackFromQuery(tile, q));
     }
   }
   const known = await loadKnownProducts();
   const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q });
-  return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) }).slice(0, Math.min(Math.max(limit, 1), 12));
+  return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
+    .slice(0, Math.min(Math.max(limit, 1), 12))
+    .map((tile) => preferPackFromQuery(tile, q));
 }
 
 export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { gaps: CatalogGap[] }) | null> {

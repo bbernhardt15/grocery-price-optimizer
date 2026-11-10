@@ -124,6 +124,7 @@ const SPECIFIC: Array<{ id: string; label: string; test: RegExp }> = [
   { id: "bbq-sauce", label: "BBQ sauce", test: /\b(bbq|barbecue|barbeque)\s+sauce\b/i },
   { id: "mac-and-cheese", label: "Mac and cheese", test: /\bmac(?:aroni)?\s*(?:and|&)\s*cheese\b/i },
   { id: "chicken-nuggets", label: "Chicken nuggets", test: /\b(dino nuggets|chicken nuggets|fun nuggets|nuggets)\b/i },
+  { id: "meatballs", label: "Meatballs", test: /\bmeatballs?\b/i },
   { id: "fabric-softener", label: "Fabric softener", test: /\bfabric softener\b|\bsnuggle\b/i },
   { id: "bread-crumbs", label: "Bread crumbs", test: /\bbread crumbs?\b/i },
   { id: "cheese", label: "Cheese", test: /\bamerican singles\b/i },
@@ -187,6 +188,10 @@ function fold(value: string): string {
 
 function clean(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function stripMarks(value: string): string {
+  return clean(value).replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function clampQty(value: number): number {
@@ -349,14 +354,15 @@ function takeInline(line: string): { name: string; quantity: number; price: numb
 function finish(draft: Draft): ReceiptLine | null {
   const sized = pullSize(draft.name.replace(/\s+,/g, ",").replace(/,\s*$/g, ""));
   const split = splitBrand(sized.name);
-  const product = clean(split.product).replace(/^[,.-]+|[,.-]+$/g, "");
-  const name = product || sized.name;
+  const product = stripMarks(split.product).replace(/^[,.-]+|[,.-]+$/g, "");
+  const name = product || stripMarks(sized.name);
   if (!name || !/[a-z]/i.test(name) || isJunkLine(name)) return null;
-  const category = categoryFor(name, split.brand);
-  const store = split.store || isReceiptStoreBrand(split.brand);
+  const brand = stripMarks(split.brand);
+  const category = categoryFor(name, brand);
+  const store = split.store || isReceiptStoreBrand(brand);
   return {
     name,
-    brand: split.brand,
+    brand,
     size: sized.size,
     quantity: clampQty(draft.quantity),
     upc: normalizeUpc(draft.upc),

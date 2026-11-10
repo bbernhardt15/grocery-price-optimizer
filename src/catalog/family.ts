@@ -725,6 +725,33 @@ function toVariant(product: BrowseProduct): BrowseVariant {
  * the variant closest to the median package wins, then the one sold at the
  * most stores. A much larger pack may still win; the tile only flags it.
  */
+export function packCountOf(variant: { label?: string; variantLabel?: string; sizeLabel?: string; count?: number | null }): number {
+  const count = Number(variant.count);
+  if (Number.isFinite(count) && count > 1) return count;
+  const match = `${variant.variantLabel || ""} ${variant.label || ""} ${variant.sizeLabel || ""}`.match(/\b(\d{1,2})\s*(?:pk|pack)\b/i);
+  return match ? Number(match[1]) : 0;
+}
+
+/** A search like "coke 12" opens that pack, not the best-value bottle. */
+export function preferPackFromQuery<
+  T extends {
+    defaultVariantId: string;
+    variants: Array<{ id: string; label?: string; variantLabel?: string; sizeLabel?: string; count?: number | null; flavorKey?: string; flavorLabel?: string }>;
+  },
+>(tile: T, query: string): T {
+  const wanted = String(query || "").match(/\b(6|8|12|18|24|30|32|36)\b/);
+  if (!wanted) return tile;
+  const n = Number(wanted[1]);
+  const matches = tile.variants.filter((variant) => packCountOf(variant) === n);
+  if (!matches.length) return tile;
+  const classic = matches.find(
+    (variant) => !variant.flavorKey || variant.flavorKey === "classic" || variant.flavorLabel === "Classic" || variant.flavorLabel === "Original"
+  );
+  const match = classic || matches[0]!;
+  if (match.id === tile.defaultVariantId) return tile;
+  return { ...tile, defaultVariantId: match.id };
+}
+
 export function chooseDefaultVariant(variants: BrowseVariant[]): BrowseVariant {
   const verdict = selectBestValue(variants.map(toValueRow), "unit");
   if (verdict.winnerId) {

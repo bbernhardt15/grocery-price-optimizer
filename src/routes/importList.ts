@@ -192,18 +192,14 @@ function readText(value: unknown): string {
 type ImportPriceMode = "priced" | "names";
 
 /**
- * Store offers are returned only for an in-area ZIP.
- * A missing ZIP stays on names (a receipt line may keep price: null).
- * A malformed ZIP is 400. An out-of-area ZIP is 422.
+ * Catalog rows and store prices require an in-area ZIP.
+ * A missing or malformed ZIP is 400. An out-of-area ZIP is 422.
  */
 function importPriceMode(body: unknown): ImportPriceMode | "invalid" | "out" {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return "names";
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "invalid";
   const record = body as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(record, "zipCode") && !Object.prototype.hasOwnProperty.call(record, "zip")) {
-    return "names";
-  }
-  const raw = record.zipCode !== undefined ? record.zipCode : record.zip;
-  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return "names";
+  const raw = Object.prototype.hasOwnProperty.call(record, "zipCode") ? record.zipCode : record.zip;
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return "invalid";
   const decision = requirePlanZip(raw);
   if (decision.ok) return "priced";
   return decision.status === 422 ? "out" : "invalid";
@@ -221,7 +217,7 @@ function refuseImportZip(res: Response, mode: ImportPriceMode | "invalid" | "out
   return false;
 }
 
-const PRICE_NULL_KEYS = new Set(["price", "regularPrice", "unitPrice", "priceFrom", "priceTo", "unitPriceText"]);
+const PRICE_NULL_KEYS = new Set(["price", "regularPrice", "unitPrice", "priceFrom", "priceTo", "unitPriceText", "typicalPrice", "valuePer"]);
 const PRICE_DROP_KEYS = new Set(["offers", "bestOffer", "bestPrice", "bestStore", "storeName", "store"]);
 
 function redactStorePrices(value: unknown): unknown {

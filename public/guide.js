@@ -332,9 +332,15 @@ export function mountGuide(deps = {}) {
     if (action === "later") {
       session = noteDeclined(session, detail.moment);
       current = null;
-      hidePrompt();
+      host.hidden = true;
       deps.onAction?.(action, detail);
-      sync();
+      return;
+    }
+    if (action === "save-list") {
+      session = noteDeclined(session, detail.moment || "trip-saved");
+      current = null;
+      host.hidden = true;
+      deps.onAction?.(action, detail);
       return;
     }
     if (action === "close-guide") {
@@ -362,7 +368,9 @@ export function mountGuide(deps = {}) {
 
   doc.addEventListener(
     "pointerdown",
-    () => {
+    (event) => {
+      const target = event.target;
+      if (target instanceof Node && host.contains(target)) return;
       holding += 1;
     },
     true

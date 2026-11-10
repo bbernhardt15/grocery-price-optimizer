@@ -15,6 +15,7 @@ function storePriceLeaks(value: unknown, path = "$"): string[] {
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const here = `${path}.${key}`;
     if (key === "price" && typeof entry === "number") hits.push(here);
+    if ((key === "typicalPrice" || key === "valuePer") && entry != null && entry !== "") hits.push(here);
     if (key === "bestPrice" && entry != null) hits.push(here);
     if ((key === "offers" || key === "bestOffer") && entry != null) hits.push(here);
     if ((key === "storeName" || key === "bestStore") && entry != null && entry !== "") hits.push(here);
@@ -143,5 +144,34 @@ describe("shopper routes without an in-area ZIP", () => {
       if (found.length) leaks.push(`${call.method} ${call.path} -> ${found.join(", ")}`);
     }
     assert.deepEqual(leaks, []);
+  });
+
+  it("returns 400 with no ZIP and 422 out of area for catalog search and import text", async () => {
+    const headers = { "content-type": "application/json", accept: "application/json", "x-device-id": "leak-device-01" };
+    const missing = await fetch(`${origin}/api/search-catalog?query=milk`, { headers });
+    assert.equal(missing.status, 400);
+    assert.equal(/typicalPrice|valuePer|Whole Milk/.test(JSON.stringify(await missing.json())), false);
+    const outside = await fetch(`${origin}/api/search-catalog?query=milk&zip=04101`, { headers });
+    assert.equal(outside.status, 422);
+    const outsideBody = (await outside.json()) as { code?: string };
+    assert.equal(outsideBody.code, "not_in_service_area");
+    assert.equal(/typicalPrice|valuePer|Whole Milk/.test(JSON.stringify(outsideBody)), false);
+    const text = await fetch(`${origin}/api/import/text`, { method: "POST", headers, body: JSON.stringify({ text: "Whole Milk" }) });
+    assert.equal(text.status, 400);
+    assert.equal(/typicalPrice|valuePer/.test(JSON.stringify(await text.json())), false);
+    const receipt = await fetch(`${origin}/api/import/receipt`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: "MILK GALLON                 3.29" }),
+    });
+    assert.equal(receipt.status, 400);
+    assert.equal(/typicalPrice|valuePer|3\.29/.test(JSON.stringify(await receipt.json())), false);
+    const receiptOut = await fetch(`${origin}/api/import/receipt`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: "MILK GALLON                 3.29", zipCode: "04101" }),
+    });
+    assert.equal(receiptOut.status, 422);
+    assert.equal(/typicalPrice|valuePer|3\.29/.test(JSON.stringify(await receiptOut.json())), false);
   });
 });

@@ -9,6 +9,7 @@ import {
   groupBrowseFamilies,
   groupingStats,
   identifyFamily,
+  preferPackFromQuery,
   rankProductImages,
   summarizeFamilyRows,
   type BrowseVariant,
@@ -484,6 +485,11 @@ describe("family tiles", () => {
     assert.equal(classic?.priceTo, 7.48);
     assert.ok(classic?.variants.some((variant) => variant.id === "upc:diet"));
     assert.equal(tiles.filter((tile) => tile.familyName === "Diet Coke").length, 0);
+    const searched = preferPackFromQuery(classic!, "coke 12");
+    assert.equal(searched.defaultVariantId, "upc:coke12");
+    const dietPack = searched.variants.find((variant) => variant.flavorLabel === "Diet");
+    assert.equal(dietPack?.id, "upc:diet");
+    assert.match(`${dietPack?.label || ""} ${dietPack?.variantLabel || ""}`, /12/);
   });
 
   it("treats Coke 12 as a Coca-Cola 12-pack, not one 12 fl oz can", () => {

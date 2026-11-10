@@ -87,7 +87,7 @@ img { max-width: 100%; display: block; }
   display: flex; flex-wrap: nowrap; gap: 8px; align-items: center;
   min-width: 0; max-width: 100%;
   padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
-  position: sticky; top: 0; z-index: 5;
+  position: sticky; top: 0; z-index: 40;
   background: var(--bg);
   backdrop-filter: none;
 }
@@ -128,7 +128,7 @@ img { max-width: 100%; display: block; }
   min-height: 52px; border-radius: 16px; padding: 0 118px 0 14px; font-size: 1.05rem;
 }
 .suggestions {
-  position: absolute; z-index: 6; left: 0; right: 0; top: calc(100% + 4px);
+  position: absolute; z-index: 50; left: 0; right: 0; top: calc(100% + 4px);
   margin: 0; padding: 6px; list-style: none; background: var(--surface);
   border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
   max-height: min(360px, 50dvh); overflow: auto;
@@ -361,7 +361,7 @@ a.text-btn:hover { background: var(--accent-soft); }
   padding: 0 calc(16px + var(--safe-right)) calc(var(--bar-h) + 16px) calc(16px + var(--safe-left));
 }
 .rail { display: contents; }
-.dept-scroller { position: relative; min-width: 0; }
+.dept-scroller { position: relative; min-width: 0; width: 100%; max-width: 100%; z-index: 40; overflow: hidden; }
 .dept-chips {
   display: flex; gap: 8px; overflow-x: auto; padding: 4px 36px 8px 0;
   scroll-snap-type: x proximity; min-width: 0;
@@ -369,10 +369,22 @@ a.text-btn:hover { background: var(--accent-soft); }
 .chip-hint {
   position: absolute; right: 0; top: 4px; bottom: 8px; display: flex; align-items: center;
   padding-left: 18px; font-size: 0.75rem; font-weight: 700; color: var(--muted);
-  pointer-events: none; background: linear-gradient(90deg, transparent, var(--bg) 45%);
+  pointer-events: auto; background: linear-gradient(90deg, transparent, var(--bg) 45%);
 }
 .chip-hint[hidden] { display: none; }
 .dept-nav { display: none; }
+body[data-dept-list="open"] .dept-nav {
+  display: flex; flex-direction: column; gap: 4px;
+  position: relative; z-index: 45;
+  background: var(--surface);
+  max-height: min(50vh, 320px);
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.choice-row, .size-list, .size-option, #browse-toggle, #search, button.card-open, #chip-hint {
+  scroll-margin-top: 12px;
+  scroll-margin-bottom: calc(var(--bar-h) + 320px);
+}
 .chip, .dept-link {
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   border-radius: 999px; min-height: 44px; padding: 0 14px; white-space: nowrap; scroll-snap-align: start;
@@ -2189,6 +2201,19 @@ dialog.profile-onboard,
   border: 1px solid var(--line);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
+#product-dialog[open] {
+  position: fixed;
+  z-index: 20;
+  top: calc(7.25rem + var(--safe-top));
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: calc(100dvh - 8rem - var(--safe-top));
+  margin: 0;
+  overflow: auto;
+}
 dialog.sheet::backdrop,
 dialog.list-sheet::backdrop,
 dialog.shelf-sheet::backdrop,
@@ -2199,7 +2224,7 @@ dialog.profile-onboard::backdrop {
 body[data-browse="open"] #start-here,
 body[data-browse="open"] #past-trips-home,
 body[data-browse="open"] #shelf-entry { display: none !important; }
-#browse-panel { background: var(--bg); position: relative; z-index: 2; }
+#browse-panel { background: var(--bg); position: relative; }
 @media (max-width: 1099px) {
   dialog.list-sheet[open] {
     position: fixed; left: 0; right: 0; bottom: 0; top: 12px; width: 100%; max-width: none;
