@@ -217,7 +217,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#tab-favorites")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v81");
+    await expect(page.locator("#app-version")).toContainText("v82");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -552,9 +552,12 @@ for (const size of [
     const card = page.locator("#grid .card").first();
     await expect(card).toBeVisible();
     await expect(page.locator("#grid .card")).toHaveCount(1);
-    await card.getByRole("radio", { name: "Diet" }).evaluate((node) => (node as HTMLButtonElement).click());
-    await card.locator("[data-size-id]").filter({ hasText: "12 pk" }).first().evaluate((node) => (node as HTMLButtonElement).click());
-    await expect(card).toContainText(/Diet/);
+    const diet = card.getByRole("radio", { name: "Diet" });
+    await diet.evaluate((node) => (node as HTMLButtonElement).click());
+    await expect(diet).toHaveAttribute("aria-checked", "true");
+    const pack = card.locator("[data-size-id]").filter({ hasText: "12 pk" }).first();
+    await expect(pack).toBeAttached();
+    await pack.evaluate((node) => (node as HTMLButtonElement).click());
     await expect(card.locator("[data-size-id][aria-checked='true']")).toContainText("12 pk");
   });
 
@@ -566,7 +569,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v81 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v82 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {

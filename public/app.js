@@ -2788,12 +2788,6 @@ function sizePanel(title, sizes, selectedId, sort) {
   const ordered = (verdict.orderedIds.length ? verdict.orderedIds : list.map((variant) => variant.id))
     .map((id) => byId.get(id))
     .filter(Boolean);
-  if (ordered.length <= 1) {
-    const only = ordered[0];
-    const label = only?.label || only?.sizeLabel || "";
-    const unit = only?.valueText ? ` · ${only.valueText}` : "";
-    return label ? `<p class="size">${escapeHtml(label)}${escapeHtml(unit)}</p>` : "";
-  }
   const basis = verdict.basis && verdict.basis !== "item" ? verdict.basis : ordered.find((variant) => variant.valueBasis)?.valueBasis || null;
   const showUnitToggle = hasUnits;
   const active = showUnitToggle && mode === "unit" ? "unit" : "item";
