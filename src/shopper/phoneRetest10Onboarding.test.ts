@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v79", () => {
-    assert.match(sw, /grocery-gitter-shell-v79/);
+  it("bumps the shell cache to v83", () => {
+    assert.match(sw, /grocery-gitter-shell-v83/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
@@ -188,7 +188,8 @@ describe("tenth phone test onboarding", () => {
     assert.match(markup, /id="learned-add-trip"[^>]*disabled/);
     assert.match(markup, /id="trip-add-total"/);
     assert.match(markup, /class="trip-add-total"/);
-    assert.match(markup, /id="trip-jump"/);
+    assert.match(markup, /id="learned-empty-trip-top"/);
+    assert.doesNotMatch(markup, /id="trip-jump"/);
     assert.match(markup, /id="learned-add-trip"/);
     assert.match(markup, /data-trip-all="all"/);
     assert.match(markup, /data-trip-all="none"/);

@@ -9,6 +9,7 @@ import {
   groupBrowseFamilies,
   groupingStats,
   identifyFamily,
+  preferPackFromQuery,
   rankProductImages,
   summarizeFamilyRows,
   type BrowseVariant,
@@ -67,17 +68,19 @@ describe("family identity", () => {
     ] as const;
     const keys = classic.map(([name, size]) => keyOf(name, "Coca-Cola", size));
     assert.equal(new Set(keys).size, 1);
-    assert.notEqual(keys[0], keyOf("Diet Coke 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
-    assert.notEqual(keys[0], keyOf("Coke Zero Sugar 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
-    assert.notEqual(keys[0], keyOf("Cherry Coca-Cola 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
+    assert.equal(keys[0], keyOf("Diet Coke 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
+    assert.equal(keys[0], keyOf("Coke Zero Sugar 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
+    assert.equal(keys[0], keyOf("Cherry Coca-Cola 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"));
     assert.equal(
       keyOf("Coke Zero 12 Pack 12 fl oz Cans", "Coca-Cola", "12 pk 12 fl oz"),
       keyOf("Coca-Cola Zero Sugar 2 L Bottle", "Coca-Cola", "2 L")
     );
-    assert.notEqual(
+    assert.equal(
       keyOf("Coke Zero 12 Pack 12 fl oz Cans", "Coca-Cola"),
       keyOf("Diet Coke 12 Pack 12 fl oz Cans", "Coca-Cola")
     );
+    assert.equal(identifyFamily({ name: "Diet Coke 12 Pack 12 fl oz Cans", brand: "Coca-Cola" }).flavorLabel, "Diet");
+    assert.equal(identifyFamily({ name: "Cherry Coca-Cola 2 L Bottle", brand: "Coca-Cola" }).flavorLabel, "Cherry");
 
     const labels = classic.map(([name, size]) => identifyFamily({ name, brand: "Coca-Cola", size }).variant.label);
     assert.ok(labels.some((label) => label === "12 pk · 12 fl oz cans"));
@@ -97,7 +100,8 @@ describe("family identity", () => {
     assert.equal(twin.variant.label, "2 pk · 1 L bottles");
     assert.notEqual(twoLiter.variant.signature, twin.variant.signature);
     assert.notEqual(twoLiter.familyKey, keyOf("Coca-Cola 2 Liter Bottle", "Coca-Cola", "2 L"));
-    assert.notEqual(twoLiter.familyKey, keyOf("Diet Pepsi 2 L Bottle", "Pepsi", "2 L"));
+    assert.equal(twoLiter.familyKey, keyOf("Diet Pepsi 2 L Bottle", "Pepsi", "2 L"));
+    assert.equal(identifyFamily({ name: "Diet Pepsi 2 L Bottle", brand: "Pepsi", size: "2 L", departmentId: "beverages" }).flavorLabel, "Diet");
   });
 
   it("groups Doritos chips and keeps Cool Ranch and Nacho Cheese as flavors", () => {
@@ -468,22 +472,48 @@ describe("family tiles", () => {
 
   it("returns one tile per family with a best-value default", () => {
     const tiles = groupBrowseFamilies([coke12, diet, coke2, mini]);
-    assert.equal(tiles.length, 2);
+    assert.equal(tiles.length, 1);
     const classic = tiles.find((tile) => tile.familyName === "Coca-Cola");
     assert.ok(classic);
-    assert.equal(classic?.variants.length, 3);
+    assert.equal(classic?.variants.length, 4);
+    assert.ok(classic?.flavors.some((flavor) => flavor.label === "Diet"));
+    assert.ok(classic?.flavors.some((flavor) => flavor.label === "Classic"));
     assert.equal(classic?.defaultVariantId, "upc:coke2");
     assert.equal(classic?.variantLabel, "2 L bottle");
     assert.equal(classic?.id, "upc:coke2");
     assert.equal(classic?.priceFrom, 2.48);
     assert.equal(classic?.priceTo, 7.48);
-    assert.deepEqual(
-      classic?.variants.map((variant) => variant.id),
-      ["upc:cokemini", "upc:coke2", "upc:coke12"]
-    );
-    const dietTile = tiles.find((tile) => tile.familyName === "Diet Coke");
-    assert.equal(dietTile?.variants.length, 1);
-    assert.equal(dietTile?.variants[0]?.id, "upc:diet");
+    assert.ok(classic?.variants.some((variant) => variant.id === "upc:diet"));
+    assert.equal(tiles.filter((tile) => tile.familyName === "Diet Coke").length, 0);
+    const searched = preferPackFromQuery(classic!, "coke 12");
+    assert.equal(searched.defaultVariantId, "upc:coke12");
+    const dietPack = searched.variants.find((variant) => variant.flavorLabel === "Diet");
+    assert.equal(dietPack?.id, "upc:diet");
+    assert.match(`${dietPack?.label || ""} ${dietPack?.variantLabel || ""}`, /12/);
+  });
+
+  it("treats Coke 12 as a Coca-Cola 12-pack, not one 12 fl oz can", () => {
+    const loose = product({
+      id: "upc:coke12bare",
+      name: "Coke 12",
+      brand: "Unbranded",
+      size: "12 fl oz",
+      price: 10.5,
+    });
+    const cherry = product({
+      id: "upc:cherry",
+      name: "Cherry Coke",
+      brand: "",
+      size: "12 pk 12 fl oz",
+      price: 7.5,
+    });
+    const tiles = groupBrowseFamilies([loose, cherry, coke12]);
+    const classic = tiles.find((tile) => /coca-cola/i.test(tile.familyName));
+    assert.ok(classic);
+    assert.ok(classic?.variants.some((variant) => variant.id === "upc:coke12bare"));
+    const bare = classic?.variants.find((variant) => variant.id === "upc:coke12bare");
+    assert.match(bare?.variantLabel || "", /12 pk/);
+    assert.ok(tiles.some((tile) => tile.variants.some((variant) => variant.id === "upc:cherry")));
   });
 
   it("keeps every master id so an older saved list still points at a variant", () => {
@@ -544,7 +574,8 @@ describe("demo shelf grouping", () => {
     assert.ok(coke);
     assert.ok((coke?.variants.length ?? 0) >= 4);
     assert.ok(coke?.variants.some((variant) => variant.label === "12 pk · 12 fl oz cans"));
-    assert.equal(tiles.filter((tile) => tile.brand === "Coca-Cola" && tile.familyName === "Diet Coke").length, 1);
+    assert.ok(coke?.flavors.some((flavor) => flavor.label === "Diet"));
+    assert.equal(tiles.filter((tile) => tile.brand === "Coca-Cola" && tile.familyName === "Diet Coke").length, 0);
     const doritos = tiles.find((tile) => tile.brand === "Doritos" && tile.familyName === "Doritos Chips");
     assert.ok(doritos);
     assert.ok(doritos?.flavors.some((flavor) => flavor.label === "Cool Ranch"));
@@ -603,12 +634,12 @@ describe("family sample summary", () => {
       10
     );
     assert.equal(summary.scanned, 3);
-    assert.equal(summary.families, 2);
+    assert.equal(summary.families, 1);
     assert.equal(summary.groupedFamilies, 1);
-    assert.equal(summary.groupedProducts, 2);
-    assert.equal(summary.groupedShare, 2 / 3);
+    assert.equal(summary.groupedProducts, 3);
+    assert.equal(summary.groupedShare, 1);
     const classic = summary.groups.find((group) => group.familyName === "Coca-Cola");
-    assert.equal(classic?.count, 2);
-    assert.equal(classic?.variants.length, 2);
+    assert.equal(classic?.count, 3);
+    assert.equal(classic?.variants.length, 3);
   });
 });

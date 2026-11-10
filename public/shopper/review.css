@@ -23,9 +23,10 @@ body[data-step="shop"] #shop {
   overflow-anchor: none;
 }
 .review-head-slot {
-  min-height: 196px;
+  min-height: 0;
   box-sizing: border-box;
 }
+.review-head-slot:empty { display: none; }
 body[data-step="plan"] .savings-card {
   min-height: 0;
   box-sizing: border-box;

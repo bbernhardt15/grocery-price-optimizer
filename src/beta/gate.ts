@@ -11,6 +11,7 @@ export function betaGateOpen(method: string, path: string): boolean {
   const clean = path.length > 1 ? path.replace(/\/+$/, "") : path;
   if (!clean.startsWith("/api")) return true;
   if (verb === "GET" && clean === "/api/health/ready") return true;
+  if (verb === "GET" && clean === "/api/version") return true;
   if (verb === "GET" && clean === "/api/observability") return true;
   if (verb === "GET" && clean === "/api/catalog/placeholder.svg") return true;
   if (verb === "GET" && clean === "/api/beta/gate") return true;

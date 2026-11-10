@@ -1,4 +1,5 @@
 import { Router, type Request } from "express";
+import { versionPayload } from "../buildInfo";
 import { betaAdminOk } from "../beta/adminAuth";
 import {
   acceptProductEvent,
@@ -23,6 +24,11 @@ const router = Router();
 router.get("/health/ready", (_req, res) => {
   const ready = readyPayload();
   res.status(ready.status).json(ready.body);
+});
+
+router.get("/version", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(versionPayload());
 });
 
 router.get("/beta/gate", (_req, res) => {

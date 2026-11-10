@@ -128,8 +128,10 @@ describe("Gitter guide rules", () => {
     assert.equal(revealed?.line, receiptLine(59));
     assert.match(receiptLine(1), /1 item that is/);
     assert.equal(receiptLine(1), "I found 1 item that is not on your list yet. Choose any, then add them.");
-    assert.equal(prompt.chips.at(-1)?.label, "Add selected");
-    assert.equal(prompt.chips.at(-1)?.action, "commit-picks");
+    assert.equal(prompt.chips.at(-2)?.label, "Add selected");
+    assert.equal(prompt.chips.at(-2)?.action, "commit-picks");
+    assert.equal(prompt.chips.at(-1)?.label, "No thanks");
+    assert.equal(prompt.chips.at(-1)?.action, "later");
     assert.ok(prompt.chips.some((chip) => chip.label === "Whole Milk" && chip.action === "toggle-pick"));
     assert.ok(prompt.chips.some((chip) => chip.label === "Large Eggs" && chip.action === "toggle-pick"));
     assert.equal(prompt.chips.some((chip) => chip.action === "pick-receipt"), false);
@@ -178,10 +180,10 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, runningLowLine(["Eggs", "Bread", "Bananas"]));
     assert.equal(prompt.line, "Looks like you might be low on Eggs, Bread, Bananas. Want me to add them?");
     assert.equal(runningLowLine(["Milk"]), "Looks like you might be low on Milk. Want me to add Milk?");
-    assert.equal(prompt.chips.length, 4);
+    assert.equal(prompt.chips.length, 5);
     assert.deepEqual(
       prompt.chips.map((chip) => chip.action),
-      ["toggle-pick", "toggle-pick", "toggle-pick", "commit-picks"]
+      ["toggle-pick", "toggle-pick", "toggle-pick", "commit-picks", "later"]
     );
     assert.equal(namesMatch("egg", "eggplant"), false);
     assert.equal(namesMatch("milk", "whole milk"), true);
@@ -290,7 +292,7 @@ describe("Gitter guide rules", () => {
       [
         [links.kroger.label, "open-search", links.kroger.url],
         [links.walmart.label, "open-search", links.walmart.url],
-        ["Keep these", "later", undefined],
+        ["No thanks", "later", undefined],
       ]
     );
     assert.equal(
@@ -337,6 +339,10 @@ describe("Gitter guide rules", () => {
     assert.equal(
       decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: noteShown(withReceipt, "trip-saved") }),
       null
+    );
+    assert.equal(
+      decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: noteDeclined(quiet, "trip-saved") })?.line,
+      undefined
     );
     assert.equal(prompt.chips[0].label, "Save Shopping list");
     assert.deepEqual(prompt.chips[0].names, ["Whole Milk"]);

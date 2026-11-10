@@ -64,9 +64,20 @@ export function readHandoffTrip(storage, now = Date.now()) {
  */
 export function richerTrip(existing, incoming) {
   if (!incoming || typeof incoming !== "object") return existing || null;
+  const incomingItems = Array.isArray(incoming.items) ? incoming.items : [];
+  if (Number(incoming.clearedAt) > 0 && incomingItems.length === 0) {
+    return {
+      ...(existing && typeof existing === "object" ? existing : {}),
+      ...incoming,
+      items: [],
+      plan: null,
+      step: cleanStep(incoming.step) || "add",
+      savedAt: Number(incoming.savedAt) || Number(incoming.clearedAt),
+      clearedAt: Number(incoming.clearedAt),
+    };
+  }
   if (!existing || typeof existing !== "object") return incoming;
   const existingItems = Array.isArray(existing.items) ? existing.items : [];
-  const incomingItems = Array.isArray(incoming.items) ? incoming.items : [];
   const newer = (Number(incoming.savedAt) || Number(incoming.at) || 0) >= (Number(existing.savedAt) || Number(existing.at) || 0);
   const useIncoming = incomingItems.length > 0 && (newer || existingItems.length === 0);
   const base = useIncoming ? { ...existing, ...incoming } : { ...incoming, ...existing };

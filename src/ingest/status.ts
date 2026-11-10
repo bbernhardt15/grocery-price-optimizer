@@ -444,7 +444,7 @@ export async function catalogSample(department: string, rawLimit: number): Promi
 }
 
 const FAMILY_NOTE =
-  "A family is the department, the normalized brand, and the product line (cookies, ice cream, cereal, chips). Flavor and variety are chips inside that tile. Pack count and size are the next step. Names with no shared product line stay separate, so Diet Coke does not join Coca-Cola. groupedShare is the fraction of scanned masters that sit in a family with more than one size, pack, or flavor.";
+  "A family is the department, the normalized brand, and the product line (cookies, ice cream, cereal, chips). Flavor and variety are chips inside that tile. Pack count and size are the next step. Names with no shared product line stay separate. Coke flavors, including Diet, sit on the Coca-Cola family. groupedShare is the fraction of scanned masters that sit in a family with more than one size, pack, or flavor.";
 
 /**
  * Inspect family grouping. Computes keys from stored names so it is accurate

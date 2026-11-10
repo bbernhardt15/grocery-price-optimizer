@@ -1,7 +1,19 @@
 /* Conversational guide card. Fixed, so it never pushes the list or the dock. */
 
+.gitter-guide[data-single-dismiss="1"] .gitter-guide-dismiss { display: none; }
+body:has(#gitter-guide:not([hidden]))::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 10, 0.45);
+  z-index: 6;
+  pointer-events: none;
+}
 .gitter-guide {
   position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
   z-index: 7;
   left: max(12px, var(--safe-left));
   right: max(12px, var(--safe-right));
@@ -19,13 +31,19 @@
   border-radius: 20px;
   background: var(--surface);
   color: var(--ink);
-  box-shadow: var(--shadow);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
   /* Taps pass through the card except on its own controls, so the list and the dock stay usable. */
   pointer-events: none;
   animation: gitter-guide-in 180ms ease;
   overflow: auto;
 }
 
+@media (max-height: 740px) {
+  .gitter-guide {
+    max-height: min(34vh, 220px);
+    bottom: calc(var(--bar-h) + 8px);
+  }
+}
 .gitter-guide[hidden],
 body:has(dialog[open]) #gitter-guide,
 body:has(.filters.open) #gitter-guide {
@@ -33,7 +51,7 @@ body:has(.filters.open) #gitter-guide {
 }
 
 body:has(#gitter-guide:not([hidden])) .body {
-  padding-bottom: calc(var(--bar-h) + 16px);
+  padding-bottom: calc(var(--bar-h) + 280px);
 }
 
 .gitter-guide-avatar {

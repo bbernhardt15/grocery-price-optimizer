@@ -642,7 +642,7 @@ export function mountImport(deps) {
       ${missingNote}
       ${missingHtml ? `<ul class="import-review">${missingHtml}</ul>` : ""}
       </div>
-      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Save these for next time on this phone. They are not sent to a store.</span></label>
+      <label class="import-save"><input type="checkbox" id="import-save" /> <span>Remember these for my next trip</span></label>
       <div class="import-review-actions">
         <button type="button" class="ghost" id="import-back">Back</button>
         <button type="button" class="primary" id="import-accept" ${count ? "" : "disabled"}>${escapeHtml(acceptLabel(count))}</button>
@@ -1334,7 +1334,14 @@ export function mountImport(deps) {
         saved = "";
       }
       const priced = withServiceZip(`/api/catalog/suggest?q=${encodeURIComponent(q)}`, saved);
-      const response = await fetch(priced ? apiUrl(priced) : apiUrl(`/api/search-catalog?query=${encodeURIComponent(q)}`));
+      if (!priced) {
+        if (item._searchRun !== stamp) return;
+        item.searchState = "empty";
+        item.searchHits = [];
+        renderReview();
+        return;
+      }
+      const response = await fetch(apiUrl(priced));
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "search failed");
       if (item._searchRun !== stamp) return;

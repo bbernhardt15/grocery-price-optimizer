@@ -39,6 +39,7 @@ export function tripActionBarHtml(options = {}) {
       <p class="trip-action-count" id="trip-add-count">${escape(selectedCountLabel(count))}</p>
     </div>
     <button type="button" class="primary trip-action-add" id="learned-add-trip-top" data-trip-add="1"${disabled}>Add these items to my trip</button>
+    <button type="button" class="ghost" id="learned-empty-trip-top">Start with an empty trip</button>
   </div>`;
 }
 

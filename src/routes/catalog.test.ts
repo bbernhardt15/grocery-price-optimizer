@@ -38,7 +38,7 @@ describe("GET /api/search-catalog", () => {
       ];
     };
 
-    const response = await fetch(`${origin}/api/search-catalog?query=milk`);
+    const response = await fetch(`${origin}/api/search-catalog?query=milk&zip=45202`);
     assert.equal(response.status, 200);
     const body = (await response.json()) as Array<{
       id: string;
@@ -67,6 +67,24 @@ describe("GET /api/search-catalog", () => {
     assert.equal(called, false);
   });
 
+  it("returns 400 without a ZIP and 422 outside the service area", async () => {
+    let called = false;
+    fatSecretService.searchGlobalCatalog = async () => {
+      called = true;
+      return [{ id: "1", name: "Whole Milk", brand: "Friendly Farms" }];
+    };
+    const missing = await fetch(`${origin}/api/search-catalog?query=milk`);
+    assert.equal(missing.status, 400);
+    const missingBody = JSON.stringify(await missing.json());
+    assert.equal(/typicalPrice|valuePer|Whole Milk|Friendly/.test(missingBody), false);
+    const outside = await fetch(`${origin}/api/search-catalog?query=milk&zip=04101`);
+    assert.equal(outside.status, 422);
+    const outsideBody = (await outside.json()) as { code?: string };
+    assert.equal(outsideBody.code, "not_in_service_area");
+    assert.equal(/typicalPrice|valuePer|Whole Milk|Friendly/.test(JSON.stringify(outsideBody)), false);
+    assert.equal(called, false);
+  });
+
   it("returns demo catalog matches when FatSecret fails without crashing the server", async () => {
     fatSecretService.searchGlobalCatalog = async () => {
       throw new Error(
@@ -74,7 +92,7 @@ describe("GET /api/search-catalog", () => {
       );
     };
 
-    const failed = await fetch(`${origin}/api/search-catalog?query=milk`);
+    const failed = await fetch(`${origin}/api/search-catalog?query=milk&zip=45202`);
     assert.equal(failed.status, 200);
     const failedBody = (await failed.json()) as Array<{ name: string; brand: string }>;
     assert.ok(failedBody.some((product) => /milk/i.test(product.name)));
@@ -82,7 +100,7 @@ describe("GET /api/search-catalog", () => {
     fatSecretService.searchGlobalCatalog = async () => [
       { id: "1", name: "Eggs", brand: "Generic" },
     ];
-    const recovered = await fetch(`${origin}/api/search-catalog?query=eggs`);
+    const recovered = await fetch(`${origin}/api/search-catalog?query=eggs&zip=45202`);
     assert.equal(recovered.status, 200);
     const recoveredBody = (await recovered.json()) as Array<{ name: string }>;
     assert.equal(recoveredBody[0].name, "Eggs");
@@ -93,7 +111,7 @@ describe("GET /api/search-catalog", () => {
       throw new Error("Invalid IP address detected");
     };
 
-    const response = await fetch(`${origin}/api/search-catalog?query=zzzz-not-a-product`);
+    const response = await fetch(`${origin}/api/search-catalog?query=zzzz-not-a-product&zip=45202`);
     assert.equal(response.status, 500);
     const body = (await response.json()) as { error: string };
     assert.match(body.error, /Invalid IP address detected/);

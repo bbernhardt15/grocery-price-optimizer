@@ -33,6 +33,7 @@ describe("trip completion", () => {
     assert.equal(restoreWouldResurrect(finished, at), true);
     assert.equal(restoreActiveTrip(finished, { items: [{ id: "milk" }], at: 4_000 }, at), null);
     assert.equal(restoreWouldResurrect({ items: [{ id: "bread" }], savedAt: 6_000 }, at), false);
+    assert.equal(restoreWouldResurrect({ items: [{ id: "milk" }] }, at), true);
     const idb = { items: [], plan: null, savedAt: at, completedAt: at };
     const handoff = { items: [{ id: "milk", name: "Milk" }], at: 1_000, savedAt: 1_000 };
     assert.equal(restoreActiveTrip(idb, handoff, at), null);

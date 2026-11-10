@@ -343,7 +343,8 @@ function decideGuide(input = {}) {
         chips: [
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           ...hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : [],
-          { id: "add", label: "Add selected", action: "commit-picks" }
+          { id: "add", label: "Add selected", action: "commit-picks" },
+          { id: "no", label: "No thanks", action: "later" }
         ]
       };
     }
@@ -369,7 +370,7 @@ function decideGuide(input = {}) {
         name: unfound[0]
       });
     }
-    if (chips.length < 3) chips.push({ id: "keep", label: "Keep these", action: "later" });
+    chips.push({ id: "no", label: "No thanks", action: "later" });
     return {
       moment: "review-next",
       line: reviewLine(unfound),
@@ -384,7 +385,8 @@ function decideGuide(input = {}) {
         line: runningLowLine(names),
         chips: [
           ...names.map((name) => ({ id: `usual:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
-          { id: "add", label: "Add selected", action: "commit-picks" }
+          { id: "add", label: "Add selected", action: "commit-picks" },
+          { id: "no", label: "No thanks", action: "later" }
         ]
       };
     }
@@ -412,7 +414,7 @@ function decideGuide(input = {}) {
       ]
     };
   }
-  if (step === "build" && itemCount === 0 && !session.shown.welcome) {
+  if (step === "build" && itemCount === 0 && !session.shown.welcome && !session.declined?.["trip-saved"]) {
     return {
       moment: "welcome",
       line: WELCOME_LINE,

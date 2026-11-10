@@ -433,6 +433,21 @@ export function applyTripEdits(stores, edits = {}, capabilities = {}) {
   };
 }
 
+/** Lines that have a price at two or more stores. The rest are named, not treated as savings. */
+export function overlapSavings(lines) {
+  const eligible = [];
+  const excluded = [];
+  for (const line of lines || []) {
+    const stores = new Set();
+    for (const offer of line?.offers || []) {
+      if (offer?.storeName && Number(offer.price) > 0) stores.add(String(offer.storeName).trim().toLowerCase());
+    }
+    if (stores.size >= 2) eligible.push(line);
+    else excluded.push(String(line?.name || "Item"));
+  }
+  return { ...singleStoreSavings(eligible), excluded, eligibleCount: eligible.length };
+}
+
 export function singleStoreSavings(lines) {
   const priced = (lines || []).filter((line) => Number(line?.quantity) > 0);
   const splitTotal = roundMoney(

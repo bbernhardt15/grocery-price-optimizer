@@ -370,4 +370,20 @@ trailer << /Root 1 0 R >>
     assert.ok(tampons);
     assert.equal(tampons?.quantity, 6);
   });
+
+  it("keeps adjacent Kroger products on their own lines", () => {
+    const lines = parseReceiptText("Dave's Killer Bread\nCooked Perfect® Homestyle Frozen Meatballs\n1.0 x $6.99");
+    assert.equal(lines.some((line) => /bread/i.test(line.name) && /meatball/i.test(line.name)), false);
+    assert.ok(lines.some((line) => /killer bread/i.test(line.name)));
+    assert.ok(lines.some((line) => /meatball/i.test(line.name)));
+    assert.equal(lines.some((line) => /[®™©]/.test(`${line.name} ${line.brand}`)), false);
+    const learned = inferReceiptPreferences(lines);
+    assert.ok(learned.some((row) => row.family === "bread"));
+    assert.ok(learned.some((row) => row.family === "meatballs" && row.label === "Meatballs"));
+    assert.equal(foldMarks("Kroger® Parmesan Grated Cheese"), foldMarks("Kroger Parmesan Grated Cheese"));
+  });
 });
+
+function foldMarks(value: string): string {
+  return value.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+}

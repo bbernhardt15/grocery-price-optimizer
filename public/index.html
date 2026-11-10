@@ -4,7 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#0e7a45" />
+    <meta name="gg-build" content="" />
+    <meta name="theme-color" content="#f4efe6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c221e" media="(prefers-color-scheme: dark)" />
     <script>
       (function () {
         var theme = "system";
@@ -24,8 +26,12 @@
       })();
     </script>
     <style>
-      html { background: #f4efe6; color-scheme: light; }
-      html[data-resolved="dark"] { background: #1c221e; color-scheme: dark; }
+      html, body { background: #f4efe6; color-scheme: light; }
+      @media (prefers-color-scheme: dark) {
+        html, body { background: #1c221e; color-scheme: dark; }
+      }
+      html[data-resolved="light"] { background: #f4efe6; color-scheme: light; }
+      html[data-resolved="dark"], html[data-resolved="dark"] body { background: #1c221e; color-scheme: dark; }
       html.beta-gate-hold .shell,
       html.beta-gate-hold dialog { visibility: hidden; }
     </style>
@@ -136,6 +142,7 @@
             <button type="button" class="menu-row" id="help-feedback"><span class="menu-icon" aria-hidden="true">Note</span><span>Send feedback</span></button>
             <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
             <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
+            <p id="app-version" class="muted app-version">v83</p>
           </section>
           </div>
         </aside>
@@ -228,7 +235,7 @@
               </form>
               <div class="dept-scroller">
                 <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
-                <span id="chip-hint" class="chip-hint" hidden>More</span>
+                <button type="button" id="chip-hint" class="chip-hint" hidden>More</button>
               </div>
               <div class="browse-tools">
                 <div class="toolbar">
@@ -363,6 +370,7 @@
           <button type="button" data-flow="add" aria-current="step" aria-label="Build"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h7v2H4v-2zM17 14h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg><span>Build</span></button>
           <button type="button" data-flow="plan" aria-label="Review"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 4h6v7H5V4zm8 0h6v4h-6V4zM5 13h6v7H5v-7zm8-3h6v10h-6V10z"/></svg><span>Review</span></button>
           <button type="button" data-flow="shop" aria-label="In-store"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 9l1.2-4h13.6L20 9H4zm0 2h16v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8z"/></svg><span>In-store</span></button>
+          <button type="button" id="tab-favorites" aria-label="Favorites"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 17.3l-6.2 3.7 1.6-7L2 9.2l7.2-.6L12 2l2.8 6.6 7.2.6-5.4 4.8 1.6 7z"/></svg><span>Favorites</span></button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">

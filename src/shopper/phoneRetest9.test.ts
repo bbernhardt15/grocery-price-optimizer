@@ -24,8 +24,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const coupons = readFileSync(new URL("../../public/shopper/coupons.js", import.meta.url), "utf8");
 
 describe("ninth phone test", () => {
-  it("bumps the shell cache to v79", () => {
-    assert.match(sw, /grocery-gitter-shell-v79/);
+  it("bumps the shell cache to v83", () => {
+    assert.match(sw, /grocery-gitter-shell-v83/);
   });
 
   it("suggests nearby ZIPs and does not trust one census code", () => {
@@ -114,7 +114,9 @@ describe("ninth phone test", () => {
     const lists = readFileSync(new URL("../../public/shopper/themedListsUi.js", import.meta.url), "utf8");
     assert.match(lists, /themeIcon/);
     assert.doesNotMatch(lists.slice(lists.indexOf("export function listCardHtml"), lists.indexOf("export function myListCardHtml")), /list\.blurb/);
-    assert.match(css, /dialog\.sheet, dialog\.list-sheet, dialog\.shelf-sheet \{ background: var\(--bg\)/);
+    assert.match(css, /dialog\.sheet,\ndialog\.list-sheet,\ndialog\.shelf-sheet/);
+    assert.match(css, /background: var\(--surface\)/);
+    assert.match(css, /box-shadow: 0 24px 60px rgba\(0, 0, 0, 0\.45\)/);
     assert.match(css, /body\[data-browse="open"\] #start-here/);
   });
 

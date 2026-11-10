@@ -4,8 +4,8 @@
  * A family is one tile: a brand's product line (Oreo cookies, not Oreo ice
  * cream). Flavor and variety are chips inside that tile. Pack count, unit
  * size, and container are the size chips. A name with no shared product line
- * stays strict, so Diet Coke does not join Coca-Cola and club soda does not
- * join tonic water.
+ * stays strict, so club soda does not join tonic water. Coke flavors
+ * (Classic, Diet, Zero, Cherry) share one Coca-Cola family.
  *
  * The key is computed from the name at read time, so browse does not need a
  * precomputed column to be correct. Catalog upserts also store `familyKey`
@@ -168,6 +168,7 @@ function round2(value: number): number {
 
 function tokens(text: string): string[] {
   return text
+    .replace(/[®™©℠]/g, "")
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/['’.]/g, "")
@@ -490,6 +491,9 @@ const LINE_WORDS: Record<string, Set<string>> = {
 function brandLine(brandKey: string, departmentId: string): { line: string; label: string } | null {
   if (brandKey === "doritos" && departmentId === "snacks") return { line: "chips", label: "Chips" };
   if (brandKey === "oreo" && departmentId === "snacks") return { line: "cookies", label: "Cookies" };
+  if ((brandKey === "coca cola" || brandKey === "pepsi") && (departmentId === "beverages" || departmentId === "")) {
+    return { line: "soda", label: "Soda" };
+  }
   return null;
 }
 
@@ -499,6 +503,18 @@ function detectLine(text: string): { line: string; label: string } | null {
     if (rule.pattern.test(text)) return { line: rule.line, label: rule.label };
   }
   return null;
+}
+
+function sodaFlavorLabel(flavor: string, line: string): string {
+  if (line !== "soda") return flavorLabelOf(flavor);
+  if (!flavor || flavor === "classic") return "Classic";
+  if (flavor === "diet") return "Diet";
+  if (flavor === "zero") return "Zero";
+  if (flavor === "cherry") return "Cherry";
+  if (flavor === "vanilla") return "Vanilla";
+  if (flavor === "caffeine free") return "Caffeine Free";
+  if (flavor === "caffeine free diet" || flavor === "diet caffeine free") return "Diet Caffeine Free";
+  return flavorLabelOf(flavor);
 }
 
 function flavorLabelOf(key: string): string {
@@ -537,15 +553,32 @@ function flavorOf(display: string, brand: string, line: string): string {
   return flavor.join(" ");
 }
 
+function cokeIdentity(brand: string, name: string, size: string): { brand: string; name: string; size: string } {
+  const cleanBrand = brand.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  const cleanName = name.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  const cleanSize = size.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  let nextBrand = !cleanBrand || /^unbranded$/i.test(cleanBrand) ? "" : cleanBrand;
+  if (!nextBrand && /\bcoke\b/i.test(cleanName)) nextBrand = "Coca-Cola";
+  const soda = /\b(?:coke|coca-cola|pepsi|sprite)\b/i.test(`${nextBrand} ${cleanName}`);
+  const barePack = cleanName.match(/\b(6|8|12|18|24|30|32|36)\b(?!\s*(?:fl|oz|ml|l|liter|pk|pack|ct)\b)/i);
+  let nextSize = cleanSize;
+  if (soda && barePack && !new RegExp(`\\b${barePack[1]}\\s*(?:pk|pack)\\b`, "i").test(`${cleanName} ${cleanSize}`)) {
+    const unit = cleanSize.match(/\b\d+(?:\.\d+)?\s*fl oz\b/i)?.[0] || "12 fl oz";
+    nextSize = `${barePack[1]} pk ${unit}`;
+  }
+  return { brand: nextBrand || cleanBrand, name: cleanName, size: nextSize };
+}
+
 export function identifyFamily(input: {
   brand?: string | null;
   name?: string | null;
   size?: string | null;
   departmentId?: string | null;
 }): FamilyIdentity {
-  const brand = input.brand?.trim() || "";
-  const name = input.name?.trim() || "";
-  const variant = describeVariant(name, input.size);
+  const normalized = cokeIdentity(input.brand?.trim() || "", input.name?.trim() || "", input.size?.trim() || "");
+  const brand = normalized.brand;
+  const name = normalized.name;
+  const variant = describeVariant(name, normalized.size);
   const display = cleanedName(name, variant) || brand || name;
   const parent = parentBrand(brand);
   const departmentId = input.departmentId?.trim().toLowerCase() || "";
@@ -561,7 +594,7 @@ export function identifyFamily(input: {
     line: found?.line ?? "",
     lineLabel: found?.label ?? "",
     flavor,
-    flavorLabel: flavorLabelOf(flavor),
+    flavorLabel: sodaFlavorLabel(flavor, found?.line ?? ""),
     variant,
   };
 }
@@ -692,6 +725,33 @@ function toVariant(product: BrowseProduct): BrowseVariant {
  * the variant closest to the median package wins, then the one sold at the
  * most stores. A much larger pack may still win; the tile only flags it.
  */
+export function packCountOf(variant: { label?: string; variantLabel?: string; sizeLabel?: string; count?: number | null }): number {
+  const count = Number(variant.count);
+  if (Number.isFinite(count) && count > 1) return count;
+  const match = `${variant.variantLabel || ""} ${variant.label || ""} ${variant.sizeLabel || ""}`.match(/\b(\d{1,2})\s*(?:pk|pack)\b/i);
+  return match ? Number(match[1]) : 0;
+}
+
+/** A search like "coke 12" opens that pack, not the best-value bottle. */
+export function preferPackFromQuery<
+  T extends {
+    defaultVariantId: string;
+    variants: Array<{ id: string; label?: string; variantLabel?: string; sizeLabel?: string; count?: number | null; flavorKey?: string; flavorLabel?: string }>;
+  },
+>(tile: T, query: string): T {
+  const wanted = String(query || "").match(/\b(6|8|12|18|24|30|32|36)\b/);
+  if (!wanted) return tile;
+  const n = Number(wanted[1]);
+  const matches = tile.variants.filter((variant) => packCountOf(variant) === n);
+  if (!matches.length) return tile;
+  const classic = matches.find(
+    (variant) => !variant.flavorKey || variant.flavorKey === "classic" || variant.flavorLabel === "Classic" || variant.flavorLabel === "Original"
+  );
+  const match = classic || matches[0]!;
+  if (match.id === tile.defaultVariantId) return tile;
+  return { ...tile, defaultVariantId: match.id };
+}
+
 export function chooseDefaultVariant(variants: BrowseVariant[]): BrowseVariant {
   const verdict = selectBestValue(variants.map(toValueRow), "unit");
   if (verdict.winnerId) {
@@ -716,7 +776,7 @@ export function chooseDefaultVariant(variants: BrowseVariant[]): BrowseVariant {
 }
 
 function shopperVariantLabel(flavor: string, size: string, showFlavor: boolean): string {
-  if (!showFlavor || !flavor || flavor === "Original") return size;
+  if (!showFlavor || !flavor || flavor === "Original" || flavor === "Classic") return size;
   if (size && size !== "Standard") return `${flavor} · ${size}`;
   return flavor;
 }
@@ -839,7 +899,10 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
     const flavors = [...flavorCounts.entries()]
       .map(([key, row]) => ({ key, label: row.label, count: row.count }))
       .sort((a, b) => Number(b.key === "") - Number(a.key === "") || a.label.localeCompare(b.label));
-    const brandName = calmBrand(members.find((member) => member.brand.trim())?.brand.trim() || "");
+    const brandName = calmBrand(
+      members.find((member) => member.brand.trim() && !/^unbranded$/i.test(member.brand))?.brand.trim() ||
+        (line?.line === "soda" && identities.some((row) => /coke|cola/i.test(`${row.familyName} ${row.flavor}`)) ? "Coca-Cola" : "")
+    );
     const lineTitle = !line
       ? ""
       : brandName.toLowerCase().includes(line.lineLabel.toLowerCase())
@@ -847,11 +910,13 @@ export function groupBrowseFamilies(products: BrowseProduct[]): BrowseTile[] {
         : `${brandName} ${line.lineLabel}`.trim();
     const cleaned = preferredName(identities.map((identity) => identity.familyName));
     const familyName =
-      line && flavors.length > 1
-        ? lineTitle
-        : line?.line === "ice cream" && /and cream/i.test(cleaned)
+      line?.line === "soda" && flavors.length > 1
+        ? brandName || "Coca-Cola"
+        : line && flavors.length > 1
           ? lineTitle
-          : cleaned;
+          : line?.line === "ice cream" && /and cream/i.test(cleaned)
+            ? lineTitle
+            : cleaned;
     const prices = variants.map((variant) => variant.price).filter((price) => Number.isFinite(price));
     const priceFrom = prices.length ? Math.min(...prices) : chosen.price;
     const priceTo = prices.length ? Math.max(...prices) : chosen.price;

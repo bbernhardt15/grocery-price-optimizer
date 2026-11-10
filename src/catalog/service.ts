@@ -7,7 +7,7 @@ import { rankSearchResults } from "../shopper/searchRank";
 import { groupOffersByUpc, krogerLookupCodes, upcForStorage, walmartLookupCodes } from "./normalize";
 import { fetchKrogerDepartment, fetchKrogerSearch } from "./providers/krogerBrowse";
 import { fetchWalmartDepartment, fetchWalmartSearch } from "./providers/walmartBrowse";
-import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, type BrowseTile } from "./family";
+import { annotateBrowseProduct, diversifyFamilies, groupBrowseFamilies, preferPackFromQuery, type BrowseTile } from "./family";
 import { gapsForProduct } from "./substitutes";
 import type { BrowseProduct, BrowseSort, CatalogGap, RawCatalogRecord, SizeClass, StoreCoverage } from "./types";
 import { CatalogCache } from "../models/CatalogCache";
@@ -131,6 +131,12 @@ function queryTokens(query: string): string[] {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length > 1);
+}
+
+/** Test hook. A positive delay stands in for a slow live department feed. */
+let departmentFeedDelayMs = 0;
+export function setDepartmentFeedDelayForTests(ms: number): void {
+  departmentFeedDelayMs = Math.max(0, ms);
 }
 
 function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCatalogRecord[] {
@@ -347,6 +353,22 @@ async function writeCache(
   });
 }
 
+/** A cold aisle must not wait on every live search. Late prices fill the cache for the next open. */
+async function firstPageFeed(work: Promise<RawCatalogRecord[]>, warnings: string[]): Promise<RawCatalogRecord[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), 3500);
+  });
+  const live = await Promise.race([work, timeout]);
+  if (timer) clearTimeout(timer);
+  if (live) return live;
+  warnings.push("Showing the first items. Newer store prices are still loading.");
+  void work.then(async (records) => {
+    if (records.length) await persistLive(records);
+  }).catch(() => undefined);
+  return [];
+}
+
 async function loadScope(
   scope: { departmentId?: string; query?: string },
   zipCode?: string
@@ -390,7 +412,7 @@ async function loadScope(
 
   const wantsLive = liveConfigured() && scopeNeedsFeed({ departmentId, query });
   const wantsWeekly = flippEnabled() && scopeNeedsFeed({ departmentId, query });
-  if (!wantsLive && !wantsWeekly) {
+  if (!wantsLive && !wantsWeekly && departmentFeedDelayMs === 0) {
     return { products: groupOffersByUpc(demo), warnings: [], cached: false, fromDatabase: false };
   }
 
@@ -407,11 +429,30 @@ async function loadScope(
   }
 
   const warnings: string[] = [];
+  const warm = !query && departmentId ? groupOffersByUpc(demo) : [];
+  if ((wantsLive || departmentFeedDelayMs > 0) && warm.length >= 12) {
+    warnings.push("Showing the saved aisle page. Newer store prices are still loading.");
+    const refreshKey = cacheKey;
+    void (async () => {
+      if (departmentFeedDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, departmentFeedDelayMs));
+      const locationId = await krogerLocation(zipCode);
+      const live = wantsLive
+        ? await firstPageFeed(departmentFeed(departmentId ?? "", zipCode, locationId, warnings), warnings)
+        : [];
+      if (!live.length && departmentFeedDelayMs === 0) return;
+      const refreshed = groupOffersByUpc([...demo, ...live]);
+      if (refreshed.length) await writeCache(refreshKey, refreshed, warnings, ttlMs("CATALOG_DEPT_TTL_MINUTES", 10));
+    })().catch(() => undefined);
+    return { products: warm, warnings, cached: true, fromDatabase: false };
+  }
   const locationId = await krogerLocation(zipCode);
   const live = wantsLive
-    ? query
-      ? await searchFeed(query, zipCode, locationId, warnings)
-      : await departmentFeed(departmentId ?? "", zipCode, locationId, warnings)
+    ? await firstPageFeed(
+        query
+          ? searchFeed(query, zipCode, locationId, warnings)
+          : departmentFeed(departmentId ?? "", zipCode, locationId, warnings),
+        warnings
+      )
     : [];
   const weekly = wantsWeekly
     ? await fetchWeeklyAdRecords({
@@ -423,7 +464,8 @@ async function loadScope(
     : [];
   const products = groupOffersByUpc([...demo, ...live, ...weekly]);
   const ttl = query ? ttlMs("CATALOG_SEARCH_TTL_MINUTES", 60) : ttlMs("CATALOG_DEPT_TTL_MINUTES", 360);
-  await writeCache(cacheKey, products, warnings, ttl);
+  const liveTimedOut = warnings.some((warning) => /still loading/i.test(warning));
+  if (!liveTimedOut) await writeCache(cacheKey, products, warnings, ttl);
   await persistLive(live);
   if (ingestConfig().dbFirst && live.length > 0) {
     await upsertCatalogRecords(live).catch((error: unknown) => {
@@ -528,7 +570,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
       filtered = filterProducts(scope.products, { ...filters, query: broader });
     }
   }
-  const families = groupBrowseFamilies(filtered);
+  const families = groupBrowseFamilies(filtered).map((tile) => preferPackFromQuery(tile, query || ""));
   const sort = request.sort ?? "relevance";
   const ranked = rankSearchResults(families, { query: query || "", family: familyId });
   const sorted =
@@ -574,12 +616,16 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
     const stored = await readStoredRecords({ query: q });
     if (stored.records.length > 0) {
       const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
-      return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) }).slice(0, Math.min(Math.max(limit, 1), 12));
+      return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
+        .slice(0, Math.min(Math.max(limit, 1), 12))
+        .map((tile) => preferPackFromQuery(tile, q));
     }
   }
   const known = await loadKnownProducts();
   const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q });
-  return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) }).slice(0, Math.min(Math.max(limit, 1), 12));
+  return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
+    .slice(0, Math.min(Math.max(limit, 1), 12))
+    .map((tile) => preferPackFromQuery(tile, q));
 }
 
 export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { gaps: CatalogGap[] }) | null> {
