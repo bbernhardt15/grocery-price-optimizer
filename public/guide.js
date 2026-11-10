@@ -153,6 +153,15 @@ export function mountGuide(deps = {}) {
     if (box) box.checked = settings.enabled !== false;
   }
 
+  function hidePrompt() {
+    host.hidden = true;
+    host.removeAttribute("data-moment");
+    host.removeAttribute("data-chips");
+    if (chipsEl) chipsEl.replaceChildren();
+    if (lineEl) lineEl.textContent = "";
+    if (liveEl) liveEl.textContent = "";
+  }
+
   function paint(prompt) {
     if (!prompt) {
       host.hidden = true;
@@ -242,9 +251,12 @@ export function mountGuide(deps = {}) {
       session = result.session;
       current = result.current;
       if (result.current && result.current.moment !== previousMoment) promptShownAt = now;
-      if (result.defer && !result.hidden) return;
+      if (result.defer && !result.hidden) {
+        if (!current) hidePrompt();
+        return;
+      }
       if (result.hidden || !result.current) {
-        host.hidden = true;
+        hidePrompt();
         return;
       }
       paint(result.current);
@@ -319,6 +331,7 @@ export function mountGuide(deps = {}) {
     if (action === "later") {
       session = noteDeclined(session, detail.moment);
       current = null;
+      hidePrompt();
       deps.onAction?.(action, detail);
       sync();
       return;

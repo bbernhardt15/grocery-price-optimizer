@@ -7,9 +7,12 @@ test.use({ viewport: { width: 390, height: 844 } });
 
 async function unlock(page: Page) {
   await page.goto("/");
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
-  await expect(page.locator("#beta-gate")).toBeHidden();
+  const invite = page.locator("#beta-code").first();
+  if (await invite.isVisible().catch(() => false)) {
+    await invite.fill("Brandon-50y4");
+    await page.locator("#beta-gate-form button[type=submit]").first().click();
+    await expect(page.locator("#beta-gate")).toBeHidden();
+  }
 }
 
 async function reachStores(page: Page) {
@@ -24,7 +27,7 @@ async function reachReceipts(page: Page) {
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#profile-next").click();
+    await page.locator("#store-connect-later").click();
   }
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
 }
@@ -102,7 +105,9 @@ test("internal Back during a delayed receipt read stays on upload", async ({ pag
   await unlock(page);
   await reachReceipts(page);
   await page.locator("#profile-receipt-input").setInputFiles(receipt);
-  await page.getByRole("button", { name: "Read my receipts" }).click();
+  const read = page.getByRole("button", { name: "Read my receipts" });
+  await expect(read).toBeEnabled();
+  await read.click();
   await expect(page.locator("[data-reading-screen], .read-live").first()).toBeVisible();
   await page.locator("#profile-back").click();
   await expect(page.getByRole("heading", { name: "Here's what we learned" })).toHaveCount(0);
@@ -497,7 +502,8 @@ test("favorites is its own screen and a flavor survives reload", async ({ page }
     localStorage.setItem("gg-zip", "45103");
   });
   await unlock(page);
-  await page.locator("#tab-favorites").click();
+  await page.locator("#menu-open").click();
+  await page.locator("#menu-favorites").click();
   await expect(page.locator("#favorites-screen")).toBeVisible();
   await expect(page.locator("#grid")).toBeHidden();
   const next = page.locator("#fav-next");
@@ -510,7 +516,8 @@ test("favorites is its own screen and a flavor survives reload", async ({ page }
   await field.blur();
   await page.screenshot({ path: "/opt/cursor/artifacts/favorites-flavor.png", fullPage: false });
   await page.reload();
-  await page.locator("#tab-favorites").click();
+  await page.locator("#menu-open").click();
+  await page.locator("#menu-favorites").click();
   for (let step = 0; step < 40; step += 1) {
     if ((await page.locator("#favorites-prefs h3").innerText()) === "Mac and cheese") break;
     await page.locator("#fav-next").click();
@@ -737,7 +744,8 @@ test("a saved soda flavor replaces the themed default and an empty shelf", async
     });
   });
   await unlock(page);
-  await page.locator("#tab-favorites").click();
+  await page.locator("#menu-open").click();
+  await page.locator("#menu-favorites").click();
   await expect(page.locator("#favorites-screen")).toContainText("Aisle 1 of");
   await page.screenshot({ path: "/opt/cursor/artifacts/favorites-wizard.png", fullPage: false });
   await page.locator("#favorites-close").click();
@@ -966,7 +974,7 @@ test("soda flavor chips persist and apply to search and the tailgate list", asyn
   if (await page.locator("#gitter-guide [data-guide-off]").isVisible().catch(() => false)) {
     await page.locator("#gitter-guide [data-guide-off]").evaluate((button) => (button as HTMLButtonElement).click());
   }
-  await page.locator("#tab-favorites").evaluate((button) => (button as HTMLButtonElement).click());
+  await page.locator("#usuals-toggle").evaluate((button) => (button as HTMLButtonElement).click());
   for (let step = 0; step < 45; step += 1) {
     if ((await page.locator("#favorites-prefs h3").innerText()) === "Soda") break;
     await page.locator("#fav-next").evaluate((button) => (button as HTMLButtonElement).click());
@@ -982,7 +990,7 @@ test("soda flavor chips persist and apply to search and the tailgate list", asyn
   await page.locator("#favorites-prefs input").blur();
   await expect(page.locator("#favorites-prefs input")).toHaveValue("Cherry Coke");
   await page.reload();
-  await page.locator("#tab-favorites").evaluate((button) => (button as HTMLButtonElement).click());
+  await page.locator("#usuals-toggle").evaluate((button) => (button as HTMLButtonElement).click());
   for (let step = 0; step < 45; step += 1) {
     if ((await page.locator("#favorites-prefs h3").innerText()) === "Soda") break;
     await page.locator("#fav-next").evaluate((button) => (button as HTMLButtonElement).click());

@@ -124,21 +124,23 @@ export function receiptUploadHtml() {
   </div>`;
 }
 
+const BRAND_FALLBACK = ["Kroger", "Simple Truth", "Great Value"];
+
 export function brandChipMarkup(brands, options = {}) {
   const pending = Boolean(options.pending);
-  const buttons = (brands || [])
+  const family = escapeText(options.family || "");
+  if (pending) {
+    return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands" aria-busy="true"><p class="brand-loading" role="status">Loading brands</p><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span></div></fieldset>`;
+  }
+  const given = (brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
+  const names = given.length ? given : BRAND_FALLBACK;
+  const buttons = names
     .map((brand) => {
       const on = Boolean(options.selected?.has?.(String(brand).toLowerCase()));
-      const family = escapeText(options.family || "");
       return `<button type="button" class="brand-pick" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
     })
     .join("");
-  const skeletons = pending
-    ? `<span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span>`
-    : "";
-  if (!buttons && !skeletons) return "";
-  const busy = pending ? ` aria-busy="true"` : "";
-  return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands"${busy}>${buttons}${skeletons}</div></fieldset>`;
+  return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands">${buttons}</div></fieldset>`;
 }
 
 /** Inner markup for one learned card. The section element stays put. */

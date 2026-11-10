@@ -232,6 +232,12 @@ describe("parseImportText real lists", () => {
     assert.doesNotMatch(spoken[4]?.name || "", /sheldon/i);
   });
 
+  it("hears Grader's as Graeter's", () => {
+    const spoken = parseImportText("black raspberry chip from Grader's");
+    assert.equal(spoken[0]?.brand, "Graeter's");
+    assert.match(spoken[0]?.name || "", /black raspberry/i);
+  });
+
   it("combines duplicates and skips same-as-last-time", () => {
     const items = parseImportText("bananas\nbananas\nsame as last time\nthe usual");
     assert.equal(items.length, 1);

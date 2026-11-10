@@ -10,5 +10,5 @@ export function clearTripAction() {
 }
 
 export function completeTripAction() {
-  return { event: COMPLETE_TRIP_EVENT, label: "Complete trip", undoMs: FINISH_TRIP_UNDO_MS };
+  return { event: COMPLETE_TRIP_EVENT, label: "Save this trip", undoMs: FINISH_TRIP_UNDO_MS };
 }

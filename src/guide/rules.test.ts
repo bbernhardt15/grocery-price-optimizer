@@ -327,7 +327,7 @@ describe("Gitter guide rules", () => {
     const finished = decideGuide({ ...view({ step: "add", itemCount: 0 }), settings: emptyGuideSettings(), session: quiet });
     assert.equal(finished?.moment, "trip-saved");
     assert.match(finished?.line || "", /Estimated \$304\.47/);
-    assert.match(finished?.line || "", /Past trips/);
+    assert.doesNotMatch(finished?.line || "", /Past trips/);
     assert.equal(finished?.chips?.[0]?.label, "Remember these items");
     assert.doesNotMatch(finished?.line || "", /\$0\.00/);
     const withReceipt = {

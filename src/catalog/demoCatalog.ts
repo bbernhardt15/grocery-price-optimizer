@@ -268,6 +268,43 @@ const SHELVES: Shelf[] = [
     ],
   },
   {
+    name: "Grated Parmesan Cheese",
+    brand: "Kroger",
+    upc: "0099991000622",
+    departmentId: "dairy-eggs",
+    subcategory: "Cheese",
+    size: "8 oz",
+    storeBrand: true,
+    offers: [
+      { store: "Kroger", price: 2.99 },
+      { store: "Walmart", price: 3.18 },
+    ],
+  },
+  {
+    name: "Grated Parmesan Cheese",
+    brand: "Kraft",
+    upc: "0099991000639",
+    departmentId: "dairy-eggs",
+    subcategory: "Cheese",
+    size: "8 oz",
+    offers: [
+      { store: "Kroger", price: 3.79 },
+      { store: "Walmart", price: 3.48 },
+    ],
+  },
+  {
+    name: "Shredded Parmesan Cheese",
+    brand: "BelGioioso",
+    upc: "0099991000646",
+    departmentId: "dairy-eggs",
+    subcategory: "Cheese",
+    size: "5 oz",
+    offers: [
+      { store: "Kroger", price: 4.49 },
+      { store: "Walmart", price: 4.28 },
+    ],
+  },
+  {
     name: "Shredded Cheddar Cheese",
     brand: "Kraft",
     upc: "0099991000615",

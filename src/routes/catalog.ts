@@ -1,4 +1,6 @@
 import { Router, Request, Response } from "express";
+import { demoBrowseProducts } from "../catalog/demoCatalog";
+import { spokenTranscriptAliases } from "../productSearchQuery";
 import { seedCatalog } from "../seedProducts";
 import {
   FatSecretService,
@@ -28,13 +30,28 @@ function uniqueDemoProducts(): FatSecretProduct[] {
   return products;
 }
 
+function loose(value: string): string {
+  return spokenTranscriptAliases(value).toLowerCase().replace(/['’]/g, "");
+}
+
 function demoSearch(query: string): FatSecretProduct[] {
-  const needle = query.trim().toLowerCase();
-  return DEMO_PRODUCTS.filter(
-    (product) =>
-      product.name.toLowerCase().includes(needle) ||
-      product.brand.toLowerCase().includes(needle)
-  ).slice(0, 12);
+  const needle = loose(query).trim();
+  if (!needle) return [];
+  const seen = new Set<string>();
+  const hits: FatSecretProduct[] = [];
+  const consider = (name: string, brand: string, id: string) => {
+    const key = `${name}\0${brand}`.toLowerCase();
+    if (seen.has(key)) return;
+    const blob = loose(`${brand} ${name}`);
+    if (!blob.includes(needle) && !needle.split(/\s+/).every((part) => part && blob.includes(part))) return;
+    seen.add(key);
+    hits.push({ id, name, brand });
+  };
+  for (const product of DEMO_PRODUCTS) consider(product.name, product.brand, product.id);
+  for (const product of demoBrowseProducts()) {
+    consider(product.name, product.brand || "", product.id || `demo-${loose(product.name)}`);
+  }
+  return hits.slice(0, 12);
 }
 
 function readQuery(value: unknown): string {
@@ -61,8 +78,9 @@ router.get("/search-catalog", async (req: Request, res: Response) => {
   }
 
   try {
-    const products = await fatSecretService.searchGlobalCatalog(query);
-    res.json(products);
+    const products = await fatSecretService.searchGlobalCatalog(spokenTranscriptAliases(query));
+    const extra = demoSearch(query).filter((row) => !products.some((have) => loose(have.brand) === loose(row.brand) && loose(have.name) === loose(row.name)));
+    res.json([...products, ...extra].slice(0, 24));
   } catch (error) {
     const message = errorMessage(error);
     console.error(`FatSecret catalog search failed: ${message}`);

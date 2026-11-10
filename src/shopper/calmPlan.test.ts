@@ -74,7 +74,7 @@ describe("calm trip plan", () => {
     assert.equal(card.lines[0].value, "$6.00");
     assert.equal(card.lines[1].label, "This plan");
     assert.equal(card.lines[1].value, "$5.00");
-    assert.equal(card.saved, "You save $1.00 versus Aldi.");
+    assert.equal(card.saved, "You saved $1.00 using Grocery Gitter");
     assert.equal(card.note, ESTIMATE_NOTE);
 
     const nowhere = savingsCard({ splitTotal: 5, singleStore: null, savings: 0 });

@@ -78,6 +78,8 @@ const ALL_HOUSE = new Set(Object.values(HOUSE).flat());
 function expandAliases(text) {
   return String(text || "")
     .replace(/\bsheldon\b/gi, "shells")
+    .replace(/\bgraders\b/gi, "graeter's")
+    .replace(/\bgrader'?s\b/gi, "graeter's")
     .replace(/\bgraters\b/gi, "graeter's")
     .replace(/\bgraeters\b/gi, "graeter's")
     .replace(/\bcaptain\s+crunch\b/gi, "capn crunch")

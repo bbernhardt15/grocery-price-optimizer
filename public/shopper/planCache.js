@@ -170,7 +170,7 @@ export function genuineUnfound(names, reports) {
 export function couldntCheckNote(storeName, kind) {
   const name = String(storeName || "This store").trim() || "This store";
   if (kind === "rate_limit") return `${name} asked us to slow down. Retry in a moment.`;
-  if (kind === "timeout") return `${name} ran out of time on this check. Retry checks the lines still waiting.`;
+  if (kind === "timeout") return `${name} is taking longer than usual. The other prices stay. Retry checks what's still waiting.`;
   return `${name} couldn't check right now, retry`;
 }
 

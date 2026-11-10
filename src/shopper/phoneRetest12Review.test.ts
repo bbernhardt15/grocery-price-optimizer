@@ -73,9 +73,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v74", () => {
-    assert.equal(SHELL_CACHE, "v74");
-    assert.match(sw, /grocery-gitter-shell-v74/);
+  it("bumps the shell cache to v79", () => {
+    assert.equal(SHELL_CACHE, "v79");
+    assert.match(sw, /grocery-gitter-shell-v79/);
   });
 
   it("ends a cold review with a retry instead of an endless checking shell", () => {
@@ -108,7 +108,7 @@ describe("twelfth phone test, Review and In-store", () => {
     assert.equal((loading.match(/data-review-skel=/g) || []).length, 2);
     assert.match(loading, /min-height:256px;height:256px/);
     assert.match(loading, /min-height:304px;height:304px/);
-    assert.match(loading, /min-height:196px/);
+    assert.match(loading, /data-review-progress="1"/);
     assert.equal(loading.includes("One store or this plan"), false);
     assert.equal(loading.includes("No one store has this whole list"), false);
     assert.equal(loading.includes("$265.89"), false);

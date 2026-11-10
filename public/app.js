@@ -1217,10 +1217,8 @@ function finishCurrentTrip() {
   saveList();
   const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
   void writeTripDb(factory, { items: [], plan: null, step: "add", savedAt: at, completedAt: at });
-  renderEstimate();
-  paintTrip();
-  renderShop();
   showStep("add", "user");
+  renderEstimate();
   toastAction("Saved this trip to Past trips.", "Undo", () => {
     guide?.clearTrip?.();
     clearCompletedTrip(localStorage);
@@ -1957,6 +1955,7 @@ function listenForTripTabs() {
     if (event.key === LIST_KEY) rehydrateTrip();
     if (event.key === HANDOFF_RESULT_KEY) applySharedHandoff();
   });
+  window.addEventListener("pageshow", () => rehydrateTrip());
 }
 
 async function refreshKrogerFromServer() {
@@ -2920,7 +2919,11 @@ function bindKeyboardInset() {
     document.documentElement.dataset.keyboard = insets.keyboard > 80 ? "1" : "0";
     document.documentElement.style.setProperty("--keyboard", `${insets.keyboard}px`);
     document.documentElement.style.setProperty("--browser-bottom", `${insets.toolbar}px`);
-    if (viewport) document.documentElement.style.setProperty("--vv-height", `${Math.round(viewport.height)}px`);
+    const fullHeight = Math.round(window.innerHeight || viewport?.height || 0);
+    if (fullHeight) document.documentElement.style.setProperty("--vv-height", `${fullHeight}px`);
+    if (insets.keyboard > 80 && document.activeElement instanceof HTMLElement) {
+      document.activeElement.scrollIntoView({ block: "center", inline: "nearest" });
+    }
   };
   apply();
   window.visualViewport?.addEventListener("resize", apply);
@@ -4208,6 +4211,7 @@ function paintReviewLoading(status) {
     return;
   }
   tripEl.innerHTML = `${krogerBannerHtml()}${reviewLoadingHtml(selectedStoreNames(), status)}`;
+  paintPlanningStatus();
   paintPlanBar();
   settleEntryScroll();
 }
@@ -4252,7 +4256,8 @@ function reuseSettledReview() {
   if (!hit) return false;
   const shell = tripEl?.querySelector("[data-review-shell]");
   const shown = shell?.getAttribute("data-total");
-  if (hit.source === "memory" && shell && shown != null && Math.abs(Number(shown) - Number(lastOptimize?.total)) < 0.009) {
+  const shellSignature = shell?.getAttribute("data-signature");
+  if (hit.source === "memory" && shell && shellSignature === signature && shown != null && Math.abs(Number(shown) - Number(lastOptimize?.total)) < 0.009) {
     paintPlanBar();
     settleEntryScroll();
     return true;
@@ -4265,8 +4270,13 @@ function reuseSettledReview() {
 }
 
 function paintPlanningStatus() {
-  if (tripEl?.querySelector("[data-review-stable]")) return;
   const html = planStatusNow();
+  const slot = tripEl?.querySelector("[data-review-progress]");
+  if (slot) {
+    slot.innerHTML = html;
+    return;
+  }
+  if (tripEl?.querySelector("[data-review-stable]")) return;
   const host = document.getElementById("plan-status-block");
   if (host) {
     host.outerHTML = html;
@@ -4351,8 +4361,8 @@ function beginRefreshScrollGuard(startY) {
   const detach = () => {
     window.clearTimeout(timer);
     window.removeEventListener("wheel", onUser, true);
-    window.removeEventListener("touchstart", onUser, true);
-    window.removeEventListener("touchmove", onUser, true);
+    document.removeEventListener("touchstart", onTouch, true);
+    document.removeEventListener("touchmove", onTouch, true);
     window.removeEventListener("pointerdown", onPointer, true);
     window.removeEventListener("keydown", onKey, true);
   };
@@ -4364,6 +4374,11 @@ function beginRefreshScrollGuard(startY) {
     detach();
   };
   const onUser = () => finishUser();
+  const onTouch = () => {
+    reviewUserOwned = true;
+    reviewUserScroll = window.scrollY;
+    finishUser();
+  };
   const onPointer = (event) => {
     const target = event.target;
     if (target instanceof Element && target.closest("#plan-refresh")) return;
@@ -4383,8 +4398,8 @@ function beginRefreshScrollGuard(startY) {
     timer = window.setTimeout(correct, 50);
   };
   window.addEventListener("wheel", onUser, { capture: true, passive: true });
-  window.addEventListener("touchstart", onUser, { capture: true, passive: true });
-  window.addEventListener("touchmove", onUser, { capture: true, passive: true });
+  document.addEventListener("touchstart", onTouch, { capture: true, passive: true });
+  document.addEventListener("touchmove", onTouch, { capture: true, passive: true });
   window.addEventListener("pointerdown", onPointer, true);
   window.addEventListener("keydown", onKey, true);
   timer = window.setTimeout(correct, 0);
@@ -4446,12 +4461,21 @@ function placeReviewAnchor(snapshot) {
   if (Math.abs(delta) > 1 && Math.abs(delta) < 140) writeReviewScroll(Math.max(0, window.scrollY + delta));
 }
 
+let reviewUserOwned = false;
+
 function restoreReviewScroll(snapshot) {
   refreshAnchorWatch += 1;
   if (!snapshot || !tripEl) return;
   for (const name of snapshot.openStores) {
     const fold = tripEl.querySelector(`[data-store="${CSS.escape(name)}"] details.store-fold`);
     if (fold instanceof HTMLDetailsElement) fold.open = true;
+  }
+  if (reviewUserOwned) {
+    const keep = window.scrollY;
+    reviewUserOwned = false;
+    writeReviewScroll(keep);
+    clearTripFloor();
+    return;
   }
   const intended = Math.max(0, snapshot.scrollY || 0);
   writeReviewScroll(intended);
@@ -4517,7 +4541,7 @@ function paintTrip() {
     card.lines = [];
     card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
     card.note = "";
-  } else if (plans && !/^You save /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
+  } else if (plans && !/^You saved /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -4580,15 +4604,12 @@ function paintTrip() {
   const reviewHead = `<div class="review-head">
       ${age ? `<p class="prices-age">${escapeHtml(age)}</p>` : ""}
       <div class="review-head-actions">
-        <button type="button" class="text-btn" id="plan-refresh">Refresh</button>
-        <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button>
+        <button type="button" class="text-btn" id="plan-refresh" title="Checks these stores again and keeps the prices already on screen">Check these prices again</button>
+        <button type="button" class="text-btn" data-complete-trip="1">Save this trip</button>
         <button type="button" class="text-btn" id="clear-trip-open">Clear trip</button>
       </div>
     </div>`;
   const reviewSnapshot = reviewScrollSnapshot();
-  if (reviewSnapshot && reviewSnapshot.scrollY > 40) {
-    tripEl.style.minHeight = `${Math.ceil(Math.max(reviewSnapshot.height, tripContentHeight()))}px`;
-  }
   tripEl.innerHTML = `
     ${progress}
     ${krogerBannerHtml()}
@@ -4598,7 +4619,7 @@ function paintTrip() {
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
-      ${/^You save /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
+      ${/^You saved /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
       ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
@@ -5315,6 +5336,17 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   planTicker = window.setInterval(() => {
     if (planning) paintPlanningStatus();
   }, 1000);
+  let streamedPlan = null;
+  const earlyFallback = window.setTimeout(() => {
+    if (!planning || planAbort !== controller) return;
+    paintPlanningStatus();
+    if (streamedPlan && planIsShowable(streamedPlan) && !tripEl?.querySelector("[data-review-shell]")) {
+      commitDisplayedPlan({ ...streamedPlan, partial: true }, { zip });
+      holdVisibleReview("Some stores are still checking. These prices are ready to use.");
+    } else if (flowStep === "plan" && !planReady(lastOptimize)) {
+      paintReviewLoading("Still checking. Prices that are ready will show here. Retry if a store stalls.");
+    }
+  }, 8000);
   planBtn.disabled = false;
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
@@ -5345,7 +5377,6 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       instacartEnabled = false;
     });
   let result = "ok";
-  let streamedPlan = null;
   let timeoutNote = "";
   try {
     const response = await fetchWithTimeout(
@@ -5368,7 +5399,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
           total: Number(status.total) || planProgress[name]?.total || list.size,
         };
       }
-      if (!tripEl?.querySelector("[data-review-stable]")) paintPlanningStatus();
+      paintPlanningStatus();
     }, (result) => {
       if (planIsShowable(result) || planHasDisplay(result)) streamedPlan = result;
       const shown = chooseDisplayedPlan(null, result, Date.now());
@@ -5502,6 +5533,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       toast(timedOut ? PLAN_PARTIAL_NOTE : message);
     }
   } finally {
+    window.clearTimeout(earlyFallback);
     releaseRefreshScrollGuard(scrollGuardId);
     if (planAbort === controller) {
       clearReviewRefresh();
@@ -6987,8 +7019,7 @@ $("browse-toggle")?.addEventListener("click", () => {
   if (browseOpen) openBrowse();
 });
 $("usuals-toggle")?.addEventListener("click", () => {
-  usualsOpen = !usualsOpen;
-  paintUsuals();
+  openFavorites();
 });
 $("usuals-list")?.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-usual-key]") : null;
@@ -7160,16 +7191,16 @@ $("menu-brands")?.addEventListener("click", () => {
   profileUi?.openFavorites?.();
 });
 $("menu-favorites")?.addEventListener("click", () => {
-  openFavorites();
-});
-$("tab-favorites")?.addEventListener("click", () => {
-  if (document.body.dataset.favorites === "open") {
-    closeFavorites();
-    return;
-  }
+  closeDrawer();
   openFavorites();
 });
 $("favorites-close")?.addEventListener("click", () => closeFavorites());
+document.addEventListener("submit", (event) => {
+  const form = event.target instanceof HTMLFormElement ? event.target : null;
+  if (!form?.hasAttribute("data-fav-find")) return;
+  event.preventDefault();
+  form.querySelector("button")?.click();
+});
 document.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -7219,35 +7250,43 @@ document.addEventListener("change", (event) => {
           if (note) note.textContent = body.error || "Photo reading isn't available. Type the amount you can see.";
           return;
         }
-        const fields = couponDraftFields(body.coupon);
-        const formStore = String(form.dataset.couponStore || "");
-        if (fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase()) {
-          form.dataset.couponHold = "store";
-          if (note) note.textContent = `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`;
-          return;
+        const fields = couponDraftFields(body.coupon || body);
+        const live = form.isConnected ? form : document.querySelector(`form.coupon-form[data-coupon-store="${CSS.escape(form.dataset.couponStore || "")}"]`);
+        const host = live instanceof HTMLFormElement ? live : form;
+        const liveNote = host.querySelector("[data-coupon-shot-note]") || note;
+        const formStore = String(host.dataset.couponStore || "");
+        const mismatch = Boolean(fields.storeName && formStore && fields.storeName.toLowerCase() !== formStore.toLowerCase());
+        host.dataset.couponHold = mismatch ? "store" : "";
+        const wrap = host.closest(".coupon-form-wrap");
+        if (wrap instanceof HTMLElement) wrap.hidden = false;
+        host.closest(".coupon-body")?.querySelector("[data-show-coupon-form]")?.setAttribute("hidden", "");
+        if (liveNote) {
+          liveNote.hidden = false;
+          liveNote.textContent = mismatch
+            ? `Read ${fields.storeName}. This cart is ${formStore}, so this coupon is not applied here.`
+            : fields.review;
         }
-        form.dataset.couponHold = "";
-        const line = form.querySelector("[data-coupon-line]");
+        if (mismatch) return;
+        const line = host.querySelector("[data-coupon-line]");
         if (line instanceof HTMLSelectElement && fields.itemName) {
           const wanted = fields.itemName.toLowerCase();
           const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
           if (match) line.value = match.value;
         }
-        const amount = form.querySelector("[data-coupon-amount]");
-        const kind = form.querySelector("[data-coupon-kind]");
-        const expires = form.querySelector("[data-coupon-expires]");
+        const amount = host.querySelector("[data-coupon-amount]");
+        const kind = host.querySelector("[data-coupon-kind]");
+        const expires = host.querySelector("[data-coupon-expires]");
         if (amount instanceof HTMLInputElement && fields.amount) amount.value = fields.amount;
         if (kind instanceof HTMLSelectElement && fields.kind) kind.value = fields.kind;
         if (expires instanceof HTMLInputElement && fields.expiresOn) expires.value = fields.expiresOn;
-        const minQty = form.querySelector("[data-coupon-min-qty]");
-        const minSpend = form.querySelector("[data-coupon-min-spend]");
-        const conditions = form.querySelector("[data-coupon-conditions]");
-        const source = form.querySelector("[data-coupon-source]");
+        const minQty = host.querySelector("[data-coupon-min-qty]");
+        const minSpend = host.querySelector("[data-coupon-min-spend]");
+        const conditions = host.querySelector("[data-coupon-conditions]");
+        const source = host.querySelector("[data-coupon-source]");
         if (minQty instanceof HTMLInputElement) minQty.value = fields.minQuantity ? String(fields.minQuantity) : "";
         if (minSpend instanceof HTMLInputElement) minSpend.value = fields.minSpend ? String(fields.minSpend) : "";
         if (conditions instanceof HTMLInputElement) conditions.value = fields.conditions || "";
         if (source instanceof HTMLInputElement) source.value = "screenshot";
-        if (note) note.textContent = fields.review;
       } catch {
         if (note) note.textContent = "Photo reading didn't answer. Type the amount you can see.";
       }
@@ -7258,6 +7297,17 @@ document.addEventListener("change", (event) => {
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+  if (target.closest?.("[data-fav-find]") && target.closest("button")) {
+    event.preventDefault();
+    const form = target.closest("[data-fav-find]");
+    const input = form?.querySelector("input");
+    const family = form?.getAttribute("data-fav-find") || "";
+    if (family && input) {
+      saveFavoriteVariant(family, input.value);
+      toast(input.value.trim() ? `We'll look for “${input.value.trim()}” on the ${family} aisle.` : "Cleared that product search.");
+    }
+    return;
+  }
   if (target.id === "fav-prev" || target.id === "fav-next") {
     const steps = favoriteWizardSteps();
     if (target.id === "fav-next" && favoriteStep >= steps.length - 1) {
@@ -7988,11 +8038,11 @@ function paintAccount() {
 
 function applyAccountRows(items) {
   if (readCompletedAt(localStorage)) return;
+  const incoming = (items ?? []).filter((row) => row?.name);
+  if (!incoming.length && list.size > 0) return;
   applyingAccount = true;
   list.clear();
-  for (const row of items ?? []) {
-    if (row?.name) rememberLocalRow(row);
-  }
+  for (const row of incoming) rememberLocalRow(row);
   localStorage.removeItem(REMOVED_KEY);
   renderEstimate();
   renderListRows();
@@ -8491,7 +8541,6 @@ function closeFavorites() {
   document.body.dataset.favorites = "";
   const screen = $("favorites-screen");
   if (screen) screen.hidden = true;
-  $("tab-favorites")?.removeAttribute("aria-current");
 }
 
 function openFavorites() {
@@ -8502,7 +8551,6 @@ function openFavorites() {
   paintFavorites();
   screen.hidden = false;
   document.body.dataset.favorites = "open";
-  $("tab-favorites")?.setAttribute("aria-current", "step");
   screen.querySelector("h2")?.focus();
 }
 
@@ -8530,13 +8578,28 @@ function paintFavorites() {
           `<button type="button" class="choice-chip" data-fav-flavor="${escapeHtml(row.id)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${flavors.has(row.id) ? "true" : "false"}">${escapeHtml(row.label)}</button>`
       )
       .join("");
-    host.innerHTML = `<p class="muted">Aisle ${favoriteStep + 1} of ${steps.length}</p>
+    const choiceLabel = step.id === "eggs" ? "Type and size" : step.id === "milk" || step.id === "butter" || step.id === "bread" ? "Type" : "Flavor";
+    const placeholders = {
+      eggs: "Eggland's Best, large",
+      milk: "Fairlife whole",
+      soda: "Cherry Coke",
+    };
+    const placeholder = placeholders[step.id] || `A ${step.label.toLowerCase()} you buy`;
+    host.innerHTML = `<p class="muted">Aisle ${favoriteStep + 1} of ${steps.length}. Grocery Gitter learns these choices over time.</p>
       <h3>${escapeHtml(step.label)}</h3>
       ${brandChips ? `<p class="choice-label">Brand</p><div class="choice-row" role="group" aria-label="Brand for ${escapeHtml(step.label)}">${brandChips}</div>` : ""}
-      ${flavorChips ? `<p class="choice-label">Flavor</p><div class="choice-row" role="group" aria-label="Flavor for ${escapeHtml(step.label)}">${flavorChips}</div>` : ""}
-      <label class="favorites-row">Specific product
-        <input data-fav-family="${escapeHtml(step.id)}" value="${escapeHtml(pref.variant || "")}" maxlength="80" placeholder="Cherry Coke" autocomplete="off" enterkeyhint="done" />
-      </label>
+      <p class="choice-label">Store brand</p>
+      <div class="choice-row" role="group" aria-label="Store brand for ${escapeHtml(step.label)}">
+        ${["Kroger", "Simple Truth", "Great Value", "Good & Gather"].map((name) => `<button type="button" class="choice-chip" data-fav-brand="${escapeHtml(name)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${name.toLowerCase() === String(brand).toLowerCase() ? "true" : "false"}">${escapeHtml(name)}</button>`).join("")}
+      </div>
+      ${flavorChips ? `<p class="choice-label">${choiceLabel}</p><div class="choice-row" role="group" aria-label="${choiceLabel} for ${escapeHtml(step.label)}">${flavorChips}</div><p class="muted">Pick any that apply. This aisle only.</p>` : ""}
+      <form class="favorites-row" data-fav-find="${escapeHtml(step.id)}">
+        <label>Specific product
+          <input data-fav-family="${escapeHtml(step.id)}" value="${escapeHtml(pref.variant || "")}" maxlength="80" placeholder="${escapeHtml(placeholder)}" autocomplete="off" enterkeyhint="search" />
+        </label>
+        <p class="muted">Optional. This search is only for ${escapeHtml(step.label)}. It does not change other aisles.</p>
+        <button type="submit" class="ghost">Find this product</button>
+      </form>
       <div class="starter-actions">
         <button type="button" class="ghost" id="fav-prev" ${favoriteStep === 0 ? "disabled" : ""}>Previous aisle</button>
         <button type="button" class="primary" id="fav-next">${favoriteStep === steps.length - 1 ? "Done" : "Next aisle"}</button>
@@ -8593,6 +8656,10 @@ function saveFavoriteVariant(family, value) {
 }
 
 function showStep(step, reason = "user") {
+  if (readFlowStep(step) === "shop" && reason === "user" && planning && !planReady(lastOptimize)) {
+    toast("Still checking store prices. In-store opens when this check finishes.");
+    return;
+  }
   closeFavorites();
   const decision = allowTabChange(tabGuard, reason);
   tabGuard = decision.state;
@@ -8828,7 +8895,7 @@ function renderShop() {
   const scrollY = keepScroll ? window.scrollY : 0;
   shop.innerHTML = `
     ${backPrompt}
-    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button> <button type="button" class="text-btn" data-complete-trip="1">Complete trip</button></p>
+    <p class="shop-leave"><button type="button" class="text-btn" data-flow="plan">Review the split</button> <button type="button" class="text-btn" data-complete-trip="1">Save this trip</button></p>
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${emptyCheckedStoreHtml(view.stores)}
     ${inStoreShareActionsHtml()}
@@ -8954,14 +9021,9 @@ function paintUsuals() {
   const rows = readUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
   const summary = usualsSummary(rows.length);
   block.hidden = rows.length === 0;
-  block.dataset.open = usualsOpen ? "true" : "false";
+  block.dataset.open = "false";
   const toggle = $("usuals-toggle");
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", usualsOpen ? "true" : "false");
-    toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
-  }
-  const panel = $("usuals-panel");
-  if (panel) panel.hidden = !usualsOpen;
+  if (toggle) toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
   const count = $("usuals-count");
   if (count) count.textContent = String(summary.count);
   listEl.innerHTML = usualsRowHtml(
@@ -10249,7 +10311,10 @@ matchSheet = mountMatchSheet({
         for (const row of [...unfound.querySelectorAll("li")]) {
           if ((row.textContent || "").toLowerCase().includes(needle)) row.remove();
         }
-        if (!unfound.querySelector("li")) unfound.remove();
+        const left = unfound.querySelectorAll("li").length;
+        const heading = unfound.querySelector("h3");
+        if (heading) heading.textContent = left === 1 ? "1 item to find in store" : `${left} items to find in store`;
+        if (!left) unfound.remove();
       }
     }
     saveList();
@@ -10264,7 +10329,7 @@ importer = mountImport({
   onStatus(importStatus) {
     const hint = $("ask-hint");
     if (hint && importStatus && importStatus.ai === false) {
-      hint.textContent = "Smart parsing is off; basic matching used. A product like milk, or a list like bread, milk, eggs.";
+      hint.textContent = "Smart parsing is off; basic matching used. Grocery Gitter learns what you buy over time.";
     }
   },
   offerDiets: () => Boolean(profileUi?.shouldAskDiets?.()),
@@ -10283,6 +10348,9 @@ importer = mountImport({
   },
   apiUrl,
   toast,
+  persistList() {
+    saveList();
+  },
   mediaUrl,
   askConstraints() {
     return profileToConstraints(getUserProfile(localStorage));

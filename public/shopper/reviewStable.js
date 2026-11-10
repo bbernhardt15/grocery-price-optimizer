@@ -112,9 +112,10 @@ export function reviewLoadingHtml(storeNames, status = REVIEW_LOADING_STATUS) {
   const frames = reviewLayoutFrames(storeNames);
   const line = clean(status) || REVIEW_LOADING_STATUS;
   return `<div class="review-stable" data-review-stable="loading" data-review-skel-count="${frames.count}">
-    <div class="review-head-slot" data-review-head-slot style="min-height:${frames.headMinHeight}px"></div>
-    ${reviewSkeletonHtml(storeNames)}
+    <div data-review-progress="1"></div>
     <p class="review-loading-status">${escapeText(line)}</p>
+    <p class="muted review-loading-note">Each store is listed as its prices come back. You can retry if one stalls.</p>
+    ${reviewSkeletonHtml(storeNames)}
   </div>`;
 }
 

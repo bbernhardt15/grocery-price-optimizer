@@ -25,9 +25,6 @@ async function unlock(page: Page) {
     localStorage.setItem("gg-list", saved);
   }, listSeed());
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeVisible();
-  await page.locator("#beta-code").first().fill("brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
   await expect(page.locator("#beta-gate")).toBeHidden();
   await expect(page.locator("#bar-count")).toContainText("54");
 }

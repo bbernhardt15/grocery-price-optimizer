@@ -364,7 +364,7 @@ export function mountProfileOnboarding(deps = {}) {
     const readingBusy = reading && (importGate.parsing || importGate.grouping || readCards.some((card) => card.status === "reading"));
     const readingReady = reading && !readingBusy && !beatMarkup && learnedViewReady({ ...importGate, revealed: true }) && (learnedRows.length > 0 || receiptLines.length > 0);
     if (next) {
-      next.hidden = tripChoice || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
+      next.hidden = tripChoice || step.id === "connect" || Boolean(beatMarkup) || importGate.parsing || importGate.grouping || (reading && !readingReady);
       next.textContent = returnTo ? "Save" : learned || reading ? "Continue" : step.id === "receipts" ? "Read my receipts" : primaryLabel(step.id);
     }
     if (skip) {
@@ -546,8 +546,7 @@ export function mountProfileOnboarding(deps = {}) {
     });
     const now = copy.showNow ? `<button type="button" class="primary" id="store-connect-now">${escapeText(copy.now)}</button>` : "";
     const walmart = copy.walmart ? `<p class="muted">${escapeText(copy.walmart)}</p>` : "";
-    host.innerHTML = `<section class="store-connect" aria-labelledby="store-connect-title">
-      <h3 id="store-connect-title">${escapeText(copy.title)}</h3>
+    host.innerHTML = `<section class="store-connect" aria-labelledby="profile-title">
       <p>${escapeText(copy.body)}</p>
       ${walmart}
       <div class="choice-stack">
@@ -729,6 +728,9 @@ export function mountProfileOnboarding(deps = {}) {
       if (!key || seen.has(key)) continue;
       seen.add(key);
       names.push(name);
+    }
+    if (!names.length && !isProduceFamily(row?.family)) {
+      for (const name of ["Kroger", "Simple Truth", "Great Value"]) names.push(name);
     }
     return names.slice(0, 24);
   }

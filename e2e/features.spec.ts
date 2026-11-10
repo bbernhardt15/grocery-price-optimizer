@@ -10,9 +10,7 @@ async function unlock(page: Page) {
     localStorage.setItem("gg-onboarding-done", "1");
   });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Enter your invite code" })).toBeVisible();
-  await page.locator("#beta-code").first().fill("Brandon-50y4");
-  await page.locator("#beta-gate-form button[type=submit]").first().click();
+  await expect(page.locator("#browse-toggle")).toBeVisible();
   await expect(page.locator("#beta-gate")).toBeHidden();
 }
 
@@ -20,6 +18,8 @@ test("photo import reads an order, flags a paper receipt, and explains a failure
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await unlock(page);
+  const dismiss = page.getByRole("button", { name: "Dismiss guide" });
+  if (await dismiss.isVisible()) await dismiss.click();
   await page.locator("#browse-toggle").click();
   await page.locator("#ask-import").click();
   await expect(page.locator("#import-photo")).toBeVisible();

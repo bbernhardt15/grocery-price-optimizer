@@ -87,67 +87,57 @@
             <h2 id="drawer-title" tabindex="-1">Menu</h2>
             <button type="button" id="drawer-close" class="text-btn">Close</button>
           </div>
-          <button id="refresh-prices" type="button" class="ghost">Refresh prices</button>
-          <details class="drawer-fold" id="where-you-shop" open>
-            <summary>ZIP and stores</summary>
+          <div class="menu-sheet">
+          <section class="menu-group" id="where-you-shop">
+            <p class="menu-kicker">Where you shop</p>
             <p id="zip-place" class="zip-place">Add a ZIP for nearby stores</p>
             <label class="zip">
               <span>ZIP</span>
               <input id="zip" inputmode="numeric" maxlength="10" autocomplete="postal-code" placeholder="5-digit ZIP" aria-describedby="zip-hint" />
             </label>
             <p id="zip-hint" class="sr-only">Saved on this phone. Location is used only when you ask to find nearby stores.</p>
-            <button id="find-stores" type="button" class="ghost">Find nearby stores</button>
+            <button id="find-stores" type="button" class="menu-row"><span class="menu-icon" aria-hidden="true">ZIP</span><span>Find nearby stores</span></button>
             <p id="zip-status" class="status" role="status" hidden></p>
           <fieldset id="store-picker" class="store-picker">
             <legend>Stores to shop</legend>
             <p id="store-picker-note" class="muted">Uncheck a store to leave it out of the plan.</p>
             <div id="store-picker-list"></div>
           </fieldset>
-          </details>
+          </section>
           <section id="kroger-card" class="kroger-card" hidden>
             <h2 id="kroger-card-title">Kroger connected</h2>
             <button type="button" id="kroger-send" class="primary">Send to Kroger cart</button>
             <a id="kroger-cart-link" href="https://www.kroger.com/cart" rel="noopener">Open Kroger cart</a>
           </section>
-          <button id="alerts-toggle" type="button" class="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts">
-            Alerts
-            <span id="alerts-badge" class="count-pill" hidden>0</span>
-          </button>
-          <button id="theme-btn" type="button" class="ghost theme-btn" aria-label="Toggle color theme">
-            <span aria-hidden="true" id="theme-glyph">◐</span>
-            <span id="theme-label">Match device</span>
-          </button>
-          <button id="settings-open" type="button" class="ghost settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false">Settings</button>
-          <button id="drawer-profile" type="button" class="ghost">Stores, allergies, and diets</button>
-          <button id="drawer-products" type="button" class="ghost" aria-haspopup="dialog" aria-controls="products-dialog">Locked products</button>
-          <details class="drawer-fold" open>
-            <summary>This trip</summary>
-            <nav class="menu-nav" aria-label="Menu">
-              <button type="button" id="menu-home">Home</button>
-              <button type="button" id="menu-past">Past trips</button>
-              <button type="button" id="menu-new-trip">Start a new trip</button>
-            </nav>
-          </details>
-          <details class="drawer-fold">
-            <summary>Preferences</summary>
-            <nav class="menu-nav" aria-label="Preferences">
-              <button type="button" id="menu-brands">Brands for each category</button>
-              <button type="button" id="menu-favorites">Your favorites</button>
-              <button type="button" id="menu-zip" hidden>Edit ZIP and stores</button>
-              <button type="button" id="menu-settings" hidden>Settings</button>
-              <button type="button" id="menu-redo">Redo setup</button>
-            </nav>
-          </details>
-          <details class="drawer-fold" id="menu-help">
-            <summary id="help-title">Help</summary>
-            <p>Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
-            <nav class="drawer-links" aria-label="About">
-              <button type="button" id="menu-feedback" hidden>Send feedback</button>
-              <button type="button" id="help-feedback" class="text-btn">Send feedback</button>
-              <a id="help-privacy" href="/privacy">Privacy</a>
-              <a id="help-terms" href="/terms">Terms</a>
-            </nav>
-          </details>
+          <section class="menu-group">
+            <p class="menu-kicker">This trip</p>
+            <button id="refresh-prices" type="button" class="menu-row"><span class="menu-icon" aria-hidden="true">↻</span><span>Refresh prices</span></button>
+            <button type="button" class="menu-row" id="menu-home"><span class="menu-icon" aria-hidden="true">Home</span><span>Home</span></button>
+            <button type="button" class="menu-row" id="menu-past"><span class="menu-icon" aria-hidden="true">Past</span><span>Past trips</span></button>
+            <button type="button" class="menu-row" id="menu-new-trip"><span class="menu-icon" aria-hidden="true">New</span><span>Start a new trip</span></button>
+          </section>
+          <section class="menu-group">
+            <p class="menu-kicker">Preferences</p>
+            <button type="button" class="menu-row" id="menu-brands"><span class="menu-icon" aria-hidden="true">Aa</span><span>Brands for each category</span></button>
+            <button type="button" class="menu-row" id="menu-favorites"><span class="menu-icon" aria-hidden="true">★</span><span>Your favorites</span></button>
+            <button type="button" class="menu-row" id="drawer-profile"><span class="menu-icon" aria-hidden="true">Diet</span><span>Stores, allergies, and diets</span></button>
+            <button type="button" class="menu-row" id="drawer-products" aria-haspopup="dialog" aria-controls="products-dialog"><span class="menu-icon" aria-hidden="true">Lock</span><span>Locked products</span></button>
+            <button type="button" class="menu-row" id="alerts-toggle" aria-haspopup="dialog" aria-controls="alerts-dialog" aria-expanded="false" aria-label="Price alerts"><span class="menu-icon" aria-hidden="true">$</span><span>Alerts</span><span id="alerts-badge" class="count-pill" hidden>0</span></button>
+            <button type="button" class="menu-row" id="theme-btn" aria-label="Toggle color theme"><span class="menu-icon" aria-hidden="true" id="theme-glyph">◐</span><span id="theme-label">Match device</span></button>
+            <button type="button" class="menu-row" id="settings-open" aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false"><span class="menu-icon" aria-hidden="true">Set</span><span>Settings</span></button>
+            <button type="button" class="menu-row" id="menu-zip" hidden><span class="menu-icon" aria-hidden="true">ZIP</span><span>Edit ZIP and stores</span></button>
+            <button type="button" class="menu-row" id="menu-settings" hidden><span class="menu-icon" aria-hidden="true">Set</span><span>Settings</span></button>
+            <button type="button" class="menu-row" id="menu-redo"><span class="menu-icon" aria-hidden="true">Redo</span><span>Redo setup</span></button>
+          </section>
+          <section class="menu-group" id="menu-help">
+            <p class="menu-kicker" id="help-title">Help</p>
+            <p class="muted">Pick items here. Grocery Gitter chooses the stores when you plan the trip.</p>
+            <button type="button" class="menu-row" id="menu-feedback" hidden><span class="menu-icon" aria-hidden="true">Note</span><span>Send feedback</span></button>
+            <button type="button" class="menu-row" id="help-feedback"><span class="menu-icon" aria-hidden="true">Note</span><span>Send feedback</span></button>
+            <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
+            <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
+          </section>
+          </div>
         </aside>
       </div>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -159,7 +149,7 @@
 
         <main id="catalog" class="catalog" tabindex="-1">
           <p id="pull-status" class="pull-status" hidden>Pull to refresh</p>
-          <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs.</p>
+          <p id="ask-hint" class="ask-hint">A product like milk, or a list like bread, milk, eggs. Grocery Gitter learns what you buy over time.</p>
           <div id="shelf-entry" class="feature-cards">
             <button type="button" id="shelf-scan" class="feature-card" hidden>
               <span class="feature-icon feature-icon-word" aria-hidden="true">Scan</span>
@@ -172,19 +162,16 @@
           </div>
           <p id="profile-warning" class="profile-warning" role="status" hidden></p>
           <section id="start-here" class="start-here" aria-label="Start from a list">
-            <div id="usuals-block" class="usuals-block" data-open="false" hidden>
-              <div class="start-head usuals-head">
-                <button type="button" id="usuals-toggle" class="usuals-toggle" aria-expanded="false" aria-controls="usuals-panel">
-                  <span class="usuals-chevron" aria-hidden="true"></span>
-                  <span class="usuals-title">Your favorites</span>
-                  <span id="usuals-count" class="usuals-count">0</span>
-                </button>
-                <button type="button" id="add-usuals" class="text-btn">Add all</button>
-              </div>
-              <div id="usuals-panel" class="usuals-panel" hidden>
-                <ul id="usuals-list" class="usuals-list usuals-scroll"></ul>
-              </div>
+            <div id="usuals-block" class="feature-cards" data-open="false" hidden>
+              <button type="button" id="usuals-toggle" class="feature-card">
+                <span class="feature-icon" aria-hidden="true">★</span>
+                <span class="feature-copy">
+                  <strong>Your favorites</strong>
+                  <span class="muted"><span id="usuals-count">0</span> saved on this phone</span>
+                </span>
+              </button>
             </div>
+            <ul id="usuals-list" hidden></ul>
             <h2 class="sr-only">Starter lists</h2>
             <div id="starter-lists" class="list-home"></div>
           <div id="past-trips-home" class="feature-cards"></div>
@@ -376,7 +363,6 @@
           <button type="button" data-flow="add" aria-current="step" aria-label="Build"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h7v2H4v-2zM17 14h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg><span>Build</span></button>
           <button type="button" data-flow="plan" aria-label="Review"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 4h6v7H5V4zm8 0h6v4h-6V4zM5 13h6v7H5v-7zm8-3h6v10h-6V10z"/></svg><span>Review</span></button>
           <button type="button" data-flow="shop" aria-label="In-store"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 9l1.2-4h13.6L20 9H4zm0 2h16v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8z"/></svg><span>In-store</span></button>
-          <button type="button" id="tab-favorites" aria-label="Favorites"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 17.3l-5.4 3.2 1.4-6.1L3 10.2l6.2-.5L12 4l2.8 5.7 6.2.5-5 4.2 1.4 6.1z"/></svg><span>Favorites</span></button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">

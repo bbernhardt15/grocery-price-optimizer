@@ -112,6 +112,8 @@ const FLAVOR_WORDS = new Set([
 export function spokenTranscriptAliases(text: string): string {
   return String(text || "")
     .replace(/\bsheldon\b/gi, "shells")
+    .replace(/\bgraders\b/gi, "Graeter's")
+    .replace(/\bgrader'?s\b/gi, "Graeter's")
     .replace(/\bgraters\b/gi, "Graeter's")
     .replace(/\bgraeters\b/gi, "Graeter's");
 }
