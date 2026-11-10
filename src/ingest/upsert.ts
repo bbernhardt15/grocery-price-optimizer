@@ -1,7 +1,7 @@
 import { identifyFamily } from "../catalog/family";
 import { formatUnitPrice, parsePackageSize } from "../packageSize";
 import { mapToDepartment } from "../catalog/departments";
-import { krogerProductIdForLookup, upcForStorage, upcKey } from "../catalog/normalize";
+import { catalogJoinKey, krogerProductIdForLookup, upcForStorage } from "../catalog/normalize";
 import type { RawCatalogRecord } from "../catalog/types";
 import { ingestConfig } from "./config";
 import { CatalogMaster, CatalogOffer, type CatalogStatus } from "./models";
@@ -39,7 +39,7 @@ export function localProductKey(record: RawCatalogRecord): string | null {
 }
 
 export function productKeyFor(record: RawCatalogRecord): string | null {
-  const upc = upcKey(record.upc);
+  const upc = catalogJoinKey(record);
   if (upc) {
     return upc;
   }
@@ -173,7 +173,10 @@ export async function upsertCatalogRecords(
     const krogerRaw = record.productId?.trim() || record.retailerItemId?.trim() || "";
     const krogerProductId =
       storeName.toLowerCase() === "kroger"
-        ? krogerProductIdForLookup(krogerRaw) || krogerRaw || existing?.krogerProductId
+        ? krogerProductIdForLookup(krogerRaw, { source: "kroger-product-id" }) ||
+          krogerProductIdForLookup(krogerRaw) ||
+          krogerRaw ||
+          existing?.krogerProductId
         : existing?.krogerProductId;
     const storedUpc = upcForStorage(record.upc);
     const hadBoth = Boolean(existing?.walmartItemId?.trim() && existing?.krogerProductId?.trim());

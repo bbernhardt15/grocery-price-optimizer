@@ -1,7 +1,15 @@
 import { formatUnitPrice, parsePackageSize } from "../packageSize";
 import { publishSale } from "../pricing/saleFacts";
 import { departmentById, mapToDepartment } from "./departments";
-import { canonicalGtin14, expandUpcE, gtinCheckDigit, gtinJoinKey, hasGtinCheckDigit, parseGtin } from "./gtin";
+import {
+  canonicalGtin14,
+  expandUpcE,
+  gtinCheckDigit,
+  gtinJoinKey,
+  hasGtinCheckDigit,
+  parseGtin,
+  type GtinRead,
+} from "./gtin";
 
 export { canonicalGtin14, expandUpcE, gtinCheckDigit, parseGtin };
 import type {
@@ -99,13 +107,51 @@ export function isGroceryUpc(upc: string | undefined | null): boolean {
   return false;
 }
 
-export function upcKey(upc: string | undefined | null): string | null {
-  const joined = gtinJoinKey(upc);
+function rejectedRetailCode(digits: string): boolean {
+  if (digits.length >= 4 && digits.length <= 6) return true;
+  if (digits.length === 12 && digits[0] === "2") return true;
+  if (digits.length === 13 && (digits.startsWith("02") || /^2[0-9]/.test(digits))) return true;
+  if (digits.length === 14 && digits[0] === "9") return true;
+  return false;
+}
+
+export function upcKey(upc: string | undefined | null, read?: GtinRead): string | null {
+  const joined = gtinJoinKey(upc, read);
   if (joined) return joined;
+  if (read?.source === "kroger-product-id") return null;
   const digits = upc?.replace(/\D/g, "") ?? "";
+  if (rejectedRetailCode(digits)) return null;
   if (digits.length < 8 || digits.length > 14) return null;
+  // An 8-digit code is UPC-E or it is left out. See the GTIN reader.
+  if (digits.length === 8) return null;
   const stripped = digits.replace(/^0+/, "");
   return stripped.length > 0 ? stripped : null;
+}
+
+/**
+ * Key for one catalog row. A Kroger productId is the 13-digit no-check code.
+ * A UPC field that already includes its check digit uses the normal reader.
+ */
+export function catalogJoinKey(record: {
+  storeName?: string | null;
+  upc?: string | null;
+  productId?: string | null;
+  retailerItemId?: string | null;
+}): string | null {
+  const store = record.storeName?.trim().toLowerCase() ?? "";
+  const productId = record.productId?.trim() || record.retailerItemId?.trim() || "";
+  // Only an exact 13-digit field is a Kroger productId. A composite id such as
+  // `0099999700701-KR` is not, even though its digits are 13 long.
+  if (store === "kroger" && /^\d{13}$/.test(productId)) {
+    const fromId = gtinJoinKey(productId, { source: "kroger-product-id" });
+    const upcDigits = record.upc?.replace(/\D/g, "") ?? "";
+    if (fromId && (upcDigits.length === 0 || upcDigits === productId)) return fromId;
+    const fromUpc = upcKey(record.upc);
+    if (fromId && fromUpc === fromId) return fromId;
+    if (fromUpc) return fromUpc;
+    if (fromId) return fromId;
+  }
+  return upcKey(record.upc);
 }
 
 /**
@@ -114,10 +160,18 @@ export function upcKey(upc: string | undefined | null): string | null {
  * A 13-digit Kroger id is rebuilt the same way, including when its last
  * digit accidentally passes the GS1 check.
  */
-export function krogerProductIdForLookup(upc: string | undefined | null): string | null {
-  const parsed = parseGtin(upc);
-  if (parsed) return parsed.upcBody.padStart(13, "0");
+export function krogerProductIdForLookup(upc: string | undefined | null, read?: GtinRead): string | null {
   const digits = upc?.replace(/\D/g, "") ?? "";
+  if (read?.source === "kroger-product-id") {
+    const parsed = parseGtin(digits, { source: "kroger-product-id" });
+    return parsed?.upcBody ? parsed.upcBody.padStart(13, "0") : null;
+  }
+  const parsed = parseGtin(digits);
+  if (parsed?.indicator === 0 && parsed.upcBody) return parsed.upcBody.padStart(13, "0");
+  if (digits.length === 13) {
+    const asKroger = parseGtin(digits, { source: "kroger-product-id" });
+    if (asKroger?.upcBody) return asKroger.upcBody.padStart(13, "0");
+  }
   const expanded = expandUpcE(digits);
   const code = expanded || digits;
   if (code.length === 12 || (code.length === 11 && code[0] !== "0")) {
@@ -151,9 +205,13 @@ export function upcForStorage(upc: string | undefined | null): string | undefine
 
 /** 12-digit UPC-A with check digit, for Walmart Affiliate `GET /items?upc=`. */
 export function walmartUpcForLookup(upc: string | undefined | null): string | null {
-  const parsed = parseGtin(upc);
-  if (parsed) return parsed.upcA;
   const digits = upc?.replace(/\D/g, "") ?? "";
+  if (digits.length === 13) {
+    const asKroger = parseGtin(digits, { source: "kroger-product-id" });
+    if (asKroger?.upcA) return asKroger.upcA;
+  }
+  const parsed = parseGtin(upc);
+  if (parsed?.indicator === 0 && parsed.upcA) return parsed.upcA;
   if (digits.length === 12 || (digits.length === 11 && digits[0] !== "0")) {
     const body = digits.slice(0, -1).padStart(11, "0");
     return `${body}${gtinCheckDigit(body)}`;
@@ -197,7 +255,9 @@ export function walmartLookupCodes(upc: string | undefined | null): string[] {
  * different product. Shorter and longer codes are normalized once.
  */
 export function krogerRequestId(upc: string | undefined | null): string | null {
-  return krogerProductIdForLookup(upc);
+  const digits = upc?.replace(/\D/g, "") ?? "";
+  if (digits.length === 13) return krogerProductIdForLookup(digits, { source: "kroger-product-id" });
+  return krogerProductIdForLookup(digits);
 }
 
 /**
@@ -366,7 +426,7 @@ export function groupOffersByUpc(records: RawCatalogRecord[]): BrowseProduct[] {
     if (!built) {
       continue;
     }
-    const key = upcKey(record.upc);
+    const key = catalogJoinKey(record);
     const id = key
       ? `upc:${key}`
       : `local:${slug(record.storeName)}:${slug(record.brand)}:${slug(record.name)}:${slug(built.offer.sizeLabel ?? "")}`;

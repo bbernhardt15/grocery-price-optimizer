@@ -1,5 +1,6 @@
 import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
+import { gtinJoinKey } from "../catalog/gtin";
 import { isGroceryUpc, krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { Product } from "../models/Product";
@@ -537,6 +538,8 @@ function keysForPick(pick: Pick<LookupPick, "key" | "upc" | "code">): string[] {
   for (const source of [pick.upc, pick.code, pick.key]) {
     const joined = upcKey(source);
     if (joined) keys.add(joined);
+    const kroger = gtinJoinKey(source, { source: "kroger-product-id" });
+    if (kroger) keys.add(kroger);
   }
   return [...keys];
 }

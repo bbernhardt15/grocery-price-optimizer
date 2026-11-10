@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
-import { remergeGtinCatalog } from "../ingest/remerge";
+import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
 const router = Router();
@@ -152,6 +152,10 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
   try {
     res.json(await remergeGtinCatalog({ apply, limit }));
   } catch (error) {
+    if (error instanceof RemergeBusyError) {
+      res.status(409).json({ error: error.message, reason: error.reason });
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }

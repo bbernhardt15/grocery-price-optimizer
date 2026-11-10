@@ -1,7 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { gtinJoinKey } from "../catalog/gtin";
-import { CatalogMaster, CatalogOffer } from "./models";
+import { CatalogMaster, CatalogOffer, IngestLock } from "./models";
 
 const BATCH = 400;
+const LOCK_ID = "gtin-remerge";
+const LOCK_MS = 10 * 60_000;
+const DEFAULT_COOLDOWN_MS = 60_000;
+const DEFAULT_PAUSE_MS = 50;
+
+export class RemergeBusyError extends Error {
+  readonly statusCode = 409;
+
+  constructor(readonly reason: "locked" | "cooldown") {
+    super(reason === "locked" ? "A GTIN remerge is already running." : "A GTIN remerge just finished. Wait for the cooldown.");
+  }
+}
 
 export type RemergeSample = { from: string; to: string; name: string };
 
@@ -26,7 +39,48 @@ type MasterRow = {
 };
 
 function targetKey(row: MasterRow): string | null {
-  return gtinJoinKey(row.upc) || gtinJoinKey(row.krogerProductId) || gtinJoinKey(row.key);
+  const fromKroger = row.krogerProductId
+    ? gtinJoinKey(row.krogerProductId, { source: "kroger-product-id" })
+    : null;
+  const fromUpc = gtinJoinKey(row.upc);
+  if (fromKroger && fromUpc && fromKroger !== fromUpc) {
+    const upcDigits = row.upc?.replace(/\D/g, "") ?? "";
+    const idDigits = row.krogerProductId?.replace(/\D/g, "") ?? "";
+    if (upcDigits.length === 13 && upcDigits === idDigits) return fromKroger;
+    if (row.key === fromKroger || row.key === fromUpc) return row.key;
+    return fromUpc;
+  }
+  return fromKroger || fromUpc || gtinJoinKey(row.key);
+}
+
+async function acquireRemerge(now: Date): Promise<{ owner: string } | "locked" | "cooldown"> {
+  const existing = await IngestLock.findById(LOCK_ID).lean<{ owner?: string; expiresAt?: Date } | null>();
+  if (existing?.expiresAt && existing.expiresAt.getTime() > now.getTime()) {
+    return existing.owner === "cooldown" ? "cooldown" : "locked";
+  }
+  const owner = randomUUID();
+  const expiresAt = new Date(now.getTime() + LOCK_MS);
+  const taken = await IngestLock.findOneAndUpdate(
+    { _id: LOCK_ID, expiresAt: { $lte: now } },
+    { $set: { owner, expiresAt } },
+    { new: true }
+  ).lean<{ owner?: string } | null>();
+  if (taken?.owner === owner) return { owner };
+  try {
+    await IngestLock.create({ _id: LOCK_ID, owner, expiresAt });
+    return { owner };
+  } catch {
+    return "locked";
+  }
+}
+
+async function releaseRemerge(owner: string, now: Date, cooldownMs: number): Promise<void> {
+  const expiresAt = new Date(now.getTime() + Math.max(0, cooldownMs));
+  await IngestLock.updateOne({ _id: LOCK_ID, owner }, { $set: { owner: "cooldown", expiresAt } });
+}
+
+async function unlockRemerge(owner: string): Promise<void> {
+  await IngestLock.updateOne({ _id: LOCK_ID, owner }, { $set: { expiresAt: new Date(0) } });
 }
 
 /**
@@ -34,9 +88,32 @@ function targetKey(row: MasterRow): string | null {
  * Apply moves offers and store ids, then deletes the duplicate masters.
  * A second apply finds nothing left to merge.
  */
-export async function remergeGtinCatalog(options?: { apply?: boolean; limit?: number }): Promise<RemergeReport> {
+export async function remergeGtinCatalog(options?: {
+  apply?: boolean;
+  limit?: number;
+  pauseMs?: number;
+  cooldownMs?: number;
+  now?: Date;
+  /** Test hook. Runs after the apply lock is held and before the scan. */
+  hold?: () => Promise<void>;
+  pause?: (ms: number) => Promise<void>;
+  batchSize?: number;
+}): Promise<RemergeReport> {
   const apply = options?.apply === true;
   const limit = Math.max(1, Math.min(200_000, Math.floor(options?.limit ?? 200_000)));
+  const pauseMs = Math.max(0, Math.floor(options?.pauseMs ?? DEFAULT_PAUSE_MS));
+  const cooldownMs = Math.max(0, Math.floor(options?.cooldownMs ?? DEFAULT_COOLDOWN_MS));
+  const now = options?.now ?? new Date();
+  const batchSize = Math.max(1, Math.min(BATCH, Math.floor(options?.batchSize ?? BATCH)));
+  let lockOwner = "";
+  if (apply) {
+    const gate = await acquireRemerge(now);
+    if (gate === "locked" || gate === "cooldown") throw new RemergeBusyError(gate);
+    lockOwner = gate.owner;
+  }
+  const pause = options?.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  try {
+  if (apply && options?.hold) await options.hold();
   const groups = new Map<string, MasterRow[]>();
   const report: RemergeReport = {
     dryRun: !apply,
@@ -52,7 +129,7 @@ export async function remergeGtinCatalog(options?: { apply?: boolean; limit?: nu
   let cursor = "";
   let lastFull = false;
   while (report.examined < limit) {
-    const batch = Math.min(BATCH, limit - report.examined);
+    const batch = Math.min(batchSize, limit - report.examined);
     const query = cursor ? { key: { $gt: cursor } } : {};
     const rows = await CatalogMaster.find(query)
       .sort({ key: 1 })
@@ -74,6 +151,7 @@ export async function remergeGtinCatalog(options?: { apply?: boolean; limit?: nu
       groups.set(target, list);
     }
     if (rows.length < batch) break;
+    if (apply) await pause(pauseMs);
   }
   report.truncated = lastFull && report.examined >= limit;
 
@@ -97,6 +175,7 @@ export async function remergeGtinCatalog(options?: { apply?: boolean; limit?: nu
   }
 
   if (!apply) return report;
+  let writes = 0;
 
   for (const [target, rows] of groups) {
     const distinct = rows.filter((row, index) => rows.findIndex((other) => other.key === row.key) === index);
@@ -137,6 +216,14 @@ export async function remergeGtinCatalog(options?: { apply?: boolean; limit?: nu
       }
       await CatalogMaster.deleteOne({ key: row.key });
     }
+    writes += 1;
+    if (writes % batchSize === 0) await pause(pauseMs);
   }
+  await releaseRemerge(lockOwner, now, cooldownMs);
+  lockOwner = "";
   return report;
+  } catch (error) {
+    if (lockOwner) await unlockRemerge(lockOwner);
+    throw error;
+  }
 }

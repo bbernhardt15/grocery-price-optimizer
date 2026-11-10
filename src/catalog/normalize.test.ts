@@ -27,7 +27,7 @@ describe("upcKey", () => {
     const key = upcKey(walmartUpcA);
     assert.equal(key, upcKey(walmartEan));
     assert.equal(key, upcKey(walmartGtin));
-    assert.equal(key, upcKey(krogerWithoutCheck));
+    assert.equal(key, upcKey(krogerWithoutCheck, { source: "kroger-product-id" }));
     assert.equal(key, "4900004256");
   });
 
@@ -36,8 +36,8 @@ describe("upcKey", () => {
     const cokeKroger = "0004900004256";
     const cokeNumeric = String(Number(cokeWalmart));
     assert.equal(cokeNumeric, "49000042566");
-    assert.equal(upcKey(cokeWalmart), upcKey(cokeKroger));
-    assert.equal(upcKey(cokeNumeric), upcKey(cokeKroger));
+    assert.equal(upcKey(cokeWalmart), upcKey(cokeKroger, { source: "kroger-product-id" }));
+    assert.equal(upcKey(cokeNumeric), upcKey(cokeKroger, { source: "kroger-product-id" }));
     assert.equal(krogerProductIdForLookup(cokeWalmart), cokeKroger);
     assert.equal(krogerProductIdForLookup(cokeNumeric), cokeKroger);
     assert.equal(walmartUpcForLookup(cokeKroger), cokeWalmart);
@@ -48,16 +48,16 @@ describe("upcKey", () => {
     const generalMillsWalmart = `${generalMillsBody}${generalMillsCheck}`;
     const generalMillsKroger = generalMillsBody.padStart(13, "0");
     assert.equal(generalMillsWalmart, "016000275287");
-    assert.equal(upcKey(generalMillsWalmart), upcKey(generalMillsKroger));
-    assert.equal(upcKey(String(Number(generalMillsWalmart))), upcKey(generalMillsKroger));
+    assert.equal(upcKey(generalMillsWalmart), upcKey(generalMillsKroger, { source: "kroger-product-id" }));
+    assert.equal(upcKey(String(Number(generalMillsWalmart))), upcKey(generalMillsKroger, { source: "kroger-product-id" }));
     assert.equal(walmartUpcForLookup(generalMillsKroger), generalMillsWalmart);
     assert.equal(krogerProductIdForLookup(generalMillsWalmart), generalMillsKroger);
 
     const pgBody = "03700031802";
     const pgWalmart = `${pgBody}${gtinCheckDigit(pgBody)}`;
     const pgKroger = pgBody.padStart(13, "0");
-    assert.equal(upcKey(pgWalmart), upcKey(pgKroger));
-    assert.equal(upcKey(pgWalmart.padStart(14, "0")), upcKey(pgKroger));
+    assert.equal(upcKey(pgWalmart), upcKey(pgKroger, { source: "kroger-product-id" }));
+    assert.equal(upcKey(pgWalmart.padStart(14, "0")), upcKey(pgKroger, { source: "kroger-product-id" }));
     assert.equal(walmartUpcForLookup(pgKroger), pgWalmart);
   });
 
@@ -94,7 +94,7 @@ describe("upcKey", () => {
     assert.equal(gtinCheckDigit(accidentalUpc.slice(0, -1)), Number(accidentalUpc.at(-1)));
     assert.equal(hasStandardCheckDigit(accidentalId), true);
     assert.equal(krogerProductIdForLookup(accidentalUpc), accidentalId);
-    assert.equal(upcKey(accidentalId), upcKey(accidentalUpc));
+    assert.equal(upcKey(accidentalId, { source: "kroger-product-id" }), upcKey(accidentalUpc));
     assert.deepEqual(krogerLookupCodes(accidentalId), [accidentalId]);
     assert.deepEqual(krogerLookupCodes(accidentalUpc), [accidentalId]);
     assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
