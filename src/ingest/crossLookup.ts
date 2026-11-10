@@ -1,5 +1,6 @@
 import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
+import { gtinJoinKey } from "../catalog/gtin";
 import { isGroceryUpc, krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { Product } from "../models/Product";
@@ -531,18 +532,37 @@ export async function markKrogerLookup(key: string, now: Date): Promise<void> {
   await markLookupResult("kroger", { key, variantIndex: 0, codes: ["done"] }, false, now);
 }
 
-async function matchedStoreKeys(side: Side, keys: string[]): Promise<Set<string>> {
-  if (keys.length === 0) {
-    return new Set();
+function keysForPick(pick: Pick<LookupPick, "key" | "upc" | "code">): string[] {
+  const keys = new Set<string>();
+  if (pick.key) keys.add(pick.key);
+  for (const source of [pick.upc, pick.code, pick.key]) {
+    const joined = upcKey(source);
+    if (joined) keys.add(joined);
+    const kroger = gtinJoinKey(source, { source: "kroger-product-id" });
+    if (kroger) keys.add(kroger);
   }
+  return [...keys];
+}
+
+async function matchedStoreKeys(side: Side, picks: Array<Pick<LookupPick, "key" | "upc" | "code">>): Promise<Set<string>> {
+  const query: string[] = [];
+  for (const pick of picks) {
+    for (const key of keysForPick(pick)) query.push(key);
+  }
+  if (query.length === 0) return new Set();
   const field = side === "walmart" ? "walmartItemId" : "krogerProductId";
   const rows = await CatalogMaster.find({
-    key: { $in: keys },
+    key: { $in: query },
     [field]: { $type: "string", $ne: "" },
   })
     .select("key")
     .lean<Array<{ key: string }>>();
-  return new Set(rows.map((row) => row.key));
+  const found = new Set(rows.map((row) => row.key));
+  const hits = new Set<string>();
+  for (const pick of picks) {
+    if (keysForPick(pick).some((key) => found.has(key))) hits.add(pick.key);
+  }
+  return hits;
 }
 
 /** Mark each pick hit or miss and add the day's attempt counters. */
@@ -555,7 +575,7 @@ export async function finishLookups(
   if (picks.length === 0) {
     return { attempts: 0, hits: 0 };
   }
-  const hitKeys = options?.forceMiss ? new Set<string>() : await matchedStoreKeys(side, picks.map((pick) => pick.key));
+  const hitKeys = options?.forceMiss ? new Set<string>() : await matchedStoreKeys(side, picks);
   let hits = 0;
   for (const pick of picks) {
     const hit = hitKeys.has(pick.key);
@@ -571,7 +591,8 @@ export async function finishLookups(
   if (side === "kroger") {
     const byDepartment = new Map<string, { attempts: number; hits: number }>();
     for (const pick of picks) {
-      const id = (pick.departmentId ?? "unknown").toLowerCase().replace(/[^a-z0-9-]/g, "") || "unknown";
+      const named = pick.departmentId?.trim() || mapToDepartment(undefined, pick.name).departmentId || "unknown";
+      const id = named.toLowerCase().replace(/[^a-z0-9-]/g, "") || "unknown";
       const bucket = byDepartment.get(id) ?? { attempts: 0, hits: 0 };
       bucket.attempts += 1;
       if (hitKeys.has(pick.key)) bucket.hits += 1;

@@ -129,6 +129,7 @@ type KrogerTermFallback = {
   code: string;
   upc?: string;
   locationId?: string;
+  departmentId?: string;
 };
 
 type CheckpointDoc = {
@@ -245,6 +246,7 @@ function readKrogerTermFallback(value: unknown): KrogerTermFallback | undefined 
     code: row.code,
     ...(typeof row.upc === "string" && row.upc ? { upc: row.upc } : {}),
     ...(typeof row.locationId === "string" && row.locationId ? { locationId: row.locationId } : {}),
+    ...(typeof row.departmentId === "string" && row.departmentId ? { departmentId: row.departmentId } : {}),
   };
 }
 
@@ -290,6 +292,7 @@ function lookupPickFromTerm(pending: KrogerTermFallback): LookupPick {
     variantIndex: 0,
     priority: "catalog",
     ...(pending.upc ? { upc: pending.upc } : {}),
+    ...(pending.departmentId ? { departmentId: pending.departmentId } : {}),
   };
 }
 
@@ -1183,6 +1186,7 @@ export async function stepKroger(options: {
           name: picked.name,
           code: picked.code,
           ...(picked.upc ? { upc: picked.upc } : {}),
+          ...(picked.departmentId ? { departmentId: picked.departmentId } : {}),
           ...(locationId ? { locationId } : {}),
         };
         const followMiss = async (): Promise<boolean> => {

@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
+import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
 const router = Router();
@@ -124,6 +125,37 @@ router.get("/admin/catalog/match-sample", async (req: Request, res: Response) =>
   try {
     res.json(await catalogMatchSample());
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/remerge", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Number(req.query.limit ?? 200_000);
+  try {
+    res.json(await remergeGtinCatalog({ apply: false, limit }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const apply = (req.body as { apply?: unknown } | undefined)?.apply === true;
+  if (apply && !confirmed(req, "remerge-gtin")) {
+    res.status(400).json({ error: 'Send { "apply": true, "confirm": "remerge-gtin" } to merge. Omit apply for a dry run.' });
+    return;
+  }
+  const limit = Number((req.body as { limit?: unknown } | undefined)?.limit ?? 200_000);
+  try {
+    res.json(await remergeGtinCatalog({ apply, limit }));
+  } catch (error) {
+    if (error instanceof RemergeBusyError) {
+      res.status(409).json({ error: error.message, reason: error.reason });
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }

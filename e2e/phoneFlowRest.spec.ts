@@ -799,7 +799,6 @@ test("four receipt suggestions can be selected and added", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(
     expect.arrayContaining(["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"])
   );
-  await page.screenshot({ path: "/opt/cursor/artifacts/receipt-four-added.png", fullPage: false });
 });
 
 test("an eight item import review can reach the last row and the add button", async ({ page }) => {
