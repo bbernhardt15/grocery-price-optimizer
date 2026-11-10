@@ -13,7 +13,7 @@ function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "n
 
 describe("upcKey", () => {
   it("strips punctuation and leading zeros so UPC-A and EAN-13 match", () => {
-    assert.equal(upcKey("0-078742-00001-2"), upcKey("00078742000012"));
+    assert.equal(upcKey("0-49000-04256-6"), upcKey("049000042566"));
     assert.equal(upcKey("1234567"), null);
     assert.equal(upcKey(""), null);
     assert.equal(upcKey("not-a-code"), null);
@@ -94,6 +94,7 @@ describe("upcKey", () => {
     assert.equal(gtinCheckDigit(accidentalUpc.slice(0, -1)), Number(accidentalUpc.at(-1)));
     assert.equal(hasStandardCheckDigit(accidentalId), true);
     assert.equal(krogerProductIdForLookup(accidentalUpc), accidentalId);
+    assert.equal(upcKey(accidentalId), upcKey(accidentalUpc));
     assert.deepEqual(krogerLookupCodes(accidentalId), [accidentalId]);
     assert.deepEqual(krogerLookupCodes(accidentalUpc), [accidentalId]);
     assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
