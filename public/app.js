@@ -81,6 +81,7 @@ import {
   filterTripStores,
   planningStoreNames,
   handoffMark,
+  overlapSavings,
   singleStoreSavings,
   swapSentence,
   tripFingerprint,
@@ -155,7 +156,8 @@ import {
   readKrogerTrip,
   saveKrogerTrip,
 } from "./shopper/krogerReturn.js";
-import { matchPick, readUsuals, rememberUsuals, starterList, usualKey } from "./shopper/usuals.js";
+import { matchPick, migrateUnstarredUsuals, readStarredUsuals, readUsuals, rememberUsuals, starUsual, starterList, usualKey } from "./shopper/usuals.js";
+import { SHELL_CACHE } from "./shopper/betaContext.js";
 import { usualsRowHtml, usualsSummary } from "./shopper/usualsRow.js";
 import { customCatalogProduct, mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
@@ -221,7 +223,7 @@ import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
-import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed } from "./shopper/planFallback.js";
+import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed, storeCheckSettled } from "./shopper/planFallback.js";
 import { joinBrandName } from "./shopper/tripAdd.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
 import { mountGuide, namesMatch as guideNamesMatch } from "./guide.js";
@@ -1055,8 +1057,9 @@ function showTripValue() {
     <button type="button" class="ghost" id="back-to-trip">Back to my trip</button>`;
   $("trip-value-close")?.addEventListener("click", () => dialog.close());
   $("back-to-trip")?.addEventListener("click", () => {
+    const backTo = dialog.dataset.returnStep || flowStep || "add";
     dialog.close();
-    showStep("plan");
+    if (backTo !== flowStep) showStep(backTo, "user");
   });
   host.querySelector("[data-reuse-trip]")?.addEventListener("click", () => {
     dialog.close();
@@ -1254,6 +1257,7 @@ function finishCurrentTrip() {
 }
 
 function clearTripItems() {
+  closeProductDetail(false);
   explicitClear = true;
   undoTrip = [...list.entries()];
   for (const [id, entry] of undoTrip) {
@@ -1265,6 +1269,14 @@ function clearTripItems() {
   lastOptimize = null;
   clearPlanCache(localStorage);
   clearTripSnapshot(localStorage);
+  const clearedAt = Date.now();
+  try {
+    localStorage.setItem("gg-trip-cleared", JSON.stringify({ at: clearedAt }));
+    localStorage.removeItem(HANDOFF_TRIP_KEY);
+  } catch {
+    /* private browsing */
+  }
+  publishTripState();
   renderEstimate();
   if (flowStep === "plan") paintTrip();
   if (flowStep === "shop") renderShop();
@@ -2465,6 +2477,7 @@ function listRowHtml(entry, locked) {
             <button type="button" data-list-dec="${escapeHtml(itemId)}" aria-label="Decrease ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>−</button>
             <output>${entry.quantity}</output>
             <button type="button" data-list-inc="${escapeHtml(itemId)}" aria-label="Increase ${escapeHtml(heading.title)}" ${locked ? "disabled" : ""}>+</button>
+            <button type="button" class="text-btn" data-star-item="${escapeHtml(itemId)}" aria-pressed="${entry.starred ? "true" : "false"}" aria-label="Favorite ${escapeHtml(heading.title)}">★</button>
           </div>
           ${locked ? "" : listRemoveHtml(itemId, heading.title, escapeHtml)}
         </div>
@@ -3002,6 +3015,23 @@ async function loadPage(reset) {
   }
   showCatalogError("");
   const params = filterQuery();
+  const cacheKey = params.toString();
+  if (reset && aisleCache.has(cacheKey)) {
+    const cached = aisleCache.get(cacheKey);
+    loading = false;
+    coverage = cached.coverage ?? coverage;
+    weeklyAdBanners = cached.weeklyAdBanners || [];
+    total = cached.total ?? 0;
+    nextCursor = cached.nextCursor;
+    const items = cached.items || [];
+    for (const product of items) rememberTile(product);
+    gridEl.innerHTML = items.map(cardHtml).join("");
+    applyClientFilters();
+    if (resultCountEl) resultCountEl.textContent = cached.countLabel || "";
+    const more = $("show-more");
+    if (more) more.hidden = !nextCursor;
+    return;
+  }
   if (!params.get("zip")) {
     loading = false;
     nextCursor = null;
@@ -3058,6 +3088,16 @@ async function loadPage(reset) {
       } else {
         const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
         resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
+      }
+      if (reset) {
+        aisleCache.set(cacheKey, {
+          coverage,
+          weeklyAdBanners,
+          total,
+          nextCursor,
+          items: viewed.items,
+          countLabel: resultCountEl?.textContent || "",
+        });
       }
     }
     if (reset) holdShelfForScroll(shelfScroll);
@@ -3368,7 +3408,22 @@ function openList(open) {
   }
 }
 
+let refineSnapshot = "";
+function refineKey() {
+  return [
+    sortEl?.value || "",
+    $("filter-brand")?.value || "",
+    $("filter-sale")?.checked ? "1" : "0",
+    $("filter-budget")?.checked ? "1" : "0",
+    $("filter-priced")?.checked ? "1" : "0",
+    $("filter-mine")?.checked ? "1" : "0",
+    activeDepartment,
+    query,
+  ].join("|");
+}
+const aisleCache = new Map();
 function openFilters(open) {
+  if (open) refineSnapshot = refineKey();
   $("filters").classList.toggle("open", open);
   $("filters-open").setAttribute("aria-expanded", String(open));
   document.body.dataset.refine = open ? "1" : "";
@@ -3380,25 +3435,76 @@ function openFilters(open) {
   }
 }
 
-function openProduct(product) {
+let detailHistory = false;
+function closeProductDetail(fromHistory = false) {
+  if (!(productDialog instanceof HTMLDialogElement) || !productDialog.open) {
+    detailHistory = false;
+    return;
+  }
+  productDialog.close();
+  if (!fromHistory && detailHistory) {
+    detailHistory = false;
+    history.back();
+    return;
+  }
+  detailHistory = false;
+}
+
+function openProduct(product, choices = []) {
   const title = product.familyName || product.name;
   const note = product.variantLabel || product.sizeLabel || "";
-  productDialog.innerHTML = `<div class="sheet-body">
+  const sizes = (choices.length ? choices : Array.isArray(product.variants) ? product.variants : [])
+    .map((item) => ({
+      id: item.id || item.variantId || "",
+      label: item.label || item.variantLabel || item.sizeLabel || item.name || "",
+    }))
+    .filter((item) => item.id && item.label);
+  const sizeHtml = sizes.length
+    ? `<div class="choice-row" role="group" aria-label="Size">${sizes
+        .map(
+          (item, index) =>
+            `<button type="button" class="chip" data-detail-size="${escapeHtml(item.id)}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(item.label)}</button>`
+        )
+        .join("")}</div>`
+    : "";
+  productDialog.innerHTML = `<div class="sheet-body detail-sheet">
+    <div class="detail-bar">
+      <button type="button" class="text-btn" id="dialog-back">Back</button>
+      <button type="button" class="icon-btn" id="dialog-close" aria-label="Close">×</button>
+    </div>
     <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
     <h2 id="dialog-title">${escapeHtml(title)}</h2>
     ${note ? `<p class="muted">${escapeHtml(note)}</p>` : ""}
     <p class="price">${escapeHtml(priceText(product))}</p>
     <p class="muted estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
-    <p class="muted">Pick the flavor and size on the shelf. Grocery Gitter chooses the store when you plan the trip.</p>
+    ${sizeHtml}
+    <label class="detail-qty">Quantity
+      <input id="dialog-qty" inputmode="numeric" value="1" aria-label="Quantity" />
+    </label>
     <button type="button" class="primary" id="dialog-add">Add to my list</button>
-    <button type="button" class="ghost" id="dialog-close">Close</button>
   </div>`;
-  productDialog.showModal();
+  if (!productDialog.open) productDialog.showModal();
+  if (!detailHistory) {
+    history.pushState({ ggDetail: 1 }, "");
+    detailHistory = true;
+  }
+  const picked = () => productDialog.querySelector("[data-detail-size][aria-pressed='true']")?.getAttribute("data-detail-size") || product.id;
+  productDialog.querySelectorAll("[data-detail-size]").forEach((button) => {
+    button.addEventListener("click", () => {
+      productDialog.querySelectorAll("[data-detail-size]").forEach((node) => node.setAttribute("aria-pressed", "false"));
+      button.setAttribute("aria-pressed", "true");
+    });
+  });
+  const dismiss = () => closeProductDetail(false);
   productDialog.querySelector("#dialog-add").onclick = () => {
-    addProduct(product, 1);
-    productDialog.close();
+    const qty = Math.max(1, Math.min(99, Math.floor(Number(productDialog.querySelector("#dialog-qty")?.value) || 1)));
+    const id = picked();
+    const chosen = productsById.get(id) || (Array.isArray(product.variants) ? product.variants.find((item) => item.id === id) : null) || product;
+    addProduct(chosen, qty);
+    closeProductDetail(false);
   };
-  productDialog.querySelector("#dialog-close").onclick = () => productDialog.close();
+  productDialog.querySelector("#dialog-close").onclick = dismiss;
+  productDialog.querySelector("#dialog-back").onclick = dismiss;
 }
 
 function openCoverage() {
@@ -4536,11 +4642,31 @@ function paintTrip() {
   const checksOpen = !savingsClaimAllowed(lastOptimize);
   if (checksOpen) {
     const pending = Array.isArray(lastOptimize?.pendingStores) ? lastOptimize.pendingStores.filter(Boolean) : [];
-    const waiting = pending.length > 0 || !(lastOptimize?.pricingByStore || []).length;
-    card.title = waiting ? "Checking store prices" : "Savings aren't available yet";
-    card.lines = [];
-    card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
-    card.note = "";
+    const checks = Array.isArray(lastOptimize?.pricingByStore) ? lastOptimize.pricingByStore : [];
+    const stillRunning = pending.some((name) => {
+      const row = checks.find((check) => String(check?.storeName || "").toLowerCase() === String(name).toLowerCase());
+      if (!row) return true;
+      const state = String(row.check || "");
+      if (state === "timeout" || state === "error" || state === "rate_limit" || state === "budget") return false;
+      return !storeCheckSettled(row);
+    });
+    const waiting = stillRunning || !checks.length;
+    const overlap = overlapSavings(lines);
+    if (!waiting && overlap.eligibleCount > 0 && Number(overlap.savings) > 0.009) {
+      const partial = savingsCard(overlap);
+      card.title = partial.title || "Savings on the items both stores priced";
+      card.lines = partial.lines || [];
+      card.saved = `You saved ${priceFigure(overlap.savings)} using Grocery Gitter`;
+      const leftOut = overlap.excluded?.length || 0;
+      card.note = leftOut
+        ? `${leftOut} ${leftOut === 1 ? "item is" : "items are"} not in this savings. A store didn't finish a price for ${leftOut === 1 ? "it" : "them"}.`
+        : partial.note || "";
+    } else {
+      card.title = waiting ? "Checking store prices" : "Savings aren't available yet";
+      card.lines = [];
+      card.saved = waiting ? "" : "A store didn't finish, so this total is not savings.";
+      card.note = "";
+    }
   } else if (plans && !/^You saved /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
@@ -4595,7 +4721,9 @@ function paintTrip() {
   const savingsLine = !checksOpen && plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
   const nudge = checksOpen || mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = lastOptimize?.unavailable || [];
-  const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
+  const missing = planning && missingNames.length
+    ? `<p class="matching-progress" role="status">Matching ${missingNames.length} ${missingNames.length === 1 ? "item" : "items"}…</p>`
+    : unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
   const progress = "";
   const singleStores = plans?.single ? presentPlan(plans.single.stores) : [];
   const shown = mode === "custom" ? customStores : mode === "single" ? singleStores : mode === "fewer" ? fewerStores : bestStores;
@@ -5535,11 +5663,12 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   } finally {
     window.clearTimeout(earlyFallback);
     releaseRefreshScrollGuard(scrollGuardId);
-    if (planAbort === controller) {
+      if (planAbort === controller) {
       clearReviewRefresh();
       planning = false;
       window.clearInterval(planTicker);
       planTicker = 0;
+      if (flowStep === "plan" && tripEl?.querySelector(".matching-progress")) paintTrip();
       const statusBlock = document.getElementById("plan-status-block");
       if (statusBlock) statusBlock.remove();
       if (timeoutNote && tripEl?.querySelector("[data-review-shell]")) {
@@ -5977,7 +6106,7 @@ function handleRevoked(token) {
   scheduleWatchSync();
 }
 
-async function openSharedList(token, { mergeLocal = false } = {}) {
+async function openSharedList(token, { mergeLocal = false, present = !mergeLocal } = {}) {
   const savedShare = readStoredJson(SHARE_KEY)?.shareToken;
   if (!mergeLocal && savedShare !== token) {
     const current = localStorage.getItem(LIST_KEY);
@@ -6009,7 +6138,7 @@ async function openSharedList(token, { mergeLocal = false } = {}) {
   const body = await response.json().catch(() => ({}));
   if (response.status === 410) {
     handleRevoked(token);
-    openList(true);
+    if (present) openList(true);
     return;
   }
   if (!response.ok) {
@@ -6019,7 +6148,7 @@ async function openSharedList(token, { mergeLocal = false } = {}) {
   applyServerList(body);
   if (shareState?.canEdit) await flushWrites();
   startSync();
-  openList(true);
+  if (present) openList(true);
 }
 
 async function postList(extra = {}) {
@@ -6235,6 +6364,7 @@ function rememberLocalRow(row) {
     writtenAt: Number(row.writtenAt) || 0,
     ...alertFields(row, product),
     preferredStore: row.preferredStore || "",
+    needsInput: row.needsInput === true,
   });
   const restored = list.get(itemId);
   if (restored && !restored.product.offers?.length && Array.isArray(row.offers)) restored.product.offers = row.offers;
@@ -6424,7 +6554,16 @@ document.addEventListener("click", (event) => {
   const open = target.closest("[data-open]");
   if (open) {
     const product = productsById.get(open.getAttribute("data-open"));
-    if (product) openProduct(product);
+    if (product) {
+      const card = open.closest(".card");
+      const choices = card
+        ? [...card.querySelectorAll("[data-size-id]")].map((node) => ({
+            id: node.getAttribute("data-size-id") || "",
+            label: node.textContent || "",
+          }))
+        : [];
+      openProduct(product, choices);
+    }
     return;
   }
   const inc = target.closest("[data-inc]");
@@ -6450,6 +6589,25 @@ document.addEventListener("click", (event) => {
       card.dataset.qty = String(stagedQuantity(card.dataset.qty, -1));
       const output = card.querySelector("output");
       if (output) output.textContent = card.dataset.qty;
+    }
+    return;
+  }
+  const star = target.closest("[data-star-item]");
+  if (star) {
+    const id = star.getAttribute("data-star-item");
+    const entry = list.get(id);
+    if (entry) {
+      entry.starred = !entry.starred;
+      if (entry.starred) {
+        starUsual(localStorage, {
+          name: entry.product?.familyName || entry.product?.name,
+          brand: entry.product?.brand,
+          catalogId: entry.product?.id,
+          quantity: entry.quantity,
+        });
+      }
+      paintUsuals();
+      renderListRows();
     }
     return;
   }
@@ -6515,10 +6673,14 @@ document.addEventListener("click", (event) => {
   }
   const showCouponForm = target.closest("[data-show-coupon-form]");
   if (showCouponForm) {
-    const body = showCouponForm.closest(".coupon-body");
-    const wrap = body?.querySelector(".coupon-form-wrap");
+    const panel = showCouponForm.closest("[data-store], .review-store, .store-card") || showCouponForm.parentElement;
+    const details = panel?.querySelector("details.coupon-panel");
+    if (details instanceof HTMLDetailsElement) details.open = true;
+    const wrap = panel?.querySelector(".coupon-form-wrap");
     if (wrap) wrap.hidden = false;
     showCouponForm.hidden = true;
+    const shot = wrap?.querySelector("[data-coupon-shot]");
+    if (showCouponForm.hasAttribute("data-coupon-screenshot") && shot instanceof HTMLInputElement) shot.click();
     const field = wrap?.querySelector("[data-coupon-line]");
     if (field instanceof HTMLElement) field.focus();
     return;
@@ -6535,7 +6697,9 @@ document.addEventListener("click", (event) => {
   if (flowButton) {
     if (clickShielded(tabGuard, Date.now())) return;
     haptic();
-    showStep(flowButton.getAttribute("data-flow"));
+    const next = flowButton.getAttribute("data-flow");
+    if (next === "plan" && openNeedsInput()) return;
+    showStep(next);
     return;
   }
   const watchOpen = target.closest("[data-watch-open]");
@@ -6990,8 +7154,9 @@ sortEl.addEventListener("change", () => {
 $("filters")?.addEventListener("change", paintRefine);
 $("filters").addEventListener("submit", (event) => {
   event.preventDefault();
+  const changed = refineKey() !== refineSnapshot;
   openFilters(false);
-  void loadPage(true);
+  if (changed) void loadPage(true);
 });
 $("filters-clear").addEventListener("click", () => {
   $("filter-brand").value = "";
@@ -7005,6 +7170,12 @@ $("filters-clear").addEventListener("click", () => {
 });
 $("filters-open").addEventListener("click", () => openFilters(!$("filters").classList.contains("open")));
 $("filters-close").addEventListener("click", () => openFilters(false));
+$("chip-hint")?.addEventListener("click", () => {
+  const nav = $("dept-nav");
+  if (nav) nav.hidden = false;
+  document.body.dataset.deptList = "open";
+  nav?.querySelector("button")?.focus();
+});
 $("list-toggle").addEventListener("click", () => {
   if (window.matchMedia("(min-width: 1100px)").matches) {
     $("list-panel")?.querySelector("h2")?.focus();
@@ -7017,6 +7188,10 @@ $("browse-toggle")?.addEventListener("click", () => {
   if (!browseOpen && $("filters")?.classList.contains("open")) openFilters(false);
   syncBrowse();
   if (browseOpen) openBrowse();
+});
+$("tab-favorites")?.addEventListener("click", () => {
+  closeProductDetail(false);
+  openFavorites();
 });
 $("usuals-toggle")?.addEventListener("click", () => {
   openFavorites();
@@ -7147,6 +7322,7 @@ document.addEventListener("click", (event) => {
   }
 });
 $("brand-home")?.addEventListener("click", () => {
+  closeProductDetail(false);
   goHome();
 });
 bindBrandPress($("brand-home"));
@@ -7183,6 +7359,7 @@ $("add-items")?.addEventListener("click", () => {
 });
 $("menu-home")?.addEventListener("click", () => {
   closeDrawer();
+  closeProductDetail(false);
   showStep("add");
   window.scrollTo(0, 0);
 });
@@ -7530,6 +7707,14 @@ $("menu-open")?.addEventListener("click", () => {
 });
 $("drawer-close")?.addEventListener("click", () => closeDrawer());
 $("drawer-scrim")?.addEventListener("click", () => closeDrawer());
+document.addEventListener(
+  "pointermove",
+  (event) => {
+    if (document.body.dataset.drawer !== "open" || event.pointerType !== "mouse" || !event.buttons) return;
+    event.preventDefault();
+  },
+  { passive: false }
+);
 
 let drawerSwipeStart = null;
 $("app-drawer")?.addEventListener(
@@ -8606,7 +8791,7 @@ function paintFavorites() {
       </div>`;
   }
   const listHost = $("favorites-usuals");
-  const usuals = readUsuals(localStorage);
+  const usuals = readStarredUsuals(localStorage);
   if (listHost) {
     const grouped = new Map();
     for (const row of usuals) {
@@ -8656,6 +8841,7 @@ function saveFavoriteVariant(family, value) {
 }
 
 function showStep(step, reason = "user") {
+  if (reason === "user") closeProductDetail(false);
   if (readFlowStep(step) === "shop" && reason === "user" && planning && !planReady(lastOptimize)) {
     toast("Still checking store prices. In-store opens when this check finishes.");
     return;
@@ -9018,9 +9204,9 @@ function paintUsuals() {
   const listEl = $("usuals-list");
   if (!block || !listEl) return;
   const profile = getUserProfile(localStorage);
-  const rows = readUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
+  const rows = readStarredUsuals(localStorage).filter((row) => !slotIsExcluded(profile, { label: row.name, search: row.name }));
   const summary = usualsSummary(rows.length);
-  block.hidden = rows.length === 0;
+  block.hidden = false;
   block.dataset.open = "false";
   const toggle = $("usuals-toggle");
   if (toggle) toggle.setAttribute("aria-label", `Your favorites, ${summary.label}`);
@@ -9647,7 +9833,8 @@ async function boot() {
       const profileDialog = document.getElementById("profile-onboard");
       if (shouldPromptProfile(localStorage)) {
         if (!profileDialog?.open) profileUi?.open();
-      } else welcome.maybeAutoOpen();
+      } else if (chooseBootStep() === "add") welcome.maybeAutoOpen();
+      else guide?.holdAfterReturn?.();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
@@ -9660,13 +9847,63 @@ async function boot() {
   }
 }
 
+function openNeedsInput() {
+  const rows = [...list.values()].filter((entry) => entry.needsInput === true);
+  if (!rows.length || sessionStorage.getItem("gg-needs-skip") === "1") return false;
+  let dialog = document.getElementById("needs-input");
+  if (!(dialog instanceof HTMLDialogElement)) {
+    dialog = document.createElement("dialog");
+    dialog.id = "needs-input";
+    dialog.className = "sheet needs-sheet";
+    document.body.appendChild(dialog);
+  }
+  const items = rows
+    .map((entry) => {
+      const name = entry.product?.familyName || entry.product?.name || "Item";
+      const id = entry.itemId || entry.product?.id;
+      return `<li class="needs-row"><span>${escapeHtml(name)}</span><button type="button" data-needs-remove="${escapeHtml(id)}">Remove</button><button type="button" data-needs-keep="${escapeHtml(id)}">Keep as-is</button></li>`;
+    })
+    .join("");
+  dialog.innerHTML = `<div class="sheet-body"><h2>Needs your input</h2><p>These items are not matched yet. Resolve them, then continue to Review.</p><ul>${items}</ul><button type="button" class="primary" id="needs-continue">Continue to Review</button></div>`;
+  dialog.showModal();
+  dialog.querySelector("#needs-continue")?.addEventListener("click", () => {
+    sessionStorage.setItem("gg-needs-skip", "1");
+    dialog.close();
+    showStep("plan");
+  });
+  dialog.onclick = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const remove = target?.closest("[data-needs-remove]")?.getAttribute("data-needs-remove");
+    const keep = target?.closest("[data-needs-keep]")?.getAttribute("data-needs-keep");
+    if (remove) setQuantity(remove, 0);
+    if (keep || remove) {
+      const left = [...list.values()].filter((entry) => entry.needsInput === true);
+      if (!left.length) {
+        sessionStorage.setItem("gg-needs-skip", "1");
+        dialog.close();
+        showStep("plan");
+      } else openNeedsInput();
+    }
+  };
+  return true;
+}
+
 async function bootApp() {
+  migrateUnstarredUsuals(localStorage);
+  const earlyStep = chooseBootStep();
+  if (earlyStep !== "add") showStep(earlyStep, "boot");
   listenForTripTabs();
   hydrateListFromStorage();
   const factory = typeof indexedDB !== "undefined" ? indexedDB : null;
   if (list.size === 0) {
     const merged = richerTrip(await readTripDb(factory), readHandoffTrip(localStorage));
-    const saved = restoreWouldResurrect(merged, readCompletedAt(localStorage)) ? null : merged;
+    let clearedAt = 0;
+    try {
+      clearedAt = Number(JSON.parse(localStorage.getItem("gg-trip-cleared") || "null")?.at) || 0;
+    } catch {
+      clearedAt = 0;
+    }
+    const saved = restoreWouldResurrect(merged, Math.max(readCompletedAt(localStorage), clearedAt)) ? null : merged;
     if (saved?.items?.length) {
       try {
         localStorage.setItem(LIST_KEY, JSON.stringify(saved.items));
@@ -9734,7 +9971,7 @@ async function bootApp() {
   if (urlToken) {
     const sameList = savedShare === urlToken || ownedShare === urlToken;
     if (sameList) await restoreList();
-    await openSharedList(urlToken, { mergeLocal: sameList });
+    await openSharedList(urlToken, { mergeLocal: sameList, present: true });
   } else {
     await restoreList();
     const resumeToken = savedShare || ownedShare;
@@ -9757,6 +9994,17 @@ async function bootApp() {
       sawAppHidden = true;
       maybeShowReturnPrompt("browser-finished");
     });
+  }
+  const version = document.getElementById("app-version");
+  if (version) {
+    version.textContent = SHELL_CACHE;
+    void fetch(apiUrl("/api/version"))
+      .then((response) => response.json())
+      .then((body) => {
+        const sha = String(body?.sha || "local").slice(0, 7);
+        version.textContent = `${body?.shell || SHELL_CACHE} · ${sha}`;
+      })
+      .catch(() => undefined);
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
   if (pendingKrogerReturn) {
@@ -9931,7 +10179,10 @@ document.addEventListener("click", (event) => {
   }
 });
 
-window.addEventListener("popstate", () => consumeKrogerReturn());
+window.addEventListener("popstate", () => {
+  if (productDialog?.open) closeProductDetail(true);
+  consumeKrogerReturn();
+});
 
 const welcome = mountWelcome({
   isNative,
@@ -9953,11 +10204,8 @@ const welcome = mountWelcome({
 
 function finishProfile(profile) {
   localStorage.setItem(ONBOARDING_KEY, "1");
-  const rows = pinnedUsualRows(profile);
-  if (rows.length) {
-    rememberUsuals(localStorage, rows);
-    paintUsuals();
-  }
+  migrateUnstarredUsuals(localStorage);
+  paintUsuals();
   const head = defaultHeadcount(profile);
   if (head && !localStorage.getItem("gg-party")) localStorage.setItem("gg-party", String(head));
   const stops = profile?.style?.stops;
@@ -10263,7 +10511,7 @@ function onGuideAction(action, detail = {}) {
       toast("Nothing on the list to save yet.");
       return;
     }
-    rememberUsuals(localStorage, items);
+    rememberUsuals(localStorage, items, Date.now(), { star: true });
     paintUsuals();
     toast("Saved for the next Shopping list.");
   }

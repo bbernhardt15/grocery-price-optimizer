@@ -176,6 +176,7 @@ const STORE_KEYS = new Set(STORE_PHRASES.map(([key]) => key));
 
 function fold(value: string): string {
   return String(value || "")
+    .replace(/[®™©℠]/g, "")
     .toLowerCase()
     .replace(/['’]/g, "'")
     .replace(/&/g, " and ")
@@ -382,7 +383,13 @@ export function parseReceiptText(text: string): ReceiptLine[] {
   const source = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!source.trim()) return [];
   const items: Draft[] = [];
-  const state: { current: Draft | null; parts: string[]; receipt: number; quantity: number } = { current: null, parts: [], receipt: 1, quantity: 1 };
+  const state: { current: Draft | null; parts: string[]; receipt: number; quantity: number; wrapped: boolean } = {
+    current: null,
+    parts: [],
+    receipt: 1,
+    quantity: 1,
+    wrapped: false,
+  };
   const flush = () => {
     if (state.current?.name) items.push(state.current);
     state.current = null;
@@ -392,7 +399,7 @@ export function parseReceiptText(text: string): ReceiptLine[] {
     const name = clean(state.parts.join(" "));
     state.parts = [];
     if (!name || isJunkLine(name)) return;
-    if (state.current && state.current.price == null && !state.current.upc) {
+    if (state.current && state.current.price == null && !state.current.upc && !looksLikeSeparateItem(state.current.name, name)) {
       state.current.name = clean(`${state.current.name} ${name}`);
       state.current.raw = clean(`${state.current.raw} ${name}`);
       if (state.quantity > 1) state.current.quantity = state.quantity;
@@ -405,7 +412,10 @@ export function parseReceiptText(text: string): ReceiptLine[] {
   };
   for (const original of source.split("\n")) {
     const line = original.trim();
-    if (!line || line === "*") continue;
+    if (!line || line === "*") {
+      state.wrapped = false;
+      continue;
+    }
     if (/^---\s*receipt\s*---$/i.test(line)) {
       commitParts();
       flush();
@@ -421,6 +431,7 @@ export function parseReceiptText(text: string): ReceiptLine[] {
     }
     const priced = qtyPrice(line);
     if (priced) {
+      state.wrapped = false;
       commitParts();
       if (state.current) {
         state.current.quantity = priced.quantity;
@@ -458,11 +469,31 @@ export function parseReceiptText(text: string): ReceiptLine[] {
     }
     if (state.current && (state.current.upc || state.current.price != null)) flush();
     if (inline.quantity > 1) state.quantity = inline.quantity;
+    if (!state.wrapped && state.parts.length && looksLikeSeparateItem(state.parts.join(" "), inline.name)) commitParts();
     state.parts.push(inline.name);
+    state.wrapped = /[,(\/-]$/.test(line);
   }
   commitParts();
   flush();
   return items.map(finish).filter((line): line is ReceiptLine => Boolean(line)).slice(0, 160);
+}
+
+/**
+ * Kroger order text puts the next product on the next line, with no price between them.
+ * A wrapped continuation is short or starts lower-case. A second product name starts its own line.
+ */
+function looksLikeSeparateItem(current: string, next: string): boolean {
+  const have = clean(current);
+  const incoming = clean(next);
+  if (!have || !incoming) return false;
+  if (/[,(/-]$/.test(have)) return false;
+  if (/^(?:and|with|for|the|a|an|of|in)\b/i.test(incoming)) return false;
+  if (/^\d+(?:\.\d+)?\s*(?:oz|fl|lb|ct|pk|pack|gal|ml|l)\b/i.test(incoming)) return false;
+  const incomingWords = incoming.split(/\s+/).filter(Boolean);
+  const currentWords = have.split(/\s+/).filter(Boolean);
+  if (incomingWords.length < 3 || currentWords.length < 3) return false;
+  if (/^(?:grade|size|count|pack|organic|original|family|value|style|sliced|shredded)\b/i.test(incoming)) return false;
+  return /^[A-Z0-9®™]/.test(incoming);
 }
 
 function abbreviated(name: string): boolean {

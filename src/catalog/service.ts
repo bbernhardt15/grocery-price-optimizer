@@ -347,6 +347,22 @@ async function writeCache(
   });
 }
 
+/** A cold aisle must not wait on every live search. Late prices fill the cache for the next open. */
+async function firstPageFeed(work: Promise<RawCatalogRecord[]>, warnings: string[]): Promise<RawCatalogRecord[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), 3500);
+  });
+  const live = await Promise.race([work, timeout]);
+  if (timer) clearTimeout(timer);
+  if (live) return live;
+  warnings.push("Showing the first items. Newer store prices are still loading.");
+  void work.then(async (records) => {
+    if (records.length) await persistLive(records);
+  }).catch(() => undefined);
+  return [];
+}
+
 async function loadScope(
   scope: { departmentId?: string; query?: string },
   zipCode?: string
@@ -409,9 +425,12 @@ async function loadScope(
   const warnings: string[] = [];
   const locationId = await krogerLocation(zipCode);
   const live = wantsLive
-    ? query
-      ? await searchFeed(query, zipCode, locationId, warnings)
-      : await departmentFeed(departmentId ?? "", zipCode, locationId, warnings)
+    ? await firstPageFeed(
+        query
+          ? searchFeed(query, zipCode, locationId, warnings)
+          : departmentFeed(departmentId ?? "", zipCode, locationId, warnings),
+        warnings
+      )
     : [];
   const weekly = wantsWeekly
     ? await fetchWeeklyAdRecords({
@@ -423,7 +442,8 @@ async function loadScope(
     : [];
   const products = groupOffersByUpc([...demo, ...live, ...weekly]);
   const ttl = query ? ttlMs("CATALOG_SEARCH_TTL_MINUTES", 60) : ttlMs("CATALOG_DEPT_TTL_MINUTES", 360);
-  await writeCache(cacheKey, products, warnings, ttl);
+  const liveTimedOut = warnings.some((warning) => /still loading/i.test(warning));
+  if (!liveTimedOut) await writeCache(cacheKey, products, warnings, ttl);
   await persistLive(live);
   if (ingestConfig().dbFirst && live.length > 0) {
     await upsertCatalogRecords(live).catch((error: unknown) => {

@@ -486,6 +486,30 @@ describe("family tiles", () => {
     assert.equal(dietTile?.variants[0]?.id, "upc:diet");
   });
 
+  it("treats Coke 12 as a Coca-Cola 12-pack, not one 12 fl oz can", () => {
+    const loose = product({
+      id: "upc:coke12bare",
+      name: "Coke 12",
+      brand: "Unbranded",
+      size: "12 fl oz",
+      price: 10.5,
+    });
+    const cherry = product({
+      id: "upc:cherry",
+      name: "Cherry Coke",
+      brand: "",
+      size: "12 pk 12 fl oz",
+      price: 7.5,
+    });
+    const tiles = groupBrowseFamilies([loose, cherry, coke12]);
+    const classic = tiles.find((tile) => /coca-cola/i.test(tile.familyName));
+    assert.ok(classic);
+    assert.ok(classic?.variants.some((variant) => variant.id === "upc:coke12bare"));
+    const bare = classic?.variants.find((variant) => variant.id === "upc:coke12bare");
+    assert.match(bare?.variantLabel || "", /12 pk/);
+    assert.ok(tiles.some((tile) => tile.variants.some((variant) => variant.id === "upc:cherry")));
+  });
+
   it("keeps every master id so an older saved list still points at a variant", () => {
     const tiles = groupBrowseFamilies([coke12, coke2]);
     const ids = tiles.flatMap((tile) => tile.variants.map((variant) => variant.id));

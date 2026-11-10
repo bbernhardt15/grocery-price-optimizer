@@ -168,6 +168,7 @@ function round2(value: number): number {
 
 function tokens(text: string): string[] {
   return text
+    .replace(/[®™©℠]/g, "")
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/['’.]/g, "")
@@ -537,15 +538,32 @@ function flavorOf(display: string, brand: string, line: string): string {
   return flavor.join(" ");
 }
 
+function cokeIdentity(brand: string, name: string, size: string): { brand: string; name: string; size: string } {
+  const cleanBrand = brand.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  const cleanName = name.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  const cleanSize = size.replace(/[®™©℠]/g, "").replace(/\s+/g, " ").trim();
+  let nextBrand = !cleanBrand || /^unbranded$/i.test(cleanBrand) ? "" : cleanBrand;
+  if (!nextBrand && /\bcoke\b/i.test(cleanName)) nextBrand = "Coca-Cola";
+  const soda = /\b(?:coke|coca-cola|pepsi|sprite)\b/i.test(`${nextBrand} ${cleanName}`);
+  const barePack = cleanName.match(/\b(6|8|12|18|24|30|32|36)\b(?!\s*(?:fl|oz|ml|l|liter|pk|pack|ct)\b)/i);
+  let nextSize = cleanSize;
+  if (soda && barePack && !new RegExp(`\\b${barePack[1]}\\s*(?:pk|pack)\\b`, "i").test(`${cleanName} ${cleanSize}`)) {
+    const unit = cleanSize.match(/\b\d+(?:\.\d+)?\s*fl oz\b/i)?.[0] || "12 fl oz";
+    nextSize = `${barePack[1]} pk ${unit}`;
+  }
+  return { brand: nextBrand || cleanBrand, name: cleanName, size: nextSize };
+}
+
 export function identifyFamily(input: {
   brand?: string | null;
   name?: string | null;
   size?: string | null;
   departmentId?: string | null;
 }): FamilyIdentity {
-  const brand = input.brand?.trim() || "";
-  const name = input.name?.trim() || "";
-  const variant = describeVariant(name, input.size);
+  const normalized = cokeIdentity(input.brand?.trim() || "", input.name?.trim() || "", input.size?.trim() || "");
+  const brand = normalized.brand;
+  const name = normalized.name;
+  const variant = describeVariant(name, normalized.size);
   const display = cleanedName(name, variant) || brand || name;
   const parent = parentBrand(brand);
   const departmentId = input.departmentId?.trim().toLowerCase() || "";

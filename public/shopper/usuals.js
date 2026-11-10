@@ -91,6 +91,7 @@ export function readUsuals(storage) {
         quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)),
         times: Math.max(1, Math.floor(Number(row.times) || 1)),
         lastAt: Number(row.lastAt) || 0,
+        starred: row.starred === true,
       }));
   } catch {
     return [];
@@ -104,7 +105,22 @@ export function readUsuals(storage) {
  * @param {Array<{ name?: string, brand?: string, catalogId?: string, id?: string, quantity?: number }>} items
  * @param {number} [at]
  */
-export function rememberUsuals(storage, items, at = Date.now()) {
+export function readStarredUsuals(storage) {
+  return readUsuals(storage).filter((row) => row.starred);
+}
+
+/** Drop receipt-filled rows that were never starred. Brand preferences live on the profile, not here. */
+export function migrateUnstarredUsuals(storage) {
+  const starred = readStarredUsuals(storage);
+  if (storage) storage.setItem(USUALS_KEY, JSON.stringify(starred));
+  return starred;
+}
+
+export function starUsual(storage, item, at = Date.now()) {
+  return rememberUsuals(storage, [{ ...item, starred: true }], at, { star: true });
+}
+
+export function rememberUsuals(storage, items, at = Date.now(), options = {}) {
   if (!storage) return [];
   const map = new Map(readUsuals(storage).map((row) => [usualKey(row), row]));
   for (const item of items || []) {
@@ -119,6 +135,7 @@ export function rememberUsuals(storage, items, at = Date.now()) {
       quantity: Math.max(1, Math.floor(Number(item?.quantity) || prior?.quantity || 1)),
       times: (prior?.times || 0) + 1,
       lastAt: at,
+      starred: options.star === true || item?.starred === true || prior?.starred === true,
     });
   }
   const next = [...map.values()]

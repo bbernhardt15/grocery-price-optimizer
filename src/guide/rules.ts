@@ -487,6 +487,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           ...(hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : []),
           { id: "add", label: "Add selected", action: "commit-picks" },
+          { id: "no", label: "No thanks", action: "later" },
         ],
       };
     }

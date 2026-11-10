@@ -165,8 +165,16 @@ export function mountMatchSheet(deps) {
   });
   dialog.addEventListener("close", () => {
     products.clear();
-    holdPageScroll();
-    requestAnimationFrame(holdPageScroll);
+    const pin = () => {
+      if (dialog.open) return;
+      holdPageScroll();
+    };
+    pin();
+    requestAnimationFrame(pin);
+    window.setTimeout(pin, 0);
+    window.setTimeout(pin, 50);
+    window.setTimeout(pin, 150);
+    window.setTimeout(pin, 400);
   });
   return { open };
 }

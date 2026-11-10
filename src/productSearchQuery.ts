@@ -109,8 +109,13 @@ const FLAVOR_WORDS = new Set([
  * Speech-to-text swaps heard on a phone.
  * "Sheldon" is a mis-hearing of "shells". "Graters" is Graeter's.
  */
+/** Registered marks are decoration. Matching treats the words on either side as one name. */
+export function stripRetailMarks(text: string): string {
+  return String(text || "").replace(/[®™©℠]/g, "");
+}
+
 export function spokenTranscriptAliases(text: string): string {
-  return String(text || "")
+  return stripRetailMarks(text)
     .replace(/\bsheldon\b/gi, "shells")
     .replace(/\bgraders\b/gi, "Graeter's")
     .replace(/\bgrader'?s\b/gi, "Graeter's")

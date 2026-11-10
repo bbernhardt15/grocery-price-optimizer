@@ -25,6 +25,12 @@ router.get("/health/ready", (_req, res) => {
   res.status(ready.status).json(ready.body);
 });
 
+router.get("/version", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const sha = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_SHA || "local";
+  res.json({ shell: "v80", sha });
+});
+
 router.get("/beta/gate", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.json({ required: false });

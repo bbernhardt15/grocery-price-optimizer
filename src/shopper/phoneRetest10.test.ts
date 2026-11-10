@@ -174,7 +174,7 @@ describe("tenth phone test", () => {
     assert.match(html, /Grocery Gitter home/);
     assert.match(sliceFn(app, "goHome", "syncHomeProxy"), /homeTransition/);
     assert.match(sliceFn(app, "goHome", "syncHomeProxy"), /dialog\[open\]/);
-    assert.match(app, /\$\("brand-home"\)\?\.addEventListener\("click", \(\) => \{\s*goHome\(\);/);
+    assert.match(app, /\$\("brand-home"\)\?\.addEventListener\("click", \(\) => \{\s*closeProductDetail\(false\);\s*goHome\(\);/);
     assert.match(sliceFn(app, "syncHomeProxy", "bindBrandPress"), /data-sheet-home/);
     assert.match(sliceFn(app, "syncHomeProxy", "bindBrandPress"), /goHome\(\)/);
     assert.match(css, /\.brand-home\.is-pressed \.brand-mark/);

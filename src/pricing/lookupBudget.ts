@@ -93,6 +93,22 @@ export function lookupIsRetryable(error: unknown): boolean {
   return /\b50[234]\b|bad gateway|service unavailable|ECONNRESET|socket hang up/i.test(message);
 }
 
+function withItemTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 function defaultWait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -119,7 +135,7 @@ export async function runPricedLookup<T>(input: {
     }
     noteLiveCall(input.budget, input.storeName);
     try {
-      const products = await input.run();
+      const products = await withItemTimeout(input.run(), 4_000);
       if (products.length > 0) return { status: "ok", products };
       return { status: "miss" };
     } catch (error) {

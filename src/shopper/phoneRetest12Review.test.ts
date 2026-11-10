@@ -73,9 +73,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v79", () => {
-    assert.equal(SHELL_CACHE, "v79");
-    assert.match(sw, /grocery-gitter-shell-v79/);
+  it("bumps the shell cache to v80", () => {
+    assert.equal(SHELL_CACHE, "v80");
+    assert.match(sw, /grocery-gitter-shell-v80/);
   });
 
   it("ends a cold review with a retry instead of an endless checking shell", () => {
@@ -136,7 +136,7 @@ describe("twelfth phone test, Review and In-store", () => {
     assert.equal(reviewHeadlineReady(settled229()), true);
     assert.match(css, /overflow-anchor:\s*auto/);
     assert.match(css, /animation:\s*none/);
-    assert.match(css, /min-height:\s*196px/);
+    assert.match(css, /min-height:\s*0/);
     assert.match(app, /reviewLoadingHtml/);
     assert.match(app, /reuseSettledReview/);
     assert.doesNotMatch(app, /renderTrip\(adoptReviewResult\(lastOptimize, partial\)/);

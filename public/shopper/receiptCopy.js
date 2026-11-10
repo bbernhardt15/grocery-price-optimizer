@@ -110,7 +110,7 @@ export function receiptUploadHtml() {
     </label>
     <div id="profile-receipt-files" class="receipt-files"></div>
     <p class="paper-note quiet">${escapeText(PAPER_WARNING)}</p>
-    <details class="where-find">
+    <details class="where-find faq-accordion" data-faq="1">
       <summary>Where do I find it?</summary>
       <div class="store-finds">${hints}</div>
     </details>
@@ -140,7 +140,10 @@ export function brandChipMarkup(brands, options = {}) {
       return `<button type="button" class="brand-pick" data-learned-toggle="brand" data-learned-family="${family}" data-learned-brand="${escapeText(brand)}" aria-pressed="${on ? "true" : "false"}">${escapeText(brand)}</button>`;
     })
     .join("");
-  return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands">${buttons}</div></fieldset>`;
+  const retry = options.retry
+    ? `<button type="button" class="text-btn" data-brand-retry="${family}">Try again</button>`
+    : "";
+  return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands">${buttons}</div>${retry}</fieldset>`;
 }
 
 /** Inner markup for one learned card. The section element stays put. */
@@ -151,7 +154,7 @@ export function learnedCardInnerHtml(row, options = {}) {
   const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
   const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
   const pending = Boolean(options.pending);
-  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending, saved: Boolean(options.saved) }) : "";
+  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending, saved: Boolean(options.saved), retry: Boolean(options.retry) }) : "";
   return `<div class="learned-copy">
           <h3>${escapeText(row?.label || row?.family)}</h3>
           ${learnedRulePillHtml(row)}
@@ -170,7 +173,7 @@ function learnedPickerHtml(row, brands, options = {}) {
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
   const storeOnly = row?.mode === "storeBrand";
-  const names = storeOnly ? "" : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "" });
+  const names = storeOnly ? "" : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "", retry: options.retry });
   const storeNote = storeOnly ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>` : "";
   const pickedCount = selected.size;
   const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
@@ -214,6 +217,7 @@ export function learnedSummaryHtml(learned, options = {}) {
             editing: Boolean(editing && editing === row.family),
             brands: brandsByFamily[row.family] || [],
             pending,
+            retry: Boolean(options.retryFamilies?.[row.family]),
             saved: Boolean(options.savedFamilies?.has?.(row.family)),
           });
           return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}" tabindex="-1">${inner}</section>`;

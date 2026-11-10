@@ -196,7 +196,6 @@ export function tripAddHtml(lines, options = {}) {
     <div class="trip-add-body" id="trip-add-body">
       <p class="trip-add-total" id="trip-add-total">${escape(status.label)}</p>
       ${body || `<p class="muted">Nothing to add from that.</p>`}
-      <button type="button" class="trip-jump" id="trip-jump" aria-label="Jump to Add" hidden>↓</button>
       <div class="choice-stack" id="trip-add-end">
         <button type="button" class="primary" data-trip-add="1" id="learned-add-trip"${disabled}>Add these items to my trip</button>
         <button type="button" class="ghost" id="learned-empty-trip">Start with an empty trip</button>

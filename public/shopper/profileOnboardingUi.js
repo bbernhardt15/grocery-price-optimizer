@@ -102,6 +102,7 @@ export function mountProfileOnboarding(deps = {}) {
   let editingFamily = "";
   /** @type {Record<string, object[]>} */
   let brandShelves = {};
+  let brandRetry = {};
   let lazyFamily = "";
   let resumeStatus = "";
   let dietMode = false;
@@ -242,9 +243,11 @@ export function mountProfileOnboarding(deps = {}) {
         const warning = receiptWarning ? `<p class="paper-note" role="status">${escapeText(receiptWarning)}</p>` : "";
         const brandsByFamily = {};
         const pendingFamilies = {};
+        const retryFamilies = {};
         for (const row of learnedRows) {
           brandsByFamily[row.family] = brandChoices(row);
           pendingFamilies[row.family] = !brandShelves[row.family];
+          retryFamilies[row.family] = Boolean(brandRetry[row.family]);
         }
         return `${warning}${learnedSummaryHtml(learnedRows, {
           paper: paperReceipt,
@@ -253,6 +256,7 @@ export function mountProfileOnboarding(deps = {}) {
           editingFamily,
           brandsByFamily,
           pendingFamilies,
+          retryFamilies,
           savedFamilies: savedRules,
         })}`;
       }
@@ -595,7 +599,7 @@ export function mountProfileOnboarding(deps = {}) {
         deps.toast?.(body.error || "Kroger sign-in isn't available. You can do this at checkout.");
         return;
       }
-      window.location.assign(body.authorizeUrl);
+      window.location.replace(body.authorizeUrl);
     } catch {
       try {
         sessionStorage.removeItem(PROFILE_CONNECT_KEY);
@@ -859,12 +863,24 @@ export function mountProfileOnboarding(deps = {}) {
   async function loadBrandShelf(family) {
     if (!family || brandShelves[family] || !deps.loadStaple) return;
     let tiles = [];
+    let retry = false;
     try {
-      tiles = await deps.loadStaple(categorySearch(family) || family);
+      const result = await Promise.race([
+        deps.loadStaple(categorySearch(family) || family),
+        new Promise((resolve) => setTimeout(() => resolve("timeout"), 4000)),
+      ]);
+      if (result === "timeout") {
+        retry = true;
+        tiles = [];
+      } else {
+        tiles = result || [];
+      }
     } catch {
       tiles = [];
+      retry = true;
     }
-    brandShelves[family] = tiles || [];
+    brandShelves[family] = tiles;
+    brandRetry[family] = retry;
     if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
       paintLearnedCard(family, { saved: savedRules.has(family) });
     }
@@ -1186,6 +1202,7 @@ export function mountProfileOnboarding(deps = {}) {
         editing: editingFamily === family,
         brands: brandChoices(row),
         pending: !brandShelves[row.family],
+        retry: Boolean(brandRetry[row.family]),
         saved: Boolean(options.saved),
       });
     });
@@ -1726,7 +1743,7 @@ export function mountProfileOnboarding(deps = {}) {
       paintTripTotal();
       return;
     }
-    if (target.id === "learned-empty-trip") {
+    if (target.id === "learned-empty-trip" || target.id === "learned-empty-trip-top") {
       finish(Date.now());
       return;
     }
@@ -1793,6 +1810,14 @@ export function mountProfileOnboarding(deps = {}) {
       learnedRows = next;
       if (editingFamily === family) editingFamily = "";
       rerenderLearned();
+      return;
+    }
+    if (target.dataset.brandRetry) {
+      const family = target.dataset.brandRetry;
+      delete brandShelves[family];
+      delete brandRetry[family];
+      editingFamily = family;
+      void loadBrandShelf(family);
       return;
     }
     if (target.dataset.learnedChange) {

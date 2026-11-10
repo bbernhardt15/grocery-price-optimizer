@@ -462,7 +462,10 @@ export function storeCouponMarkup(store, options) {
        <div class="coupon-form-wrap" hidden>${couponFormMarkup(store)}</div>`
     : `<p class="muted">Coupon links stay free. <button type="button" class="linkish" data-open-paywall="1">Grocery Gitter Pro</button> lets you type in a coupon you already have.</p>`;
   const saved = `${lines ? `<ul class="your-coupon-list">${lines}</ul>` : ""}${estimated}`;
-  return `${saved}<details class="coupon-panel"${open}>
+  const shot = options.canEnter
+    ? `<button type="button" class="text-btn" data-show-coupon-form data-coupon-screenshot="1">Add a coupon screenshot</button>`
+    : "";
+  return `${saved}${shot}<details class="coupon-panel"${open}>
     <summary>Check ${storeName} coupons before you shop</summary>
     <div class="coupon-body">
       ${link}

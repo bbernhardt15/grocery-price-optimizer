@@ -177,6 +177,7 @@ export function mountGuide(deps = {}) {
         );
     host.hidden = false;
     host.dataset.moment = prompt.moment;
+    host.dataset.singleDismiss = (prompt.chips || []).some((chip) => chip?.id === "no") ? "1" : "";
     host.dataset.chips = chipKey;
     if (chipsEl && !same) {
       chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");

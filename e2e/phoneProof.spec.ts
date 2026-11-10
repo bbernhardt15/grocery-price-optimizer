@@ -319,7 +319,7 @@ test("a coupon screenshot review applies only the eligible discount", async ({ p
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
   await page.getByText("Check Walmart coupons before you shop").click();
-  await page.getByRole("button", { name: "Add a coupon" }).click();
+  await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64"
@@ -376,9 +376,9 @@ test("remembered favorites are grouped by department", async ({ page }) => {
     localStorage.setItem(
       "gg-usuals",
       JSON.stringify([
-        { name: "Large Eggs", brand: "Eggland's Best", quantity: 1, times: 2, lastAt: 2 },
-        { name: "Whole Milk", brand: "Dairy Pure", quantity: 1, times: 2, lastAt: 2 },
-        { name: "Bananas", brand: "Fresh", quantity: 1, times: 1, lastAt: 1 },
+        { name: "Large Eggs", brand: "Eggland's Best", quantity: 1, times: 2, lastAt: 2, starred: true },
+        { name: "Whole Milk", brand: "Dairy Pure", quantity: 1, times: 2, lastAt: 2, starred: true },
+        { name: "Bananas", brand: "Fresh", quantity: 1, times: 1, lastAt: 1, starred: true },
       ])
     );
   });
@@ -500,7 +500,7 @@ test("a Walmart coupon is not applied on the Kroger form", async ({ page }) => {
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
   await page.getByText("Check Kroger coupons before you shop").click();
-  await page.getByRole("button", { name: "Add a coupon" }).click();
+  await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64"
