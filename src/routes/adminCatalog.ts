@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
+import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
@@ -153,6 +154,44 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
     res.json(await remergeGtinCatalog({ apply, limit }));
   } catch (error) {
     if (error instanceof RemergeBusyError) {
+      res.status(409).json({ error: error.message, reason: error.reason });
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+function cooldownStore(value: unknown): CooldownStore {
+  return value === "kroger" || value === "walmart" || value === "both" ? value : "both";
+}
+
+router.get("/admin/catalog/match-cooldowns", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Number(req.query.limit ?? 200_000);
+  try {
+    res.json(await clearMatchCooldowns({ apply: false, store: cooldownStore(req.query.store), limit }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/match-cooldowns", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const body = (req.body ?? {}) as { apply?: unknown; store?: unknown; limit?: unknown };
+  const apply = body.apply === true;
+  if (apply && !confirmed(req, "clear-match-cooldowns")) {
+    res.status(400).json({
+      error: 'Send { "apply": true, "confirm": "clear-match-cooldowns" } to clear. Omit apply for a dry run.',
+    });
+    return;
+  }
+  const limit = Number(body.limit ?? 200_000);
+  try {
+    res.json(await clearMatchCooldowns({ apply, store: cooldownStore(body.store), limit }));
+  } catch (error) {
+    if (error instanceof CooldownBusyError) {
       res.status(409).json({ error: error.message, reason: error.reason });
       return;
     }

@@ -232,19 +232,37 @@ function pushCode(out: string[], code: string | null | undefined, pattern: RegEx
 }
 
 /**
- * Codes to ask Walmart about, primary first.
- * UPC-E is expanded. The 12-digit UPC-A is then padded to EAN-13 and GTIN-14
- * (a leading zero does not change the check digit).
+ * The only code sent as Walmart Affiliate `upc`.
+ * EAN-13 and GTIN-14 are the same item with extra zeros. Walmart answers
+ * those with "UPC not found", and each try was counted as a miss.
  */
 export function walmartLookupCodes(upc: string | undefined | null): string[] {
   const out: string[] = [];
-  const primary = walmartUpcForLookup(upc);
-  pushCode(out, primary, /^\d{12}$/);
-  if (primary && primary.length === 12) {
-    pushCode(out, `0${primary}`, /^\d{13}$/);
-    pushCode(out, `00${primary}`, /^\d{14}$/);
-  }
+  pushCode(out, walmartUpcForLookup(upc), /^\d{12}$/);
   return out;
+}
+
+export type StoreLookupFormats = {
+  /** 13-digit Kroger `filter.productId`. The check digit is removed. */
+  krogerProductId: string | null;
+  /** Consumer GTIN-14 (indicator 0). Kroger's list API rejects this shape. */
+  gtin14: string | null;
+  /** Digits as stored, with no rewrite. */
+  stored: string;
+  /** 12-digit UPC-A with the check digit. The Walmart `upc` parameter. */
+  upcA: string | null;
+};
+
+/** Every form a replay can try. Ingest sends only `krogerProductId` and `upcA`. */
+export function storeLookupFormats(value: string | null | undefined): StoreLookupFormats {
+  const stored = value?.replace(/\D/g, "") ?? "";
+  const upcA = walmartUpcForLookup(stored);
+  return {
+    krogerProductId: krogerRequestId(stored),
+    gtin14: upcA ? `00${upcA}` : null,
+    stored,
+    upcA,
+  };
 }
 
 /**

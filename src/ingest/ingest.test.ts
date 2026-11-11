@@ -1353,12 +1353,12 @@ describe("catalog ingestion", () => {
     assert.ok(progress.mergedToday >= 2);
   });
 
-  it("retries a Walmart miss on the next GTIN variant, then waits out the cooldown", async () => {
+  it("sends Walmart one 12-digit UPC and waits out the cooldown after a miss", async () => {
     const krogerUpc = "0004900004256";
     const key = upcKey(krogerUpc);
     assert.ok(key);
     const codes = walmartLookupCodes(krogerUpc);
-    assert.deepEqual(codes, ["049000042566", "0049000042566", "00049000042566"]);
+    assert.deepEqual(codes, ["049000042566"]);
     let clock = Date.parse("2026-09-29T17:00:00.000Z");
     const now = () => new Date(clock);
     await CatalogMaster.deleteMany({ key });
@@ -1392,21 +1392,7 @@ describe("catalog ingestion", () => {
         return { items: [] };
       },
     };
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await stepWalmart({
-        client,
-        maxCalls: 1,
-        store: new MemoryBudgetStore(),
-        sleep: async () => undefined,
-        config,
-        now,
-      });
-      clock += 60_000;
-    }
-    assert.deepEqual(seen, codes);
-    const resting = await CatalogMaster.findOne({ key });
-    assert.equal(resting?.walmartItemId ?? "", "");
-    assert.ok(resting?.matchWalmartAt);
+    const before = await matchProgress(now());
     await stepWalmart({
       client,
       maxCalls: 1,
@@ -1415,7 +1401,22 @@ describe("catalog ingestion", () => {
       config,
       now,
     });
-    assert.equal(seen.length, 3);
+    assert.deepEqual(seen, codes);
+    const resting = await CatalogMaster.findOne({ key });
+    assert.equal(resting?.walmartItemId ?? "", "");
+    assert.ok(resting?.matchWalmartAt);
+    const progress = await matchProgress(now());
+    assert.equal(progress.hitRate.walmartAttempts - before.hitRate.walmartAttempts, 1);
+    assert.equal(progress.hitRate.walmartHits - before.hitRate.walmartHits, 0);
+    await stepWalmart({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now,
+    });
+    assert.equal(seen.length, 1);
     clock = (resting?.matchWalmartAt?.getTime() ?? clock) + 14 * 86_400_000 + 60_000;
     await stepWalmart({
       client,
@@ -1425,7 +1426,7 @@ describe("catalog ingestion", () => {
       config,
       now,
     });
-    assert.equal(seen[3], codes[0]);
+    assert.equal(seen[1], codes[0]);
   });
 
   it("does not mark a master tried when Walmart answers 429", async () => {
