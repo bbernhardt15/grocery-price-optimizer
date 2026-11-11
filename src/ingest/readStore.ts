@@ -3,6 +3,7 @@ import type { CatalogProduct } from "../optimizeGroceryList";
 import { parseGroceryUnit } from "../pricing/parseGroceryUnit";
 import type { RawCatalogRecord } from "../catalog/types";
 import { escapeRegex } from "../escapeRegex";
+import { DAIRY_FALSE_FRIEND } from "../catalog/departments";
 import { ingestConfig } from "./config";
 import { CatalogMaster, CatalogOffer, type CatalogMasterDoc, type CatalogOfferDoc } from "./models";
 
@@ -63,7 +64,9 @@ async function findMasters(scope: { departmentId?: string; query?: string }): Pr
       .limit(config.browseScan)
       .lean<CatalogMasterDoc[]>();
   }
-  return CatalogMaster.find({ ...department, ...visible })
+  const dairyFood =
+    scope.departmentId === "dairy-eggs" ? { name: { $not: DAIRY_FALSE_FRIEND } } : {};
+  return CatalogMaster.find({ ...department, ...visible, ...dairyFood })
     .sort(scope.departmentId && scope.departmentId !== "all" ? { name: 1 } : { lastSeenAt: -1 })
     .limit(config.browseScan)
     .lean<CatalogMasterDoc[]>();

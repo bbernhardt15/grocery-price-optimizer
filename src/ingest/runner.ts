@@ -1083,7 +1083,7 @@ export async function stepKroger(options: {
   }
 
   async function markKrogerLookupMiss(pick: LookupPick): Promise<void> {
-    const finished = await finishLookups("kroger", [pick], nowFn(), { forceMiss: true });
+    const finished = await finishLookups("kroger", [pick], nowFn(), { forceMiss: true, httpStatus: 400 });
     cp.matchAttempts += finished.attempts;
     cp.attempts = 0;
     delete cp.termFallback;
@@ -1115,11 +1115,11 @@ export async function stepKroger(options: {
       if (matched.length > 0) {
         const saved = await upsertCatalogRecords(matched, nowFn());
         upserted += saved.offers;
-        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn());
+        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn(), { httpStatus: 200, term: true });
         cp.matchAttempts += finished.attempts;
         cp.matchHits += finished.hits;
       } else {
-        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn(), { forceMiss: true });
+        const finished = await finishLookups("kroger", [lookupPickFromTerm(pending)], nowFn(), { forceMiss: true, httpStatus: 200, term: true });
         cp.matchAttempts += finished.attempts;
       }
       noteKrogerProductSuccess(cp);
@@ -1138,7 +1138,10 @@ export async function stepKroger(options: {
       }
       if (kind === "server") {
         const isolated = (cp.serverStrikes ?? 0) === 0;
-        await holdLookup("kroger", pending.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS);
+        await holdLookup("kroger", pending.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS, {
+          code: pending.code,
+          httpStatus: 503,
+        });
       }
       cp.termFallback = pending;
       const outcome = await failKroger(cp, error, sleep, nowFn(), { request: "products", term, lookup: true });
@@ -1227,7 +1230,7 @@ export async function stepKroger(options: {
           } else {
             const saved = await upsertCatalogRecords(bound, nowFn());
             upserted += saved.offers;
-            const finished = await finishLookups("kroger", [picked], nowFn());
+            const finished = await finishLookups("kroger", [picked], nowFn(), { httpStatus: 200 });
             cp.matchAttempts += finished.attempts;
             cp.matchHits += finished.hits;
             noteKrogerProductSuccess(cp);
@@ -1241,7 +1244,7 @@ export async function stepKroger(options: {
               break;
             }
           } else if (kind === "fatal") {
-            const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true });
+            const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true, httpStatus: 400 });
             cp.matchAttempts += finished.attempts;
             noteKrogerProductSuccess(cp);
             await persist("running", {
@@ -1250,7 +1253,10 @@ export async function stepKroger(options: {
           } else {
             if (kind === "server") {
               const isolated = (cp.serverStrikes ?? 0) === 0;
-              await holdLookup("kroger", picked.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS);
+              await holdLookup("kroger", picked.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS, {
+                code: picked.code,
+                httpStatus: 503,
+              });
             }
             const outcome = await failKroger(cp, error, sleep, nowFn(), {
               request: "products",

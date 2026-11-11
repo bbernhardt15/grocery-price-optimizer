@@ -178,16 +178,14 @@ export function readCardHtml(card) {
     ? `<p class="read-error">${escapeText(card?.error || "Couldn't read that file.")}</p><button type="button" class="ghost" data-read-retry="${escapeText(card?.index)}">Retry</button>`
     : "";
   const ratio = Math.max(0, Math.min(1, Number(card?.ratio) || 0));
-  const ratioLabel = String(Math.round(ratio * 1000) / 1000);
-  const meter = ratio > 0 ? `<progress max="1" value="${ratioLabel}"></progress>` : `<progress max="1"></progress>`;
-  const cart = `<div class="read-cart-track" style="--read-ratio:${ratioLabel}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(ratio * 100)}"><span class="read-pusher" aria-hidden="true"><svg viewBox="0 0 32 32" width="28" height="28"><circle cx="10" cy="8" r="3" fill="currentColor"/><path d="M8 12h6l2 6h8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="24" r="2" fill="currentColor"/><circle cx="24" cy="24" r="2" fill="currentColor"/><path d="M14 18h10l-1 4H15z" fill="currentColor"/></svg></span><span class="read-cart"></span></div>`;
+  const percent = Math.round(ratio * 100);
+  const meter = `<div class="read-smooth" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div>`;
   const title = status === "reading" || status === "pending" ? READING_RECEIPT : readCardTitle(card, foundLabel);
   const stage = phase ? `<p class="read-stage" data-read-phase="1">${escapeText(phase)}</p>` : "";
   return `<article class="read-card" data-read-card="${escapeText(card?.index)}" data-state="${escapeText(status)}">
     <h3>${escapeText(title)}</h3>
     ${stage}
     ${meter}
-    ${cart}
     ${waiting}
     <ul class="read-items">${items}</ul>
     ${error}

@@ -32,8 +32,8 @@ function chromeExecutable() {
 const chrome = chromeExecutable();
 
 describe("twelfth phone test — onboarding and receipt import", () => {
-  it("bumps the shell cache to v84", () => {
-    assert.equal(SHELL_CACHE, "v84");
+  it("bumps the shell cache to v85", () => {
+    assert.equal(SHELL_CACHE, "v85");
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
   });
 
@@ -112,7 +112,7 @@ describe("twelfth phone test — onboarding and receipt import", () => {
     assert.match(markup, /id="trip-add-count"/);
     assert.match(markup, /0 selected/);
     assert.match(markup, /Select all/);
-    assert.match(markup, /id="learned-add-trip-top"[^>]*disabled/);
+    assert.doesNotMatch(markup, /id="learned-add-trip-top"/);
     assert.match(markup, /id="learned-add-trip" disabled/);
     assert.match(markup, /id="trip-add-body"/);
     assert.match(profileUi, /syncTripAddBar/);
@@ -406,9 +406,8 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
           barMoved: Math.abs(bar.getBoundingClientRect().top - bar.getBoundingClientRect().top) ,
         };
         const barTop = bar.getBoundingClientRect().top;
-        const topButton = document.getElementById("learned-add-trip-top") as HTMLButtonElement;
         const bottomButton = document.getElementById("learned-add-trip") as HTMLButtonElement;
-        const disabledAtRest = topButton.disabled && bottomButton.disabled;
+        const disabledAtRest = bottomButton.disabled;
         const boxes = [...stage.querySelectorAll("[data-trip-pick]")] as HTMLInputElement[];
         boxes[0].checked = true;
         const selected = boxes.filter((box) => box.checked).length;
@@ -424,7 +423,6 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
           barStays: Math.abs(barBox.top - barTop) < 1,
           scrolled: body.scrollTop,
           disabledAtRest,
-          topEnabled: !topButton.disabled,
           bottomEnabled: !bottomButton.disabled,
           count: document.getElementById("trip-add-count")?.textContent,
           rowVisibleTop: rowBox.top,
@@ -434,7 +432,6 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
       assert.equal(trip.coversAtRest, false);
       assert.equal(trip.bodyStartsBelowBar, true);
       assert.equal(trip.disabledAtRest, true);
-      assert.equal(trip.topEnabled, true);
       assert.equal(trip.bottomEnabled, true);
       assert.equal(trip.count, "1 selected");
       assert.ok(trip.scrolled > 0);

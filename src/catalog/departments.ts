@@ -169,12 +169,15 @@ const RULES: readonly Rule[] = [
   { test: /ground beef|\bbeef\b|steak/i, departmentId: "meat-seafood", subcategory: "Beef" },
   { test: /pork|bacon|sausage/i, departmentId: "meat-seafood", subcategory: "Pork" },
   { test: /\bmeat\b/i, departmentId: "meat-seafood" },
+  { test: /\b(?:creme|cream)\s+eggs?\b/i, departmentId: "snacks", subcategory: "Candy" },
+  { test: /\b(?:easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating)\b/i, departmentId: "other" },
+  { test: /\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h)\b|\b(?:pain\s+relief|muscle|cold\s+sore|hemorrhoid|antifungal|diaper\s+rash|shaving|face|facial|eye|hand|foot)\s+creams?\b/i, departmentId: "personal-care", subcategory: "Health" },
   { test: /\beggnog\b/i, departmentId: "dairy-eggs" },
   { test: /\beggs?\b/i, departmentId: "dairy-eggs", subcategory: "Eggs" },
   { test: /cheese/i, departmentId: "dairy-eggs", subcategory: "Cheese" },
   { test: /yogurt/i, departmentId: "dairy-eggs", subcategory: "Yogurt" },
   { test: /butter|margarine/i, departmentId: "dairy-eggs", subcategory: "Butter" },
-  { test: /milk|cream|dairy/i, departmentId: "dairy-eggs", subcategory: "Milk" },
+  { test: /\b(?:heavy|whipping|sour)\s+creams?\b|\bcream\s+cheese\b|\bcreamers?\b|\bhalf\s*(?:&|and)\s*half\b|\bmilk\b|\bdairy\b/i, departmentId: "dairy-eggs", subcategory: "Milk" },
   { test: /banana|apple|berry|fruit|avocado|grape/i, departmentId: "produce", subcategory: "Fruit" },
   { test: /\bcarrots?\b/i, departmentId: "produce", subcategory: "Vegetables" },
   { test: /spinach|lettuce|vegetable|broccoli|herb|onion|potato|bok choy|kale|arugula/i, departmentId: "produce", subcategory: "Vegetables" },
@@ -495,6 +498,10 @@ const TOPICAL_CARE = /\b(?:lip\s*care|lip\s*balms?|cocoa butter|lotions?|body bu
 
 /** Creams and ointments. Gels stay with tablets so glucose gel and liquid gels stay oral. */
 const TOPICAL_MEDICINE = /\b(?:creams?|ointments?|lotions?|balms?|anti-?itch)\b/i;
+
+/** Names that matched dairy because they say cream or egg, but are not food. */
+export const DAIRY_FALSE_FRIEND =
+  /\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating|(?:creme|cream)\s+eggs?)\b/i;
 
 const ALLERGY_DRUG =
   /\b(?:diphenhydramine|cetirizine|loratadine|fexofenadine|zyrtec|claritin|allegra|benadryl)\b/i;

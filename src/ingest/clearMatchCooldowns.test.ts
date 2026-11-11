@@ -100,6 +100,49 @@ describe("match cooldown reset", () => {
     assert.equal(progressAfter.cooldowns.walmart, 1);
   });
 
+  it("lists recent Kroger misses without secrets", async () => {
+    const now = new Date("2026-11-11T15:00:00.000Z");
+    await CatalogMaster.deleteMany({});
+    await CatalogMaster.create({
+      key: "miss-milk",
+      name: "Whole Milk",
+      brand: "Dairy Pure",
+      departmentId: "dairy-eggs",
+      upc: "078742351896",
+      walmartItemId: "9",
+      matchKrogerAt: now,
+      matchKrogerCode: "0007874235189",
+      matchKrogerHttp: 200,
+      matchKrogerTerm: true,
+      matchKrogerSkip: "",
+      lastSeenAt: now,
+    });
+    process.env.ADMIN_TOKEN = "secret-token";
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const denied = await fetch(`${origin}/api/admin/catalog/kroger-misses`);
+      assert.equal(denied.status, 401);
+      const ok = await fetch(`${origin}/api/admin/catalog/kroger-misses`, {
+        headers: { authorization: "Bearer secret-token" },
+      });
+      assert.equal(ok.status, 200);
+      const body = (await ok.json()) as { misses: Array<Record<string, unknown>> };
+      assert.equal(body.misses[0]?.name, "Whole Milk");
+      assert.equal(body.misses[0]?.productIdSent, "0007874235189");
+      assert.equal(body.misses[0]?.httpStatus, 200);
+      assert.equal(body.misses[0]?.termFallback, true);
+      assert.equal(body.misses[0]?.cooldownSkip, false);
+      assert.equal(JSON.stringify(body).includes("secret"), false);
+    } finally {
+      server.close();
+      delete process.env.ADMIN_TOKEN;
+    }
+  });
+
   it("refuses a second apply while the lock is held", async () => {
     await IngestLock.deleteMany({ _id: "match-cooldown" });
     const now = new Date();

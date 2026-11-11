@@ -1153,10 +1153,14 @@ export function mountProfileOnboarding(deps = {}) {
       if (ratio > 0) meter.value = String(ratio);
       else meter.removeAttribute("value");
     }
+    const walked = card.status === "reading" ? Math.max(ratio, Math.min(0.92, Number(card.walk) || 0)) : ratio;
     const track = node.querySelector(".read-cart-track");
-    if (track instanceof HTMLElement) {
-      const walked = card.status === "reading" ? Math.max(ratio, Math.min(0.92, Number(card.walk) || 0)) : ratio;
-      track.style.setProperty("--read-ratio", String(Math.round(walked * 1000) / 1000));
+    if (track instanceof HTMLElement) track.style.setProperty("--read-ratio", String(Math.round(walked * 1000) / 1000));
+    const smooth = node.querySelector(".read-smooth span");
+    if (smooth instanceof HTMLElement) {
+      const percent = Math.round(walked * 100);
+      smooth.style.width = `${percent}%`;
+      node.querySelector(".read-smooth")?.setAttribute("aria-valuenow", String(percent));
     }
     const list = node.querySelector(".read-items");
     if (list && !card.hideItems) {

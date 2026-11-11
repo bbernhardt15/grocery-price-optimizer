@@ -37,8 +37,8 @@ describe("intake presentation", () => {
       status: "reading",
       items: ["Large eggs"],
     });
-    assert.match(html, /<progress max="1" value="0.4"><\/progress>/);
-    assert.match(html, /read-cart-track/);
+    assert.match(html, /class="read-smooth"/);
+    assert.match(html, /width:40%/);
     assert.equal(readingPhaseText({ status: "reading" }, 1), "Looking for item names…");
     assert.equal(readingPhaseText({ status: "reading" }, 2), "Working through the receipt…");
     assert.equal(readingPhaseText({ status: "reading" }, 8), "Almost through the receipt…");

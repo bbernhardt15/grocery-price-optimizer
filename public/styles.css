@@ -163,12 +163,12 @@ html[data-keyboard="1"] .suggestions {
   position: absolute; top: 7px; right: 7px; width: 9px; height: 9px;
   border-radius: 999px; background: var(--sale); box-shadow: 0 0 0 2px var(--bg);
 }
-.drawer-scrim { position: fixed; inset: 0; z-index: 30; background: var(--backdrop); }
+.drawer-scrim { position: fixed; inset: 0; z-index: 89; background: var(--backdrop); }
 .drawer-scrim[hidden] { pointer-events: none; }
 .app-drawer {
   display: flex; flex-direction: column; align-items: stretch; gap: 8px;
   background: var(--surface); color: var(--ink);
-  position: fixed; z-index: 31; top: 0; bottom: 0; left: 0;
+  position: fixed; z-index: 90; top: 0; bottom: 0; left: 0;
   height: 100dvh; max-height: 100dvh;
   width: min(20.5rem, calc(100vw - 3rem));
   transform: translateX(-105%);
@@ -361,7 +361,11 @@ a.text-btn:hover { background: var(--accent-soft); }
   padding: 0 calc(16px + var(--safe-right)) calc(var(--bar-h) + 16px) calc(16px + var(--safe-left));
 }
 .rail { display: contents; }
-.dept-scroller { position: relative; min-width: 0; width: 100%; max-width: 100%; z-index: 40; overflow: hidden; }
+.dept-scroller { position: relative; min-width: 0; width: 100%; max-width: 100%; z-index: 2; overflow: hidden; }
+body[data-step="plan"] #browse,
+body[data-step="shop"] #browse,
+body[data-favorites="open"] .dept-scroller { display: none !important; }
+#chip-hint, .chip-hint { display: none !important; }
 .dept-chips {
   display: flex; gap: 8px; overflow-x: auto; padding: 4px 36px 8px 0;
   scroll-snap-type: x proximity; min-width: 0;
@@ -548,7 +552,7 @@ body[data-dept-list="open"] .dept-nav {
   display: none; flex-direction: column; gap: 10px;
 }
 .filters.open {
-  display: flex; position: fixed; z-index: 30; left: 0; right: 0; bottom: var(--bar-h);
+  display: flex; position: fixed; z-index: 80; left: 0; right: 0; bottom: var(--bar-h);
   max-height: calc(var(--vv-height, 100dvh) - var(--bar-h) - var(--keyboard, 0px) - var(--safe-top) - 12px);
   overflow: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch;
   background: var(--surface);
@@ -958,7 +962,9 @@ a.handoff-btn:active { color: var(--bg); text-decoration: none; }
 .coupon-panel summary {
   min-height: 44px; padding: 10px 12px; font-weight: 700; cursor: pointer;
 }
-.coupon-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; }
+.coupon-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
+.coupon-form, .coupon-form input, .coupon-form select, .coupon-amount { max-width: 100%; width: 100%; box-sizing: border-box; }
+.coupon-amount { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .coupon-link {
   display: inline-flex; align-items: center; justify-content: center; align-self: flex-start;
   min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--ink); color: var(--bg);
@@ -1569,28 +1575,26 @@ dialog.profile-onboard[data-step="learned"] #profile-stage {
   scroll-padding-bottom: 20px;
 }
 dialog.profile-onboard[data-step="learned"] .profile-actions {
-  position: relative;
+  position: static !important;
   bottom: auto;
   flex: none;
-  background: var(--bg);
-  z-index: 4;
+  background: transparent;
+  z-index: auto;
 }
 dialog.profile-onboard[data-step="place"] #profile-stage,
 dialog.profile-onboard[data-step="zip"] #profile-stage,
 dialog.profile-onboard[data-step="connect"] #profile-stage,
 dialog.profile-onboard[data-step="trip"] #profile-stage { padding-bottom: 8px; }
 dialog.profile-onboard[data-step="trip"] .trip-action-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  background: var(--bg);
+  position: static;
+  z-index: auto;
+  background: transparent;
 }
 dialog.profile-onboard[data-step="trip"] #trip-add-end {
-  position: sticky;
-  bottom: 0;
-  background: var(--bg);
-  padding-top: 8px;
-  z-index: 1;
+  position: static;
+  background: transparent;
+  padding-top: 16px;
+  z-index: auto;
 }
 dialog.profile-onboard[data-zip-typing="1"] #profile-next { display: none !important; }
 dialog.profile-onboard[data-step="receipts"] .profile-dots { display: none; }
@@ -1638,9 +1642,32 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   color: var(--ink);
 }
 #usuals-block { margin: 0; }
+#usuals-toggle.feature-card,
+#past-trips-open.feature-card,
+[data-lists-open].feature-card {
+  min-height: 76px;
+  padding: 14px 16px;
+}
+#usuals-toggle .feature-icon,
+#past-trips-open .feature-icon,
+[data-lists-open] .feature-icon {
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+}
 @media (max-height: 700px) {
-  #usuals-toggle.feature-card { min-height: 44px; padding: 0 12px; }
-  #usuals-toggle .feature-icon { width: 36px; height: 36px; }
+  #usuals-toggle.feature-card,
+  #past-trips-open.feature-card,
+  [data-lists-open].feature-card {
+    min-height: 64px;
+    padding: 8px 12px;
+  }
+  #usuals-toggle .feature-icon,
+  #past-trips-open .feature-icon,
+  [data-lists-open] .feature-icon {
+    width: 36px;
+    height: 36px;
+  }
 }
 .feature-icon {
   flex: none;
@@ -2068,6 +2095,19 @@ dialog.sheet, dialog.profile-onboard {
 }
 .read-card h3 { margin: 0; font-size: 1.05rem; }
 .read-card progress, .read-progress progress { width: 100%; height: 8px; accent-color: var(--accent); border: 0; }
+.read-smooth {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.read-smooth span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  width: 0;
+  transition: width 600ms linear;
+}
 .read-cart-track {
   position: relative;
   height: 28px;

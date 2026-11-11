@@ -28,8 +28,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eleventh phone test", () => {
-  it("bumps the shell cache to v84", () => {
-    assert.match(sw, /grocery-gitter-shell-v84/);
+  it("bumps the shell cache to v85", () => {
+    assert.match(sw, /grocery-gitter-shell-v85/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -147,7 +147,7 @@ describe("eleventh phone test", () => {
     assert.match(readCardTitle({ name: "Receipt.jpg", found: 3, status: "reading", items: ["Milk"] }, foundLabel), /3 items found/);
     const waiting = readCardHtml({ index: 0, name: "Receipt.jpg", found: 0, ratio: 0.2, status: "reading", items: [] });
     assert.match(waiting, /Reading your receipt\.\.\./);
-    assert.match(waiting, /<progress/);
+    assert.match(waiting, /class="read-smooth"/);
     assert.doesNotMatch(waiting, /0 items found/);
     const found = readCardHtml({ index: 0, name: "Receipt.jpg", found: 2, ratio: 0.8, status: "reading", items: ["Milk", "Bread"] });
     assert.match(found, /2 items found/);

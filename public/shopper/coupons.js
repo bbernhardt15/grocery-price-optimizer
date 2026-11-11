@@ -437,7 +437,7 @@ export function storeCouponMarkup(store, options) {
   const rows = options.rows || [];
   const names = couponChecklist(store?.items);
   const sentence = checklistSentence(names);
-  const open = options.open ? " open" : "";
+  const open = options.open === false ? "" : " open";
   const storeName = escapeHtml(store?.storeName || "");
   const link = page
     ? `<a class="coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}" data-store-leave="${storeName}" data-leave-kind="coupons">${escapeHtml(`Open ${page.label}`)}</a>
@@ -465,11 +465,12 @@ export function storeCouponMarkup(store, options) {
   const shot = options.canEnter
     ? `<button type="button" class="text-btn" data-show-coupon-form data-coupon-screenshot="1">Add a coupon screenshot</button>`
     : "";
-  return `${saved}${shot}<details class="coupon-panel"${open}>
+  return `${saved}<details class="coupon-panel"${open}>
     <summary>Check ${storeName} coupons before you shop</summary>
     <div class="coupon-body">
       ${link}
       <p class="coupon-list">${escapeHtml(sentence)}</p>
+      ${shot}
       <label class="check-line coupon-clipped">
         <input type="checkbox" data-coupon-clipped="${storeName}"${clipped} />
         <span>I clipped my coupons</span>

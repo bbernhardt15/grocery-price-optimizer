@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
+import { CatalogMaster } from "../ingest/models";
 import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
@@ -157,6 +158,42 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
       res.status(409).json({ error: error.message, reason: error.reason });
       return;
     }
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/kroger-misses", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Math.max(1, Math.min(100, Math.floor(Number(req.query.limit ?? 40))));
+  try {
+    const rows = await CatalogMaster.find({
+      $or: [
+        {
+          matchKrogerAt: { $type: "date" },
+          $or: [{ krogerProductId: { $exists: false } }, { krogerProductId: null }, { krogerProductId: "" }],
+        },
+        { matchKrogerSkip: "cooldown" },
+      ],
+    })
+      .sort({ matchKrogerAt: -1, updatedAt: -1 })
+      .limit(limit)
+      .select("name brand departmentId upc matchKrogerCode matchKrogerHttp matchKrogerTerm matchKrogerSkip matchKrogerAt")
+      .lean<Array<Record<string, unknown>>>();
+    res.json({
+      misses: rows.map((row) => ({
+        name: String(row.name || ""),
+        brand: String(row.brand || ""),
+        department: String(row.departmentId || ""),
+        upc: String(row.upc || ""),
+        productIdSent: String(row.matchKrogerCode || ""),
+        httpStatus: typeof row.matchKrogerHttp === "number" ? row.matchKrogerHttp : null,
+        termFallback: row.matchKrogerTerm === true,
+        cooldownSkip: row.matchKrogerSkip === "cooldown",
+        at: row.matchKrogerAt instanceof Date ? row.matchKrogerAt.toISOString() : "",
+      })),
+    });
+  } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }
