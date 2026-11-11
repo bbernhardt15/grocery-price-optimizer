@@ -899,6 +899,7 @@ function placePageToast() {
     releaseToastClearance();
     if (!guideOpen) {
       toastEl.dataset.toastPlace = toastEl.dataset.place || "page";
+      liftToastOffFooter();
       return;
     }
     const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
@@ -943,6 +944,22 @@ function placePageToast() {
     guide.style.minHeight = "0";
     guide.dataset.guideScroll = "1";
   }
+}
+
+function liftToastOffFooter() {
+  if (!toastEl?.classList.contains("show") || toastEl.dataset.place === "sheet") return;
+  if (getComputedStyle(toastEl).position !== "fixed") return;
+  const footer = document.querySelector(".site-footer");
+  if (!(footer instanceof HTMLElement)) return;
+  const foot = footer.getBoundingClientRect();
+  const viewH = window.innerHeight;
+  if (foot.height < 8 || foot.bottom < 40 || foot.top > viewH - 4) return;
+  const box = toastEl.getBoundingClientRect();
+  const hits = box.bottom > foot.top + 1 && box.top < foot.bottom - 1 && box.right > foot.left && box.left < foot.right;
+  if (!hits) return;
+  toastEl.style.bottom = `${Math.round(viewH - foot.top + 8)}px`;
+  toastEl.style.top = "auto";
+  toastEl.style.transform = "translateX(-50%)";
 }
 
 function toast(message, durationMs = 1600) {

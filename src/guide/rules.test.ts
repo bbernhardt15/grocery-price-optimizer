@@ -367,6 +367,14 @@ describe("Gitter guide rules", () => {
     });
     assert.equal(kept.current?.moment, "review-next");
     assert.equal(kept.current?.line, unmatched.current?.line);
+    const leftReview = presentGuide({
+      settings: emptyGuideSettings(),
+      session: unmatched.session,
+      current: unmatched.current,
+      view: view({ step: "shop", itemCount: 3, unfound: ["Shirley Temple"], pricesLabel: "Prices updated" }),
+    });
+    assert.equal(leftReview.current, null);
+    assert.equal(leftReview.hidden, true);
     assert.equal(prompt.chips.some((chip) => chip.label === "Undo"), false);
     const undone = clearTripNote(session);
     assert.equal(undone.trip, null);

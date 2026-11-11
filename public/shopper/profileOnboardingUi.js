@@ -377,7 +377,11 @@ export function mountProfileOnboarding(deps = {}) {
       skip.disabled = false;
     }
     if (next && dietMode && step.id === "diets") next.textContent = "Save";
+    const actions = document.querySelector("#profile-onboard .profile-actions");
+    const form = $("profile-form");
+    if (actions && form && actions.parentElement !== form) form.appendChild(actions);
     if (stage) stage.innerHTML = stageHtml(step);
+    if (learned && actions && stage) stage.appendChild(actions);
     bindPlaceInput();
     bindReceiptInput();
     if ((step.kind === "place" || step.kind === "zip") && !options.deferStores) paintStoreList();
@@ -1693,7 +1697,7 @@ export function mountProfileOnboarding(deps = {}) {
   });
   $("profile-stage")?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
-    if (!target) return;
+    if (!target || target.id === "profile-next") return;
     const card = target.closest("[data-learned-row]");
     if (card instanceof HTMLElement && (target.dataset.learnedChange || target.dataset.learnedMode || target.dataset.learnedToggle || target.dataset.learnedRemove)) {
       event.preventDefault();
@@ -1710,7 +1714,7 @@ export function mountProfileOnboarding(deps = {}) {
   });
   $("profile-stage")?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest("button") : null;
-    if (!target) return;
+    if (!target || target.id === "profile-next") return;
     event.preventDefault();
     event.stopPropagation();
     if (target.dataset.missingDept) {

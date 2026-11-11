@@ -648,12 +648,17 @@ export function presentGuide(input: PresentInput = {}): PresentResult {
   const packed = { ...view, settings, session };
   const decision = decideGuide(packed);
   const frame = applyGuideFrame(current, decision, input);
+  const onReview = surface(view.step) === "review";
+  // The unmatched-item card belongs on Review. Leaving that tab takes it down.
+  if (current?.moment === "review-next" && !onReview) {
+    return { session, current: null, defer: false, hidden: true };
+  }
   if (frame.defer) {
     return { session, current, defer: true, hidden: frame.hidden };
   }
   // An unmatched-item question stays until the shopper answers or dismisses it.
   // A later savings card or a cleared unfound list must not take it down.
-  if (current?.moment === "review-next" && !session.declined?.["review-next"]) {
+  if (current?.moment === "review-next" && !session.declined?.["review-next"] && onReview) {
     const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
     if (!decision || decision.moment === "review-next" || nextRank <= MOMENT_RANK["review-next"]) {
       const nextSession = session.shown["review-next"] ? session : noteShown(session, "review-next");

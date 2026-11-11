@@ -192,7 +192,7 @@ html[data-drawer="open"] { overflow: hidden; overscroll-behavior: none; }
 .drawer-head h2, .drawer-help h2 { margin: 0; font-family: var(--display); font-size: 1.2rem; }
 .zip-place { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .drawer-help { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; }
-.menu-sheet { display: flex; flex-direction: column; gap: 18px; padding-bottom: 24px; }
+.menu-sheet { display: flex; flex-direction: column; gap: 18px; padding-bottom: 56px; }
 .menu-group { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
 .menu-kicker {
   margin: 8px 0 4px;
@@ -579,8 +579,8 @@ html[data-keyboard="1"] body {
 .browse-tools { position: relative; }
 .browse { display: flex; flex-direction: column; gap: var(--row-gap); margin-top: 0; }
 .browse-toggle {
-  width: 100%; min-height: 52px; border-radius: 16px; border: 1px dashed var(--line);
-  background: transparent; color: var(--ink); font-weight: 700; text-align: left; padding: 0 16px;
+  width: 100%; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft); color: var(--ink); font-weight: 700; text-align: left;
 }
 .browse-toggle[aria-expanded="true"] { border-style: solid; background: var(--surface); }
 .ask-hint { margin: 0; color: var(--muted); font-size: 0.95rem; }
@@ -1644,27 +1644,40 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
 #usuals-block { margin: 0; }
 #usuals-toggle.feature-card,
 #past-trips-open.feature-card,
-[data-lists-open].feature-card {
+[data-lists-open].feature-card,
+#browse-toggle.feature-card {
+  height: 76px;
   min-height: 76px;
+  max-height: 76px;
   padding: 14px 16px;
+  box-sizing: border-box;
+}
+#usuals-toggle .feature-icon,
+#past-trips-open .feature-icon,
+[data-lists-open] .feature-icon,
+#browse-toggle .feature-icon {
+  width: 44px;
+  height: 44px;
 }
 #usuals-toggle .feature-icon,
 #past-trips-open .feature-icon,
 [data-lists-open] .feature-icon {
-  width: 44px;
-  height: 44px;
   font-size: 1.1rem;
 }
 @media (max-height: 700px) {
   #usuals-toggle.feature-card,
   #past-trips-open.feature-card,
-  [data-lists-open].feature-card {
+  [data-lists-open].feature-card,
+  #browse-toggle.feature-card {
+    height: 64px;
     min-height: 64px;
+    max-height: 64px;
     padding: 8px 12px;
   }
   #usuals-toggle .feature-icon,
   #past-trips-open .feature-icon,
-  [data-lists-open] .feature-icon {
+  [data-lists-open] .feature-icon,
+  #browse-toggle .feature-icon {
     width: 36px;
     height: 36px;
   }
@@ -2381,7 +2394,20 @@ dialog.handoff-sheet[open] .sheet-body {
 .detail-qty { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
 .needs-sheet { background: var(--surface); color: var(--ink); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35); }
 .trip-add-body { padding-bottom: 24px; }
-.app-version { margin: 12px 0 4px; font-size: 0.85rem; }
+.app-version {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(8px + var(--safe-bottom));
+  z-index: 2;
+  margin: 0;
+  padding: 8px 0 2px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  pointer-events: none;
+}
+.menu-row { scroll-margin-bottom: 72px; }
 @media (prefers-reduced-motion: reduce) {
   .read-pusher { display: none; }
 }
