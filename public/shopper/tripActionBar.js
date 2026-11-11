@@ -1,8 +1,6 @@
 /**
- * The trip picker can be a long list. Select all, the count, and Add
- * stay in a bar at the top of the sheet. The same Add button also stays
- * at the bottom. Neither is enabled until something is selected.
- * The bar is a flex sibling of the scrolling list, so it does not cover rows.
+ * Select all stays at the top. Add and Start with an empty trip sit at the
+ * end of the list, after the shopper has scrolled the rows.
  */
 
 function escapeText(value) {
@@ -30,16 +28,12 @@ export function tripButtonsEnabled(count) {
 export function tripActionBarHtml(options = {}) {
   const escape = options.escapeHtml || escapeText;
   const count = Math.max(0, Math.floor(Number(options.count) || 0));
-  const enabled = options.canAdd === true && tripButtonsEnabled(count);
-  const disabled = enabled ? "" : " disabled";
   return `<div class="trip-action-bar" id="trip-action-bar">
     <div class="trip-action-tools">
       <button type="button" class="ghost trip-select-all" data-trip-all="all">Select all</button>
       <button type="button" class="ghost" data-trip-all="none">Clear all</button>
       <p class="trip-action-count" id="trip-add-count">${escape(selectedCountLabel(count))}</p>
     </div>
-    <button type="button" class="primary trip-action-add" id="learned-add-trip-top" data-trip-add="1"${disabled}>Add these items to my trip</button>
-    <button type="button" class="ghost" id="learned-empty-trip-top">Start with an empty trip</button>
   </div>`;
 }
 

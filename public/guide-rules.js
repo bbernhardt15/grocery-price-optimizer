@@ -457,10 +457,14 @@ function presentGuide(input = {}) {
   const packed = { ...view, settings, session };
   const decision = decideGuide(packed);
   const frame = applyGuideFrame(current, decision, input);
+  const onReview = surface(view.step) === "review";
+  if (current?.moment === "review-next" && !onReview) {
+    return { session, current: null, defer: false, hidden: true };
+  }
   if (frame.defer) {
     return { session, current, defer: true, hidden: frame.hidden };
   }
-  if (current?.moment === "review-next" && !session.declined?.["review-next"]) {
+  if (current?.moment === "review-next" && !session.declined?.["review-next"] && onReview) {
     const nextRank = decision ? MOMENT_RANK[decision.moment] : 0;
     if (!decision || decision.moment === "review-next" || nextRank <= MOMENT_RANK["review-next"]) {
       const nextSession = session.shown["review-next"] ? session : noteShown(session, "review-next");

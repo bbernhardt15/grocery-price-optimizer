@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { expandUpcE, gtinCheckDigit, groupOffersByUpc, hasStandardCheckDigit, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
+import { expandUpcE, gtinCheckDigit, groupOffersByUpc, hasStandardCheckDigit, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, storeLookupFormats, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -69,7 +69,7 @@ describe("upcKey", () => {
     assert.equal(upcKey(`0${middle}5`), upcKey("012345000065"));
     assert.equal(upcKey("1234567"), null);
     const codes = walmartLookupCodes("012345000065");
-    assert.deepEqual(codes, ["012345000065", "0012345000065", "00012345000065"]);
+    assert.deepEqual(codes, ["012345000065"]);
     assert.deepEqual(walmartLookupCodes(`0${middle}5`), codes);
     const kroger = krogerLookupCodes("012345000065");
     assert.deepEqual(kroger, ["0001234500006"]);
@@ -100,6 +100,29 @@ describe("upcKey", () => {
     assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
     const zeroBody = "01200000345";
     const zeroCheck = String(gtinCheckDigit(zeroBody));
+    const formats = storeLookupFormats("016000124790");
+    assert.deepEqual(formats, {
+      krogerProductId: "0001600012479",
+      gtin14: "00016000124790",
+      stored: "016000124790",
+      upcA: "016000124790",
+    });
+    assert.deepEqual(storeLookupFormats("0001600012479"), {
+      krogerProductId: "0001600012479",
+      gtin14: "00016000124790",
+      stored: "0001600012479",
+      upcA: "016000124790",
+    });
+    assert.deepEqual(storeLookupFormats("049000042566"), {
+      krogerProductId: "0004900004256",
+      gtin14: "00049000042566",
+      stored: "049000042566",
+      upcA: "049000042566",
+    });
+    assert.equal(storeLookupFormats("894700010144").krogerProductId, "0089470001014");
+    assert.equal(storeLookupFormats("0089470001014").upcA, "894700010144");
+    assert.equal(storeLookupFormats("070708200500").krogerProductId, "0007070820050");
+    assert.equal(storeLookupFormats("070708200500").upcA, "070708200507");
     assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);
     assert.equal(upcKey(`0123450${zeroCheck}`), upcKey(`${zeroBody}${zeroCheck}`));
   });

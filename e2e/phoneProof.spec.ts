@@ -188,26 +188,25 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   await page.getByText("Paste order text instead").click();
   await page.locator("#profile-receipt-paste").fill("Whole Milk");
   await page.getByRole("button", { name: "Read my receipts" }).click();
-  const cart = page.locator(".read-cart");
-  await expect(cart).toBeVisible();
+  const bar = page.locator(".read-smooth span");
+  await expect(bar).toBeVisible();
   const phase = page.locator("[data-read-phase]");
   await expect(phase).toBeVisible();
-  const left = () => cart.evaluate((el) => Number.parseFloat(getComputedStyle(el).left) || 0);
-  const firstLeft = await left();
+  const width = () => bar.evaluate((el) => Number.parseFloat(el.style.width) || 0);
+  const firstLeft = await width();
   const firstPhase = (await phase.innerText()).toLowerCase();
   const samples = [firstLeft];
   await expect
     .poll(
       async () => {
-        const value = await left();
+        const value = await width();
         if (value > samples[samples.length - 1] + 4) samples.push(value);
         return samples.length;
       },
       { timeout: 6000 }
     )
     .toBeGreaterThanOrEqual(3);
-  const trackEnd = await cart.evaluate((el) => (el.parentElement ? el.parentElement.clientWidth - 36 : 0));
-  expect(samples[samples.length - 1]).toBeLessThan(trackEnd - 8);
+  expect(samples[samples.length - 1]).toBeLessThan(96);
   await expect.poll(async () => (await phase.innerText()).toLowerCase(), { timeout: 5000 }).not.toBe(firstPhase);
   const secondPhase = (await phase.innerText()).toLowerCase();
   expect(firstPhase.includes("still reading")).toBe(false);
@@ -318,7 +317,6 @@ test("a coupon screenshot review applies only the eligible discount", async ({ p
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByText("Check Walmart coupons before you shop").click();
   await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -499,7 +497,6 @@ test("a Walmart coupon is not applied on the Kroger form", async ({ page }) => {
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByText("Check Kroger coupons before you shop").click();
   await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -555,7 +552,7 @@ test("coming back from a store opens the return sheet", async ({ page }) => {
   await page.evaluate(() => {
     window.open = () => window;
   });
-  await page.getByRole("link", { name: "Walmart Cash" }).click();
+  await page.getByRole("link", { name: "Walmart Cash", exact: true }).click();
   const armed = await page.evaluate(() => localStorage.getItem("gg-handoff-pending"));
   expect(armed).toBeTruthy();
   const result = await page.evaluate(async () => {

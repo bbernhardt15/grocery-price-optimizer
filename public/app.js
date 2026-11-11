@@ -444,7 +444,23 @@ function chooseBootStep() {
   });
 }
 
+function clearStuckLayers() {
+  document.body.dataset.deptList = "";
+  document.querySelector(".filters")?.classList.remove("open");
+  $("filters-open")?.setAttribute("aria-expanded", "false");
+  document.querySelector(".list-panel")?.classList.remove("open");
+  document.getElementById("list-backdrop")?.setAttribute("hidden", "");
+  for (const dialog of document.querySelectorAll("dialog[open]")) {
+    try {
+      dialog.close();
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
 function goHome() {
+  clearStuckLayers();
   const open = [...document.querySelectorAll("dialog[open]")].map((dialog) => dialog.id);
   const transition = homeTransition(open);
   for (const id of transition.closeDialogIds) {
@@ -883,6 +899,7 @@ function placePageToast() {
     releaseToastClearance();
     if (!guideOpen) {
       toastEl.dataset.toastPlace = toastEl.dataset.place || "page";
+      liftToastOffFooter();
       return;
     }
     const gap = Math.max(12, Math.round(window.innerHeight - guideBox.top + 12));
@@ -927,6 +944,22 @@ function placePageToast() {
     guide.style.minHeight = "0";
     guide.dataset.guideScroll = "1";
   }
+}
+
+function liftToastOffFooter() {
+  if (!toastEl?.classList.contains("show") || toastEl.dataset.place === "sheet") return;
+  if (getComputedStyle(toastEl).position !== "fixed") return;
+  const footer = document.querySelector(".site-footer");
+  if (!(footer instanceof HTMLElement)) return;
+  const foot = footer.getBoundingClientRect();
+  const viewH = window.innerHeight;
+  if (foot.height < 8 || foot.bottom < 40 || foot.top > viewH - 4) return;
+  const box = toastEl.getBoundingClientRect();
+  const hits = box.bottom > foot.top + 1 && box.top < foot.bottom - 1 && box.right > foot.left && box.left < foot.right;
+  if (!hits) return;
+  toastEl.style.bottom = `${Math.round(viewH - foot.top + 8)}px`;
+  toastEl.style.top = "auto";
+  toastEl.style.transform = "translateX(-50%)";
 }
 
 function toast(message, durationMs = 1600) {
@@ -2922,7 +2955,15 @@ function renderDepartments() {
   }
   $("dept-chips").innerHTML = chips.join("");
   $("dept-nav").innerHTML = links.join("");
-  requestAnimationFrame(syncChipHint);
+  const departmentFilter = $("filter-department");
+  if (departmentFilter) {
+    const options = [`<option value="all">All departments</option>`]
+      .concat(visible.map((department) => `<option value="${escapeHtml(department.id)}"${activeDepartment === department.id ? " selected" : ""}>${escapeHtml(department.name)}</option>`))
+      .join("");
+    departmentFilter.innerHTML = options;
+  }
+  const hint = $("chip-hint");
+  if (hint) hint.hidden = true;
 }
 
 function syncChipHint() {
@@ -4283,7 +4324,7 @@ function reviewStoreArticle(store, couponSummary, coupons) {
     storeSummary,
     clipped: isClipped(localStorage, tripId(), store.storeName),
     canEnter: !planLimited("ownCoupons"),
-    open: false,
+    open: true,
     coupons,
   });
   const lines = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item));
@@ -7239,11 +7280,9 @@ $("filters-clear").addEventListener("click", () => {
 });
 $("filters-open").addEventListener("click", () => openFilters(!$("filters").classList.contains("open")));
 $("filters-close").addEventListener("click", () => openFilters(false));
-$("chip-hint")?.addEventListener("click", () => {
-  const nav = $("dept-nav");
-  if (nav) nav.hidden = false;
-  document.body.dataset.deptList = "open";
-  nav?.querySelector("button")?.focus();
+$("filter-department")?.addEventListener("change", (event) => {
+  const value = event.target instanceof HTMLSelectElement ? event.target.value : "all";
+  selectDepartment(value || "all");
 });
 $("list-toggle").addEventListener("click", () => {
   if (window.matchMedia("(min-width: 1100px)").matches) {
@@ -7440,6 +7479,7 @@ $("menu-favorites")?.addEventListener("click", () => {
   closeDrawer();
   openFavorites();
 });
+$("aisle-setup")?.addEventListener("click", () => openAisleSetup());
 $("favorites-close")?.addEventListener("click", () => closeFavorites());
 document.addEventListener("submit", (event) => {
   const form = event.target instanceof HTMLFormElement ? event.target : null;
@@ -8806,7 +8846,23 @@ function closeFavorites() {
   if (screen) screen.hidden = true;
 }
 
+function openAisleSetup() {
+  favoritesMode = "brands";
+  showStep("add");
+  closeDrawer();
+  closeProductDetail(false);
+  const screen = $("favorites-screen");
+  if (!screen) return;
+  paintFavorites();
+  screen.hidden = false;
+  document.body.dataset.favorites = "open";
+  $("favorites-usuals")?.setAttribute("hidden", "");
+  screen.querySelector("h2")?.focus();
+  window.scrollTo(0, 0);
+}
+
 function openFavorites() {
+  favoritesMode = "stars";
   showStep("add");
   closeDrawer();
   const screen = $("favorites-screen");
@@ -8818,37 +8874,37 @@ function openFavorites() {
 }
 
 let favoriteStep = 0;
+let favoritesMode = "stars";
 
-function paintFavorites() {
-  const host = $("favorites-prefs");
+function brandAisleHtml() {
   const profile = getUserProfile(localStorage);
   const steps = favoriteWizardSteps();
-  if (host && steps.length) {
-    favoriteStep = Math.max(0, Math.min(favoriteStep, steps.length - 1));
-    const step = steps[favoriteStep];
-    const pref = profile.categoryPreferences?.[step.id] || {};
-    const brand = pref.brand || "";
-    const flavors = new Set(pref.attributes || []);
-    const brandChips = step.brands
-      .map(
-        (name) =>
-          `<button type="button" class="choice-chip" data-fav-brand="${escapeHtml(name)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${name.toLowerCase() === String(brand).toLowerCase() ? "true" : "false"}">${escapeHtml(name)}</button>`
-      )
-      .join("");
-    const flavorChips = step.flavors
-      .map(
-        (row) =>
-          `<button type="button" class="choice-chip" data-fav-flavor="${escapeHtml(row.id)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${flavors.has(row.id) ? "true" : "false"}">${escapeHtml(row.label)}</button>`
-      )
-      .join("");
-    const choiceLabel = step.id === "eggs" ? "Type and size" : step.id === "milk" || step.id === "butter" || step.id === "bread" ? "Type" : "Flavor";
-    const placeholders = {
-      eggs: "Eggland's Best, large",
-      milk: "Fairlife whole",
-      soda: "Cherry Coke",
-    };
-    const placeholder = placeholders[step.id] || `A ${step.label.toLowerCase()} you buy`;
-    host.innerHTML = `<p class="muted">Aisle ${favoriteStep + 1} of ${steps.length}. Grocery Gitter learns these choices over time.</p>
+  if (!steps.length) return "";
+  favoriteStep = Math.max(0, Math.min(favoriteStep, steps.length - 1));
+  const step = steps[favoriteStep];
+  const pref = profile.categoryPreferences?.[step.id] || {};
+  const brand = pref.brand || "";
+  const flavors = new Set(pref.attributes || []);
+  const brandChips = step.brands
+    .map(
+      (name) =>
+        `<button type="button" class="choice-chip" data-fav-brand="${escapeHtml(name)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${name.toLowerCase() === String(brand).toLowerCase() ? "true" : "false"}">${escapeHtml(name)}</button>`
+    )
+    .join("");
+  const flavorChips = step.flavors
+    .map(
+      (row) =>
+        `<button type="button" class="choice-chip" data-fav-flavor="${escapeHtml(row.id)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${flavors.has(row.id) ? "true" : "false"}">${escapeHtml(row.label)}</button>`
+    )
+    .join("");
+  const choiceLabel = step.id === "eggs" ? "Type and size" : step.id === "milk" || step.id === "butter" || step.id === "bread" ? "Type" : "Flavor";
+  const placeholders = {
+    eggs: "Eggland's Best, large",
+    milk: "Fairlife whole",
+    soda: "Cherry Coke",
+  };
+  const placeholder = placeholders[step.id] || `A ${step.label.toLowerCase()} you buy`;
+  return `<p class="muted">Aisle ${favoriteStep + 1} of ${steps.length}. This setup is separate from Favorites.</p>
       <h3>${escapeHtml(step.label)}</h3>
       ${brandChips ? `<p class="choice-label">Brand</p><div class="choice-row" role="group" aria-label="Brand for ${escapeHtml(step.label)}">${brandChips}</div>` : ""}
       <p class="choice-label">Store brand</p>
@@ -8867,10 +8923,22 @@ function paintFavorites() {
         <button type="button" class="ghost" id="fav-prev" ${favoriteStep === 0 ? "disabled" : ""}>Previous aisle</button>
         <button type="button" class="primary" id="fav-next">${favoriteStep === steps.length - 1 ? "Done" : "Next aisle"}</button>
       </div>`;
-  }
+}
+
+function paintFavorites() {
+  const brands = favoritesMode === "brands";
+  const title = $("favorites-title");
+  if (title) title.textContent = brands ? "Brands by aisle" : "Your favorites";
+  const screen = $("favorites-screen");
+  screen?.querySelector(":scope > .muted")?.toggleAttribute("hidden", brands);
+  screen?.querySelector("h3")?.toggleAttribute("hidden", brands);
+  const host = $("favorites-prefs");
+  if (host) host.innerHTML = brands ? brandAisleHtml() : "";
   const listHost = $("favorites-usuals");
   const usuals = readStarredUsuals(localStorage);
   if (listHost) {
+    listHost.hidden = brands;
+    if (brands) return;
     const grouped = new Map();
     for (const row of usuals) {
       const section = sectionForEntry({ product: { name: row.name, familyName: row.name, departmentName: row.department } });
@@ -8890,7 +8958,7 @@ function paintFavorites() {
             return `<li class="list-section" role="presentation"><h3 class="list-section-title">${escapeHtml(section)}</h3></li>${items}`;
           })
           .join("")
-      : `<li class="muted">Nothing remembered yet. Finish a trip and save the list, or pick a brand above.</li>`;
+      : `<li class="muted">Star items to see them here.</li>`;
   }
 }
 
@@ -8925,6 +8993,7 @@ function showStep(step, reason = "user") {
     return;
   }
   closeFavorites();
+  if (reason === "user") clearStuckLayers();
   const decision = allowTabChange(tabGuard, reason);
   tabGuard = decision.state;
   if (!decision.allow) return;
@@ -9000,6 +9069,7 @@ function showStep(step, reason = "user") {
   }
   paintUsuals();
   paintPlanBar();
+  if (reason === "user" && flowStep === "add") window.scrollTo(0, 0);
 }
 
 function paintPlanBar() {

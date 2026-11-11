@@ -27,6 +27,14 @@ const masterSchema = new Schema(
     /** Next GTIN variant to send. Zero means the primary code. */
     matchWalmartVariant: { type: Number },
     matchKrogerVariant: { type: Number },
+    /** Last Kroger productId sent for this master. */
+    matchKrogerCode: { type: String, default: "" },
+    /** HTTP status of that lookup. Empty when the call never left this process. */
+    matchKrogerHttp: { type: Number },
+    /** True when the name search ran after the id lookup. */
+    matchKrogerTerm: { type: Boolean, default: false },
+    /** "cooldown" when a 503/504 hold skipped the miss counter. */
+    matchKrogerSkip: { type: String, default: "" },
     /** When this master first carried both a Walmart id and a Kroger id. */
     mergedAt: { type: Date },
     /** Set by the scope job. Hidden from search, plans, and shelf counts. Not a hard delete. */
@@ -208,6 +216,10 @@ export type CatalogMasterDoc = {
   matchKrogerHoldUntil?: Date;
   matchWalmartVariant?: number;
   matchKrogerVariant?: number;
+  matchKrogerCode?: string;
+  matchKrogerHttp?: number | null;
+  matchKrogerTerm?: boolean;
+  matchKrogerSkip?: string;
   mergedAt?: Date;
   outOfScope?: boolean;
   status: CatalogStatus;

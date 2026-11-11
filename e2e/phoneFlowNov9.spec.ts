@@ -69,7 +69,7 @@ for (const size of [
     await expect(page.locator("#app-drawer details, #app-drawer summary")).toHaveCount(0);
     await expect(page.locator(".menu-row").first()).toBeVisible();
     await expect(page.locator("#app-drawer")).toContainText("Where you shop");
-    await page.locator("#menu-favorites").click();
+    await page.locator("#aisle-setup").click();
     await expect(page.locator("#favorites-prefs")).toContainText("Type and size");
     await expect(page.locator("#favorites-prefs")).toContainText("Kroger");
     await expect(page.locator("#favorites-prefs")).toContainText("Simple Truth");

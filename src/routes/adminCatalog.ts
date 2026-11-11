@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
+import { CatalogMaster } from "../ingest/models";
+import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 
@@ -153,6 +155,80 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
     res.json(await remergeGtinCatalog({ apply, limit }));
   } catch (error) {
     if (error instanceof RemergeBusyError) {
+      res.status(409).json({ error: error.message, reason: error.reason });
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/admin/catalog/kroger-misses", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Math.max(1, Math.min(100, Math.floor(Number(req.query.limit ?? 40))));
+  try {
+    const rows = await CatalogMaster.find({
+      $or: [
+        {
+          matchKrogerAt: { $type: "date" },
+          $or: [{ krogerProductId: { $exists: false } }, { krogerProductId: null }, { krogerProductId: "" }],
+        },
+        { matchKrogerSkip: "cooldown" },
+      ],
+    })
+      .sort({ matchKrogerAt: -1, updatedAt: -1 })
+      .limit(limit)
+      .select("name brand departmentId upc matchKrogerCode matchKrogerHttp matchKrogerTerm matchKrogerSkip matchKrogerAt")
+      .lean<Array<Record<string, unknown>>>();
+    res.json({
+      misses: rows.map((row) => ({
+        name: String(row.name || ""),
+        brand: String(row.brand || ""),
+        department: String(row.departmentId || ""),
+        upc: String(row.upc || ""),
+        productIdSent: String(row.matchKrogerCode || ""),
+        httpStatus: typeof row.matchKrogerHttp === "number" ? row.matchKrogerHttp : null,
+        termFallback: row.matchKrogerTerm === true,
+        cooldownSkip: row.matchKrogerSkip === "cooldown",
+        at: row.matchKrogerAt instanceof Date ? row.matchKrogerAt.toISOString() : "",
+      })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+function cooldownStore(value: unknown): CooldownStore {
+  return value === "kroger" || value === "walmart" || value === "both" ? value : "both";
+}
+
+router.get("/admin/catalog/match-cooldowns", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const limit = Number(req.query.limit ?? 200_000);
+  try {
+    res.json(await clearMatchCooldowns({ apply: false, store: cooldownStore(req.query.store), limit }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/catalog/match-cooldowns", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const body = (req.body ?? {}) as { apply?: unknown; store?: unknown; limit?: unknown };
+  const apply = body.apply === true;
+  if (apply && !confirmed(req, "clear-match-cooldowns")) {
+    res.status(400).json({
+      error: 'Send { "apply": true, "confirm": "clear-match-cooldowns" } to clear. Omit apply for a dry run.',
+    });
+    return;
+  }
+  const limit = Number(body.limit ?? 200_000);
+  try {
+    res.json(await clearMatchCooldowns({ apply, store: cooldownStore(body.store), limit }));
+  } catch (error) {
+    if (error instanceof CooldownBusyError) {
       res.status(409).json({ error: error.message, reason: error.reason });
       return;
     }

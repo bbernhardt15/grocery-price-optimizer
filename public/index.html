@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="gg-build" content="" />
     <meta name="theme-color" content="#f4efe6" media="(prefers-color-scheme: light)" />
+    <meta name="gg-brand" content="#0e7a45" />
     <meta name="theme-color" content="#1c221e" media="(prefers-color-scheme: dark)" />
     <script>
       (function () {
@@ -22,7 +23,7 @@
         root.setAttribute("data-resolved", dark ? "dark" : "light");
         root.style.colorScheme = dark ? "dark" : "light";
         var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", dark ? "#1c221e" : "#0e7a45");
+        if (meta) meta.setAttribute("content", dark ? "#1c221e" : "#f4efe6");
       })();
     </script>
     <style>
@@ -125,6 +126,7 @@
           <section class="menu-group">
             <p class="menu-kicker">Preferences</p>
             <button type="button" class="menu-row" id="menu-brands"><span class="menu-icon" aria-hidden="true">Aa</span><span>Brands for each category</span></button>
+            <button type="button" class="menu-row" id="aisle-setup"><span class="menu-icon" aria-hidden="true">Aisle</span><span>Set brands by aisle</span></button>
             <button type="button" class="menu-row" id="menu-favorites"><span class="menu-icon" aria-hidden="true">★</span><span>Your favorites</span></button>
             <button type="button" class="menu-row" id="drawer-profile"><span class="menu-icon" aria-hidden="true">Diet</span><span>Stores, allergies, and diets</span></button>
             <button type="button" class="menu-row" id="drawer-products" aria-haspopup="dialog" aria-controls="products-dialog"><span class="menu-icon" aria-hidden="true">Lock</span><span>Locked products</span></button>
@@ -142,9 +144,9 @@
             <button type="button" class="menu-row" id="help-feedback"><span class="menu-icon" aria-hidden="true">Note</span><span>Send feedback</span></button>
             <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
             <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
-            <p id="app-version" class="muted app-version">v83</p>
           </section>
           </div>
+          <p id="app-version" class="muted app-version">v86</p>
         </aside>
       </div>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -188,7 +190,7 @@
               <h2 id="favorites-title" tabindex="-1">Your favorites</h2>
               <button type="button" class="text-btn" id="favorites-close">Back to Build</button>
             </div>
-            <p class="muted">Brand and flavor for every aisle. Saved on this phone and used the next time that aisle is added.</p>
+            <p class="muted">Only items you starred. Brand setup for each aisle stays in the menu.</p>
             <div id="favorites-prefs"></div>
             <h3>Remembered items</h3>
             <ul id="favorites-usuals" class="usuals-list"></ul>
@@ -235,7 +237,7 @@
               </form>
               <div class="dept-scroller">
                 <div id="dept-chips" class="dept-chips" role="tablist" aria-label="Departments"></div>
-                <button type="button" id="chip-hint" class="chip-hint" hidden>More</button>
+                <button type="button" id="chip-hint" class="chip-hint" hidden aria-hidden="true"></button>
               </div>
               <div class="browse-tools">
                 <div class="toolbar">
@@ -260,6 +262,11 @@
                       <option value="unitPrice">Best unit price</option>
                       <option value="name">Name</option>
                       <option value="onSale">On sale</option>
+                    </select>
+                  </label>
+                  <label>Department
+                    <select id="filter-department" name="department" aria-label="Department">
+                      <option value="all">All departments</option>
                     </select>
                   </label>
                   <label>Brand

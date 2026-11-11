@@ -289,7 +289,6 @@ test("a coupon photo fills the amount and the note", async ({ page }) => {
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByText("Check Kroger coupons before you shop").click();
   await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
   await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
   await expect(page.locator("[data-coupon-shot-note]")).toContainText("Read from the screenshot");

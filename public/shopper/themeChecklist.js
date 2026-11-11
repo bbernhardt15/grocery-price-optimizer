@@ -209,6 +209,7 @@ function rowHtml(item, escapeHtml) {
       <output>${item.quantity}</output>
       <button type="button" data-theme-inc="${text(escapeHtml, item.id)}" aria-label="Increase ${text(escapeHtml, item.label)}">+</button>
     </div>
+    <button type="button" class="text-btn" data-slot-change="${text(escapeHtml, item.id)}">Change</button>
     <label class="theme-brand">Brand for this list
       <input data-theme-brand="${text(escapeHtml, item.id)}" value="${text(escapeHtml, item.brand || "")}" maxlength="40" autocomplete="off" />
     </label>

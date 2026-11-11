@@ -92,9 +92,8 @@ for (const size of [
     await page.locator("button.card-open").first().click();
     const detail = page.locator("#product-dialog");
     await expect(detail).toBeVisible();
-    await expect(page.locator("#chip-hint")).toBeVisible();
-    await page.locator("#chip-hint").click();
-    await expect(page.locator("#dept-nav")).toBeVisible();
+    await expect(page.locator("#chip-hint")).toBeHidden();
+    await expect(page.locator(".dept-chips")).toBeVisible();
     await page.locator("#brand-home").click();
     await expect(detail).toBeHidden();
     await page.locator("button.card-open").first().click();
@@ -240,8 +239,9 @@ for (const size of [
     await expect(page.getByRole("heading", { name: /Bread/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Meatballs/ })).toBeVisible();
     await page.locator("#profile-next").click();
-    await expect(page.locator("#learned-add-trip-top")).toBeVisible();
-    await expect(page.locator("#learned-empty-trip-top")).toBeVisible();
+    await expect(page.locator("#learned-add-trip")).toBeVisible();
+    await expect(page.locator("#learned-empty-trip")).toBeVisible();
+    await expect(page.locator("#learned-add-trip-top")).toHaveCount(0);
   });
 
   test(`return from a store stays on the tab that was open at ${size.width}x${size.height}`, async ({ page }) => {
@@ -274,7 +274,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#tab-favorites")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v83");
+    await expect(page.locator("#app-version")).toContainText("v86");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -347,12 +347,8 @@ for (const size of [
     await page.locator("#filters-close").evaluate((node) => (node as HTMLButtonElement).click());
     await page.waitForTimeout(400);
     expect(browses).toBe(afterOpen);
-    await page.locator("#chip-hint").evaluate((node) => {
-      const button = node as HTMLButtonElement;
-      button.hidden = false;
-      button.click();
-    });
-    await expect.poll(async () => page.evaluate(() => document.body.dataset.deptList || "")).toBe("open");
+    await expect(page.locator("#chip-hint")).toBeHidden();
+    await expect(page.locator("#filter-department")).toBeAttached();
   });
 
   test(`theme, sticky header, star, and review slot at ${size.width}x${size.height}`, async ({ page }) => {
@@ -549,7 +545,8 @@ for (const size of [
     await page.locator("[data-flow='plan']").click();
     const prompt = page.locator("#gitter-guide");
     await expect(prompt.getByRole("button", { name: "No thanks" })).toBeVisible();
-    await expect(prompt.getByRole("button", { name: "Dismiss guide" })).toHaveCount(0);
+    await expect(prompt).toContainText("Needs a look");
+    await expect(prompt.getByRole("button", { name: "Dismiss guide" })).toBeVisible();
     await prompt.getByRole("button", { name: "No thanks" }).click();
     await expect(prompt).toBeHidden();
   });
@@ -623,7 +620,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v83 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v86 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {
@@ -647,11 +644,10 @@ for (const size of [
     await page.getByText("Paste order text instead").click();
     await page.locator("#profile-receipt-paste").fill("Whole Milk");
     await page.getByRole("button", { name: "Read my receipts" }).click();
-    const track = page.locator(".read-cart-track");
+    const track = page.locator(".read-smooth");
     await expect(track).toBeVisible();
-    await expect(page.locator(".read-pusher")).toBeVisible();
-    const first = await track.evaluate((node) => getComputedStyle(node).getPropertyValue("--read-ratio"));
-    await expect.poll(async () => track.evaluate((node) => Number(getComputedStyle(node).getPropertyValue("--read-ratio")))).toBeGreaterThan(Number(first) || 0);
+    const first = await track.locator("span").evaluate((node) => Number.parseFloat(node.style.width) || 0);
+    await expect.poll(async () => track.locator("span").evaluate((node) => Number.parseFloat(node.style.width) || 0)).toBeGreaterThan(first);
   });
 
   test(`needs input can pick a store match and skips the couldn't-find prompt at ${size.width}x${size.height}`, async ({ page }) => {

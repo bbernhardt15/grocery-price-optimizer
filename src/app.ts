@@ -95,6 +95,12 @@ app.get("/api", (_req, res) => {
         "Dry run. Counts masters that would move onto one GTIN key, and how many of those keys would merge. Writes nothing and does not run on deploy.",
       "POST /api/admin/catalog/remerge":
         'Dry run unless the body is { "apply": true, "confirm": "remerge-gtin" }. One apply at a time. A second apply while one is running, or during the cooldown after it finishes, returns 409. Batches are throttled. Nothing runs on deploy.',
+      "GET /api/admin/catalog/kroger-misses":
+        "Recent Kroger lookup misses: name, brand, department, stored UPC, the productId sent, HTTP status, term fallback, and cooldown skip. No secrets. Same admin token as status.",
+      "GET /api/admin/catalog/match-cooldowns":
+        "Dry run. Counts Kroger and Walmart match cooldowns (a finished miss that still lacks the other store). Query store=kroger, walmart, or both. Writes nothing.",
+      "POST /api/admin/catalog/match-cooldowns":
+        'Dry run unless the body is { "apply": true, "confirm": "clear-match-cooldowns", "store": "kroger" }. One apply at a time, throttled, 409 if one is already running. Does not run on deploy.',
       "GET /api/admin/catalog/deactivate-out-of-scope":
         "Dry run. Counts products outside grocery-store scope by the department they are stored in, plus a sample and how the Kroger lookup queue would be re-prioritized. Writes nothing.",
       "POST /api/admin/catalog/deactivate-out-of-scope":

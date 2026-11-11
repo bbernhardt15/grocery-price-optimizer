@@ -28,6 +28,17 @@ describe("mapToDepartment", () => {
 
   it("infers a department from the product name when the retailer sent none", () => {
     assert.equal(mapToDepartment(undefined, "Whole Milk").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Sour Cream").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Large Eggs").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Bengay Ultra Strength Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "Abreva Cold Sore Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "PAAS Easter Egg Dye Kit").departmentId, "other");
+    assert.equal(mapToDepartment(undefined, "Cadbury Creme Egg").departmentId, "snacks");
+    const started = Date.now();
+    for (let i = 0; i < 2000; i += 1) {
+      mapToDepartment(undefined, i % 2 === 0 ? "Bengay Ultra Strength Cream" : "Large Eggs");
+    }
+    assert.ok(Date.now() - started < 500);
     assert.equal(mapToDepartment([], "Large Eggs").subcategory, "Eggs");
     assert.equal(mapToDepartment(undefined, "Paper Towels").departmentId, "household");
     assert.equal(mapToDepartment(undefined, "Dry Dog Food").departmentId, "pet");

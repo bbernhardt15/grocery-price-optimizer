@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 
-export const SHELL_VERSION = "v83";
+export const SHELL_VERSION = "v86";
 
 /** Short commit from Railway, GIT_SHA, or the local git checkout. Never "local". */
 export function commitSha(): string {

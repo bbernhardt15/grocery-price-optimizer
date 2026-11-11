@@ -503,10 +503,28 @@ export async function nextKrogerLookup(now: Date): Promise<{ key: string; name: 
 }
 
 /** Skip a row after a server error. Does not count as a hit or a miss. */
-export async function holdLookup(side: Side, key: string, now: Date, holdMs?: number): Promise<void> {
+export async function holdLookup(
+  side: Side,
+  key: string,
+  now: Date,
+  holdMs?: number,
+  detail?: { code?: string; httpStatus?: number }
+): Promise<void> {
   const field = side === "walmart" ? "matchWalmartHoldUntil" : "matchKrogerHoldUntil";
   const ms = holdMs ?? retryMs();
-  await CatalogMaster.updateOne({ key }, { $set: { [field]: new Date(now.getTime() + ms) } });
+  await CatalogMaster.updateOne({ key }, {
+    $set: {
+      [field]: new Date(now.getTime() + ms),
+      ...(side === "kroger"
+        ? {
+            matchKrogerCode: detail?.code || "",
+            ...(detail?.httpStatus ? { matchKrogerHttp: detail.httpStatus } : {}),
+            matchKrogerTerm: false,
+            matchKrogerSkip: "cooldown",
+          }
+        : {}),
+    },
+  });
 }
 
 export async function markLookupResult(
@@ -570,7 +588,7 @@ export async function finishLookups(
   side: Side,
   picks: LookupPick[],
   now: Date,
-  options?: { forceMiss?: boolean }
+  options?: { forceMiss?: boolean; httpStatus?: number | null; term?: boolean }
 ): Promise<{ attempts: number; hits: number }> {
   if (picks.length === 0) {
     return { attempts: 0, hits: 0 };
@@ -583,6 +601,19 @@ export async function finishLookups(
       hits += 1;
     }
     await markLookupResult(side, pick, hit, now);
+    if (side === "kroger") {
+      await CatalogMaster.updateOne(
+        { key: pick.key },
+        {
+          $set: {
+            matchKrogerCode: pick.code || "",
+            ...(options?.httpStatus ? { matchKrogerHttp: options.httpStatus } : {}),
+            matchKrogerTerm: options?.term === true,
+            matchKrogerSkip: "",
+          },
+        }
+      );
+    }
   }
   const day = utcDay(now);
   const attemptsField = side === "walmart" ? "walmartAttempts" : "krogerAttempts";
