@@ -222,7 +222,7 @@ import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
-import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
+import { browseQueue } from "./shopper/browseQueue.js";
 import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed, storeCheckSettled } from "./shopper/planFallback.js";
 import { joinBrandName } from "./shopper/tripAdd.js";
 import { isHomeScreenApp, shouldApplyShellUpdate } from "./shopper/shellUpdate.js";
@@ -330,9 +330,8 @@ function openStoreHandoff(url, store, kind) {
     void openExternal(safe);
     return;
   }
-  const bridge = handoffBridgePath(store, record.kind, safe);
-  const opened = window.open(bridge, "_blank");
-  if (!opened) window.location.assign(bridge);
+  const opened = window.open(safe, "_blank", "noopener");
+  if (!opened) window.location.assign(safe);
 }
 
 function publishHandoff(store, kind, detail) {
@@ -6803,7 +6802,6 @@ document.addEventListener("click", (event) => {
   }
   const flowButton = target.closest("[data-flow]");
   if (flowButton) {
-    if (clickShielded(tabGuard, Date.now())) return;
     haptic();
     const next = flowButton.getAttribute("data-flow");
     if (next === "plan" && openNeedsInput()) return;
@@ -7403,10 +7401,23 @@ document.addEventListener("click", (event) => {
 });
 $("store-return-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
-  const store = $("store-return")?.dataset.store || "Walmart";
-  markPurchase(store, "bought");
-  $("store-return")?.close();
-  finishCurrentTrip();
+  const dialog = $("store-return");
+  const store = dialog?.dataset.store || "Walmart";
+  try {
+    dialog?.close();
+  } catch {
+    /* already closed */
+  }
+  try {
+    markPurchase(store, "bought");
+  } catch {
+    /* the sheet is already gone */
+  }
+  try {
+    finishCurrentTrip();
+  } catch {
+    toast("The trip sheet is closed. Your list is still here.");
+  }
 });
 $("clear-trip-cancel")?.addEventListener("click", () => $("clear-trip")?.close());
 $("clear-trip-form")?.addEventListener("submit", (event) => {
@@ -10571,6 +10582,7 @@ profileUi = mountProfileOnboarding({
     showStep("add");
     renderEstimate();
     toast(added === 1 ? "Added 1 item." : added ? `Added ${added} items.` : "Nothing new to add.");
+    if (added) void planTrip({ stay: true, quiet: true });
   },
   readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;
@@ -10600,9 +10612,10 @@ profileUi = mountProfileOnboarding({
   loadStaple: async (search) => {
     const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
     if (!browse) return [];
-    const response = await fetch(browse);
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return [];
+    return browseQueue.enqueue(browse, async () => {
+      const response = await fetch(browse, { signal: AbortSignal.timeout(8000) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return [];
     const want = familyFromQuery(search);
     const matched = want ? selectStapleTiles(body.items || [], want, 12, search) : body.items || [];
     return matched.map((tile) => {
@@ -10621,6 +10634,7 @@ profileUi = mountProfileOnboarding({
         variants: tile.variants || [],
         upc: variant.upc || tile.upc || "",
       };
+    });
     });
   },
   onDone: finishProfile,

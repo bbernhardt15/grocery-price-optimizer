@@ -139,6 +139,12 @@ export function setDepartmentFeedDelayForTests(ms: number): void {
   departmentFeedDelayMs = Math.max(0, ms);
 }
 
+/** Test hook. Pauses every browse so a burst cannot hide a stuck loop. */
+let browsePauseMs = 0;
+export function setBrowsePauseForTests(ms: number): void {
+  browsePauseMs = Math.max(0, ms);
+}
+
 function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCatalogRecord[] {
   const tokens = queryTokens(scope.query ?? "");
   const family = familyFromQuery(scope.query ?? "");
@@ -370,7 +376,7 @@ async function firstPageFeed(work: Promise<RawCatalogRecord[]>, warnings: string
 }
 
 async function loadScope(
-  scope: { departmentId?: string; query?: string },
+  scope: { departmentId?: string; query?: string; maxScan?: number },
   zipCode?: string
 ): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
   const query = scope.query?.trim();
@@ -388,6 +394,7 @@ async function loadScope(
       ...(departmentId ? { departmentId } : {}),
       ...(query ? { query } : {}),
       ...(zipCode ? { zipCode } : {}),
+      ...(scope.maxScan ? { maxScan: scope.maxScan } : {}),
     });
     if (stored.records.length > 0) {
       const stores = new Set(stored.storeNames.map((store) => store.toLowerCase()));
@@ -536,12 +543,17 @@ export async function loadKnownProducts(hints?: { queries?: string[]; upcs?: str
 }
 
 export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
+  if (browsePauseMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, browsePauseMs));
+  }
   const query = request.query ? spokenTranscriptAliases(request.query).trim() : request.query?.trim();
   const departmentId = request.departmentId?.trim();
+  const pageLimit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const scope = await loadScope(
     {
       ...(departmentId && departmentId !== "all" ? { departmentId } : {}),
       ...(query ? { query } : {}),
+      maxScan: Math.min(ingestConfig().browseScan, pageLimit * 6),
     },
     request.zipCode
   );

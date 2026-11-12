@@ -29,6 +29,8 @@ import { shouldStreamReview } from "./pricing/reviewStream";
 import { runStorePools } from "./pricing/storePool";
 import { findFreshUpcPrices } from "./pricing/freshCatalogPrice";
 import { createLookupBudget, interleaveByStore, runPricedLookup, stableLineKey } from "./pricing/lookupBudget";
+import { krogerService } from "./krogerService";
+import { KROGER_PRODUCT_ID_BATCH } from "./ingest/krogerBatch";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -44,7 +46,7 @@ export type ResolvedCatalog = {
 /** A small list should finish. A slow store must not hold the rest forever. */
 /** Return what we have inside the time a phone will wait. Partials stream before this. */
 const PRICE_BUDGET_MS = 9_000;
-/** Kroger's public Products API accepts one product id per call, so the pool is the batch. Capped to avoid 429s. */
+/** Name searches still run a few at a time. Known UPCs go out as one product-id batch. */
 const PRICE_POOL = 8;
 
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
@@ -310,6 +312,32 @@ export async function resolveCatalogProducts(
   const storeLeft = new Map<string, number>();
   const requestCache = new Map<string, CatalogProduct[]>();
   const budget = createLookupBudget(Date.now(), { deadlineMs: PRICE_BUDGET_MS });
+  const krogerBatch = new Map<string, CatalogProduct[]>();
+  if (competing.some((name) => name.trim().toLowerCase() === "kroger") && locationId) {
+    const wanted: Array<{ name: string; upc: string }> = [];
+    for (const line of lines) {
+      const upc = hooks?.upcByName?.get(line.name.toLowerCase()) || "";
+      if (upc) wanted.push({ name: line.name, upc });
+    }
+    for (let index = 0; index < wanted.length && Date.now() < budget.deadlineAt; index += KROGER_PRODUCT_ID_BATCH) {
+      const slice = wanted.slice(index, index + KROGER_PRODUCT_ID_BATCH);
+      try {
+        const page = await krogerService.productsByIds(slice.map((row) => row.upc), locationId);
+        for (const row of slice) {
+          const code = row.upc.replace(/\D/g, "");
+          const hits = page.products.filter((product) => {
+            const id = `${product.productId || ""} ${product.upc || ""}`.replace(/\D/g, "");
+            return code && id.includes(code.slice(-11));
+          });
+          if (hits.length) krogerBatch.set(row.name.toLowerCase(), hits);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.info(`price Kroger batch ${message}`);
+        break;
+      }
+    }
+  }
   for (const storeName of competing) storeLeft.set(storeName, lines.length);
   const jobs: Array<{ storeName: string; lineName: string; run: () => Promise<void> }> = [];
   // One store's lines run before the next so the first store can stream
@@ -357,6 +385,13 @@ export async function resolveCatalogProducts(
       }
 
       const upc = hooks?.upcByName?.get(line.name.toLowerCase()) || "";
+      const batched = storeName.trim().toLowerCase() === "kroger" ? krogerBatch.get(line.name.toLowerCase()) : undefined;
+      if (batched?.length) {
+        add(batched, line.name, "live");
+        acc.liveHits += 1;
+        source = "batch";
+        return;
+      }
       if (upc) {
         const fresh = await findFreshUpcPrices({ storeName, upc, locationId: krogerId, zip });
         if (fresh.length > 0) {

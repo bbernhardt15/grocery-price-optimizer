@@ -1077,11 +1077,11 @@ export function mountProfileOnboarding(deps = {}) {
       readTick += 1;
       for (const card of readCards) {
         if (card.status !== "reading") continue;
-        const floor = Math.max(0, Math.min(0.92, Number(card.ratio) || 0));
-        card.walk = Math.min(0.92, Math.max(floor, Number(card.walk) || 0) + 0.2);
+        card.ratio = Math.min(0.92, Math.max(Number(card.ratio) || 0, 0) + 0.05);
+        card.walk = card.ratio;
         patchReadCard(card);
       }
-    }, 800);
+    }, 400);
   }
 
   function applyReadProgress(event) {
@@ -1110,7 +1110,9 @@ export function mountProfileOnboarding(deps = {}) {
         card.items.push(name);
       }
     }
-    if (Number.isFinite(Number(event.fileRatio))) card.ratio = Math.max(0, Math.min(1, Number(event.fileRatio)));
+    if (Number.isFinite(Number(event.fileRatio))) {
+      card.ratio = Math.max(Number(card.ratio) || 0, Math.max(0, Math.min(1, Number(event.fileRatio))));
+    }
     if (event.status === "error") {
       card.status = "error";
       card.error = event.error || event.message || "Couldn't read that file.";
@@ -1717,6 +1719,15 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target || target.id === "profile-next") return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.dataset.missingSkip) {
+      const family = target.dataset.missingSkip;
+      const label = target.dataset.missingLabel || family;
+      draft = setCategoryPreference(draft, { family, mode: "never", brand: "", productId: "", size: "", attributes: [], label }, Date.now());
+      persist(draft);
+      const host = target.closest(".missing-dept");
+      if (host) host.textContent = `${label} left off.`;
+      return;
+    }
     if (target.dataset.missingDept) {
       const family = target.dataset.missingDept;
       const label = target.dataset.missingLabel || family;

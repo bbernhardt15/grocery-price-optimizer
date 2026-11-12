@@ -150,6 +150,42 @@ router.get("/catalog/suggest", async (req, res) => {
   });
 });
 
+const BROWSE_RESPONSE_CAP = 180_000;
+
+function slimBrowseItem(item: unknown): unknown {
+  if (!item || typeof item !== "object") return item;
+  const row = item as { variants?: unknown[]; imageUrls?: unknown[]; gaps?: unknown[] };
+  const variants = Array.isArray(row.variants) ? row.variants.slice(0, 4) : row.variants;
+  return {
+    ...row,
+    ...(Array.isArray(row.imageUrls) ? { imageUrls: row.imageUrls.slice(0, 1) } : {}),
+    ...(Array.isArray(variants)
+      ? {
+          variants: variants.map((variant) => {
+            if (!variant || typeof variant !== "object") return variant;
+            const sized = variant as { imageUrls?: unknown[]; gaps?: unknown[] };
+            return {
+              ...sized,
+              ...(Array.isArray(sized.imageUrls) ? { imageUrls: sized.imageUrls.slice(0, 1) } : {}),
+              gaps: [],
+            };
+          }),
+        }
+      : {}),
+    gaps: [],
+  };
+}
+
+function capBrowsePage<T extends { items?: unknown[] }>(page: T): T {
+  let body = page;
+  if (JSON.stringify(body).length <= BROWSE_RESPONSE_CAP) return body;
+  body = {
+    ...page,
+    items: (page.items || []).slice(0, 24).map((item) => slimBrowseItem(item)),
+  };
+  return body;
+}
+
 router.get("/catalog/browse", async (req, res) => {
   const zipCode = takeZip(req.query.zip ?? req.query.zipCode, res);
   if (!zipCode) return;
@@ -175,7 +211,7 @@ router.get("/catalog/browse", async (req, res) => {
       ...(req.query.cursor ? { cursor: String(req.query.cursor) } : {}),
       ...(zipCode ? { zipCode } : {}),
     });
-    res.json(page);
+    res.json(capBrowsePage(page));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: `Catalog browse failed: ${message}` });

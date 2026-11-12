@@ -10,6 +10,7 @@ import { IngestBudget, IngestCheckpoint, CatalogMaster, CatalogOffer, ShopperZip
 import { recategorizeProgress } from "./maintenance";
 import { refreshActivityToday, refreshQueueSize } from "./refresh";
 import { KROGER_PRODUCT_ID_BATCH } from "./krogerBatch";
+import { loopSnapshot } from "../runtime/loopGuard";
 
 export function presentIngestError(entry: unknown): IngestErrorDetail | { message: string } {
   if (typeof entry === "string") {
@@ -233,6 +234,7 @@ export async function catalogStatus() {
     enabled: config.enabled,
     dbFirst: config.dbFirst,
     day,
+    loop: loopSnapshot(),
     counts: {
       products,
       offers,

@@ -29,6 +29,10 @@ export function tripActionBarHtml(options = {}) {
   const escape = options.escapeHtml || escapeText;
   const count = Math.max(0, Math.floor(Number(options.count) || 0));
   return `<div class="trip-action-bar" id="trip-action-bar">
+    <div class="choice-stack trip-action-ends">
+      <button type="button" class="primary" data-trip-add="1" id="learned-add-trip-top"${options.canAdd ? "" : " disabled"}>Add these items to my trip</button>
+      <button type="button" class="ghost" id="learned-empty-trip-top">Start with an empty trip</button>
+    </div>
     <div class="trip-action-tools">
       <button type="button" class="ghost trip-select-all" data-trip-all="all">Select all</button>
       <button type="button" class="ghost" data-trip-all="none">Clear all</button>
