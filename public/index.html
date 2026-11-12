@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="system">
+<html lang="en" data-theme="system" data-boot="pending">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -145,8 +145,8 @@
             <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
             <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
           </section>
+          <p id="app-version" class="muted app-version">v90</p>
           </div>
-          <p id="app-version" class="muted app-version">v89</p>
         </aside>
       </div>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -377,7 +377,6 @@
           <button type="button" data-flow="add" aria-current="step" aria-label="Build"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h7v2H4v-2zM17 14h2v3h3v2h-3v3h-2v-3h-3v-2h3z"/></svg><span>Build</span></button>
           <button type="button" data-flow="plan" aria-label="Review"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 4h6v7H5V4zm8 0h6v4h-6V4zM5 13h6v7H5v-7zm8-3h6v10h-6V10z"/></svg><span>Review</span></button>
           <button type="button" data-flow="shop" aria-label="In-store"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 9l1.2-4h13.6L20 9H4zm0 2h16v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8z"/></svg><span>In-store</span></button>
-          <button type="button" id="tab-favorites" aria-label="Favorites"><svg class="tab-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 17.3l-6.2 3.7 1.6-7L2 9.2l7.2-.6L12 2l2.8 6.6 7.2.6-5.4 4.8 1.6 7z"/></svg><span>Favorites</span></button>
         </nav>
         <div class="list-bar" id="list-bar">
           <button type="button" id="list-bar-btn" class="list-bar-btn">
@@ -657,6 +656,10 @@
       <div class="sheet-body" id="trip-value-body"></div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"><span id="toast-text"></span><button type="button" id="toast-action" hidden>Undo</button></div>
+    <div id="connect-confirm" class="connect-confirm" hidden role="status">
+      <span class="connect-check" aria-hidden="true">✓</span>
+      <p>Kroger connected</p>
+    </div>
     <script src="/native-config.js?v=store-2"></script>
     <script src="/native-shell.js?v=store-2"></script>
     <script src="/sentry-loader.js?v=sentry-1"></script>

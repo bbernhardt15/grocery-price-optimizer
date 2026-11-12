@@ -611,11 +611,12 @@ export function mountImport(deps) {
               : "";
         foundCards.push(`<li class="import-tile" data-key="${escapeHtml(item.key)}">
           <div class="import-tile-head">
-            ${image ? `<img src="${escapeHtml(media(image))}" alt="" />` : ""}
+            ${image ? `<img data-photo="product" src="${escapeHtml(media(image))}" alt="" />` : `<span class="product-placeholder" aria-hidden="true"></span>`}
             <div>
               ${kicker}
               ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
               <h3>${escapeHtml(title)}</h3>
+              <button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(title)}" data-fav-brand="${escapeHtml(brand || "")}" data-fav-id="${escapeHtml(product?.id || "")}" aria-label="Favorite ${escapeHtml(title)}">★</button>
               ${flag}
               ${item.shelfNote ? `<p class="import-note">${escapeHtml(item.shelfNote)}</p>` : ""}
             </div>

@@ -278,9 +278,8 @@ export function formatDollars(amount: unknown): string {
 export function receiptLine(count: number, total?: number): string {
   const n = Math.max(0, Math.floor(count));
   const all = Math.max(n, Math.floor(Number(total) || n));
-  const noun = all === 1 ? "item that is" : "items that are";
-  if (all > n) return `Showing ${n} of ${all} ${noun} not on your list yet. Choose any, then add them.`;
-  return `I found ${n} ${noun} not on your list yet. Choose any, then add them.`;
+  if (all > n) return `These were on past receipts but aren't on this list. Showing ${n} of ${all}. Add any?`;
+  return "These were on past receipts but aren't on this list. Add any?";
 }
 
 export function runningLowLine(names: string[]): string {
@@ -487,7 +486,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
           ...picks.map((name) => ({ id: `pick:${normalizeName(name)}`, label: name, action: "toggle-pick", name })),
           ...(hidden > 0 ? [{ id: "more-picks", label: `Show ${hidden} more`, action: "show-rest" }] : []),
           { id: "add", label: "Add selected", action: "commit-picks" },
-          { id: "no", label: "No thanks", action: "later" },
+          { id: "no", label: "Skip", action: "later" },
         ],
       };
     }

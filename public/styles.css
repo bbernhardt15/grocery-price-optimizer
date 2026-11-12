@@ -816,7 +816,7 @@ dialog.shelf-sheet .sheet-body {
 }
 .step-bar {
   position: static;
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
   width: 100%; min-width: 0; padding: 0; background: transparent;
 }
 .step-bar button {
@@ -1509,6 +1509,8 @@ dialog.list-sheet .sheet-actions { position: static; flex: none; }
   font-weight: 650;
 }
 .profile-warning[hidden] { display: none; }
+html[data-boot="pending"] #profile-onboard { display: none !important; }
+dialog.profile-onboard:not([open]) { display: none !important; }
 dialog.profile-onboard {
   width: 100%;
   max-width: 480px;
@@ -1751,7 +1753,64 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   gap: 10px;
   padding: 12px 0;
 }
-.import-progress[hidden] { display: none; }
+.connect-confirm {
+  position: fixed;
+  z-index: 80;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  padding: 22px 24px;
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+.connect-confirm[hidden] { display: none !important; }
+.connect-confirm p { margin: 0; font-family: var(--display); font-size: 1.25rem; font-weight: 700; }
+.connect-check {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.fav-star {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.product-placeholder {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  background: var(--bg-accent);
+}
+.import-progress[data-kind="done"] .import-spinner,
+.import-progress[data-kind="error"] .import-spinner { display: none; }
+.import-progress[data-kind="error"] {
+  align-items: flex-start;
+  color: var(--muted);
+  padding: 0 0 8px;
+}
 .import-spinner {
   width: 18px;
   height: 18px;
@@ -2395,19 +2454,16 @@ dialog.handoff-sheet[open] .sheet-body {
 .needs-sheet { background: var(--surface); color: var(--ink); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35); }
 .trip-add-body { padding-bottom: 24px; }
 .app-version {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: calc(8px + var(--safe-bottom));
-  z-index: 2;
-  margin: 0;
-  padding: 8px 0 2px;
+  position: static;
+  margin: 16px 16px calc(12px + var(--safe-bottom));
+  padding: 12px 0 0;
   font-size: 0.85rem;
-  background: var(--surface);
+  background: transparent;
   border-top: 1px solid var(--line);
   pointer-events: none;
 }
-.menu-row { scroll-margin-bottom: 72px; }
+.menu-icon { display: none; }
+.menu-row { display: flex; align-items: center; min-height: 44px; }
 @media (prefers-reduced-motion: reduce) {
   .read-pusher { display: none; }
 }

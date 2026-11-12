@@ -38,7 +38,7 @@ export function inStoreShareText(sections) {
 }
 
 export function inStoreShareActionsHtml() {
-  return `<div class="instore-share"><button type="button" class="primary" data-share-list>Share list</button><button type="button" class="ghost" data-save-pdf>Save as PDF</button></div>`;
+  return `<div class="instore-share"><button type="button" class="primary" data-share-list>Share list</button><button type="button" class="ghost" data-save-pdf>Print list</button></div>`;
 }
 
 function escapeText(value) {

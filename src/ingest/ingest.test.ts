@@ -442,7 +442,8 @@ describe("catalog ingestion", () => {
     assert.equal(page.catalogSource, "database");
     assert.ok(page.items.some((item) => item.upc?.includes("11122233348") || item.name === "Whole Milk"));
     const stores = new Set(page.items.flatMap((item) => item.offers.map((offer) => offer.storeName)));
-    assert.ok(stores.has("Aldi"));
+    assert.equal(stores.has("Aldi"), false);
+    assert.ok(stores.has("Kroger") || stores.has("Walmart"));
     assert.equal(page.items[0] && page.items[1] ? page.items[0].bestOffer.price <= page.items[1].bestOffer.price : true, true);
     delete process.env.CATALOG_DB_FIRST;
   });

@@ -5,7 +5,8 @@
 
 import { getUserProfile, saveUserProfile } from "./profile.js";
 import { familyLabel, forgetPreference, unblockProduct } from "./productPreference.js";
-import { modeLabel } from "./categoryPreference.js";
+import { modeLabel, setCategoryPreference } from "./categoryPreference.js";
+import { meatPreferenceHtml } from "./receiptCopy.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -77,7 +78,8 @@ export function mountMyProducts(deps = {}) {
             <button type="button" class="text-btn" data-products-later>Maybe later</button>
           </div>
         </div>`;
-    body.innerHTML = `${note}${how}<ul class="my-product-list">${rows}</ul>${blocks}`;
+    const meat = meatPreferenceHtml(profile.categoryPreferences?.meat?.mode);
+    body.innerHTML = `${note}${meat}${how}<ul class="my-product-list">${rows}</ul>${blocks}`;
   }
 
   function open() {
@@ -103,6 +105,19 @@ export function mountMyProducts(deps = {}) {
     }
     if (target.hasAttribute("data-products-later")) {
       storage.setItem("gg-products-note", "1");
+      paint();
+      return;
+    }
+    if (target.dataset.meatMode === "never" || target.dataset.meatMode === "cheapest") {
+      saveUserProfile(
+        storage,
+        setCategoryPreference(
+          profile,
+          { family: "meat", mode: target.dataset.meatMode, brand: "", productId: "", size: "", attributes: [], label: "Meat & Seafood" },
+          Date.now()
+        )
+      );
+      deps.onChange?.();
       paint();
       return;
     }

@@ -273,9 +273,9 @@ for (const size of [
       );
     });
     await unlock(page);
-    await expect(page.locator("#tab-favorites")).toBeVisible();
+    await expect(page.locator("#usuals-toggle")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v89");
+    await expect(page.locator("#app-version")).toContainText("v90");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -393,7 +393,7 @@ for (const size of [
     await page.locator("[data-star-item]").evaluate((node) => (node as HTMLButtonElement).click());
     await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-usuals") || "[]") as Array<{ starred?: boolean; name?: string }>).some((row) => row.starred && /milk/i.test(row.name || "")))).toBe(true);
     await page.locator("#list-close").click();
-    await page.locator("#tab-favorites").click();
+    await page.locator("#usuals-toggle").click();
     await expect(page.locator("#favorites-usuals")).toContainText(/Milk/);
     await page.locator('[data-flow="plan"]').click();
     const slot = await page.evaluate(() => {
@@ -621,7 +621,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v89 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v90 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {

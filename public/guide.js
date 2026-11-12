@@ -153,13 +153,29 @@ export function mountGuide(deps = {}) {
     if (box) box.checked = settings.enabled !== false;
   }
 
+  function lockPage(on) {
+    const shell = doc.querySelector(".shell");
+    if (shell instanceof HTMLElement) {
+      if (on) shell.setAttribute("inert", "");
+      else shell.removeAttribute("inert");
+    }
+  }
+
   function hidePrompt() {
     host.hidden = true;
     host.removeAttribute("data-moment");
     host.removeAttribute("data-chips");
+    host.setAttribute("role", "region");
+    host.removeAttribute("aria-modal");
     if (chipsEl) chipsEl.replaceChildren();
     if (lineEl) lineEl.textContent = "";
     if (liveEl) liveEl.textContent = "";
+    const dismiss = host.querySelector("[data-guide-dismiss]");
+    if (dismiss) {
+      dismiss.textContent = "×";
+      dismiss.setAttribute("aria-label", DISMISS_LABEL);
+    }
+    lockPage(false);
   }
 
   function paint(prompt) {
@@ -191,6 +207,26 @@ export function mountGuide(deps = {}) {
     }
     if (liveEl && !same) liveEl.textContent = prompt.line || "";
     if (!same) typeLine(prompt.line || "");
+    const dismiss = host.querySelector("[data-guide-dismiss]");
+    const receipt = prompt.moment === "receipt";
+    lockPage(receipt);
+    if (receipt) {
+      host.setAttribute("role", "dialog");
+      host.setAttribute("aria-modal", "true");
+      if (dismiss) {
+        dismiss.textContent = "Skip";
+        dismiss.setAttribute("aria-label", "Skip");
+      }
+      const first = host.querySelector("button");
+      if (first instanceof HTMLElement) first.focus();
+    } else {
+      host.setAttribute("role", "region");
+      host.removeAttribute("aria-modal");
+      if (dismiss) {
+        dismiss.textContent = "×";
+        dismiss.setAttribute("aria-label", DISMISS_LABEL);
+      }
+    }
   }
 
   function typeLine(line) {
@@ -276,16 +312,44 @@ export function mountGuide(deps = {}) {
     }, GUIDE_QUIET_MS + 20);
   }
 
+  host.addEventListener("keydown", (event) => {
+    if (host.hidden || host.dataset.moment !== "receipt" || event.key !== "Tab") return;
+    const items = [...host.querySelectorAll("button")].filter((button) => button instanceof HTMLButtonElement && !button.disabled);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && doc.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && doc.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+
+  function dismissOpenPrompt(event) {
+    if (host.hidden) return;
+    const raw = event?.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    if (element && !element.closest("[data-guide-dismiss]")) return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const moment = current?.moment || host.dataset.moment || "";
+    if (moment) session = noteDeclined(session, moment);
+    current = null;
+    if (moment !== "receipt") persist(dismissGuide(settings));
+    hidePrompt();
+  }
+  host.querySelector("[data-guide-dismiss]")?.addEventListener("click", dismissOpenPrompt);
+  host.querySelector("[data-guide-dismiss]")?.addEventListener("pointerup", dismissOpenPrompt);
+
   host.addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest("button") : null;
+    const raw = event.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    const button = element?.closest("button") || null;
     if (!button || !host.contains(button)) return;
     event.stopPropagation();
-    if (button.hasAttribute("data-guide-dismiss")) {
-      persist(dismissGuide(settings));
-      current = null;
-      host.hidden = true;
-      return;
-    }
+    if (button.hasAttribute("data-guide-dismiss")) return;
     if (button.hasAttribute("data-guide-off")) {
       persist(setGuideEnabled(settings, false));
       current = null;

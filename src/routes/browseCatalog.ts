@@ -7,6 +7,7 @@ import {
   suggestCatalog,
 } from "../catalog/service";
 import { catalogCoverage } from "../catalog/coverage";
+import { restrictReleaseBanners, restrictReleaseCoverage } from "../catalog/releaseStores";
 import type { BrowseSort, SizeClass } from "../catalog/types";
 import { noteShopperZip } from "../ingest/runner";
 import { flippConsumerEnabled, listWeeklyAdBanners } from "../pricing/flipp/client";
@@ -86,8 +87,8 @@ router.get("/catalog/coverage", async (req, res) => {
     }
   }
   res.json({
-    stores: catalogCoverage(coverageFlags()),
-    ...(zipCode ? { zip: zipCode, weeklyAdBanners: weeklyAdBanners ?? [] } : {}),
+    stores: restrictReleaseCoverage(catalogCoverage(coverageFlags())),
+    ...(zipCode ? { zip: zipCode, weeklyAdBanners: restrictReleaseBanners(weeklyAdBanners ?? []) } : {}),
     ...(weeklyAdWarning ? { warning: weeklyAdWarning } : {}),
   });
 });

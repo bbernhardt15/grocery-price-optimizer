@@ -261,7 +261,7 @@ test("receipt choices stay selected after the guide repaints", async ({ page }) 
     fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
   );
   const guide = page.locator("#gitter-guide");
-  await expect(guide).toContainText("I found 3 items that are not on your list yet.");
+  await expect(guide).toContainText("These were on past receipts but aren't on this list.");
   await guide.locator("[data-guide-name='Whole Milk']").click();
   await page.waitForTimeout(450);
   await expect(guide.locator("[data-guide-name='Whole Milk']")).toHaveAttribute("aria-pressed", "true");
@@ -786,7 +786,7 @@ test("four receipt suggestions can be selected and added", async ({ page }) => {
   await unlock(page);
   await page.evaluate(() => fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
   const guide = page.locator("#gitter-guide");
-  await expect(guide).toContainText("I found 4 items that are not on your list yet.");
+  await expect(guide).toContainText("These were on past receipts but aren't on this list.");
   for (const name of ["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"]) {
     await guide.locator(`[data-guide-name='${name}']`).click();
     await expect(guide.locator(`[data-guide-name='${name}']`)).toHaveAttribute("aria-pressed", "true");

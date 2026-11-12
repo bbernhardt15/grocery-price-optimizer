@@ -18,6 +18,49 @@ body:has(#gitter-guide:not([hidden]))::before {
   z-index: 70;
   pointer-events: none;
 }
+body:has(#gitter-guide[data-moment="receipt"]:not([hidden]))::before {
+  pointer-events: auto;
+  z-index: 85;
+}
+#gitter-guide[data-moment="receipt"] {
+  pointer-events: auto;
+  top: max(12px, env(safe-area-inset-top));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 90;
+  align-items: stretch;
+}
+#gitter-guide[data-moment="receipt"] .gitter-guide-copy {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+#gitter-guide[data-moment="receipt"] .gitter-guide-chips {
+  max-height: 160px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+#gitter-guide[data-moment="receipt"] .gitter-guide-chip {
+  flex: 0 0 auto;
+  width: 100%;
+}
+@media (max-height: 740px) {
+  #gitter-guide[data-moment="receipt"] {
+    max-height: calc(100dvh - 24px);
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
 .gitter-guide {
   position: fixed;
   background: var(--sale-soft, #fff4e5);

@@ -158,7 +158,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       assert.ok(add.scroll <= add.inner + 1);
       assert.deepEqual(
         add.labels.map((label: { text: string }) => label.text),
-        ["Build", "Review", "In-store", "Favorites"]
+        ["Build", "Review", "In-store"]
       );
       for (const label of add.labels) {
         assert.ok(label.height >= 44, `${label.text} is at least 44px`);
