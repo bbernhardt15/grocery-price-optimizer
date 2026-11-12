@@ -73,9 +73,9 @@ function streamed(total: number) {
 }
 
 describe("twelfth phone test, Review and In-store", () => {
-  it("bumps the shell cache to v87", () => {
-    assert.equal(SHELL_CACHE, "v87");
-    assert.match(sw, /grocery-gitter-shell-v87/);
+  it("bumps the shell cache to v88", () => {
+    assert.equal(SHELL_CACHE, "v88");
+    assert.match(sw, /grocery-gitter-shell-v88/);
   });
 
   it("ends a cold review with a retry instead of an endless checking shell", () => {

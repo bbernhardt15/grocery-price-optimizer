@@ -1,5 +1,6 @@
 import { krogerAisleLabel } from "./catalog/krogerAisle";
 import { krogerProductIdForLookup, krogerRequestId } from "./catalog/normalize";
+import { krogerProductIdList } from "./ingest/krogerBatch";
 import { krogerStartParam } from "./ingest/krogerTerms";
 import { readKrogerStore, rememberKrogerStore } from "./krogerLocationCache";
 import { buildKrogerSearchTerm, shorterKrogerSearchTerm } from "./krogerSearchTerm";
@@ -515,9 +516,16 @@ export class KrogerService {
       params.set("filter.locationId", locationId.trim());
     }
 
+    let query = params.toString();
+    if (productId?.includes(",")) {
+      query = query.replace(
+        /filter\.productId=([^&]*)/,
+        (_match, value: string) => `filter.productId=${value.replace(/%2C/gi, ",")}`
+      );
+    }
     let response: Response;
     try {
-      response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+      response = await fetch(`${PRODUCTS_ENDPOINT}?${query}`, {
         method: "GET",
         cache: "no-cache",
         headers: {
@@ -647,8 +655,32 @@ export class KrogerService {
   }
 
   /**
+   * GET /v1/products?filter.productId={id},{id}
+   * Up to 50 comma-separated 13-digit ids. One HTTP call. Shopper search does
+   * not use this. Ingest charges the whole list as one budget unit.
+   */
+  async productsByIds(
+    productIds: string[],
+    locationId?: string
+  ): Promise<{ products: CatalogProduct[]; returned: number }> {
+    const ids = krogerProductIdList(productIds);
+    if (ids.length === 0) {
+      return { products: [], returned: 0 };
+    }
+    const storeId = locationId?.trim() || undefined;
+    const page = await this.fetchProductPayload("", storeId, {
+      productId: ids.join(","),
+      limit: ids.length,
+    });
+    const products = page.products
+      .map((product) => toCatalogProduct(product, storeId))
+      .filter((product): product is CatalogProduct => product !== null);
+    return { products, returned: page.products.length };
+  }
+
+  /**
    * GET /v1/products?filter.productId={id}
-   * Kroger's id is the 13-digit UPC body (no check digit). One id per call.
+   * Kroger's id is the 13-digit UPC body (no check digit).
    * Shopper search does not use this. Ingest charges it on the Kroger budget.
    */
   async productsById(

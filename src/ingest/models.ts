@@ -158,6 +158,9 @@ const matchDaySchema = new Schema({
   walmartHits: { type: Number, default: 0 },
   krogerAttempts: { type: Number, default: 0 },
   krogerHits: { type: Number, default: 0 },
+  /** HTTP calls. A 50-id product batch is one call. Attempts stay one per item. */
+  walmartCalls: { type: Number, default: 0 },
+  krogerCalls: { type: Number, default: 0 },
   /** attempts and hits keyed by department id, for the health check. */
   krogerByDepartment: { type: Schema.Types.Mixed, default: undefined },
 });

@@ -7,6 +7,7 @@ import { Product } from "../models/Product";
 import { utcDay } from "./budget";
 import { ingestConfig } from "./config";
 import { CATALOG_DEMAND_DAYS, demandText } from "./demand";
+import { KROGER_PRODUCT_ID_BATCH } from "./krogerBatch";
 import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer } from "./models";
 
 /**
@@ -654,6 +655,17 @@ export async function finishLookups(
   return { attempts: picks.length, hits };
 }
 
+/** One kept Products or term HTTP call. A batch counts as one. Items are attempts, not calls. */
+export async function noteMatchCalls(side: Side, calls: number, now: Date): Promise<void> {
+  const kept = Math.max(0, Math.floor(calls));
+  if (kept === 0) {
+    return;
+  }
+  const field = side === "walmart" ? "walmartCalls" : "krogerCalls";
+  const day = utcDay(now);
+  await CatalogMatchDay.updateOne({ day }, { $inc: { [field]: kept }, $setOnInsert: { day } }, { upsert: true });
+}
+
 export type KrogerQueueSweep = {
   examined: number;
   eligible: number;
@@ -779,6 +791,8 @@ export async function matchProgress(now = new Date()) {
       walmartHits?: number;
       krogerAttempts?: number;
       krogerHits?: number;
+      walmartCalls?: number;
+      krogerCalls?: number;
       krogerByDepartment?: Record<string, { attempts?: number; hits?: number }>;
     } | null>(),
     countCooldowns("walmart", now),
@@ -790,6 +804,8 @@ export async function matchProgress(now = new Date()) {
   const walmartHits = ledger?.walmartHits ?? 0;
   const krogerAttempts = ledger?.krogerAttempts ?? 0;
   const krogerHits = ledger?.krogerHits ?? 0;
+  const walmartCalls = ledger?.walmartCalls ?? 0;
+  const krogerCalls = ledger?.krogerCalls ?? 0;
   const krogerByDepartment: Record<string, { attempts: number; hits: number; rate: number | null }> = {};
   for (const [id, bucket] of Object.entries(ledger?.krogerByDepartment ?? {})) {
     const attempts = bucket?.attempts ?? 0;
@@ -804,8 +820,10 @@ export async function matchProgress(now = new Date()) {
       kroger: rate(krogerHits, krogerAttempts),
       walmartAttempts,
       walmartHits,
+      walmartCalls,
       krogerAttempts,
       krogerHits,
+      krogerCalls,
       krogerByDepartment,
       walmartMisses: Math.max(0, walmartAttempts - walmartHits),
       krogerMisses: Math.max(0, krogerAttempts - krogerHits),
@@ -816,5 +834,6 @@ export async function matchProgress(now = new Date()) {
     lookupShare: config.matchLookupShare,
     retryDays: config.matchRetryDays,
     walmartBatch: config.walmartLookupBatch,
+    krogerBatch: KROGER_PRODUCT_ID_BATCH,
   };
 }

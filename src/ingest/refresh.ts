@@ -7,6 +7,7 @@ import { SharedList } from "../models/SharedList";
 import { utcDay } from "./budget";
 import { staleRatioOf } from "./config";
 import { CATALOG_DEMAND_DAYS } from "./demand";
+import { KROGER_PRODUCT_ID_BATCH } from "./krogerBatch";
 import { CatalogDemand, CatalogMaster, CatalogOffer, CatalogRefreshDay } from "./models";
 import { REFRESH_MAX_MISSES, WALMART_LOOKUP_IDS_MAX, walmartItemIdForLookup } from "./walmartRefreshBatch";
 
@@ -231,6 +232,10 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
     .lean<OfferRow[]>();
 }
 
+function refreshIdCap(storeName: "Walmart" | "Kroger"): number {
+  return storeName === "Kroger" ? KROGER_PRODUCT_ID_BATCH : WALMART_LOOKUP_IDS_MAX;
+}
+
 /**
  * Stale offers for one store, skipping general merchandise marked
  * refreshExcluded. A stale offer the rules mark excluded (auto, RV,
@@ -238,14 +243,15 @@ async function staleOffers(storeName: string, now: Date, limit: number, keys?: s
  * the next pass does not spend a call on it. Saved lists and shared lists come first, then popular
  * items, price watches, recent searches, merged products, and the oldest
  * stale offer. Saved lists and usuals (starter-book favorites) share the
- * list tier, and each tier is the stalest offer first.
+ * list tier, and each tier is the stalest offer first. Kroger may return 50
+ * ids. Walmart stays at 20.
  */
 export async function nextRefreshPicks(
   storeName: "Walmart" | "Kroger",
   now: Date,
   limit: number
 ): Promise<RefreshPick[]> {
-  const want = Math.max(0, Math.min(WALMART_LOOKUP_IDS_MAX, Math.floor(limit)));
+  const want = Math.max(0, Math.min(refreshIdCap(storeName), Math.floor(limit)));
   if (want === 0) {
     return [];
   }
