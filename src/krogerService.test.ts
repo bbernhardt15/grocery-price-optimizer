@@ -490,4 +490,48 @@ describe("KrogerService.searchProducts", () => {
     const numericUrl = urls.filter((url) => url.includes("/products")).at(-1) ?? "";
     assert.match(numericUrl, /filter\.productId=0007070820050/);
   });
+
+  it("asks for up to 50 product ids in one filter.productId list at one location", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    const urls: string[] = [];
+    mockFetch(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({
+        data: [
+          {
+            productId: "0004138761190",
+            upc: "0004138761190",
+            brand: "4C",
+            description: "4C Parmesan Grated Cheese",
+            categories: ["Dairy"],
+            items: [{ price: { regular: 5.17 }, size: "8 oz" }],
+          },
+          {
+            productId: "0007835470318",
+            upc: "0007835470318",
+            brand: "Cabot Creamery",
+            description: "Cabot Extra Sharp Cheddar",
+            categories: ["Dairy"],
+            items: [{ price: { regular: 3.14 }, size: "8 oz" }],
+          },
+        ],
+      });
+    });
+
+    const service = new KrogerService();
+    const page = await service.productsByIds(
+      ["0004138761190", "0002100030165", "0007835470318"],
+      "01400902"
+    );
+    assert.deepEqual(page.products.map((product) => product.productId), ["0004138761190", "0007835470318"]);
+    const productsUrl = urls.find((url) => url.includes("/products?")) ?? "";
+    assert.match(productsUrl, /filter\.productId=0004138761190,0002100030165,0007835470318/);
+    assert.match(productsUrl, /filter\.locationId=01400902/);
+    assert.equal(productsUrl.includes("filter.term="), false);
+  });
 });

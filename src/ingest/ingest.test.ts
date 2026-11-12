@@ -4008,4 +4008,280 @@ describe("catalog ingestion", () => {
     const offer = await CatalogOffer.findOne({ productKey: key, storeName: "Kroger" }).lean<{ price?: number } | null>();
     assert.equal(offer?.price, 3.19);
   });
+
+  it("batches Kroger product ids and sends a partial miss down the per-item path", async () => {
+    const now = new Date("2026-11-12T18:00:00.000Z");
+    const rows = [
+      { upc: "0004138761190", name: "4C Parmesan Grated Cheese", brand: "4C", price: 5.17 },
+      { upc: "0002100030165", name: "Breakstone's All Natural Sour Cream", brand: "Breakstone's", price: 3.19 },
+      { upc: "0007835470318", name: "Cabot Creamery Extra Sharp Cheddar Cheese Block Refrigerated", brand: "Cabot Creamery", price: 3.14 },
+    ];
+    const keys = rows.map((row) => upcKey(row.upc));
+    assert.equal(keys.every((key) => typeof key === "string"), true);
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await CatalogMatchDay.deleteMany({ day: "2026-11-12" });
+    for (const row of rows) {
+      const key = upcKey(row.upc);
+      await CatalogMaster.create({
+        key,
+        name: row.name,
+        brand: row.brand,
+        departmentId: "dairy-eggs",
+        upc: row.upc,
+        walmartItemId: `wm-${row.upc}`,
+        lastSeenAt: now,
+        status: "active",
+      });
+    }
+    await CatalogMaster.updateMany({ key: { $nin: keys } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400902" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const batches: Array<{ ids: string[]; locationId?: string }> = [];
+    const singles: Array<{ productId: string; locationId?: string }> = [];
+    const terms: string[] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    const client = {
+      resolveLocation: async () => "01400902",
+      page: async () => {
+        throw new Error("discovery should wait");
+      },
+      lookupProductIds: async (ids: string[], locationId?: string) => {
+        batches.push({ ids: [...ids], locationId });
+        return {
+          returned: 2,
+          records: rows
+            .filter((row) => row.upc !== "0002100030165")
+            .map((row) => ({
+              name: row.name,
+              brand: row.brand,
+              storeName: "Kroger",
+              price: row.price,
+              upc: row.upc,
+              productId: row.upc,
+              locationId,
+              priceSource: "live" as const,
+              categories: ["Dairy"],
+            })),
+        };
+      },
+      lookupProductId: async (id: string, locationId?: string) => {
+        singles.push({ productId: id, locationId });
+        return { returned: 0, records: [] };
+      },
+      lookupTerm: async (term: string, locationId?: string) => {
+        terms.push(term);
+        return {
+          returned: 1,
+          records: [
+            {
+              name: "Breakstone's All Natural Sour Cream",
+              brand: "Breakstone's",
+              storeName: "Kroger",
+              price: 3.19,
+              upc: "0002100012164",
+              productId: "0002100012164",
+              locationId: locationId ?? "01400902",
+              priceSource: "live" as const,
+              categories: ["Dairy"],
+            },
+          ],
+        };
+      },
+    };
+    await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.1,
+      now: () => now,
+    });
+    assert.equal(batches.length, 1);
+    assert.deepEqual(batches[0]?.ids.slice().sort(), rows.map((row) => row.upc).sort());
+    assert.equal(batches[0]?.locationId, "01400902");
+    assert.equal(singles.length, 0);
+    const fourC = await CatalogMaster.findOne({ key: upcKey("0004138761190") });
+    const cabot = await CatalogMaster.findOne({ key: upcKey("0007835470318") });
+    const breakstone = await CatalogMaster.findOne({ key: upcKey("0002100030165") });
+    assert.equal(fourC?.krogerProductId, "0004138761190");
+    assert.equal(cabot?.krogerProductId, "0007835470318");
+    assert.equal(breakstone?.krogerProductId, undefined);
+    const afterBatch = await matchProgress(now);
+    assert.equal(afterBatch.hitRate.krogerAttempts, 2);
+    assert.equal(afterBatch.hitRate.krogerHits, 2);
+    assert.equal(afterBatch.hitRate.krogerCalls, 1);
+    assert.equal(afterBatch.krogerBatch, 50);
+    const status = await catalogStatus();
+    assert.equal(status.match.krogerBatch, 50);
+    assert.equal(typeof status.match.hitRate.krogerCalls, "number");
+    assert.equal(typeof status.match.hitRate.krogerAttempts, "number");
+    assert.equal(status.refresh.krogerBatchSize, 50);
+
+    await stepKroger({
+      client,
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.1,
+      now: () => now,
+    });
+    assert.deepEqual(singles, [{ productId: "0002100030165", locationId: undefined }]);
+    assert.deepEqual(terms, ["Breakstone's All Natural Sour Cream"]);
+    const matched = await CatalogMaster.findOne({ key: upcKey("0002100030165") });
+    assert.equal(matched?.krogerProductId, "0002100012164");
+    const afterFallback = await matchProgress(now);
+    assert.equal(afterFallback.hitRate.krogerAttempts, 3);
+    assert.equal(afterFallback.hitRate.krogerHits, 3);
+    assert.equal(afterFallback.hitRate.krogerCalls, 3);
+  });
+
+  it("refreshes known Kroger ids in one call and counts a missing id separately", async () => {
+    const now = new Date("2026-11-12T19:00:00.000Z");
+    const rows = [
+      { upc: "0004610041103", name: "Sargento Extra Sharp Cheddar", brand: "Sargento", price: 3.33 },
+      { upc: "0003663202954", name: "Activia Yogurt", brand: "Activia", price: 6.29 },
+      { upc: "0004138732790", name: "4C Homestyle Parmesan Grated Cheese", brand: "4C", price: 4.99 },
+    ];
+    const keys = rows.map((row) => upcKey(row.upc));
+    assert.equal(keys.every((key) => typeof key === "string"), true);
+    await CatalogMaster.deleteMany({ key: { $in: keys } });
+    await CatalogOffer.deleteMany({ productKey: { $in: keys } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Kroger" }, { $set: { refreshExcluded: true } });
+    await CatalogRefreshDay.deleteMany({ day: "2026-11-12" });
+    for (const [index, row] of rows.entries()) {
+      const key = upcKey(row.upc);
+      await CatalogMaster.create({
+        key,
+        name: row.name,
+        brand: row.brand,
+        departmentId: "dairy-eggs",
+        upc: row.upc,
+        krogerProductId: row.upc,
+        walmartItemId: `refresh-${row.upc}`,
+        matchKrogerAt: now,
+        matchKrogerVariant: 0,
+        lastSeenAt: new Date(`2026-01-0${index + 1}T00:00:00.000Z`),
+        status: "active",
+      });
+      await CatalogOffer.create({
+        productKey: key,
+        storeName: "Kroger",
+        locationId: "01400902",
+        price: row.price,
+        lastSeenAt: new Date(`2026-01-0${index + 1}T00:00:00.000Z`),
+        status: "stale",
+      });
+    }
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400902" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const batches: string[][] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 0;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 1;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400902",
+        page: async () => {
+          throw new Error("discovery should wait");
+        },
+        lookupProductId: async () => {
+          throw new Error("a refresh batch should not ask one id at a time");
+        },
+        lookupProductIds: async (ids: string[]) => {
+          batches.push([...ids]);
+          return {
+            returned: 2,
+            records: rows
+              .filter((row) => row.upc !== "0003663202954")
+              .map((row) => ({
+                name: row.name,
+                brand: row.brand,
+                storeName: "Kroger",
+                price: row.price,
+                upc: row.upc,
+                productId: row.upc,
+                locationId: "01400902",
+                priceSource: "live" as const,
+                categories: ["Dairy"],
+              })),
+          };
+        },
+      },
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.2,
+      now: () => now,
+    });
+    assert.equal(batches.length, 1);
+    assert.deepEqual(batches[0]?.slice().sort(), rows.map((row) => row.upc).sort());
+    const day = await CatalogRefreshDay.findOne({ day: "2026-11-12" }).lean<{
+      krogerCalls?: number;
+      krogerAttempted?: number;
+    } | null>();
+    assert.equal(day?.krogerCalls, 1);
+    assert.equal(day?.krogerAttempted, 3);
+    const missing = await CatalogOffer.findOne({ productKey: upcKey("0003663202954"), storeName: "Kroger" }).lean<{
+      refreshMisses?: number;
+    } | null>();
+    const priced = await CatalogOffer.findOne({ productKey: upcKey("0004610041103"), storeName: "Kroger" }).lean<{
+      refreshMisses?: number;
+    } | null>();
+    assert.equal(missing?.refreshMisses, 1);
+    assert.equal(priced?.refreshMisses, 0);
+    const status = await catalogStatus();
+    assert.equal(typeof status.refresh.callsToday.kroger, "number");
+    assert.equal(typeof status.refresh.attemptedToday.kroger, "number");
+    assert.equal(status.refresh.krogerBatchSize, 50);
+  });
 });

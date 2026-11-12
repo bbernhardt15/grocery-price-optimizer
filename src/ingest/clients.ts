@@ -34,6 +34,8 @@ export type KrogerCatalogClient = {
   resolveLocations?(zip: string): Promise<string[]>;
   /** Products API filter.productId. Optional so term-only tests stay quiet. */
   lookupProductId?(productId: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
+  /** Up to 50 product ids in one filter.productId call. One call, one budget unit. */
+  lookupProductIds?(productIds: string[], locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
   /** Name search used when filter.productId is rejected or returns nothing. */
   lookupTerm?(term: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
 };
@@ -89,6 +91,10 @@ export function krogerProductsClient(): KrogerCatalogClient {
     },
     async lookupProductId(productId, locationId) {
       const page = await krogerService.productsById(productId, locationId);
+      return krogerLookupRecords(page.products, locationId, page.returned);
+    },
+    async lookupProductIds(productIds, locationId) {
+      const page = await krogerService.productsByIds(productIds, locationId);
       return krogerLookupRecords(page.products, locationId, page.returned);
     },
     async lookupTerm(term, locationId) {
