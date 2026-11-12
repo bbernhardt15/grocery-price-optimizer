@@ -390,25 +390,42 @@ export function effectiveShares(input: {
     };
   }
 
+  const lookupShare = roundShare(configuredLookupShare);
+  const refreshShare = roundShare(configuredRefreshShare);
+  let discoveryShare = roundShare(Math.max(0, 1 - lookupShare - refreshShare));
+  if (discoveryShare === 0 && lookupShare > 0 && refreshShare > 0) {
+    const floor = clampShare(input.staleDiscoveryShare ?? DEFAULT_STALE_DISCOVERY_SHARE);
+    const room = Math.max(0, 1 - floor);
+    const scale = room / (lookupShare + refreshShare);
+    return {
+      ...base,
+      mode: "balanced",
+      lookupShare: roundShare(lookupShare * scale),
+      refreshShare: roundShare(refreshShare * scale),
+      discoveryShare: roundShare(floor),
+      refreshFirst: false,
+    };
+  }
   return {
     ...base,
     mode: "balanced",
-    lookupShare: roundShare(configuredLookupShare),
-    refreshShare: roundShare(configuredRefreshShare),
-    discoveryShare: roundShare(Math.max(0, 1 - configuredLookupShare - configuredRefreshShare)),
+    lookupShare,
+    refreshShare,
+    discoveryShare,
     refreshFirst: false,
   };
 }
 
 /**
  * Walmart shelf is stale above this share. Refresh takes the match floor
- * until the shelf is back under {@link WALMART_STALE_RAISE}. The daily call
- * cap and the minimum gap are unchanged, so this cannot add 429s.
+ * until the shelf is back under it. Production sat at 28.7% and still used
+ * the small refresh share, so the line is 25%. The daily call cap and the
+ * minimum gap are unchanged, so this cannot add 429s.
  */
-export const WALMART_STALE_RAISE = 0.3;
+export const WALMART_STALE_RAISE = 0.25;
 /** Under this share, Walmart refresh drops to half of CATALOG_REFRESH_SHARE_WALMART. */
 export const WALMART_STALE_LOWER = 0.25;
-/** Refresh fraction used while Walmart stale offers are above 30%. Crawl keeps its floor. */
+/** Refresh fraction used while Walmart stale offers are above 25%. Crawl keeps its floor. */
 export const WALMART_RAISED_REFRESH_SHARE = 0.85;
 
 export type WalmartEffectiveShares = EffectiveShares & {
@@ -418,10 +435,10 @@ export type WalmartEffectiveShares = EffectiveShares & {
 
 /**
  * Adaptive CATALOG_REFRESH_SHARE_WALMART.
- * Above 30% stale, refresh rises to {@link WALMART_RAISED_REFRESH_SHARE} and
+ * Above 25% stale, refresh rises to {@link WALMART_RAISED_REFRESH_SHARE} and
  * the match floor is given to refresh. Crawl keeps CATALOG_STALE_DISCOVERY_SHARE
- * so the walk does not stall. Between 25% and 30% the configured share is used.
- * Under 25% the configured share is cut in half. The daily budget is not raised.
+ * so the walk does not stall. Under 25% the configured share is cut in half.
+ * The daily budget is not raised.
  */
 export function walmartEffectiveShares(input: {
   staleRatio: number;
@@ -440,11 +457,17 @@ export function walmartEffectiveShares(input: {
     const raised = Math.max(configured, WALMART_RAISED_REFRESH_SHARE);
     const shares = effectiveShares({
       ...input,
+      staleRatio: Math.max(staleRatio, STALE_RATIO_REFRESH + 0.001),
       refreshShare: raised,
       staleLookupShare: 0,
       staleDiscoveryShare: input.staleDiscoveryShare ?? DEFAULT_STALE_DISCOVERY_SHARE,
     });
-    return { ...shares, configuredRefreshShare: configured, adaptedRefreshShare: shares.refreshShare };
+    return {
+      ...shares,
+      staleRatio: roundShare(staleRatio),
+      configuredRefreshShare: configured,
+      adaptedRefreshShare: shares.refreshShare,
+    };
   }
   if (staleRatio < WALMART_STALE_LOWER) {
     const lowered = roundShare(configured * 0.5);

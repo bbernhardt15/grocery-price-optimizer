@@ -171,7 +171,8 @@ const RULES: readonly Rule[] = [
   { test: /\bmeat\b/i, departmentId: "meat-seafood" },
   { test: /\b(?:creme|cream)\s+eggs?\b/i, departmentId: "snacks", subcategory: "Candy" },
   { test: /\b(?:easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating)\b/i, departmentId: "other" },
-  { test: /\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h)\b|\b(?:pain\s+relief|muscle|cold\s+sore|hemorrhoid|antifungal|diaper\s+rash|shaving|face|facial|eye|hand|foot)\s+creams?\b/i, departmentId: "personal-care", subcategory: "Health" },
+  { test: /lamisil|\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|alocane|americaine|birchwood)\b|\b(?:pain\s+relief|muscle|cold\s+sore|hem+orrh?oid\w*|antifungal|diaper\s+rash|shaving|face|facial|eye|hand|foot)\s+creams?\b|\b(?:ointments?|insoles?|forefoot|high\s+heels?|scar\s+therapy|\bcbd\b)\b/i, departmentId: "personal-care", subcategory: "Health" },
+  { test: /\bdiscontinued\b/i, departmentId: "other" },
   { test: /\beggnog\b/i, departmentId: "dairy-eggs" },
   { test: /\beggs?\b/i, departmentId: "dairy-eggs", subcategory: "Eggs" },
   { test: /cheese/i, departmentId: "dairy-eggs", subcategory: "Cheese" },
@@ -501,7 +502,7 @@ const TOPICAL_MEDICINE = /\b(?:creams?|ointments?|lotions?|balms?|anti-?itch)\b/
 
 /** Names that matched dairy because they say cream or egg, but are not food. */
 export const DAIRY_FALSE_FRIEND =
-  /\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating|(?:creme|cream)\s+eggs?)\b/i;
+  /lamisil|\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|alocane|americaine|birchwood|easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating|(?:creme|cream)\s+eggs?|ointments?|insoles?|forefoot|high\s+heels?|scar\s+therapy|\bcbd\b|discontinued|hem+orrh?oid\w*)\b/i;
 
 const ALLERGY_DRUG =
   /\b(?:diphenhydramine|cetirizine|loratadine|fexofenadine|zyrtec|claritin|allegra|benadryl)\b/i;

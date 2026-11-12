@@ -31,6 +31,13 @@ describe("mapToDepartment", () => {
     assert.equal(mapToDepartment(undefined, "Sour Cream").departmentId, "dairy-eggs");
     assert.equal(mapToDepartment(undefined, "Large Eggs").departmentId, "dairy-eggs");
     assert.equal(mapToDepartment(undefined, "Bengay Ultra Strength Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "8pclamisil Af Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "1 Pair Black Butterfly Shaped High Heel Forefoot Pad Foot Cushion Insole").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "190965 Birchwood Casey Darkotic Combo").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "Advanced 200mg Broad Spectrum CBD Pain Cream by AmourCBD").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "Americaine Hemmorrhoidal Ointment Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "4C Parmesan Grated Cheese").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Almond Breeze Shelf-Stable Unsweetened Dairy-Free Almondmilk").departmentId, "dairy-eggs");
     assert.equal(mapToDepartment(undefined, "Abreva Cold Sore Cream").departmentId, "personal-care");
     assert.equal(mapToDepartment(undefined, "PAAS Easter Egg Dye Kit").departmentId, "other");
     assert.equal(mapToDepartment(undefined, "Cadbury Creme Egg").departmentId, "snacks");

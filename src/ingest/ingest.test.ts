@@ -2646,6 +2646,42 @@ describe("catalog ingestion", () => {
     assert.equal(krogerLookupBlock({ name: "Great Value Black Beans", brand: "Great Value" }), "walmart-only-brand");
     assert.equal(
       krogerLookupBlock({
+        name: "Great Value Whole Milk",
+        brand: "",
+        departmentId: "dairy-eggs",
+        upc: "078742229911",
+      }),
+      "walmart-only-brand"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "1 Pair Black Butterfly Shaped High Heel Forefoot Pad Foot Cushion Insole",
+        brand: "Unique Bargains",
+        departmentId: "dairy-eggs",
+        upc: "605322175735",
+      }),
+      "dairy-false-friend"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "8pclamisil Af Cream",
+        brand: "Lamisil",
+        departmentId: "dairy-eggs",
+        upc: "300671142932",
+      }),
+      "dairy-false-friend"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "4C Parmesan Grated Cheese",
+        brand: "4C",
+        departmentId: "dairy-eggs",
+        upc: "0004138761190",
+      }),
+      null
+    );
+    assert.equal(
+      krogerLookupBlock({
         name: "Walex Porta-Pak RV Waste Water Treatment",
         brand: "Walex",
         categoryPaths: ["Auto & Tires/RV/Waste Water"],
