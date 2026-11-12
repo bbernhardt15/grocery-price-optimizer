@@ -4,6 +4,7 @@
  */
 
 import { getUserProfile, saveUserProfile, shouldPromptProfile } from "./profile.js";
+import { browseRetryDelay } from "./browseQueue.js";
 import {
   AISLE_LABELS,
   SKIP_LABEL,
@@ -872,28 +873,35 @@ export function mountProfileOnboarding(deps = {}) {
 
   async function loadBrandShelf(family) {
     if (!family || brandShelves[family] || !deps.loadStaple) return;
-    let tiles = [];
-    let retry = false;
-    try {
-      const result = await Promise.race([
-        deps.loadStaple(categorySearch(family) || family),
-        new Promise((resolve) => setTimeout(() => resolve("timeout"), 4000)),
-      ]);
-      if (result === "timeout") {
-        retry = true;
-        tiles = [];
-      } else {
-        tiles = result || [];
+    const search = categorySearch(family) || family;
+    const paint = () => {
+      if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
+        paintLearnedCard(family, { saved: savedRules.has(family) });
       }
+    };
+    try {
+      const tiles = await deps.loadStaple(search, 3000);
+      brandShelves[family] = tiles || [];
+      brandRetry[family] = false;
     } catch {
-      tiles = [];
-      retry = true;
+      brandShelves[family] = [];
+      brandRetry[family] = true;
+      paint();
+      const wait = browseRetryDelay(0);
+      if (wait) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (brandRetry[family]) {
+          try {
+            const tiles = await deps.loadStaple(search, 3000);
+            brandShelves[family] = tiles || [];
+            brandRetry[family] = false;
+          } catch {
+            brandRetry[family] = true;
+          }
+        }
+      }
     }
-    brandShelves[family] = tiles;
-    brandRetry[family] = retry;
-    if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
-      paintLearnedCard(family, { saved: savedRules.has(family) });
-    }
+    paint();
   }
 
   async function loadProducts() {

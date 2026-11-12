@@ -7,21 +7,22 @@ async function unlock(page: Page) {
   const invite = page.locator("#beta-code").first();
   if (await invite.isVisible().catch(() => false)) {
     await invite.fill("Brandon-50y4");
-    await page.locator("#beta-gate-form button[type=submit]").first().click();
+    await page.locator("#beta-gate-form button[type=submit]").first().tap();
     await expect(page.locator("#beta-gate")).toBeHidden();
   }
 }
 
-async function startReceipt(page: Page) {
-  await page.getByRole("button", { name: "Get started" }).click();
+async function openReceipt(page: Page) {
+  const start = page.getByRole("button", { name: "Get started" });
+  if (await start.isVisible().catch(() => false)) await start.tap();
   await page.locator("#profile-zip").pressSequentially("45103");
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
-  await page.locator("#profile-zip-done").click();
-  await page.locator("#profile-next").click();
+  await page.locator("#profile-zip-done").tap();
+  await page.locator("#profile-next").tap();
   if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
-    await page.locator("#store-connect-later").click();
+    await page.locator("#store-connect-later").tap();
   }
-  await page.getByText("Paste order text instead").click();
+  await page.getByText("Paste order text instead").tap();
   await page.locator("#profile-receipt-paste").fill("Dave's Killer Bread\n1.0 x $6.99");
 }
 
@@ -31,83 +32,138 @@ const sizes = [
 ] as const;
 
 for (const size of sizes) {
-  test(`Nov 12 receipt and trip actions at ${size.width}x${size.height}`, async ({ page }) => {
+  test(`Nov 12 receipt, brands, and a background price check at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await unlock(page);
-    await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toContainText("v89");
-    await page.locator("#drawer-close").click();
-    await startReceipt(page);
+    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v89");
+    await openReceipt(page);
     await page.route("**/api/import/receipt", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 900));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
       await route.continue();
     });
-    await page.getByRole("button", { name: "Read my receipts" }).click();
+    await page.route("**/api/catalog/browse**", (route) =>
+      route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "busy" }) })
+    );
+    await page.getByRole("button", { name: "Read my receipts" }).tap();
     const bar = page.locator(".read-smooth").first();
     await expect(bar).toBeVisible();
-    await expect.poll(async () => {
-      const now = await bar.getAttribute("aria-valuenow");
-      return Number(now || 0);
-    }).toBeGreaterThan(8);
+    const samples: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      samples.push(Number((await bar.getAttribute("aria-valuenow")) || 0));
+      await page.waitForTimeout(250);
+    }
+    expect(samples[samples.length - 1]).toBeGreaterThan(samples[0]);
     await expect(page.getByRole("heading", { name: "Here's what we learned" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Use the lowest Meat & Seafood price/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Leave Meat & Seafood off" })).toBeVisible();
-    await page.getByRole("button", { name: "Leave Meat & Seafood off" }).click();
-    await expect(page.locator("#profile-stage")).toContainText("Meat & Seafood left off");
-    await page.locator("#profile-next").click();
-    await expect(page.locator("#learned-add-trip-top")).toBeVisible();
-    await expect(page.locator("#learned-empty-trip-top")).toBeVisible();
+    await page.locator("[data-learned-change]").first().tap();
+    await expect(page.getByRole("button", { name: "Load brands again" })).toBeVisible();
+    await page.unroute("**/api/catalog/browse**");
+    await page.locator("#profile-next").tap();
     await expect(page.locator("#learned-add-trip")).toBeVisible();
-    await expect(page.locator("#learned-empty-trip")).toBeVisible();
-    const positions = await page.evaluate(() => {
-      const top = document.querySelector("#learned-add-trip-top")?.getBoundingClientRect().top ?? 0;
-      const row = document.querySelector(".trip-add-row")?.getBoundingClientRect().top ?? 0;
-      const bottom = document.querySelector("#learned-add-trip")?.getBoundingClientRect().top ?? 0;
-      return { top, row, bottom };
+    await page.getByRole("checkbox", { name: "Dave's Killer Bread" }).tap();
+    await expect(page.locator("#learned-add-trip")).toBeEnabled();
+    let planned = 0;
+    await page.route("**/api/optimize-list", async (route) => {
+      planned += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 6.99,
+          stores: [
+            {
+              storeName: "Kroger",
+              subtotal: 6.99,
+              items: [{ lineId: "bread", name: "Dave's Killer Bread", price: 6.99, quantity: 1, itemTotal: 6.99 }],
+            },
+          ],
+          unavailable: [],
+        }),
+      });
     });
-    expect(positions.top).toBeLessThan(positions.row);
-    expect(positions.bottom).toBeGreaterThan(positions.row);
-    await page.locator("#learned-add-trip").click();
-    await expect.poll(async () => page.evaluate(() => document.body.dataset.step)).toBe("add");
+    await page.locator("#learned-add-trip").tap();
+    await expect.poll(() => planned).toBeGreaterThan(0);
+    await expect(page.locator("body")).toHaveAttribute("data-step", "add");
+    await expect(page.locator("#trip")).toBeHidden();
   });
 
-  test(`coupon handoff and I finished at ${size.width}x${size.height}`, async ({ page }) => {
+  test(`Review coupons, I finished, and Still shopping at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await page.addInitScript(() => {
       localStorage.setItem("gg-onboarding-done", "1");
       localStorage.setItem("gg-zip", "45103");
+      localStorage.setItem(
+        "gg-list",
+        JSON.stringify([{ id: "custom:bread", itemId: "custom:bread", name: "Dave's Killer Bread", quantity: 1 }])
+      );
     });
-    await unlock(page);
-    await page.evaluate(() => {
-      const dialog = document.getElementById("store-return");
-      if (!(dialog instanceof HTMLDialogElement)) return;
-      dialog.dataset.store = "Kroger";
-      dialog.showModal();
+    await page.route("**/api/optimize-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 6.99,
+          stores: [
+            {
+              storeName: "Kroger",
+              subtotal: 6.99,
+              items: [
+                {
+                  lineId: "bread",
+                  name: "Dave's Killer Bread",
+                  price: 6.99,
+                  quantity: 1,
+                  itemTotal: 6.99,
+                  storeName: "Kroger",
+                },
+              ],
+            },
+          ],
+          unavailable: [],
+        }),
+      });
     });
-    await page.locator("#store-return-yes").click();
-    await expect(page.locator("#store-return")).toBeHidden();
-    await page.locator('[data-flow="plan"]').click();
-    await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
-    await page.locator('[data-flow="add"]').click();
-    await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     await page.context().route("https://www.kroger.com/**", (route) =>
       route.fulfill({ status: 200, contentType: "text/html", body: "<p>Kroger coupons</p>" })
     );
-    await page.evaluate(() => {
-      const link = document.createElement("a");
-      link.href = "https://www.kroger.com/savings/cl/coupons/";
-      link.textContent = "Kroger digital coupons";
-      link.dataset.couponLink = link.href;
-      link.dataset.storeLeave = "Kroger";
-      link.dataset.leaveKind = "coupons";
-      document.body.appendChild(link);
-    });
+    await unlock(page);
+    await page.locator('#bottom-dock [data-flow="plan"]').tap();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
+    const coupons = page.getByRole("link", { name: "Open Kroger digital coupons" });
+    await expect(coupons).toBeVisible();
     const popup = page.waitForEvent("popup");
-    await page.getByRole("link", { name: "Kroger digital coupons" }).click();
+    await coupons.tap();
     const opened = await popup;
     await opened.waitForURL(/kroger\.com/);
     expect(opened.url()).not.toContain("handoff.html");
     expect(opened.url()).not.toBe("about:blank");
     await opened.close();
+
+    await page.evaluate(() => {
+      const dialog = document.getElementById("store-return");
+      if (dialog instanceof HTMLDialogElement) {
+        dialog.dataset.store = "Kroger";
+        dialog.showModal();
+      }
+    });
+    await page.locator("#store-return-no").tap();
+    await expect(page.locator("#store-return")).toBeHidden();
+    await page.locator('#bottom-dock [data-flow="shop"]').tap();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
+    await page.locator('#bottom-dock [data-flow="add"]').tap();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "add");
+
+    await page.evaluate(() => {
+      const dialog = document.getElementById("store-return");
+      if (dialog instanceof HTMLDialogElement) {
+        dialog.dataset.store = "Kroger";
+        dialog.showModal();
+      }
+    });
+    await page.locator("#store-return-yes").tap();
+    await expect(page.locator("#store-return")).toBeHidden();
+    await page.locator('#bottom-dock [data-flow="plan"]').tap();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
+    await page.locator('#bottom-dock [data-flow="add"]').tap();
+    await expect(page.locator("body")).toHaveAttribute("data-step", "add");
   });
 }

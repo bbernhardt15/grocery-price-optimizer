@@ -177,12 +177,18 @@ function slimBrowseItem(item: unknown): unknown {
 }
 
 function capBrowsePage<T extends { items?: unknown[] }>(page: T): T {
-  let body = page;
-  if (JSON.stringify(body).length <= BROWSE_RESPONSE_CAP) return body;
-  body = {
-    ...page,
-    items: (page.items || []).slice(0, 24).map((item) => slimBrowseItem(item)),
-  };
+  let items = page.items || [];
+  let body: T = page;
+  let encoded = JSON.stringify(body);
+  if (encoded.length <= BROWSE_RESPONSE_CAP) return body;
+  items = items.slice(0, 24).map((item) => slimBrowseItem(item));
+  body = { ...page, items };
+  encoded = JSON.stringify(body);
+  while (encoded.length > BROWSE_RESPONSE_CAP && items.length > 0) {
+    items = items.slice(0, Math.max(0, items.length - 1));
+    body = { ...page, items };
+    encoded = JSON.stringify(body);
+  }
   return body;
 }
 

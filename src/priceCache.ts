@@ -31,6 +31,7 @@ import { findFreshUpcPrices } from "./pricing/freshCatalogPrice";
 import { createLookupBudget, interleaveByStore, runPricedLookup, stableLineKey } from "./pricing/lookupBudget";
 import { krogerService } from "./krogerService";
 import { KROGER_PRODUCT_ID_BATCH } from "./ingest/krogerBatch";
+import { krogerRequestId } from "./catalog/normalize";
 
 export const PRICE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -324,10 +325,11 @@ export async function resolveCatalogProducts(
       try {
         const page = await krogerService.productsByIds(slice.map((row) => row.upc), locationId);
         for (const row of slice) {
-          const code = row.upc.replace(/\D/g, "");
+          const wantedId = krogerRequestId(row.upc);
           const hits = page.products.filter((product) => {
-            const id = `${product.productId || ""} ${product.upc || ""}`.replace(/\D/g, "");
-            return code && id.includes(code.slice(-11));
+            const productId = krogerRequestId(product.productId);
+            const upc = krogerRequestId(product.upc);
+            return Boolean(wantedId && (productId === wantedId || upc === wantedId));
           });
           if (hits.length) krogerBatch.set(row.name.toLowerCase(), hits);
         }

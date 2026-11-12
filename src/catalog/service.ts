@@ -625,7 +625,7 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
     return [];
   }
   if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
-    const stored = await readStoredRecords({ query: q });
+    const stored = await readStoredRecords({ query: q, maxScan: 48 });
     if (stored.records.length > 0) {
       const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
       return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
@@ -645,7 +645,7 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
     const records = await readStoredById(id);
     if (records.length > 0) {
       const departmentId = records[0]?.departmentId;
-      const mates = await readStoredRecords(departmentId ? { departmentId } : {});
+      const mates = await readStoredRecords(departmentId ? { departmentId, maxScan: 24 } : { maxScan: 24 });
       const products = groupOffersByUpc(mates.records);
       const product = products.find((entry) => entry.id === id) ?? groupOffersByUpc(records)[0];
       if (product) {
