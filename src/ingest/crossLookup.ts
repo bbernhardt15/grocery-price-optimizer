@@ -61,6 +61,8 @@ export type LookupPick = {
   priority: LookupPriority;
   /** Stored retailer code, so a Kroger hit can stay on this master. */
   upc?: string;
+  /** Brand on the master, used when a name search returns a different product id. */
+  brand?: string;
   /** Department recorded on the Kroger hit-rate breakdown. */
   departmentId?: string;
 };
@@ -380,6 +382,7 @@ function toPick(side: Side, row: CandidateRow, priority: LookupPriority): Lookup
     variantIndex,
     priority,
     ...(row.upc ? { upc: row.upc } : {}),
+    ...(row.brand ? { brand: row.brand } : {}),
     ...(row.departmentId ? { departmentId: row.departmentId } : {}),
   };
 }

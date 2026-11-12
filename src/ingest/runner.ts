@@ -19,6 +19,7 @@ import {
   type IngestErrorDetail,
 } from "./budget";
 import { krogerProductsClient, walmartAffiliateClient, type KrogerCatalogClient, type WalmartCatalogClient } from "./clients";
+import { krogerTermBinds } from "./krogerBind";
 import { effectiveShares, ingestConfig, nextTickTurn, refreshShareFor, tickCallSplit, walmartEffectiveShares, type IngestConfig } from "./config";
 import {
   KROGER_TERMS_VERSION,
@@ -113,6 +114,10 @@ export type KrogerCheckpoint = {
   pendingZips: string[];
   clientErrorStreak: number;
   clientErrorLocationId?: string;
+  /** Product-id lookups still owed at the next nearby store, or with no location. */
+  idFallback?: KrogerIdFallback;
+  /** Nearby location list was asked once. Further misses reuse cp.locations. */
+  nearbyListed?: boolean;
   /** Name search still owed after filter.productId missed. Not a discovery error. */
   termFallback?: KrogerTermFallback;
   nextAllowedAt?: string;
@@ -128,7 +133,19 @@ type KrogerTermFallback = {
   name: string;
   code: string;
   upc?: string;
+  brand?: string;
   locationId?: string;
+  departmentId?: string;
+};
+
+type KrogerIdFallback = {
+  key: string;
+  name: string;
+  code: string;
+  /** Next entry in the location list. The list length means a query with no locationId. */
+  nextIndex: number;
+  upc?: string;
+  brand?: string;
   departmentId?: string;
 };
 
@@ -256,22 +273,33 @@ function krogerClientMiss(error: unknown): boolean {
   return status !== null && status >= 400 && status < 500 && status !== 429;
 }
 
-function krogerRecordMatches(record: RawCatalogRecord, masterKey: string, expected: string): boolean {
+function krogerRecordMatches(
+  record: RawCatalogRecord,
+  masterKey: string,
+  expected: string,
+  catalog?: { name?: string; brand?: string }
+): boolean {
   const id = (record.productId || record.retailerItemId || "").replace(/\D/g, "");
   if (id && (id === expected || krogerProductIdForLookup(id) === expected)) {
     return true;
   }
   const key = upcKey(record.upc) || upcKey(id);
-  return Boolean(key && key === masterKey);
+  if (key && key === masterKey) {
+    return true;
+  }
+  if (!catalog?.name) {
+    return false;
+  }
+  return krogerTermBinds({ name: catalog.name, brand: catalog.brand }, record);
 }
 
 function bindKrogerLookupRecords(
   records: RawCatalogRecord[],
-  pick: { key: string; code: string; upc?: string },
+  pick: { key: string; code: string; upc?: string; name?: string; brand?: string },
   mode: "id" | "term"
 ): RawCatalogRecord[] {
   const expected = pick.code.replace(/\D/g, "");
-  const chosen = mode === "id" ? records : records.filter((record) => krogerRecordMatches(record, pick.key, expected));
+  const chosen = mode === "id" ? records : records.filter((record) => krogerRecordMatches(record, pick.key, expected, pick));
   const upc = pick.upc?.replace(/\D/g, "");
   return chosen.map((record) => {
     const productId = (record.productId || record.retailerItemId || expected).trim();
@@ -292,6 +320,7 @@ function lookupPickFromTerm(pending: KrogerTermFallback): LookupPick {
     variantIndex: 0,
     priority: "catalog",
     ...(pending.upc ? { upc: pending.upc } : {}),
+    ...(pending.brand ? { brand: pending.brand } : {}),
     ...(pending.departmentId ? { departmentId: pending.departmentId } : {}),
   };
 }
@@ -951,18 +980,22 @@ async function trackedZips(config: IngestConfig): Promise<string[]> {
 }
 
 /**
- * Cross-store match asks the first resolved grocery store, not whichever ZIP
- * the crawl cursor is on. A city with a thin banner was marking national
- * UPCs as misses.
+ * Cross-store match asks the closest resolved grocery store first, then the
+ * other stores saved for that ZIP. The crawl cursor ZIP is not the match store.
  */
-function krogerMatchLocation(cp: KrogerCheckpoint): string | undefined {
+function krogerMatchLocations(cp: KrogerCheckpoint): string[] {
+  const ids: string[] = [];
   for (const location of cp.locations) {
     const id = location.locationId?.trim();
-    if (id) {
-      return id;
+    if (id && !ids.includes(id)) {
+      ids.push(id);
     }
   }
-  return undefined;
+  return ids;
+}
+
+function krogerMatchLocation(cp: KrogerCheckpoint): string | undefined {
+  return krogerMatchLocations(cp)[0];
 }
 
 function noteKrogerProductSuccess(cp: KrogerCheckpoint): void {
@@ -1086,6 +1119,7 @@ export async function stepKroger(options: {
     const finished = await finishLookups("kroger", [pick], nowFn(), { forceMiss: true, httpStatus: 400 });
     cp.matchAttempts += finished.attempts;
     cp.attempts = 0;
+    delete cp.idFallback;
     delete cp.termFallback;
     await persist("running", { clearError: true });
   }
@@ -1111,7 +1145,18 @@ export async function stepKroger(options: {
         await persist("paused", { lastError: "Kroger daily budget reached" });
         return "stop";
       }
-      const matched = bindKrogerLookupRecords(charged.records, pending, "term");
+      let matched = bindKrogerLookupRecords(charged.records, pending, "term");
+      if (matched.length === 0 && pending.locationId && calls < options.maxCalls) {
+        const national = await callKrogerProduct(() => lookupTerm(term));
+        if (national === "budget") {
+          cp.termFallback = { ...pending };
+          delete cp.termFallback.locationId;
+          paused = "budget";
+          await persist("paused", { lastError: "Kroger daily budget reached" });
+          return "stop";
+        }
+        matched = bindKrogerLookupRecords(national.records, pending, "term");
+      }
       if (matched.length > 0) {
         const saved = await upsertCatalogRecords(matched, nowFn());
         upserted += saved.offers;
@@ -1153,6 +1198,144 @@ export async function stepKroger(options: {
     }
   }
 
+  function termFromProbe(probe: KrogerIdFallback, locationId?: string): KrogerTermFallback {
+    return {
+      key: probe.key,
+      name: probe.name,
+      code: probe.code,
+      ...(probe.upc ? { upc: probe.upc } : {}),
+      ...(probe.brand ? { brand: probe.brand } : {}),
+      ...(probe.departmentId ? { departmentId: probe.departmentId } : {}),
+      ...(locationId ? { locationId } : {}),
+    };
+  }
+
+  function probeFromPick(picked: LookupPick): KrogerIdFallback {
+    return {
+      key: picked.key,
+      name: picked.name,
+      code: picked.code,
+      nextIndex: 0,
+      ...(picked.upc ? { upc: picked.upc } : {}),
+      ...(picked.brand ? { brand: picked.brand } : {}),
+      ...(picked.departmentId ? { departmentId: picked.departmentId } : {}),
+    };
+  }
+
+  async function ensureNearbyLocations(): Promise<void> {
+    if (cp.nearbyListed || !options.client.resolveLocations) {
+      return;
+    }
+    const zip = cp.locations.find((location) => location.zip)?.zip || cp.plannedZips[0];
+    cp.nearbyListed = true;
+    if (!zip) {
+      return;
+    }
+    try {
+      const listed = await options.client.resolveLocations(zip);
+      for (const raw of listed) {
+        const locationId = raw.trim();
+        if (!locationId || cp.locations.some((location) => location.locationId === locationId)) {
+          continue;
+        }
+        cp.locations.push({ zip, locationId });
+      }
+    } catch {
+      // A locations miss leaves the store already on the checkpoint.
+    }
+  }
+
+  async function acceptIdHit(picked: LookupPick, records: RawCatalogRecord[]): Promise<void> {
+    const bound = bindKrogerLookupRecords(records, picked, "id");
+    if (bound.length === 0) {
+      return;
+    }
+    const saved = await upsertCatalogRecords(bound, nowFn());
+    upserted += saved.offers;
+    const finished = await finishLookups("kroger", [picked], nowFn(), { httpStatus: 200 });
+    cp.matchAttempts += finished.attempts;
+    cp.matchHits += finished.hits;
+    noteKrogerProductSuccess(cp);
+    delete cp.idFallback;
+    delete cp.termFallback;
+    await persist("running", { clearError: true });
+  }
+
+  async function deferTerm(pending: KrogerTermFallback): Promise<boolean> {
+    delete cp.idFallback;
+    if (!lookupRoom()) {
+      cp.termFallback = pending;
+      await persist("running", { clearError: true });
+      return false;
+    }
+    lookupsDone += 1;
+    const outcome = await runKrogerTerm(pending);
+    return outcome === "stop";
+  }
+
+  /** True when this tick should stop. An empty id walks the next store before the name search. */
+  async function afterEmptyId(probe: KrogerIdFallback): Promise<boolean> {
+    const locations = krogerMatchLocations(cp);
+    if (probe.nextIndex <= locations.length) {
+      cp.idFallback = probe;
+      await persist("running", { clearError: true });
+      return false;
+    }
+    return deferTerm(termFromProbe(probe, locations[0]));
+  }
+
+  async function queryId(probe: KrogerIdFallback): Promise<boolean> {
+    await ensureNearbyLocations();
+    const locations = krogerMatchLocations(cp);
+    const national = probe.nextIndex >= locations.length;
+    const locationId = national ? undefined : locations[probe.nextIndex];
+    const picked = lookupPickFromTerm(termFromProbe(probe, locationId));
+    try {
+      const charged = await callKrogerProduct(() => options.client.lookupProductId!(probe.code, locationId));
+      if (charged === "budget") {
+        cp.idFallback = probe;
+        paused = "budget";
+        await persist("paused", { lastError: "Kroger daily budget reached" });
+        return true;
+      }
+      if (charged.records.length > 0) {
+        await acceptIdHit(picked, charged.records);
+        return false;
+      }
+      return afterEmptyId({ ...probe, nextIndex: probe.nextIndex + 1 });
+    } catch (error) {
+      const kind = retryClass(error);
+      if (krogerClientMiss(error)) {
+        return deferTerm(termFromProbe(probe, locations[0]));
+      }
+      delete cp.idFallback;
+      if (kind === "fatal") {
+        const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true, httpStatus: 400 });
+        cp.matchAttempts += finished.attempts;
+        noteKrogerProductSuccess(cp);
+        await persist("running", {
+          error: ingestErrorDetail("kroger", error, { request: "products", productId: probe.code }, nowFn()),
+        });
+        return false;
+      }
+      if (kind === "server") {
+        const isolated = (cp.serverStrikes ?? 0) === 0;
+        await holdLookup("kroger", probe.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS, {
+          code: probe.code,
+          httpStatus: 503,
+        });
+      }
+      const outcome = await failKroger(cp, error, sleep, nowFn(), {
+        request: "products",
+        productId: probe.code,
+      });
+      cp = outcome.checkpoint;
+      paused = outcome.paused;
+      await persist(outcome.status, { error: outcome.error });
+      return Boolean(outcome.stop);
+    }
+  }
+
   while (calls < options.maxCalls) {
     if (epochMs(cp.serverCooldownUntil) > nowFn().getTime()) {
       paused = "server";
@@ -1170,6 +1353,13 @@ export async function stepKroger(options: {
       discoveryBudget: split.discovery,
     });
     if (turn === "lookup") {
+      if (cp.idFallback && options.client.lookupProductId) {
+        lookupsDone += 1;
+        if (await queryId(cp.idFallback)) {
+          break;
+        }
+        continue;
+      }
       if (cp.termFallback && options.client.lookupProductId) {
         lookupsDone += 1;
         const outcome = await runKrogerTerm(cp.termFallback);
@@ -1182,96 +1372,12 @@ export async function stepKroger(options: {
       if (!picked) {
         lookupExhausted = true;
         continue;
-      } else {
-        const locationId = krogerMatchLocation(cp);
-        const pending: KrogerTermFallback = {
-          key: picked.key,
-          name: picked.name,
-          code: picked.code,
-          ...(picked.upc ? { upc: picked.upc } : {}),
-          ...(picked.departmentId ? { departmentId: picked.departmentId } : {}),
-          ...(locationId ? { locationId } : {}),
-        };
-        const followMiss = async (): Promise<boolean> => {
-          if (!lookupRoom()) {
-            cp.termFallback = pending;
-            await persist("running", { clearError: true });
-            return false;
-          }
-          lookupsDone += 1;
-          const outcome = await runKrogerTerm(pending);
-          return outcome === "stop";
-        };
-        lookupsDone += 1;
-        try {
-          const charged = await callKrogerProduct(() => options.client.lookupProductId!(picked.code, locationId));
-          if (charged === "budget") {
-            paused = "budget";
-            await persist("paused", { lastError: "Kroger daily budget reached" });
-            break;
-          }
-          let records = charged.records;
-          if (records.length === 0 && locationId && lookupRoom()) {
-            lookupsDone += 1;
-            const national = await callKrogerProduct(() => options.client.lookupProductId!(picked.code));
-            if (national === "budget") {
-              paused = "budget";
-              await persist("paused", { lastError: "Kroger daily budget reached" });
-              break;
-            }
-            records = national.records;
-            delete pending.locationId;
-          }
-          const bound = bindKrogerLookupRecords(records, picked, "id");
-          if (bound.length === 0) {
-            if (await followMiss()) {
-              break;
-            }
-          } else {
-            const saved = await upsertCatalogRecords(bound, nowFn());
-            upserted += saved.offers;
-            const finished = await finishLookups("kroger", [picked], nowFn(), { httpStatus: 200 });
-            cp.matchAttempts += finished.attempts;
-            cp.matchHits += finished.hits;
-            noteKrogerProductSuccess(cp);
-            delete cp.termFallback;
-            await persist("running", { clearError: true });
-          }
-        } catch (error) {
-          const kind = retryClass(error);
-          if (krogerClientMiss(error)) {
-            if (await followMiss()) {
-              break;
-            }
-          } else if (kind === "fatal") {
-            const finished = await finishLookups("kroger", [picked], nowFn(), { forceMiss: true, httpStatus: 400 });
-            cp.matchAttempts += finished.attempts;
-            noteKrogerProductSuccess(cp);
-            await persist("running", {
-              error: ingestErrorDetail("kroger", error, { request: "products", productId: picked.code }, nowFn()),
-            });
-          } else {
-            if (kind === "server") {
-              const isolated = (cp.serverStrikes ?? 0) === 0;
-              await holdLookup("kroger", picked.key, nowFn(), isolated ? undefined : LOOKUP_OUTAGE_HOLD_MS, {
-                code: picked.code,
-                httpStatus: 503,
-              });
-            }
-            const outcome = await failKroger(cp, error, sleep, nowFn(), {
-              request: "products",
-              productId: picked.code,
-            });
-            cp = outcome.checkpoint;
-            paused = outcome.paused;
-            await persist(outcome.status, { error: outcome.error });
-            if (outcome.stop) {
-              break;
-            }
-          }
-        }
-        continue;
       }
+      lookupsDone += 1;
+      if (await queryId(probeFromPick(picked))) {
+        break;
+      }
+      continue;
     }
     if (turn === "refresh") {
       const [picked] = await nextRefreshPicks("Kroger", nowFn(), 1);

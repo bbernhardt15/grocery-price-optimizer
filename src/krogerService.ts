@@ -327,11 +327,11 @@ export class KrogerService {
   }
 
   /**
-   * GET /v1/locations?filter.zipCode.near={zip}&filter.limit=1
+   * GET /v1/locations?filter.zipCode.near={zip}&filter.limit={limit}
    * Throws when credentials are missing, the ZIP is invalid, or no store is in range.
-   * A 401/403 drops the cached token and retries once.
+   * A 401/403 drops the cached token and retries once. The first id is the closest store.
    */
-  private async lookupClosestStoreLocation(zipCode: string, attempt = 0): Promise<string> {
+  private async lookupStoreLocations(zipCode: string, limit: number, attempt = 0): Promise<string[]> {
     const zip = normalizeZip(zipCode);
     const clientId = process.env.KROGER_CLIENT_ID?.trim() ?? "";
     const clientSecret = process.env.KROGER_CLIENT_SECRET?.trim() ?? "";
@@ -345,7 +345,7 @@ export class KrogerService {
     const token = await this.getAccessToken(attempt > 0);
     const query = new URLSearchParams({
       "filter.zipCode.near": zip,
-      "filter.limit": "1",
+      "filter.limit": String(limit),
     });
 
     const response = await fetch(`${LOCATIONS_ENDPOINT}?${query.toString()}`, {
@@ -364,7 +364,7 @@ export class KrogerService {
         );
         this.accessToken = null;
         this.tokenExpiresAtMs = 0;
-        return this.lookupClosestStoreLocation(zip, attempt + 1);
+        return this.lookupStoreLocations(zip, limit, attempt + 1);
       }
       throw new KrogerPricingError(
         `Kroger locations request failed (${response.status}) for ZIP ${zip}`,
@@ -374,12 +374,21 @@ export class KrogerService {
     }
 
     const payload = (await response.json()) as LocationsResponse;
-    const locationId = payload.data?.[0]?.locationId?.trim();
+    const locationIds = (payload.data ?? [])
+      .map((row) => row.locationId?.trim() || "")
+      .filter((id) => id.length > 0);
+    const locationId = locationIds[0];
     if (!locationId) {
       throw new Error(`No Kroger store found near ZIP ${zip}`);
     }
     await rememberKrogerStore(zip, locationId);
-    return locationId;
+    return locationIds;
+  }
+
+  /** Closest store. Shopper pricing and the crawl cursor keep asking for one. */
+  private async lookupClosestStoreLocation(zipCode: string, attempt = 0): Promise<string> {
+    const locationIds = await this.lookupStoreLocations(zipCode, 1, attempt);
+    return locationIds[0];
   }
 
   /**
@@ -450,6 +459,25 @@ export class KrogerService {
         throw error;
       }
       return null;
+    }
+  }
+
+  /**
+   * Nearby stores for a product-id miss. The crawl still prices at the closest
+   * store first. A locations outage returns the last saved store instead of failing the lookup.
+   */
+  async listNearbyStoreLocations(zipCode: string, limit = 4): Promise<string[]> {
+    const cap = Math.max(1, Math.min(8, Math.floor(limit)));
+    try {
+      return await this.lookupStoreLocations(zipCode, cap);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Invalid ZIP code/.test(message)) {
+        throw error;
+      }
+      const cached = await readKrogerStore(normalizeZip(zipCode));
+      const demo = demoLocationId();
+      return cached && cached !== demo ? [cached] : [];
     }
   }
 
