@@ -617,6 +617,7 @@ export async function stepWalmart(options: {
   };
 
   while (calls < options.maxCalls) {
+    await new Promise((resolve) => setImmediate(resolve));
     const cooldownAt = epochMs(cp.cooldownUntil);
     if (cooldownAt > nowFn().getTime()) {
       paused = "cooldown";
@@ -1555,6 +1556,7 @@ export async function stepKroger(options: {
   }
 
   while (calls < options.maxCalls) {
+    await new Promise((resolve) => setImmediate(resolve));
     if (epochMs(cp.serverCooldownUntil) > nowFn().getTime()) {
       paused = "server";
       break;

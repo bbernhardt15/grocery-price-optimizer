@@ -1,5 +1,6 @@
 import { ingestConfig } from "./config";
 import { runIngestTick } from "./runner";
+import { ingestShouldWait, loopSnapshot } from "../runtime/loopGuard";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -10,6 +11,11 @@ export function startIngestScheduler(): void {
     return;
   }
   const tick = () => {
+    if (ingestShouldWait()) {
+      const snap = loopSnapshot();
+      console.info(`Catalog ingest deferred (lag ${snap.lagP99Ms}ms, in flight ${snap.inFlight}).`);
+      return;
+    }
     void runIngestTick().catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`Catalog ingest tick failed: ${message}`);

@@ -72,7 +72,9 @@ describe("walkthrough gaps the audit still needed", () => {
   it("lets a missing receipt department be saved instead of only described", () => {
     const html = learnedSummaryHtml([{ family: "eggs", label: "Eggs", mode: "brand", brand: "Eggland's" }], {});
     assert.match(html, /data-missing-dept="produce"/);
-    assert.match(html, /Produce: cheapest/);
+    assert.match(html, /Use the lowest Produce price/);
+    assert.match(html, /Leave Produce off/);
+    assert.match(html, /data-missing-skip="meat"/);
     const css = readFileSync(new URL("../../public/styles.css", import.meta.url), "utf8");
     assert.match(css, /\.read-cart \{[\s\S]*transition: left 420ms linear/);
   });

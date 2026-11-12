@@ -289,6 +289,7 @@ export class WalmartPricingProvider implements StorePricingProvider {
         method: "GET",
         cache: "no-cache",
         headers: walmartAuthHeaders(credentials),
+        signal: AbortSignal.timeout(8_000),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

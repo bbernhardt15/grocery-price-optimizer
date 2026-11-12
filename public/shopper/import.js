@@ -94,6 +94,10 @@ export function catalogSearchMarkup(item, escape) {
   if (state === "error") {
     return `${field}<div class="import-hit-list" data-search-state="error" role="alert"><p class="import-search-state">Search didn't load. Try again.</p></div>`;
   }
+  if (state === "busy") {
+    const kept = item.searchHits?.length ? searchHitRows(item.key, item.searchHits, escape) : "";
+    return `${field}<div class="import-hit-list" data-search-state="busy" role="status"><p class="import-search-state">The catalog is busy. These matches are still here.</p>${kept}<button type="button" class="ghost" data-search-go="${key}">Try this search again</button></div>`;
+  }
   if (state === "empty") {
     const href = escape(catalogStoreSearchHref(item.searchQuery || item.raw || item.name || ""));
     return `${field}<div class="import-hit-list" data-search-state="empty">
@@ -1321,8 +1325,8 @@ export function mountImport(deps) {
       return;
     }
     item.searchQuery = q;
-    item.searchState = "loading";
-    item.searchHits = [];
+    const previous = Array.isArray(item.searchHits) ? item.searchHits.slice() : [];
+    item.searchState = previous.length ? "results" : "loading";
     const stamp = Date.now();
     item._searchRun = stamp;
     renderReview();
@@ -1341,8 +1345,9 @@ export function mountImport(deps) {
         renderReview();
         return;
       }
-      const response = await fetch(apiUrl(priced));
-      const body = await response.json();
+      if (typeof deps.fetchBrowse !== "function") throw new Error("queue");
+      const response = await deps.fetchBrowse(apiUrl(priced));
+      const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "search failed");
       if (item._searchRun !== stamp) return;
       const rows = Array.isArray(body) ? body : body.suggestions || [];
@@ -1355,8 +1360,8 @@ export function mountImport(deps) {
       renderReview();
     } catch {
       if (item._searchRun !== stamp) return;
-      item.searchState = "error";
-      item.searchHits = [];
+      item.searchHits = previous;
+      item.searchState = "busy";
       renderReview();
     }
   }

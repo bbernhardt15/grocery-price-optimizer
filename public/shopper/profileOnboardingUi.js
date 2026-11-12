@@ -4,6 +4,7 @@
  */
 
 import { getUserProfile, saveUserProfile, shouldPromptProfile } from "./profile.js";
+import { browseRetryDelay } from "./browseQueue.js";
 import {
   AISLE_LABELS,
   SKIP_LABEL,
@@ -258,6 +259,11 @@ export function mountProfileOnboarding(deps = {}) {
           pendingFamilies,
           retryFamilies,
           savedFamilies: savedRules,
+          skippedFamilies: new Set(
+            Object.values(draft.categoryPreferences || {})
+              .filter((row) => row?.mode === "never")
+              .map((row) => row.family)
+          ),
         })}`;
       }
       const restore = learnedRows.length
@@ -872,28 +878,36 @@ export function mountProfileOnboarding(deps = {}) {
 
   async function loadBrandShelf(family) {
     if (!family || brandShelves[family] || !deps.loadStaple) return;
-    let tiles = [];
-    let retry = false;
-    try {
-      const result = await Promise.race([
-        deps.loadStaple(categorySearch(family) || family),
-        new Promise((resolve) => setTimeout(() => resolve("timeout"), 4000)),
-      ]);
-      if (result === "timeout") {
-        retry = true;
-        tiles = [];
-      } else {
-        tiles = result || [];
+    const search = categorySearch(family) || family;
+    const paint = () => {
+      if (receiptPhase !== "learned") return;
+      if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
+        paintLearnedCard(family, { saved: savedRules.has(family) });
       }
+    };
+    try {
+      const tiles = await deps.loadStaple(search, 3000);
+      brandShelves[family] = tiles || [];
+      brandRetry[family] = false;
     } catch {
-      tiles = [];
-      retry = true;
+      brandShelves[family] = [];
+      brandRetry[family] = true;
+      paint();
+      const wait = browseRetryDelay(0);
+      if (wait) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (brandRetry[family]) {
+          try {
+            const tiles = await deps.loadStaple(search, 3000);
+            brandShelves[family] = tiles || [];
+            brandRetry[family] = false;
+          } catch {
+            brandRetry[family] = true;
+          }
+        }
+      }
     }
-    brandShelves[family] = tiles;
-    brandRetry[family] = retry;
-    if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
-      paintLearnedCard(family, { saved: savedRules.has(family) });
-    }
+    paint();
   }
 
   async function loadProducts() {
@@ -1077,11 +1091,11 @@ export function mountProfileOnboarding(deps = {}) {
       readTick += 1;
       for (const card of readCards) {
         if (card.status !== "reading") continue;
-        const floor = Math.max(0, Math.min(0.92, Number(card.ratio) || 0));
-        card.walk = Math.min(0.92, Math.max(floor, Number(card.walk) || 0) + 0.2);
+        card.ratio = Math.min(0.92, Math.max(Number(card.ratio) || 0, 0) + 0.05);
+        card.walk = card.ratio;
         patchReadCard(card);
       }
-    }, 800);
+    }, 400);
   }
 
   function applyReadProgress(event) {
@@ -1110,7 +1124,9 @@ export function mountProfileOnboarding(deps = {}) {
         card.items.push(name);
       }
     }
-    if (Number.isFinite(Number(event.fileRatio))) card.ratio = Math.max(0, Math.min(1, Number(event.fileRatio)));
+    if (Number.isFinite(Number(event.fileRatio))) {
+      card.ratio = Math.max(Number(card.ratio) || 0, Math.max(0, Math.min(1, Number(event.fileRatio))));
+    }
     if (event.status === "error") {
       card.status = "error";
       card.error = event.error || event.message || "Couldn't read that file.";
@@ -1203,6 +1219,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function paintLearnedCard(family, options = {}) {
+    if (receiptPhase !== "learned") return null;
     const stage = $("profile-stage");
     const row = learnedRows.find((item) => item.family === family);
     const cssFamily = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(family) : String(family).replace(/["\\]/g, "");
@@ -1717,6 +1734,15 @@ export function mountProfileOnboarding(deps = {}) {
     if (!target || target.id === "profile-next") return;
     event.preventDefault();
     event.stopPropagation();
+    if (target.dataset.missingSkip) {
+      const family = target.dataset.missingSkip;
+      const label = target.dataset.missingLabel || family;
+      draft = setCategoryPreference(draft, { family, mode: "never", brand: "", productId: "", size: "", attributes: [], label }, Date.now());
+      persist(draft);
+      const host = target.closest(".missing-dept");
+      if (host) host.textContent = `${label} left off.`;
+      return;
+    }
     if (target.dataset.missingDept) {
       const family = target.dataset.missingDept;
       const label = target.dataset.missingLabel || family;

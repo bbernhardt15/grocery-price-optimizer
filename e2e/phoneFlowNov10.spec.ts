@@ -241,7 +241,8 @@ for (const size of [
     await page.locator("#profile-next").click();
     await expect(page.locator("#learned-add-trip")).toBeVisible();
     await expect(page.locator("#learned-empty-trip")).toBeVisible();
-    await expect(page.locator("#learned-add-trip-top")).toHaveCount(0);
+    await expect(page.locator("#learned-add-trip-top")).toBeVisible();
+    await expect(page.locator("#learned-empty-trip-top")).toBeVisible();
   });
 
   test(`return from a store stays on the tab that was open at ${size.width}x${size.height}`, async ({ page }) => {
@@ -274,7 +275,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#tab-favorites")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v88");
+    await expect(page.locator("#app-version")).toContainText("v89");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -620,7 +621,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v88 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v89 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {

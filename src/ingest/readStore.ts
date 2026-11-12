@@ -27,8 +27,12 @@ function departmentClause(departmentId?: string): Record<string, unknown> {
   return { departmentId: { $ne: "other" } };
 }
 
-async function findMasters(scope: { departmentId?: string; query?: string }): Promise<CatalogMasterDoc[]> {
+const MASTER_FIELDS = "key upc name brand imageUrls departmentId subcategory categoryPaths size familyKey familyName variantLabel";
+const OFFER_FIELDS = "productKey storeName price priceSource retailerItemId locationId zip size onSale availability productUrl";
+
+async function findMasters(scope: { departmentId?: string; query?: string }, maxScan?: number): Promise<CatalogMasterDoc[]> {
   const config = ingestConfig();
+  const limit = Math.max(24, Math.min(config.browseScan, Math.floor(maxScan ?? config.browseScan)));
   const tokens = tokensOf(scope.query ?? "");
   const visible = { status: { $ne: "discontinued" as const }, outOfScope: { $ne: true } };
   const department = departmentClause(scope.departmentId);
@@ -43,7 +47,8 @@ async function findMasters(scope: { departmentId?: string; query?: string }): Pr
         { score: { $meta: "textScore" } }
       )
         .sort({ score: { $meta: "textScore" } })
-        .limit(config.browseScan)
+        .limit(limit)
+        .select(MASTER_FIELDS)
         .lean<CatalogMasterDoc[]>();
       const narrowed = found.filter((master) => matchesTokens(master.name, master.brand, tokens));
       if (narrowed.length > 0) {
@@ -61,14 +66,16 @@ async function findMasters(scope: { departmentId?: string; query?: string }): Pr
       $and: clauses,
       ...department,
     })
-      .limit(config.browseScan)
+      .limit(limit)
+      .select(MASTER_FIELDS)
       .lean<CatalogMasterDoc[]>();
   }
   const dairyFood =
     scope.departmentId === "dairy-eggs" ? { name: { $not: DAIRY_FALSE_FRIEND } } : {};
   return CatalogMaster.find({ ...department, ...visible, ...dairyFood })
     .sort(scope.departmentId && scope.departmentId !== "all" ? { name: 1 } : { lastSeenAt: -1 })
-    .limit(config.browseScan)
+    .limit(limit)
+    .select(MASTER_FIELDS)
     .lean<CatalogMasterDoc[]>();
 }
 
@@ -84,7 +91,7 @@ function recordFrom(master: CatalogMasterDoc, offer: CatalogOfferDoc): RawCatalo
     ...(offer.locationId ? { locationId: offer.locationId } : {}),
     ...(offer.zip ? { zip: offer.zip } : {}),
     ...(offer.size || master.size ? { size: offer.size || master.size } : {}),
-    ...(master.imageUrls?.length ? { imageUrls: master.imageUrls } : {}),
+    ...(master.imageUrls?.length ? { imageUrls: master.imageUrls.slice(0, 2) } : {}),
     departmentId: master.departmentId,
     ...(master.subcategory ? { subcategory: master.subcategory } : {}),
     ...(master.categoryPaths?.length ? { categories: master.categoryPaths } : {}),
@@ -122,11 +129,12 @@ export async function readStoredRecords(scope: {
   query?: string;
   zipCode?: string;
   locationId?: string;
+  maxScan?: number;
 }): Promise<{ records: RawCatalogRecord[]; warnings: string[]; storeNames: string[] }> {
   if (mongoose.connection.readyState !== 1) {
     return { records: [], warnings: [], storeNames: [] };
   }
-  const masters = await findMasters(scope);
+  const masters = await findMasters(scope, scope.maxScan);
   if (masters.length === 0) {
     return { records: [], warnings: [], storeNames: [] };
   }
@@ -135,7 +143,10 @@ export async function readStoredRecords(scope: {
     productKey: { $in: keys },
     status: { $ne: "discontinued" },
     outOfScope: { $ne: true },
-  }).lean<CatalogOfferDoc[]>();
+  })
+    .select(OFFER_FIELDS)
+    .limit(Math.max(keys.length, 1) * 4)
+    .lean<CatalogOfferDoc[]>();
   const zip = scope.zipCode?.trim().slice(0, 5) ?? "";
   const locationId = scope.locationId?.trim() ?? "";
   const kroger = offers.filter((offer) => offer.storeName.toLowerCase() === "kroger");

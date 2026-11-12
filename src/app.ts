@@ -25,6 +25,7 @@ import betaRouter from "./routes/beta";
 import { enforceBetaInvite } from "./beta/gate";
 import { IMPORT_MESSAGES } from "./import/messages";
 import { recordedTestPushTitles, sendTestPush } from "./alerts/push";
+import { BROWSE_CONCURRENCY, beginRequest, endRequest, ingestShouldWait, loopSnapshot, noteClientClosed, rejectBrowse } from "./runtime/loopGuard";
 
 initSentry();
 
@@ -199,6 +200,35 @@ app.get("/api", (_req, res) => {
 
 app.get("/api/observability", (_req, res) => {
   res.json(observabilityResponse());
+});
+
+app.use((req, res, next) => {
+  const path = req.path || "";
+  if (path === "/api/version" || path === "/api/health" || path === "/api/health/ready") {
+    next();
+    return;
+  }
+  const browse = req.method === "GET" && path.startsWith("/api/catalog/browse");
+  if (browse && loopSnapshot().browseInFlight >= BROWSE_CONCURRENCY) {
+    rejectBrowse();
+    res.setHeader("Retry-After", "1");
+    res.status(503).json({ error: "Catalog is busy. Wait a moment and try that aisle again." });
+    return;
+  }
+  const kind = browse ? "browse" : "other";
+  beginRequest(kind);
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    endRequest(kind);
+  };
+  res.on("finish", done);
+  res.on("close", () => {
+    if (!res.writableEnded) noteClientClosed();
+    done();
+  });
+  next();
 });
 
 app.use("/api", attachAccount);

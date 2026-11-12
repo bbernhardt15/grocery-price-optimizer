@@ -13,6 +13,31 @@ function escapeText(value) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * One browse on the shared queue. Callers pass the app's fetchBrowse so this
+ * search shares the cap, the URL dedupe, and the 503 backoff.
+ * @param {string} url
+ * @param {(url: string, options?: object, timeout?: number) => Promise<Response>} fetchBrowse
+ */
+export function requestMatchBrowse(url, fetchBrowse) {
+  if (typeof fetchBrowse !== "function") {
+    throw new TypeError("Match search needs the shared browse queue.");
+  }
+  return fetchBrowse(url);
+}
+
+/** A 503 or a dropped search keeps the rows already on screen and offers another try. */
+export function matchBusyView(previous) {
+  const rows = Array.isArray(previous) ? previous : [];
+  return {
+    rows,
+    retry: true,
+    status: rows.length
+      ? "The aisle is busy. These matches are still here."
+      : "The aisle is busy. Try this search again.",
+  };
+}
+
 /** The food word, without the store or a single flavor, so every matching product can show. */
 export function matchBrowseQuery(name) {
   const text = String(name || "").replace(/\s+/g, " ").trim();
@@ -48,15 +73,10 @@ export function mountMatchSheet(deps) {
   const products = new Map();
   let query = "";
   let storeName = "";
+  let shown = [];
 
-  function paint(rows, message) {
-    const host = dialog.querySelector("#match-results");
-    if (!host) return;
-    if (!rows.length) {
-      host.innerHTML = `<p class="muted">${escapeText(message || "Nothing close in Grocery Gitter.")}</p>`;
-      return;
-    }
-    host.innerHTML = rows
+  function rowHtml(rows) {
+    return rows
       .map((row) => {
         const id = String(row.id || "");
         const label = String(row.label || "Item");
@@ -64,6 +84,19 @@ export function mountMatchSheet(deps) {
         return `<button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}"><span>${escapeText(label)}</span>${price}</button>`;
       })
       .join("");
+  }
+
+  function paint(rows, message, { retry = false } = {}) {
+    const host = dialog.querySelector("#match-results");
+    if (!host) return;
+    const list = rowHtml(rows);
+    const note = message ? `<p class="muted" role="status">${escapeText(message)}</p>` : "";
+    const again = retry ? `<button type="button" class="ghost" data-match-retry>Try this search again</button>` : "";
+    if (!list && !note && !again) {
+      host.innerHTML = `<p class="muted" role="status">Nothing close in Grocery Gitter.</p>`;
+      return;
+    }
+    host.innerHTML = `${list}${note}${again}`;
   }
 
   function offerFor(item, store) {
@@ -78,9 +111,17 @@ export function mountMatchSheet(deps) {
     return { store: String(hit.storeName || store), price: Number(hit.price) };
   }
 
+  function showBusy(previous) {
+    const busy = matchBusyView(previous);
+    shown = busy.rows;
+    paint(shown, busy.status, { retry: true });
+  }
+
   async function search(name) {
     const where = storeName ? ` at ${storeName}` : "";
-    paint([], `Searching Grocery Gitter${where}…`);
+    const kept = shown.slice();
+    if (kept.length) paint(kept, `Searching Grocery Gitter${where}…`);
+    else paint([], `Searching Grocery Gitter${where}…`);
     const apiUrl = deps.apiUrl || ((path) => path);
     let saved = "";
     try {
@@ -88,14 +129,19 @@ export function mountMatchSheet(deps) {
     } catch {
       saved = "";
     }
-    const query = matchBrowseQuery(name) || name;
-    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=48`, saved);
+    const browseQuery = matchBrowseQuery(name) || name;
+    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(browseQuery)}&limit=48`, saved);
     if (!priced) {
       paint([], "Add a ZIP to see store prices.");
+      shown = [];
       return;
     }
     try {
-      const response = await fetch(apiUrl(priced));
+      const response = await requestMatchBrowse(apiUrl(priced), deps.fetchBrowse);
+      if (!response.ok) {
+        showBusy(kept);
+        return;
+      }
       const body = await response.json().catch(() => ({}));
       const items = Array.isArray(body.items) ? body.items : [];
       products.clear();
@@ -115,9 +161,10 @@ export function mountMatchSheet(deps) {
           store: offer?.store || storeName,
         });
       }
+      shown = rows;
       paint(rows, rows.length ? "" : storeName ? `Nothing at ${storeName} in Grocery Gitter. That item stays off the ${storeName} cart.` : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
     } catch {
-      paint([], "Couldn't search just now. You can keep shopping in the store.");
+      showBusy(kept);
     }
   }
 
@@ -156,6 +203,12 @@ export function mountMatchSheet(deps) {
 
   dialog.querySelector("#match-close")?.addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => {
+    const retry = event.target instanceof Element ? event.target.closest("[data-match-retry]") : null;
+    if (retry) {
+      event.preventDefault();
+      if (query) void search(query);
+      return;
+    }
     const target = event.target instanceof Element ? event.target.closest("[data-match-pick]") : null;
     if (!target) return;
     event.preventDefault();
@@ -165,6 +218,7 @@ export function mountMatchSheet(deps) {
   });
   dialog.addEventListener("close", () => {
     products.clear();
+    shown = [];
     const pin = () => {
       if (dialog.open) return;
       holdPageScroll();

@@ -32,8 +32,8 @@ function chromeExecutable() {
 const chrome = chromeExecutable();
 
 describe("twelfth phone test — onboarding and receipt import", () => {
-  it("bumps the shell cache to v88", () => {
-    assert.equal(SHELL_CACHE, "v88");
+  it("bumps the shell cache to v89", () => {
+    assert.equal(SHELL_CACHE, "v89");
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
   });
 
@@ -112,7 +112,8 @@ describe("twelfth phone test — onboarding and receipt import", () => {
     assert.match(markup, /id="trip-add-count"/);
     assert.match(markup, /0 selected/);
     assert.match(markup, /Select all/);
-    assert.doesNotMatch(markup, /id="learned-add-trip-top"/);
+    assert.match(markup, /id="learned-add-trip-top"/);
+    assert.match(markup, /id="learned-empty-trip-top"/);
     assert.match(markup, /id="learned-add-trip" disabled/);
     assert.match(markup, /id="trip-add-body"/);
     assert.match(profileUi, /syncTripAddBar/);

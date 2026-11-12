@@ -309,6 +309,7 @@ export class KrogerService {
         Accept: "application/json",
       },
       body,
+      signal: AbortSignal.timeout(8_000),
     });
 
     const payload = (await response.json()) as TokenResponse;
@@ -356,6 +357,7 @@ export class KrogerService {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(8_000),
     });
 
     if (!response.ok) {
@@ -532,6 +534,7 @@ export class KrogerService {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(8_000),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -26,7 +26,7 @@ for (const size of sizes) {
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toContainText("v88");
+    await expect(page.locator("#app-version")).toContainText("v89");
     await page.locator("#drawer-close").click();
 
     const tiles = page.locator("#usuals-toggle, [data-lists-open], #past-trips-open, #browse-toggle");
@@ -267,7 +267,7 @@ for (const size of sizes) {
     await page.locator("#brand-home").click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/v88 · [0-9a-f]{7}/i);
+    await expect(page.locator("#app-version")).toHaveText(/v89 · [0-9a-f]{7}/i);
     const versionSeen = await page.evaluate(() => {
       const drawer = document.querySelector("#app-drawer");
       const node = document.querySelector("#app-version");

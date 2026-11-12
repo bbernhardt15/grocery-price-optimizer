@@ -233,7 +233,7 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   const learnedFit = await page.evaluate(() => {
     const scroller = document.querySelector("#profile-stage");
     const next = document.querySelector("#profile-next");
-    const last = document.querySelector(".missing-depts [data-missing-dept]:last-of-type");
+    const last = document.querySelector(".missing-depts .missing-dept:last-of-type");
     if (!scroller || !next || !last) return null;
     const frame = scroller.getBoundingClientRect();
     const nextBox = next.getBoundingClientRect();

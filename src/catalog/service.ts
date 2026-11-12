@@ -139,6 +139,12 @@ export function setDepartmentFeedDelayForTests(ms: number): void {
   departmentFeedDelayMs = Math.max(0, ms);
 }
 
+/** Test hook. Pauses every browse so a burst cannot hide a stuck loop. */
+let browsePauseMs = 0;
+export function setBrowsePauseForTests(ms: number): void {
+  browsePauseMs = Math.max(0, ms);
+}
+
 function demoRecordsFor(scope: { departmentId?: string; query?: string }): RawCatalogRecord[] {
   const tokens = queryTokens(scope.query ?? "");
   const family = familyFromQuery(scope.query ?? "");
@@ -370,7 +376,7 @@ async function firstPageFeed(work: Promise<RawCatalogRecord[]>, warnings: string
 }
 
 async function loadScope(
-  scope: { departmentId?: string; query?: string },
+  scope: { departmentId?: string; query?: string; maxScan?: number },
   zipCode?: string
 ): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
   const query = scope.query?.trim();
@@ -388,6 +394,7 @@ async function loadScope(
       ...(departmentId ? { departmentId } : {}),
       ...(query ? { query } : {}),
       ...(zipCode ? { zipCode } : {}),
+      ...(scope.maxScan ? { maxScan: scope.maxScan } : {}),
     });
     if (stored.records.length > 0) {
       const stores = new Set(stored.storeNames.map((store) => store.toLowerCase()));
@@ -536,12 +543,17 @@ export async function loadKnownProducts(hints?: { queries?: string[]; upcs?: str
 }
 
 export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
+  if (browsePauseMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, browsePauseMs));
+  }
   const query = request.query ? spokenTranscriptAliases(request.query).trim() : request.query?.trim();
   const departmentId = request.departmentId?.trim();
+  const pageLimit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const scope = await loadScope(
     {
       ...(departmentId && departmentId !== "all" ? { departmentId } : {}),
       ...(query ? { query } : {}),
+      maxScan: Math.min(ingestConfig().browseScan, pageLimit * 6),
     },
     request.zipCode
   );
@@ -613,7 +625,7 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
     return [];
   }
   if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
-    const stored = await readStoredRecords({ query: q });
+    const stored = await readStoredRecords({ query: q, maxScan: 48 });
     if (stored.records.length > 0) {
       const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
       return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
@@ -633,7 +645,7 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
     const records = await readStoredById(id);
     if (records.length > 0) {
       const departmentId = records[0]?.departmentId;
-      const mates = await readStoredRecords(departmentId ? { departmentId } : {});
+      const mates = await readStoredRecords(departmentId ? { departmentId, maxScan: 24 } : { maxScan: 24 });
       const products = groupOffersByUpc(mates.records);
       const product = products.find((entry) => entry.id === id) ?? groupOffersByUpc(records)[0];
       if (product) {

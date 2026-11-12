@@ -222,6 +222,7 @@ import { APPROXIMATE_ZIP_NOTE } from "./shopper/deviceZip.js";
 import { listThumbHtml } from "./shopper/listRowChrome.js";
 import { addLifetimeSavings, totalAtStore, tripValueSummary } from "./shopper/tripValue.js";
 import { keepAwake, keyboardOverlap, lightTap, moreChips, pullDistance, pullShouldRefresh, pullStatusText } from "./shopper/phone.js";
+import { browseQueue, browseRetryDelay } from "./shopper/browseQueue.js";
 import { fetchWithTimeout, PLAN_PARTIAL_NOTE, PLAN_TIMEOUT_MS, planTimedOut } from "./shopper/planLoad.js";
 import { chooseDisplayedPlan, listDisplayPlan, savingsClaimAllowed, storeCheckSettled } from "./shopper/planFallback.js";
 import { joinBrandName } from "./shopper/tripAdd.js";
@@ -330,9 +331,18 @@ function openStoreHandoff(url, store, kind) {
     void openExternal(safe);
     return;
   }
-  const bridge = handoffBridgePath(store, record.kind, safe);
-  const opened = window.open(bridge, "_blank");
-  if (!opened) window.location.assign(bridge);
+  // noopener makes window.open return null even when the tab opened, which used to
+  // send this page to the store as well. Drop the opener after a real tab.
+  const opened = window.open(safe, "_blank");
+  if (opened) {
+    try {
+      opened.opener = null;
+    } catch {
+      /* the new tab can already be cross-origin */
+    }
+    return;
+  }
+  window.location.assign(safe);
 }
 
 function publishHandoff(store, kind, detail) {
@@ -3056,6 +3066,35 @@ let catalogGeneration = 0;
 let catalogAbort = null;
 const AISLE_TIMEOUT_MS = 12000;
 
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Every catalog browse shares one queue. A 503 or a dropped connection waits, then tries again. */
+async function fetchBrowse(url, options = {}, timeout = AISLE_TIMEOUT_MS) {
+  return browseQueue.enqueue(url, async () => {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (options.signal?.aborted) throw new DOMException("The aisle was cancelled.", "AbortError");
+      try {
+        const response = await fetchWithTimeout(fetch, url, options, timeout);
+        if (response.status !== 503) return response;
+        const wait = browseRetryDelay(attempt);
+        if (!wait || attempt === 2) return response;
+        await waitMs(wait);
+      } catch (error) {
+        lastError = error;
+        if (planTimedOut(error) || options.signal?.aborted) throw error;
+        const wait = browseRetryDelay(attempt);
+        if (!wait || attempt === 2) throw error;
+        await waitMs(wait);
+      }
+    }
+    if (lastError) throw lastError;
+    throw new Error("The aisle is busy.");
+  });
+}
+
 function discontinuedTitle(product) {
   const text = [product?.name, product?.familyName, product?.catalogName, product?.brand].filter(Boolean).join(" ");
   return /discontinued/i.test(text);
@@ -3112,8 +3151,7 @@ async function loadPage(reset) {
   }
   if (!reset && nextCursor) params.set("cursor", nextCursor);
   try {
-    const response = await fetchWithTimeout(
-      fetch,
+    const response = await fetchBrowse(
       apiUrl(`/api/catalog/browse?${params.toString()}`),
       controller ? { signal: controller.signal } : {},
       AISLE_TIMEOUT_MS
@@ -3182,6 +3220,11 @@ async function loadPage(reset) {
     }
   } catch (error) {
     if (generation !== catalogGeneration) return;
+    const kept = Boolean(gridEl?.querySelector(".card"));
+    if (kept) {
+      showCatalogError("The aisle is busy. These items are still here.");
+      return;
+    }
     if (reset && planTimedOut(error) && catalogAbort === controller) {
       showCatalogError("");
       gridEl.innerHTML = `<div class="empty-state" role="alert"><h3>This aisle is taking a while</h3><p>The catalog didn't answer. Nothing new was added.</p><button type="button" class="primary" data-empty-action="retry-aisle">Try this aisle again</button></div>`;
@@ -3195,8 +3238,14 @@ async function loadPage(reset) {
       gridEl.innerHTML = emptyStateMarkup(state, escapeHtml, "alert");
       resultCountEl.textContent = state.title;
     } else {
-      showCatalogError(error instanceof Error ? error.message : "Could not load the catalog.");
-      if (reset) gridEl.innerHTML = "";
+      const message = error instanceof Error ? error.message : "Could not load the catalog.";
+      if (reset) {
+        showCatalogError("");
+        gridEl.innerHTML = `<div class="empty-state" role="status"><h3>The aisle is busy</h3><p>${escapeHtml(message)}</p><button type="button" class="primary" data-empty-action="retry-aisle">Try this aisle again</button></div>`;
+        if (resultCountEl) resultCountEl.textContent = "The aisle is busy";
+      } else {
+        showCatalogError(message);
+      }
     }
   } finally {
     if (generation !== catalogGeneration) return;
@@ -3414,11 +3463,7 @@ async function loadSuggestions(text) {
   const controller = new AbortController();
   suggestAbort = controller;
   const requestQuery = q;
-  if (suggestionQuery !== q) {
-    suggestions = [];
-    activeSuggest = -1;
-    suggestionQuery = "";
-  }
+  const kept = suggestions.slice();
   suggestLoadingTimer = window.setTimeout(() => {
     if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
   }, 200);
@@ -3431,10 +3476,21 @@ async function loadSuggestions(text) {
       showSuggestStatus("Add a ZIP to see store prices.");
       return;
     }
-    const response = await fetch(priced, { signal: controller.signal });
+    const response = await fetchBrowse(priced, { signal: controller.signal });
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
+    if (!response.ok) {
+      suggestions = kept;
+      if (kept.length) {
+        suggestionQuery = requestQuery;
+        showSuggestStatus("The catalog is busy. These matches are still here.");
+        renderSuggestionRows(requestQuery);
+      } else {
+        showSuggestStatus("The catalog is busy. Try this search again.");
+      }
+      return;
+    }
     const profile = getUserProfile(localStorage);
     const warning = exclusionWarning(profile, q);
     showProfileWarning(warning);
@@ -3452,7 +3508,13 @@ async function loadSuggestions(text) {
     if (error?.name === "AbortError") return;
     window.clearTimeout(suggestLoadingTimer);
     if (searchEl.value.trim() !== requestQuery) return;
-    suggestions = [];
+    suggestions = kept;
+    if (kept.length) {
+      suggestionQuery = requestQuery;
+      showSuggestStatus("The catalog is busy. These matches are still here.");
+      renderSuggestionRows(requestQuery);
+      return;
+    }
     const kind = networkKind(error, navigator.onLine);
     if (kind) {
       const state = emptyState(kind);
@@ -4106,7 +4168,7 @@ function renderTrip(payload, options = {}) {
     stores: figures.stores.length ? figures.stores : payload?.stores || [],
     total,
   };
-  reviewSignature = signature;
+  if (!options.prefetch) reviewSignature = signature;
   if (!options.keepEdits) {
     plannedSignature = signature;
     tripEdits = { lockedStore: null, moves: {} };
@@ -4906,7 +4968,7 @@ async function fillMissingSuggestions() {
         host.innerHTML = `<p class="muted">Add a ZIP to see store prices.</p>`;
         continue;
       }
-      const response = await fetchWithTimeout(fetch, browse, {}, 4000);
+      const response = await fetchBrowse(browse, {}, 4000);
       const body = await response.json().catch(() => ({}));
       if (fillMissingSuggestions.generation !== generation || !host.isConnected) return;
       const ranked = rankSwapSuggestions(name, body.items || []);
@@ -5442,11 +5504,12 @@ function pinPreferredStores(payload) {
   if (changed) tripEdits = { ...tripEdits, moves, planMode: tripEdits.planMode || "custom" };
 }
 
-function commitDisplayedPlan(payload, { zip } = {}) {
+function commitDisplayedPlan(payload, { zip, prefetch = false } = {}) {
   if (!payload) return false;
   pinPreferredStores(payload);
-  renderTrip(payload, { keepEdits: true, force: true });
+  renderTrip(payload, { keepEdits: true, force: true, prefetch });
   if (!planReady(lastOptimize)) return false;
+  if (prefetch) return true;
   quietRetryAttempt = 0;
   writePlanCache(localStorage, {
     signature: listSignature(),
@@ -5560,7 +5623,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
     if (!planning || planAbort !== controller) return;
     paintPlanningStatus();
     if (streamedPlan && planIsShowable(streamedPlan) && !tripEl?.querySelector("[data-review-shell]")) {
-      commitDisplayedPlan({ ...streamedPlan, partial: true }, { zip });
+      commitDisplayedPlan({ ...streamedPlan, partial: true }, { zip, prefetch: quiet && stay });
       holdVisibleReview("Some stores are still checking. These prices are ready to use.");
     } else if (flowStep === "plan" && !planReady(lastOptimize)) {
       paintReviewLoading("Still checking. Prices that are ready will show here. Retry if a store stalls.");
@@ -5625,7 +5688,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
         streamedPlan = shown;
-        if (commitDisplayedPlan(shown, { zip })) clearPlanTabBusy();
+        if (commitDisplayedPlan(shown, { zip, prefetch: quiet && stay })) clearPlanTabBusy();
         return;
       }
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
@@ -5644,10 +5707,10 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
           : null;
     const adopted = adoptReviewResult(previousPlan, body, Date.now());
     const chosen = chooseDisplayedPlan(adopted, streamedPlan, Date.now());
-    if (chosen && commitDisplayedPlan(chosen, { zip })) {
+    if (chosen && commitDisplayedPlan(chosen, { zip, prefetch: quiet && stay })) {
       betaEvent("plan_built");
       rememberListAsUsuals();
-      openList(false);
+      if (!(quiet && stay)) openList(false);
       void instacartTask.then(() => {
         if (planAbort && planAbort !== controller) return;
         if (flowStep === "shop") renderShop();
@@ -5670,9 +5733,9 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       if (flowStep === "plan") paintReviewLoading();
       return result;
     }
-    if (commitDisplayedPlan(listPlanFallback(), { zip })) {
+    if (commitDisplayedPlan(listPlanFallback(), { zip, prefetch: quiet && stay })) {
       rememberListAsUsuals();
-      openList(false);
+      if (!(quiet && stay)) openList(false);
       return result;
     }
     if (flowStep === "plan") paintReviewLoading(REVIEW_GAVE_UP_STATUS);
@@ -5701,7 +5764,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       rememberListAsUsuals();
       return "ok";
     }
-    if (recovered && planIsShowable(recovered) && commitDisplayedPlan(recovered, { zip })) {
+    if (recovered && planIsShowable(recovered) && commitDisplayedPlan(recovered, { zip, prefetch: quiet && stay })) {
       if (timedOut) timeoutNote = REVIEW_REFRESH_TIMEOUT_STATUS;
       rememberListAsUsuals();
       return "ok";
@@ -5711,7 +5774,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       paintReviewLoading(REVIEW_GAVE_UP_STATUS);
       return "fail";
     }
-    if (commitDisplayedPlan(listPlanFallback(), { zip })) {
+    if (commitDisplayedPlan(listPlanFallback(), { zip, prefetch: quiet && stay })) {
       rememberListAsUsuals();
       return "ok";
     }
@@ -6527,7 +6590,7 @@ async function addSample() {
     toast("Add a ZIP to see store prices.");
     return;
   }
-  const response = await fetch(sampleUrl);
+  const response = await fetchBrowse(sampleUrl);
   const body = await response.json();
   const wanted = [
     { name: "Bananas", brand: "Fresh" },
@@ -6803,7 +6866,6 @@ document.addEventListener("click", (event) => {
   }
   const flowButton = target.closest("[data-flow]");
   if (flowButton) {
-    if (clickShielded(tabGuard, Date.now())) return;
     haptic();
     const next = flowButton.getAttribute("data-flow");
     if (next === "plan" && openNeedsInput()) return;
@@ -7403,10 +7465,23 @@ document.addEventListener("click", (event) => {
 });
 $("store-return-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
-  const store = $("store-return")?.dataset.store || "Walmart";
-  markPurchase(store, "bought");
-  $("store-return")?.close();
-  finishCurrentTrip();
+  const dialog = $("store-return");
+  const store = dialog?.dataset.store || "Walmart";
+  try {
+    dialog?.close();
+  } catch {
+    /* already closed */
+  }
+  try {
+    markPurchase(store, "bought");
+  } catch {
+    /* the sheet is already gone */
+  }
+  try {
+    finishCurrentTrip();
+  } catch {
+    toast("The trip sheet is closed. Your list is still here.");
+  }
 });
 $("clear-trip-cancel")?.addEventListener("click", () => $("clear-trip")?.close());
 $("clear-trip-form")?.addEventListener("submit", (event) => {
@@ -9283,7 +9358,7 @@ function lists() {
       searchTiles: async (query) => {
         const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(query)}&limit=12`);
         if (!browse) return null;
-        const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
+        const response = await fetchBrowse(browse, {}, PLAN_TIMEOUT_MS);
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
         for (const tile of body.items || []) rememberTile(tile);
@@ -9412,7 +9487,7 @@ async function openPreferenceChange(family) {
   let tiles = [];
   try {
     const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(label)}&limit=8`);
-    const response = browse ? await fetch(browse) : null;
+    const response = browse ? await fetchBrowse(browse, {}, 8000) : null;
     const body = await response.json().catch(() => ({}));
     tiles = filterTiles(getUserProfile(localStorage), body.items || []);
     for (const tile of tiles) rememberTile(tile);
@@ -9466,7 +9541,7 @@ async function loadFamilyShelf(families) {
     seen.add(search);
     const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
     if (!browse) return flattenTiles([]);
-    const response = await fetchWithTimeout(fetch, browse, {}, PLAN_TIMEOUT_MS);
+    const response = await fetchBrowse(browse, {}, PLAN_TIMEOUT_MS);
     const body = await response.json().catch(() => ({}));
     tiles = tiles.concat(body.items || []);
   }
@@ -9622,7 +9697,7 @@ async function loadStarterShelf(picks) {
     queries.slice(0, 12).map((name) => {
       const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=8`);
       if (!browse) return Promise.resolve({});
-      return fetchWithTimeout(fetch, browse, {}, 4000)
+      return fetchBrowse(browse, {}, 4000)
         .then((response) => response.json().catch(() => ({})))
         .catch(() => ({}));
     })
@@ -10038,7 +10113,7 @@ async function fillNeedsSearch(name, store, listId, host) {
   host.innerHTML = `<p class="muted">Searching ${escapeHtml(store)}…</p>`;
   try {
     const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=6`);
-    const response = browse ? await fetch(browse) : null;
+    const response = browse ? await fetchBrowse(browse, {}, 8000) : null;
     const body = await response?.json().catch(() => ({}));
     const tiles = Array.isArray(body?.items) ? body.items.slice(0, 4) : [];
     if (!tiles.length) {
@@ -10571,6 +10646,7 @@ profileUi = mountProfileOnboarding({
     showStep("add");
     renderEstimate();
     toast(added === 1 ? "Added 1 item." : added ? `Added ${added} items.` : "Nothing new to add.");
+    if (added) void planTrip({ stay: true, quiet: true });
   },
   readReceipts: async ({ text, files, onProgress } = {}) => {
     let photo = false;
@@ -10597,12 +10673,12 @@ profileUi = mountProfileOnboarding({
     );
   },
   readLines: (lines) => postImport("/api/import/receipt", { lines }),
-  loadStaple: async (search) => {
+  loadStaple: async (search, timeout = 8000) => {
     const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(search)}&limit=24`);
     if (!browse) return [];
-    const response = await fetch(browse);
+    const response = await fetchBrowse(browse, {}, timeout);
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return [];
+    if (!response.ok) throw new Error(body.error || "The aisle is busy.");
     const want = familyFromQuery(search);
     const matched = want ? selectStapleTiles(body.items || [], want, 12, search) : body.items || [];
     return matched.map((tile) => {
@@ -10793,6 +10869,7 @@ guide = mountGuide({
 
 matchSheet = mountMatchSheet({
   apiUrl,
+  fetchBrowse,
   onPick(product, name, store) {
     const wanted = String(name || "").trim();
     for (const [id, entry] of [...list]) {
@@ -10860,6 +10937,7 @@ importer = mountImport({
     paintUsuals();
   },
   apiUrl,
+  fetchBrowse,
   toast,
   persistList() {
     saveList();
