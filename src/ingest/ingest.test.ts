@@ -10,7 +10,9 @@ import { krogerProductIdForLookup, upcKey, walmartLookupCodes, walmartUpcForLook
 import type { RawCatalogRecord } from "../catalog/types";
 import { MemoryBudgetStore, MongoBudgetStore, utcDay } from "./budget";
 import { ingestConfig } from "./config";
+import { KROGER_PRODUCT_ID_BATCH } from "./krogerBatch";
 import { KROGER_TERMS_VERSION } from "./krogerTerms";
+import { WALMART_LOOKUP_IDS_MAX } from "./walmartRefreshBatch";
 import { dropShadowLocalKeys, excludeNongroceryFromRefresh, recategorizeCatalog, resetRunCounters, startRecategorizeJob } from "./maintenance";
 import { CatalogDemand, CatalogMaster, CatalogMatchDay, CatalogOffer, CatalogRefreshDay, IngestBudget, IngestCheckpoint, IngestLock, ShopperZip } from "./models";
 import { SavedList } from "../auth/models";
@@ -4283,5 +4285,137 @@ describe("catalog ingestion", () => {
     assert.equal(typeof status.refresh.callsToday.kroger, "number");
     assert.equal(typeof status.refresh.attemptedToday.kroger, "number");
     assert.equal(status.refresh.krogerBatchSize, 50);
+  });
+
+  it("sends 50 Kroger refresh ids in one call and leaves the 51st, while Walmart stays at 20", async () => {
+    const now = new Date("2026-11-12T20:00:00.000Z");
+    const krogerIds = Array.from({ length: KROGER_PRODUCT_ID_BATCH + 1 }, (_unused, index) =>
+      `00${String(index + 1).padStart(11, "0")}`
+    );
+    const heldBack = krogerIds[KROGER_PRODUCT_ID_BATCH] ?? "";
+    const krogerKeys = krogerIds.map((upc) => `kroger-batch-${upc}`);
+    const walmartKeys = Array.from({ length: WALMART_LOOKUP_IDS_MAX + 5 }, (_unused, index) => `walmart-cap-${index + 1}`);
+    await CatalogMaster.deleteMany({ key: { $in: [...krogerKeys, ...walmartKeys] } });
+    await CatalogOffer.deleteMany({ productKey: { $in: [...krogerKeys, ...walmartKeys] } });
+    await CatalogOffer.updateMany({ status: "stale", storeName: "Kroger" }, { $set: { refreshExcluded: true } });
+    await CatalogMaster.insertMany(
+      krogerIds.map((upc, index) => ({
+        key: `kroger-batch-${upc}`,
+        name: `Batch Milk ${index + 1}`,
+        brand: "Test Dairy",
+        departmentId: "dairy-eggs",
+        upc,
+        krogerProductId: upc,
+        walmartItemId: `kroger-batch-wm-${index + 1}`,
+        matchKrogerAt: now,
+        matchKrogerVariant: 0,
+        lastSeenAt: new Date(now.getTime() - (krogerIds.length - index) * 60_000),
+        status: "active",
+      }))
+    );
+    await CatalogOffer.insertMany(
+      krogerIds.map((upc, index) => ({
+        productKey: `kroger-batch-${upc}`,
+        storeName: "Kroger",
+        locationId: "01400902",
+        price: 1,
+        lastSeenAt: new Date(now.getTime() - (krogerIds.length - index) * 60_000),
+        status: "stale",
+      }))
+    );
+    await CatalogMaster.insertMany(
+      walmartKeys.map((key, index) => ({
+        key,
+        name: `Batch Cereal ${index + 1}`,
+        brand: "Test Cereal",
+        departmentId: "breakfast",
+        upc: `016000${String(index + 1).padStart(6, "0")}`,
+        walmartItemId: String(300000 + index),
+        lastSeenAt: new Date(now.getTime() - (index + 1) * 60_000),
+        status: "active",
+      }))
+    );
+    await CatalogOffer.insertMany(
+      walmartKeys.map((key, index) => ({
+        productKey: key,
+        storeName: "Walmart",
+        locationId: "1443",
+        price: 2,
+        lastSeenAt: new Date(now.getTime() - (index + 1) * 60_000),
+        status: "stale",
+      }))
+    );
+    const queued = await nextRefreshPicks("Kroger", now, KROGER_PRODUCT_ID_BATCH + 1);
+    assert.equal(queued.length, KROGER_PRODUCT_ID_BATCH);
+    assert.equal(queued.some((pick) => pick.code === heldBack), false);
+    const walmartQueued = await nextRefreshPicks("Walmart", now, KROGER_PRODUCT_ID_BATCH);
+    assert.equal(walmartQueued.length, WALMART_LOOKUP_IDS_MAX);
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400902" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const batches: string[][] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 0;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 1;
+    const client = {
+      resolveLocation: async () => "01400902",
+      page: async () => {
+        throw new Error("discovery should wait");
+      },
+      lookupProductId: async (id: string) => {
+        batches.push([id]);
+        return { returned: 0, records: [] };
+      },
+      lookupProductIds: async (ids: string[]) => {
+        batches.push([...ids]);
+        return { returned: 0, records: [] };
+      },
+    };
+    await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.2,
+      now: () => now,
+    });
+    assert.equal(batches.length, 1);
+    assert.equal(batches[0]?.length, KROGER_PRODUCT_ID_BATCH);
+    assert.equal(batches[0]?.includes(heldBack), false);
+    const waiting = await nextRefreshPicks("Kroger", now, KROGER_PRODUCT_ID_BATCH);
+    assert.deepEqual(waiting.map((pick) => pick.code), [heldBack]);
+    await stepKroger({
+      client,
+      maxCalls: 1,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      staleRatio: 0.2,
+      now: () => now,
+    });
+    assert.equal(batches.length, 2);
+    assert.deepEqual(batches[1], [heldBack]);
   });
 });
