@@ -56,6 +56,16 @@ for (const size of sizes) {
     await expect(page.getByRole("heading", { name: "Here's what we learned" })).toBeVisible();
     await page.locator("[data-learned-change]").first().tap();
     await expect(page.getByRole("button", { name: "Load brands again" })).toBeVisible();
+    const leaveMeat = page.getByRole("button", { name: "Leave Meat & Seafood off" });
+    await expect(leaveMeat).toBeVisible();
+    await leaveMeat.tap();
+    await expect(page.getByText("Meat & Seafood left off.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Leave Meat & Seafood off" })).toHaveCount(0);
+    const meatMode = await page.evaluate(() => {
+      const profile = JSON.parse(localStorage.getItem("gg-profile") || "{}");
+      return profile.categoryPreferences?.meat?.mode || "";
+    });
+    expect(meatMode).toBe("never");
     await page.unroute("**/api/catalog/browse**");
     await page.locator("#profile-next").tap();
     await expect(page.locator("#learned-add-trip")).toBeVisible();

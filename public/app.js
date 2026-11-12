@@ -3463,11 +3463,7 @@ async function loadSuggestions(text) {
   const controller = new AbortController();
   suggestAbort = controller;
   const requestQuery = q;
-  if (suggestionQuery !== q) {
-    suggestions = [];
-    activeSuggest = -1;
-    suggestionQuery = "";
-  }
+  const kept = suggestions.slice();
   suggestLoadingTimer = window.setTimeout(() => {
     if (suggestions.length === 0) showSuggestStatus(`Searching for “${q}”…`);
   }, 200);
@@ -3480,10 +3476,21 @@ async function loadSuggestions(text) {
       showSuggestStatus("Add a ZIP to see store prices.");
       return;
     }
-    const response = await fetch(priced, { signal: controller.signal });
+    const response = await fetchBrowse(priced, { signal: controller.signal });
     const body = await response.json().catch(() => ({}));
     if (controller.signal.aborted || searchEl.value.trim() !== requestQuery) return;
     window.clearTimeout(suggestLoadingTimer);
+    if (!response.ok) {
+      suggestions = kept;
+      if (kept.length) {
+        suggestionQuery = requestQuery;
+        showSuggestStatus("The catalog is busy. These matches are still here.");
+        renderSuggestionRows(requestQuery);
+      } else {
+        showSuggestStatus("The catalog is busy. Try this search again.");
+      }
+      return;
+    }
     const profile = getUserProfile(localStorage);
     const warning = exclusionWarning(profile, q);
     showProfileWarning(warning);
@@ -3501,7 +3508,13 @@ async function loadSuggestions(text) {
     if (error?.name === "AbortError") return;
     window.clearTimeout(suggestLoadingTimer);
     if (searchEl.value.trim() !== requestQuery) return;
-    suggestions = [];
+    suggestions = kept;
+    if (kept.length) {
+      suggestionQuery = requestQuery;
+      showSuggestStatus("The catalog is busy. These matches are still here.");
+      renderSuggestionRows(requestQuery);
+      return;
+    }
     const kind = networkKind(error, navigator.onLine);
     if (kind) {
       const state = emptyState(kind);
@@ -10856,6 +10869,7 @@ guide = mountGuide({
 
 matchSheet = mountMatchSheet({
   apiUrl,
+  fetchBrowse,
   onPick(product, name, store) {
     const wanted = String(name || "").trim();
     for (const [id, entry] of [...list]) {
@@ -10923,6 +10937,7 @@ importer = mountImport({
     paintUsuals();
   },
   apiUrl,
+  fetchBrowse,
   toast,
   persistList() {
     saveList();

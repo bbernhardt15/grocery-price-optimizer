@@ -259,6 +259,11 @@ export function mountProfileOnboarding(deps = {}) {
           pendingFamilies,
           retryFamilies,
           savedFamilies: savedRules,
+          skippedFamilies: new Set(
+            Object.values(draft.categoryPreferences || {})
+              .filter((row) => row?.mode === "never")
+              .map((row) => row.family)
+          ),
         })}`;
       }
       const restore = learnedRows.length
@@ -875,6 +880,7 @@ export function mountProfileOnboarding(deps = {}) {
     if (!family || brandShelves[family] || !deps.loadStaple) return;
     const search = categorySearch(family) || family;
     const paint = () => {
+      if (receiptPhase !== "learned") return;
       if (editingFamily === family && stepId === "receipts" && learnedViewReady(importGate)) {
         paintLearnedCard(family, { saved: savedRules.has(family) });
       }
@@ -1213,6 +1219,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   function paintLearnedCard(family, options = {}) {
+    if (receiptPhase !== "learned") return null;
     const stage = $("profile-stage");
     const row = learnedRows.find((item) => item.family === family);
     const cssFamily = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(family) : String(family).replace(/["\\]/g, "");

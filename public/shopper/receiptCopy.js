@@ -242,12 +242,13 @@ export function learnedSummaryHtml(learned, options = {}) {
     ["frozen", "Frozen"],
     ["household", "Household"],
   ].filter(([, label]) => !covered.has(label));
+  const skipped = options.skippedFamilies instanceof Set ? options.skippedFamilies : new Set(options.skippedFamilies || []);
   const missing = missingDepts.length
     ? `<section class="missing-depts"><p class="paper-note">Not on this receipt. The lowest price includes every item in that aisle. You can leave an aisle off.</p><div class="mini-row">${missingDepts
-        .map(
-          ([id, label]) =>
-            `<span class="missing-dept"><button type="button" class="mini-chip" data-missing-dept="${escapeText(id)}" data-missing-label="${escapeText(label)}">Use the lowest ${escapeText(label)} price</button><button type="button" class="text-btn" data-missing-skip="${escapeText(id)}" data-missing-label="${escapeText(label)}">Leave ${escapeText(label)} off</button></span>`
-        )
+        .map(([id, label]) => {
+          if (skipped.has(id)) return `<span class="missing-dept">${escapeText(label)} left off.</span>`;
+          return `<span class="missing-dept"><button type="button" class="mini-chip" data-missing-dept="${escapeText(id)}" data-missing-label="${escapeText(label)}">Use the lowest ${escapeText(label)} price</button><button type="button" class="text-btn" data-missing-skip="${escapeText(id)}" data-missing-label="${escapeText(label)}">Leave ${escapeText(label)} off</button></span>`;
+        })
         .join("")}</div></section>`
     : "";
   return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${missing}${basketTeaserHtml(options.lines)}</div>`;
