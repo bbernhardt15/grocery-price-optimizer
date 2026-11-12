@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { expandUpcE, gtinCheckDigit, groupOffersByUpc, hasStandardCheckDigit, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, storeLookupFormats, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
+import { expandUpcE, gtinCheckDigit, groupOffersByUpc, hasStandardCheckDigit, isStoreBrand, krogerLookupCodes, krogerProductIdForLookup, krogerRequestId, storeLookupFormats, upcForStorage, upcKey, walmartLookupCodes, walmartUpcForLookup } from "./normalize";
 import type { RawCatalogRecord } from "./types";
 
 function record(overrides: Partial<RawCatalogRecord> & Pick<RawCatalogRecord, "name" | "storeName" | "price">): RawCatalogRecord {
@@ -122,6 +122,15 @@ describe("upcKey", () => {
     assert.equal(storeLookupFormats("894700010144").krogerProductId, "0089470001014");
     assert.equal(storeLookupFormats("0089470001014").upcA, "894700010144");
     assert.equal(storeLookupFormats("070708200500").krogerProductId, "0007070820050");
+    // Production dairy misses and personal-care hits, ZIP 45103 catalog, Nov 12.
+    assert.equal(krogerRequestId("0004138761190"), "0004138761190");
+    assert.equal(krogerRequestId("0002100030165"), "0002100030165");
+    assert.equal(krogerRequestId("0007835470318"), "0007835470318");
+    assert.equal(krogerRequestId("0081547301038"), "0081547301038");
+    assert.equal(krogerRequestId("0003114235892"), "0003114235892");
+    assert.equal(krogerRequestId("0003320018626"), "0003320018626");
+    assert.equal(krogerRequestId("041570054130"), "0004157005413");
+    assert.deepEqual(krogerLookupCodes("041570054130"), ["0004157005413"]);
     assert.equal(storeLookupFormats("070708200500").upcA, "070708200507");
     assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);
     assert.equal(upcKey(`0123450${zeroCheck}`), upcKey(`${zeroBody}${zeroCheck}`));

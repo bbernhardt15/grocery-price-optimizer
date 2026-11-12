@@ -30,6 +30,8 @@ export type KrogerPageQuery = {
 export type KrogerCatalogClient = {
   page(query: KrogerPageQuery): Promise<{ records: RawCatalogRecord[]; returned: number }>;
   resolveLocation(zip: string): Promise<string | null>;
+  /** Nearby stores, closest first. Used when a product id misses at the first store. */
+  resolveLocations?(zip: string): Promise<string[]>;
   /** Products API filter.productId. Optional so term-only tests stay quiet. */
   lookupProductId?(productId: string, locationId?: string): Promise<{ records: RawCatalogRecord[]; returned: number }>;
   /** Name search used when filter.productId is rejected or returns nothing. */
@@ -78,6 +80,12 @@ export function krogerProductsClient(): KrogerCatalogClient {
       }
       const locationId = await krogerService.getClosestStoreLocationStrict(zip);
       return locationId?.trim() || null;
+    },
+    async resolveLocations(zip) {
+      if (!krogerApiConfigured()) {
+        return [];
+      }
+      return krogerService.listNearbyStoreLocations(zip, 4);
     },
     async lookupProductId(productId, locationId) {
       const page = await krogerService.productsById(productId, locationId);

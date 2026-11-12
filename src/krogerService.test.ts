@@ -54,6 +54,32 @@ describe("KrogerService.getClosestStoreLocation", () => {
     assert.equal(calls[2].authorization, "Bearer test-token");
   });
 
+  it("asks for several nearby stores and keeps the closest id first", async () => {
+    process.env.KROGER_CLIENT_ID = "client-id";
+    process.env.KROGER_CLIENT_SECRET = "client-secret";
+    const calls: string[] = [];
+    mockFetch(async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/connect/oauth2/token")) {
+        return Response.json({ access_token: "test-token", expires_in: 1800 });
+      }
+      return Response.json({
+        data: [
+          { locationId: "01400902" },
+          { locationId: "01400441" },
+          { locationId: "03500529" },
+        ],
+      });
+    });
+
+    const service = new KrogerService();
+    const locationIds = await service.listNearbyStoreLocations("45103", 4);
+    assert.deepEqual(locationIds, ["01400902", "01400441", "03500529"]);
+    assert.match(calls[1], /filter\.zipCode\.near=45103/);
+    assert.match(calls[1], /filter\.limit=4/);
+  });
+
   it("returns the demo locationId when API credentials are not configured", async () => {
     delete process.env.KROGER_CLIENT_ID;
     delete process.env.KROGER_CLIENT_SECRET;

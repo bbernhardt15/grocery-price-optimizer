@@ -1,5 +1,5 @@
 import { SavedList } from "../auth/models";
-import { mapToDepartment } from "../catalog/departments";
+import { DAIRY_FALSE_FRIEND, mapToDepartment } from "../catalog/departments";
 import { gtinJoinKey } from "../catalog/gtin";
 import { isGroceryUpc, krogerLookupCodes, upcKey, walmartLookupCodes } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
@@ -61,6 +61,8 @@ export type LookupPick = {
   priority: LookupPriority;
   /** Stored retailer code, so a Kroger hit can stay on this master. */
   upc?: string;
+  /** Brand on the master, used when a name search returns a different product id. */
+  brand?: string;
   /** Department recorded on the Kroger hit-rate breakdown. */
   departmentId?: string;
 };
@@ -82,6 +84,16 @@ type CandidateRow = {
  */
 const WALMART_ONLY_BRAND =
   /^(?:great value|equate|marketside|parents choice|parent's choice|mainstays|ozark trail|hyper tough|super tech|onn|sams choice|sam's choice|freshness guaranteed|clear american|members mark|member's mark|ol roy|ol' roy|special kitty|george|athletic works|time and tru|wonder nation|no boundaries|terra & sky|pen\+gear|expert grill|blackweb|hart|world table)$/i;
+
+function leadingBrand(name: string | undefined): string {
+  return (name ?? "").trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
+function dairyFalseFriend(name: string, brand: string | undefined): boolean {
+  if (DAIRY_FALSE_FRIEND.test(`${brand ?? ""} ${name}`)) return true;
+  const named = mapToDepartment(undefined, name);
+  return named.departmentId === "personal-care" || named.signal === "excluded";
+}
 
 export function isWalmartOnlyBrand(brand: string | undefined): boolean {
   const key = (brand ?? "")
@@ -110,7 +122,7 @@ export function krogerLookupBlock(row: {
   departmentId?: string;
   upc?: string;
 }): string | null {
-  if (isWalmartOnlyBrand(row.brand)) {
+  if (isWalmartOnlyBrand(row.brand) || isWalmartOnlyBrand(leadingBrand(row.name))) {
     return "walmart-only-brand";
   }
   const mapped = mapToDepartment(row.categoryPaths, row.name);
@@ -121,6 +133,9 @@ export function krogerLookupBlock(row: {
     return "upc-check";
   }
   const stored = row.departmentId?.trim() ?? "";
+  if (stored === "dairy-eggs" && dairyFalseFriend(row.name, row.brand)) {
+    return "dairy-false-friend";
+  }
   const storedGrocery = (GROCERY_DEPARTMENTS as readonly string[]).includes(stored);
   // A stored grocery department wins over a vague name. An excluded signal
   // (appliances, movies, delivery) does not. General merchandise still does not.
@@ -367,6 +382,7 @@ function toPick(side: Side, row: CandidateRow, priority: LookupPriority): Lookup
     variantIndex,
     priority,
     ...(row.upc ? { upc: row.upc } : {}),
+    ...(row.brand ? { brand: row.brand } : {}),
     ...(row.departmentId ? { departmentId: row.departmentId } : {}),
   };
 }

@@ -2646,6 +2646,42 @@ describe("catalog ingestion", () => {
     assert.equal(krogerLookupBlock({ name: "Great Value Black Beans", brand: "Great Value" }), "walmart-only-brand");
     assert.equal(
       krogerLookupBlock({
+        name: "Great Value Whole Milk",
+        brand: "",
+        departmentId: "dairy-eggs",
+        upc: "078742229911",
+      }),
+      "walmart-only-brand"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "1 Pair Black Butterfly Shaped High Heel Forefoot Pad Foot Cushion Insole",
+        brand: "Unique Bargains",
+        departmentId: "dairy-eggs",
+        upc: "605322175735",
+      }),
+      "dairy-false-friend"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "8pclamisil Af Cream",
+        brand: "Lamisil",
+        departmentId: "dairy-eggs",
+        upc: "300671142932",
+      }),
+      "dairy-false-friend"
+    );
+    assert.equal(
+      krogerLookupBlock({
+        name: "4C Parmesan Grated Cheese",
+        brand: "4C",
+        departmentId: "dairy-eggs",
+        upc: "0004138761190",
+      }),
+      null
+    );
+    assert.equal(
+      krogerLookupBlock({
         name: "Walex Porta-Pak RV Waste Water Treatment",
         brand: "Walex",
         categoryPaths: ["Auto & Tires/RV/Waste Water"],
@@ -3782,5 +3818,194 @@ describe("catalog ingestion", () => {
     assert.equal(typeof status.match.hitRate.krogerMisses, "number");
     const tomorrow = await nextKrogerLookups(new Date(now.getTime() + 86_400_000), 5);
     assert.equal(tomorrow.some((pick) => pick.key === "cooldown-miss"), false);
+  });
+
+  it("tries the other 45103 stores when the closest store does not carry Cabot", async () => {
+    const now = new Date("2026-11-12T16:00:00.000Z");
+    const upc = "0007835470318";
+    const key = upcKey(upc);
+    assert.ok(key);
+    await CatalogMaster.deleteMany({ key });
+    await CatalogOffer.deleteMany({ productKey: key });
+    await CatalogMaster.create({
+      key,
+      name: "Cabot Creamery Extra Sharp Cheddar Cheese Block Refrigerated",
+      brand: "Cabot Creamery",
+      departmentId: "dairy-eggs",
+      upc,
+      walmartItemId: "cabot-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $ne: key } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400902" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const seen: Array<{ productId: string; locationId?: string }> = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400902",
+        resolveLocations: async () => ["01400902", "01400441", "03500529"],
+        page: async () => {
+          throw new Error("discovery should wait");
+        },
+        lookupProductId: async (id: string, locationId?: string) => {
+          seen.push({ productId: id, locationId });
+          if (locationId !== "03500529") {
+            return { returned: 0, records: [] };
+          }
+          return {
+            returned: 1,
+            records: [
+              {
+                name: "Cabot Creamery Extra Sharp Cheddar Cheese Block Refrigerated",
+                brand: "Cabot Creamery",
+                storeName: "Kroger",
+                price: 3.14,
+                upc,
+                productId: upc,
+                locationId,
+                priceSource: "live" as const,
+                categories: ["Dairy"],
+              },
+            ],
+          };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.deepEqual(seen, [
+      { productId: "0007835470318", locationId: "01400902" },
+      { productId: "0007835470318", locationId: "01400441" },
+      { productId: "0007835470318", locationId: "03500529" },
+    ]);
+    const row = await CatalogMaster.findOne({ key });
+    assert.equal(row?.krogerProductId, upc);
+    const offer = await CatalogOffer.findOne({ productKey: key, storeName: "Kroger" }).lean<{ locationId?: string; price?: number } | null>();
+    assert.equal(offer?.locationId, "03500529");
+    assert.equal(offer?.price, 3.14);
+  });
+
+  it("binds Breakstone's when the name search returns a different Kroger product id", async () => {
+    const now = new Date("2026-11-12T17:00:00.000Z");
+    const upc = "0002100030165";
+    const key = upcKey(upc);
+    assert.ok(key);
+    await CatalogMaster.deleteMany({ key });
+    await CatalogOffer.deleteMany({ productKey: key });
+    await CatalogMaster.create({
+      key,
+      name: "Breakstone's All Natural Sour Cream",
+      brand: "Breakstone's",
+      departmentId: "dairy-eggs",
+      upc,
+      walmartItemId: "breakstone-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $ne: key } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400902" }],
+        locationIndex: 0,
+        queryIndex: 0,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    const seenIds: Array<{ productId: string; locationId?: string }> = [];
+    const seenTerms: string[] = [];
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    await stepKroger({
+      client: {
+        resolveLocation: async () => "01400902",
+        page: async () => {
+          throw new Error("discovery should wait");
+        },
+        lookupProductId: async (id: string, locationId?: string) => {
+          seenIds.push({ productId: id, locationId });
+          return { returned: 0, records: [] };
+        },
+        lookupTerm: async (term: string) => {
+          seenTerms.push(term);
+          return {
+            returned: 1,
+            records: [
+              {
+                name: "Breakstone's All Natural Sour Cream",
+                brand: "Breakstone's",
+                storeName: "Kroger",
+                price: 3.19,
+                upc: "0002100012164",
+                productId: "0002100012164",
+                locationId: "01400902",
+                priceSource: "live" as const,
+                categories: ["Dairy"],
+              },
+            ],
+          };
+        },
+      },
+      maxCalls: 4,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.deepEqual(seenIds, [
+      { productId: "0002100030165", locationId: "01400902" },
+      { productId: "0002100030165", locationId: undefined },
+    ]);
+    assert.deepEqual(seenTerms, ["Breakstone's All Natural Sour Cream"]);
+    const row = await CatalogMaster.findOne({ key });
+    assert.equal(row?.krogerProductId, "0002100012164");
+    assert.equal(row?.walmartItemId, "breakstone-1");
+    const offer = await CatalogOffer.findOne({ productKey: key, storeName: "Kroger" }).lean<{ price?: number } | null>();
+    assert.equal(offer?.price, 3.19);
   });
 });
