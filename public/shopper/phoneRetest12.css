@@ -102,26 +102,31 @@
   animation: none;
 }
 
-dialog.profile-onboard[data-step="trip"] #profile-stage {
+dialog.profile-onboard[data-step="trip"] .sheet-body {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
-dialog.profile-onboard[data-step="trip"] .learned-trip.trip-add {
-  display: flex;
-  flex-direction: column;
+dialog.profile-onboard[data-step="trip"] #profile-stage {
+  display: block;
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+dialog.profile-onboard[data-step="trip"] .learned-trip.trip-add {
+  display: block;
   min-height: 0;
 }
 .trip-action-bar {
-  position: relative;
-  z-index: 3;
+  position: static;
+  z-index: auto;
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px 0 10px;
-  background: var(--bg);
+  background: transparent;
 }
 .trip-action-tools {
   display: flex;

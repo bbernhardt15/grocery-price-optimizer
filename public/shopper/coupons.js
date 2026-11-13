@@ -439,10 +439,12 @@ export function storeCouponMarkup(store, options) {
   const sentence = checklistSentence(names);
   const open = options.open === false ? "" : " open";
   const storeName = escapeHtml(store?.storeName || "");
-  const link = page
+  const link = page && !options.omitLink
     ? `<a class="coupon-link" href="${escapeHtml(page.url)}" data-coupon-link="${escapeHtml(page.url)}" data-store-leave="${storeName}" data-leave-kind="coupons">${escapeHtml(`Open ${page.label}`)}</a>
        <p class="muted coupon-note">${escapeHtml(page.note)}</p>`
-    : `<p class="muted coupon-note">We don’t have a coupon page for ${escapeHtml(store?.storeName || "this store")} yet.</p>`;
+    : options.omitLink
+      ? ""
+      : `<p class="muted coupon-note">We don’t have a coupon page for ${escapeHtml(store?.storeName || "this store")} yet.</p>`;
   const clipped = options.clipped ? " checked" : "";
   const lines = rows
     .map((row) => {

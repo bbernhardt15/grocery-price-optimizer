@@ -61,7 +61,7 @@ describe("Gitter guide moments on the real flows", () => {
     const shown = afterSheet(session, seen);
     assert.equal(shown.current?.moment, "receipt");
     assert.equal(shown.current?.line, receiptLine(6, 59));
-    assert.equal(shown.current?.chips.at(-1)?.label, "No thanks");
+    assert.equal(shown.current?.chips.at(-1)?.label, "Skip");
     assert.ok(shown.current?.chips.some((chip) => chip.label === "Add selected"));
     assert.equal(shown.current?.chips.some((chip) => chip.action === "show-rest"), true);
     const already = view({ itemCount: 59, listNames: lines.map((line) => line.name) });

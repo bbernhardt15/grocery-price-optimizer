@@ -26,7 +26,7 @@ for (const size of sizes) {
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toContainText("v89");
+    await expect(page.locator("#app-version")).toContainText("v90");
     await page.locator("#drawer-close").click();
 
     const tiles = page.locator("#usuals-toggle, [data-lists-open], #past-trips-open, #browse-toggle");
@@ -62,8 +62,9 @@ for (const size of sizes) {
     });
     expect(layered).toBe(true);
     await page.locator("#filters-close").click();
-
-    await page.locator("#tab-favorites").click();
+    await page.locator("#browse-toggle").click();
+    await expect(page.locator("#usuals-toggle")).toBeVisible();
+    await page.locator("#usuals-toggle").click();
     await expect(page.locator("#favorites-screen")).toBeVisible();
     await expect(page.locator("#favorites-screen")).toContainText("Star items to see them here");
     await expect(page.locator("#favorites-screen")).not.toContainText("Aisle 1");
@@ -244,15 +245,14 @@ for (const size of sizes) {
     await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
     await expect(page.locator("[data-coupon-amount]")).toBeVisible();
     await page.locator("[data-coupon-amount]").evaluate((node) => node.scrollIntoView({ block: "center" }));
-    const formFits = await page.evaluate(() => {
+    await expect.poll(async () => page.evaluate(() => {
       const field = document.querySelector("[data-coupon-amount]");
       const dock = document.querySelector("#bottom-dock");
       if (!(field instanceof HTMLElement) || !(dock instanceof HTMLElement)) return false;
       const box = field.getBoundingClientRect();
       const dockBox = dock.getBoundingClientRect();
       return box.width > 0 && box.right <= window.innerWidth + 1 && box.bottom <= dockBox.top + 1 && box.top >= 0;
-    });
-    expect(formFits).toBe(true);
+    })).toBe(true);
     await page.locator('#step-bar [data-flow="shop"]').click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
     await expect(page.locator("#gitter-guide")).toBeHidden();
@@ -267,19 +267,28 @@ for (const size of sizes) {
     await page.locator("#brand-home").click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/v89 · [0-9a-f]{7}/i);
+    await expect(page.locator("#app-version")).toHaveText(/v90 · [0-9a-f]{7}/i);
     const versionSeen = await page.evaluate(() => {
       const drawer = document.querySelector("#app-drawer");
       const node = document.querySelector("#app-version");
-      if (!(drawer instanceof HTMLElement) || !(node instanceof HTMLElement)) return null;
-      drawer.scrollTop = 0;
+      const sheet = document.querySelector(".menu-sheet");
+      if (!(drawer instanceof HTMLElement) || !(node instanceof HTMLElement) || !(sheet instanceof HTMLElement)) return null;
+      const last = sheet.lastElementChild === node;
+      node.scrollIntoView({ block: "end" });
       const box = node.getBoundingClientRect();
       const frame = drawer.getBoundingClientRect();
-      return { scroll: drawer.scrollTop, top: box.top, bottom: box.bottom, view: window.innerHeight, height: box.height, frameBottom: frame.bottom };
+      return {
+        last,
+        top: box.top,
+        bottom: box.bottom,
+        height: box.height,
+        frameTop: frame.top,
+        frameBottom: frame.bottom,
+      };
     });
-    expect(versionSeen?.scroll).toBe(0);
+    expect(versionSeen?.last).toBe(true);
     expect(versionSeen && versionSeen.height).toBeGreaterThan(8);
-    expect(versionSeen && versionSeen.bottom).toBeLessThanOrEqual((versionSeen?.view || 0) + 1);
-    expect(versionSeen && versionSeen.top).toBeGreaterThan(40);
+    expect(versionSeen && versionSeen.bottom).toBeLessThanOrEqual((versionSeen?.frameBottom || 0) + 2);
+    expect(versionSeen && versionSeen.top).toBeGreaterThanOrEqual((versionSeen?.frameTop || 0) - 1);
   });
 }

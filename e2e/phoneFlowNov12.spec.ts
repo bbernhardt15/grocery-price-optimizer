@@ -14,8 +14,12 @@ async function unlock(page: Page) {
 
 async function openReceipt(page: Page) {
   const start = page.getByRole("button", { name: "Get started" });
-  if (await start.isVisible().catch(() => false)) await start.tap();
-  await page.locator("#profile-zip").pressSequentially("45103");
+  const zip = page.locator("#profile-zip");
+  await expect(async () => {
+    if (await start.isVisible().catch(() => false)) await start.tap();
+    await expect(zip).toBeVisible();
+  }).toPass();
+  await zip.pressSequentially("45103");
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
   await page.locator("#profile-zip-done").tap();
   await page.locator("#profile-next").tap();
@@ -35,7 +39,7 @@ for (const size of sizes) {
   test(`Nov 12 receipt, brands, and a background price check at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await unlock(page);
-    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v89");
+    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v90");
     await openReceipt(page);
     await page.route("**/api/import/receipt", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -56,16 +60,7 @@ for (const size of sizes) {
     await expect(page.getByRole("heading", { name: "Here's what we learned" })).toBeVisible();
     await page.locator("[data-learned-change]").first().tap();
     await expect(page.getByRole("button", { name: "Load brands again" })).toBeVisible();
-    const leaveMeat = page.getByRole("button", { name: "Leave Meat & Seafood off" });
-    await expect(leaveMeat).toBeVisible();
-    await leaveMeat.tap();
-    await expect(page.getByText("Meat & Seafood left off.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Leave Meat & Seafood off" })).toHaveCount(0);
-    const meatMode = await page.evaluate(() => {
-      const profile = JSON.parse(localStorage.getItem("gg-profile") || "{}");
-      return profile.categoryPreferences?.meat?.mode || "";
-    });
-    expect(meatMode).toBe("never");
     await page.unroute("**/api/catalog/browse**");
     await page.locator("#profile-next").tap();
     await expect(page.locator("#learned-add-trip")).toBeVisible();
@@ -138,7 +133,7 @@ for (const size of sizes) {
     await unlock(page);
     await page.locator('#bottom-dock [data-flow="plan"]').tap();
     await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
-    const coupons = page.getByRole("link", { name: "Open Kroger digital coupons" });
+    const coupons = page.getByRole("link", { name: "Kroger digital coupons" });
     await expect(coupons).toBeVisible();
     const popup = page.waitForEvent("popup");
     await coupons.tap();

@@ -55,7 +55,8 @@ describe("tenth phone test — Add tab", () => {
     assert.match(html, /id="usuals-toggle"/);
     assert.match(html, /id="usuals-count"/);
     assert.match(html, /class="feature-card"/);
-    assert.equal(html.includes('id="tab-favorites"'), true);
+    assert.equal(html.includes('id="tab-favorites"'), false);
+    assert.match(html, /id="usuals-toggle"/);
     assert.equal(html.includes('id="usuals-panel"'), false);
     assert.equal(usualsSummary(0).label, "0 usuals");
     assert.equal(usualsSummary(1).label, "1 usual");
@@ -167,7 +168,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v89/);
+    assert.match(sw, /grocery-gitter-shell-v90/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);

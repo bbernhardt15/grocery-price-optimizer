@@ -18,6 +18,25 @@ export const RECEIPT_HINT = "We'll learn the brands you already buy.";
 export const LEARNED_PURPOSE =
   "This teaches the brands you already buy. It does not add them to a trip until you say so.";
 
+/** Preferences home for Meat & Seafood when this receipt did not include it. */
+export function meatPreferenceHtml(mode) {
+  const current = mode === "never" || mode === "cheapest" ? mode : "";
+  const note =
+    current === "never"
+      ? "Meat & Seafood left off."
+      : current === "cheapest"
+        ? "Using the lowest Meat & Seafood price."
+        : "A receipt only asks about Meat & Seafood when it was on that receipt. Set it here anytime.";
+  return `<section class="missing-depts" data-meat-pref>
+    <h3>Meat & Seafood</h3>
+    <p class="muted">${escapeText(note)}</p>
+    <div class="mini-row">
+      <button type="button" class="mini-chip" data-meat-mode="cheapest" aria-pressed="${current === "cheapest" ? "true" : "false"}">Use the lowest Meat &amp; Seafood price</button>
+      <button type="button" class="text-btn" data-meat-mode="never" aria-pressed="${current === "never" ? "true" : "false"}">Leave Meat &amp; Seafood off</button>
+    </div>
+  </section>`;
+}
+
 export const PAPER_WARNING =
   "Photos of paper receipts don't work well: names are abbreviated and there is no UPC or barcode.";
 
@@ -236,11 +255,16 @@ export function learnedSummaryHtml(learned, options = {}) {
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
   const covered = new Set([...groups.keys()]);
+  const hasMeat = /\b(meat|seafood|beef|steak|chicken|pork|bacon|fish|shrimp|salmon|turkey|sausage|ham)\b/i.test(
+    [...rows, ...(options.lines || [])]
+      .map((row) => [row?.name, row?.label, row?.family, row?.departmentName, row?.department].filter(Boolean).join(" "))
+      .join(" ")
+  );
   const missingDepts = [
     ["produce", "Produce"],
-    ["meat", "Meat & Seafood"],
     ["frozen", "Frozen"],
     ["household", "Household"],
+    ...(hasMeat ? [["meat", "Meat & Seafood"]] : []),
   ].filter(([, label]) => !covered.has(label));
   const skipped = options.skippedFamilies instanceof Set ? options.skippedFamilies : new Set(options.skippedFamilies || []);
   const missing = missingDepts.length

@@ -65,10 +65,12 @@ describe("browse catalog routes", () => {
     assert.ok(body.items.length > 0);
     assert.ok(body.items.every((item) => /milk|egg|butter|yogurt|cheese/i.test(item.name)));
     assert.ok(body.items[0].bestOffer.price <= body.items[1].bestOffer.price);
-    const national = body.items.find((item) => item.name === "Whole Milk" && item.gaps.some((gap) => gap.storeName === "Aldi"));
+    const dumped = JSON.stringify(body);
+    assert.doesNotMatch(dumped, /Aldi|Target|Publix/);
+    const national = body.items.find((item) => item.name === "Whole Milk");
     assert.ok(national);
-    const aldi = national.gaps.find((gap) => gap.storeName === "Aldi");
-    assert.equal(aldi?.substitute?.name, "Whole Milk");
+    assert.equal(national.gaps.some((gap) => /aldi|target|publix/i.test(gap.storeName)), false);
+    assert.ok(national.gaps.every((gap) => /kroger|walmart/i.test(gap.storeName)));
     const walmart = body.coverage.find((store) => store.storeName === "Walmart");
     assert.equal(walmart?.mode, "demo_only");
   });
@@ -133,28 +135,19 @@ describe("browse catalog routes", () => {
         weeklyAdBanners?: Array<{ storeName: string }>;
         warnings: string[];
       };
-      const weekly = body.items.find((item) =>
-        item.offers.some((offer) => offer.storeName === "Aldi" && offer.priceSource === "weekly_ad")
+      assert.equal(
+        body.items.find((item) => item.name === "Friendly Farms Whole Milk"),
+        undefined
       );
-      assert.equal(weekly?.name, "Friendly Farms Whole Milk");
-      assert.equal(weekly?.offers[0]?.price, 2.89);
-      const target = body.coverage.find((store) => store.storeName === "Target");
-      assert.equal(target?.mode, "weekly_ad_only");
-      assert.equal(target?.label, "Weekly ad only");
-      const publix = body.coverage.find((store) => store.storeName === "Publix");
-      assert.equal(publix?.mode, "weekly_ad_only");
-      assert.match(publix?.detail ?? "", /not a shelf price/i);
-      const sprouts = body.coverage.find((store) => store.storeName === "Sprouts");
-      assert.equal(sprouts?.mode, "weekly_ad_only");
-      const stopAndShop = body.coverage.find((store) => store.storeName === "Stop & Shop");
-      assert.equal(stopAndShop?.mode, "weekly_ad_only");
-      assert.equal(body.coverage.find((store) => store.storeName === "Food Lion"), undefined);
-      assert.equal(body.coverage.find((store) => store.storeName === "Safeway"), undefined);
-      assert.equal(body.coverage.find((store) => store.storeName === "Hy-Vee"), undefined);
-      assert.deepEqual(
-        (body.weeklyAdBanners ?? []).map((banner) => banner.storeName),
-        ["Aldi", "Target"]
-      );
+      assert.equal(body.items.some((item) => item.offers.some((offer) => offer.storeName === "Aldi" || offer.storeName === "Target" || offer.storeName === "Publix")), false);
+      assert.equal(body.coverage.find((store) => store.storeName === "Target"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Publix"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Aldi"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Sprouts"), undefined);
+      assert.equal(body.coverage.find((store) => store.storeName === "Stop & Shop"), undefined);
+      assert.ok(body.coverage.some((store) => store.storeName === "Kroger"));
+      assert.ok(body.coverage.some((store) => store.storeName === "Walmart"));
+      assert.deepEqual(body.weeklyAdBanners ?? [], []);
       assert.equal(body.warnings?.some((warning) => /5-digit US ZIP/i.test(warning)) ?? false, false);
 
       const listed = await fetch(`${origin}/api/catalog/coverage?zip=45202`);
@@ -162,12 +155,12 @@ describe("browse catalog routes", () => {
       const listedBody = (await listed.json()) as {
         zip: string;
         weeklyAdBanners: Array<{ storeName: string; merchantId?: number }>;
+        stores: Array<{ storeName: string }>;
       };
       assert.equal(listedBody.zip, "45202");
-      assert.deepEqual(
-        listedBody.weeklyAdBanners.map((banner) => banner.storeName),
-        ["Aldi", "Target"]
-      );
+      assert.deepEqual(listedBody.weeklyAdBanners, []);
+      assert.equal(listedBody.stores.some((store) => store.storeName === "Publix"), false);
+      assert.ok(listedBody.stores.some((store) => store.storeName === "Kroger"));
 
       const missingZip = await fetch(`${origin}/api/catalog/browse?q=milk`);
       assert.equal(missingZip.status, 400);

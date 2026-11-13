@@ -126,11 +126,11 @@ describe("Gitter guide rules", () => {
     });
     assert.equal(revealed?.chips.filter((chip) => chip.action === "toggle-pick").length, 59);
     assert.equal(revealed?.line, receiptLine(59));
-    assert.match(receiptLine(1), /1 item that is/);
-    assert.equal(receiptLine(1), "I found 1 item that is not on your list yet. Choose any, then add them.");
+    assert.match(receiptLine(1), /Add any/);
+    assert.equal(receiptLine(1), "These were on past receipts but aren't on this list. Add any?");
     assert.equal(prompt.chips.at(-2)?.label, "Add selected");
     assert.equal(prompt.chips.at(-2)?.action, "commit-picks");
-    assert.equal(prompt.chips.at(-1)?.label, "No thanks");
+    assert.equal(prompt.chips.at(-1)?.label, "Skip");
     assert.equal(prompt.chips.at(-1)?.action, "later");
     assert.ok(prompt.chips.some((chip) => chip.label === "Whole Milk" && chip.action === "toggle-pick"));
     assert.ok(prompt.chips.some((chip) => chip.label === "Large Eggs" && chip.action === "toggle-pick"));

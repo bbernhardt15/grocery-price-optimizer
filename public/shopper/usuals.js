@@ -120,6 +120,19 @@ export function starUsual(storage, item, at = Date.now()) {
   return rememberUsuals(storage, [{ ...item, starred: true }], at, { star: true });
 }
 
+/** Star or unstar one favorite. Returns whether it is starred afterward. */
+export function toggleStarredUsual(storage, item, at = Date.now()) {
+  const key = usualKey({ ...item, name: clean(item?.name) });
+  const prior = readUsuals(storage).find((row) => usualKey(row) === key);
+  if (prior?.starred) {
+    const next = readUsuals(storage).map((row) => (usualKey(row) === key ? { ...row, starred: false } : row));
+    storage?.setItem(USUALS_KEY, JSON.stringify(next.filter((row) => row.starred)));
+    return false;
+  }
+  starUsual(storage, item, at);
+  return true;
+}
+
 export function rememberUsuals(storage, items, at = Date.now(), options = {}) {
   if (!storage) return [];
   const map = new Map(readUsuals(storage).map((row) => [usualKey(row), row]));

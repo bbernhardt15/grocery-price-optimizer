@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { inStoreRoute } from "../../public/shopper/inStore.js";
-import { learnedSummaryHtml } from "../../public/shopper/receiptCopy.js";
+import { learnedSummaryHtml, meatPreferenceHtml } from "../../public/shopper/receiptCopy.js";
 import { reviewStoreCardHtml } from "../../public/shopper/reviewStoreCard.js";
 import { sectionForEntry } from "../../public/shopper/listSections.js";
 import { emptyBook, setOverride } from "../../public/shopper/themedLists.js";
@@ -74,7 +74,17 @@ describe("walkthrough gaps the audit still needed", () => {
     assert.match(html, /data-missing-dept="produce"/);
     assert.match(html, /Use the lowest Produce price/);
     assert.match(html, /Leave Produce off/);
-    assert.match(html, /data-missing-skip="meat"/);
+    assert.doesNotMatch(html, /data-missing-skip="meat"/);
+    const meat = learnedSummaryHtml([{ family: "ground-beef", label: "Ground beef", mode: "cheapest" }], {
+      lines: [{ name: "Ground Beef" }],
+    });
+    assert.match(meat, /data-missing-skip="meat"/);
+    assert.match(meat, /Leave Meat &amp; Seafood off/);
+    const prefs = meatPreferenceHtml("");
+    assert.match(prefs, /data-meat-pref/);
+    assert.match(prefs, /Use the lowest Meat &amp; Seafood price/);
+    assert.match(prefs, /Leave Meat &amp; Seafood off/);
+    assert.match(meatPreferenceHtml("never"), /Meat &amp; Seafood left off/);
     const css = readFileSync(new URL("../../public/styles.css", import.meta.url), "utf8");
     assert.match(css, /\.read-cart \{[\s\S]*transition: left 420ms linear/);
   });

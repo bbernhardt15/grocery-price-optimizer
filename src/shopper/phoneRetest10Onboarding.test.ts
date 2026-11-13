@@ -23,8 +23,8 @@ const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 const CINCINNATI = { lat: 39.0916, lng: -84.1437 };
 
 describe("tenth phone test onboarding", () => {
-  it("bumps the shell cache to v89", () => {
-    assert.match(sw, /grocery-gitter-shell-v89/);
+  it("bumps the shell cache to v90", () => {
+    assert.match(sw, /grocery-gitter-shell-v90/);
   });
 
   it("starts the ZIP field empty unless a saved ZIP exists", () => {
@@ -205,8 +205,8 @@ describe("tenth phone test onboarding", () => {
 
   it("drops the empty list square and explains price alerts", () => {
     const escape = (value: string) => value.replace(/"/g, "&quot;");
-    assert.equal(listThumbHtml("", escape), "");
-    assert.equal(listThumbHtml("   ", escape), "");
+    assert.match(listThumbHtml("", escape), /product-placeholder/);
+    assert.match(listThumbHtml("   ", escape), /product-placeholder/);
     assert.match(listThumbHtml("https://cdn.example/milk.jpg", escape), /src="https:\/\/cdn\.example\/milk\.jpg"/);
     assert.equal(listAlertStateLabel(false), "Off");
     assert.equal(listAlertStateLabel(true), "On");

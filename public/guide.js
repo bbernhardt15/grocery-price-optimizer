@@ -133,6 +133,11 @@ export function mountGuide(deps = {}) {
     </div>
     <button type="button" class="gitter-guide-dismiss" data-guide-dismiss="1" aria-label="${escapeHtml(DISMISS_LABEL)}">×</button>`;
   doc.body.appendChild(host);
+  const receiptDialog = doc.createElement("dialog");
+  receiptDialog.id = "gitter-receipt-sheet";
+  receiptDialog.className = "gitter-receipt-sheet";
+  receiptDialog.setAttribute("aria-label", "Items from past receipts");
+  doc.body.appendChild(receiptDialog);
 
   const lineEl = host.querySelector(".gitter-guide-line");
   const liveEl = host.querySelector(".gitter-guide-live");
@@ -146,6 +151,16 @@ export function mountGuide(deps = {}) {
     settingsHost.insertBefore(block, settingsHost.firstChild);
   }
 
+  function closeReceiptSheet() {
+    if (receiptDialog.open) receiptDialog.close();
+    const importDialog = doc.getElementById("import-dialog");
+    if (importDialog instanceof HTMLElement) importDialog.inert = false;
+  }
+
+  function guideRoot(node) {
+    return node?.closest?.("#gitter-guide, #gitter-receipt-sheet") || null;
+  }
+
   function persist(next) {
     settings = next;
     writeGuideSettings(storage, settings);
@@ -153,13 +168,29 @@ export function mountGuide(deps = {}) {
     if (box) box.checked = settings.enabled !== false;
   }
 
+  function lockPage(on) {
+    const shell = doc.querySelector(".shell");
+    if (shell instanceof HTMLElement) {
+      if (on) shell.setAttribute("inert", "");
+      else shell.removeAttribute("inert");
+    }
+  }
+
   function hidePrompt() {
     host.hidden = true;
     host.removeAttribute("data-moment");
     host.removeAttribute("data-chips");
+    host.setAttribute("role", "region");
+    host.removeAttribute("aria-modal");
     if (chipsEl) chipsEl.replaceChildren();
     if (lineEl) lineEl.textContent = "";
     if (liveEl) liveEl.textContent = "";
+    const dismiss = host.querySelector("[data-guide-dismiss]");
+    if (dismiss) {
+      dismiss.textContent = "×";
+      dismiss.setAttribute("aria-label", DISMISS_LABEL);
+    }
+    lockPage(false);
   }
 
   function paint(prompt) {
@@ -191,6 +222,26 @@ export function mountGuide(deps = {}) {
     }
     if (liveEl && !same) liveEl.textContent = prompt.line || "";
     if (!same) typeLine(prompt.line || "");
+    const dismiss = host.querySelector("[data-guide-dismiss]");
+    const receipt = prompt.moment === "receipt";
+    lockPage(false);
+    if (receipt) {
+      host.setAttribute("role", "dialog");
+      host.setAttribute("aria-modal", "true");
+      if (dismiss) {
+        dismiss.textContent = "Skip";
+        dismiss.setAttribute("aria-label", "Skip");
+      }
+      const first = host.querySelector("button");
+      if (first instanceof HTMLElement) first.focus();
+    } else {
+      host.setAttribute("role", "region");
+      host.removeAttribute("aria-modal");
+      if (dismiss) {
+        dismiss.textContent = "×";
+        dismiss.setAttribute("aria-label", DISMISS_LABEL);
+      }
+    }
   }
 
   function typeLine(line) {
@@ -276,14 +327,57 @@ export function mountGuide(deps = {}) {
     }, GUIDE_QUIET_MS + 20);
   }
 
-  host.addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest("button") : null;
-    if (!button || !host.contains(button)) return;
+  host.addEventListener("keydown", (event) => {
+    if (host.hidden || host.dataset.moment !== "receipt" || event.key !== "Tab") return;
+    const items = [...host.querySelectorAll("button")].filter((button) => button instanceof HTMLButtonElement && !button.disabled);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && doc.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && doc.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+
+  function dismissOpenPrompt(event) {
+    const raw = event?.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    if (element && !element.closest("[data-guide-dismiss]")) return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const moment = current?.moment || host.dataset.moment || "";
+    if (moment) session = noteDeclined(session, moment);
+    current = null;
+    closeReceiptSheet();
+    if (moment !== "receipt") persist(dismissGuide(settings));
+    hidePrompt();
+  }
+  host.addEventListener("pointerup", (event) => {
+    const raw = event.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
+  });
+  host.addEventListener("click", onGuideClick);
+  receiptDialog.addEventListener("click", onGuideClick);
+  receiptDialog.addEventListener("pointerup", (event) => {
+    const raw = event.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
+  });
+
+  function onGuideClick(event) {
+    const raw = event.target;
+    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
+    const button = element?.closest("button") || null;
+    const root = guideRoot(button);
+    if (!button || !root) return;
+    event.guideHandled = true;
     event.stopPropagation();
     if (button.hasAttribute("data-guide-dismiss")) {
-      persist(dismissGuide(settings));
-      current = null;
-      host.hidden = true;
+      dismissOpenPrompt(event);
       return;
     }
     if (button.hasAttribute("data-guide-off")) {
@@ -307,14 +401,15 @@ export function mountGuide(deps = {}) {
       return;
     }
     if (action === "commit-picks") {
-      const names = [...host.querySelectorAll("[data-guide-action='toggle-pick'][aria-pressed='true']")]
+      const names = [...root.querySelectorAll("[data-guide-action='toggle-pick'][aria-pressed='true']")]
         .map((chip) => chip.getAttribute("data-guide-name") || "")
         .map((name) => name.trim())
         .filter(Boolean);
-      if (!names.length) return;
+    if (!names.length) return;
       const moment = current?.moment || host.dataset.moment || "";
       if (moment) session = noteShown(session, moment);
       current = null;
+      closeReceiptSheet();
       host.hidden = true;
       deps.onAction?.("commit-picks", { names, moment });
       return;
@@ -334,6 +429,7 @@ export function mountGuide(deps = {}) {
     if (action === "later") {
       session = noteDeclined(session, detail.moment);
       current = null;
+      closeReceiptSheet();
       host.hidden = true;
       deps.onAction?.(action, detail);
       return;
@@ -354,7 +450,7 @@ export function mountGuide(deps = {}) {
     current = null;
     host.hidden = true;
     deps.onAction?.(action, detail);
-  });
+  }
 
   doc.addEventListener("change", (event) => {
     const target = event.target;
@@ -409,6 +505,41 @@ export function mountGuide(deps = {}) {
     dialogs.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
   }
 
+  function openOverImport() {
+    const importDialog = doc.getElementById("import-dialog");
+    if (!(importDialog instanceof HTMLDialogElement) || !importDialog.open) return false;
+    const result = presentGuide({
+      settings,
+      session,
+      view: deps.getState?.() || {},
+      current: null,
+      holding: false,
+      dialogOpen: false,
+      fieldFocused: false,
+    });
+    if (result.current?.moment !== "receipt") return false;
+    session = result.session;
+    current = result.current;
+    paint(result.current);
+    receiptDialog.replaceChildren();
+    for (const node of [...host.childNodes]) receiptDialog.appendChild(node.cloneNode(true));
+    receiptDialog.querySelector("[data-guide-dismiss]")?.addEventListener("click", dismissOpenPrompt);
+    if (!receiptDialog.open) receiptDialog.showModal();
+    importDialog.inert = true;
+    const first = receiptDialog.querySelector("[data-guide-name], button");
+    if (first instanceof HTMLElement) first.focus();
+    return true;
+  }
+  receiptDialog.addEventListener("close", () => {
+    const importDialog = doc.getElementById("import-dialog");
+    if (importDialog instanceof HTMLElement) importDialog.inert = false;
+    if (current?.moment === "receipt") {
+      session = noteDeclined(session, "receipt");
+      current = null;
+      hidePrompt();
+    }
+  });
+
   installReceiptWatch(win, (payload) => {
     const pressed = host.querySelector("[data-guide-action='toggle-pick'][aria-pressed='true']");
     if (pressed && host.dataset.moment === "receipt") return;
@@ -452,6 +583,7 @@ export function mountGuide(deps = {}) {
     readSettings() {
       return settings;
     },
+    openOverImport,
   };
   doc.__gitterGuide = api;
   sync();

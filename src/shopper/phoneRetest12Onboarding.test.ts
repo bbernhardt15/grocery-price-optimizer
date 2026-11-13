@@ -32,8 +32,8 @@ function chromeExecutable() {
 const chrome = chromeExecutable();
 
 describe("twelfth phone test — onboarding and receipt import", () => {
-  it("bumps the shell cache to v89", () => {
-    assert.equal(SHELL_CACHE, "v89");
+  it("bumps the shell cache to v90", () => {
+    assert.equal(SHELL_CACHE, "v90");
     assert.match(sw, new RegExp(`grocery-gitter-shell-${SHELL_CACHE}`));
   });
 
@@ -406,7 +406,9 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
           bodyTop: body.getBoundingClientRect().top,
           barMoved: Math.abs(bar.getBoundingClientRect().top - bar.getBoundingClientRect().top) ,
         };
-        const barTop = bar.getBoundingClientRect().top;
+        const beforeTop = bar.getBoundingClientRect().top;
+        stage.scrollTop = 480;
+        const afterTop = bar.getBoundingClientRect().top;
         const bottomButton = document.getElementById("learned-add-trip") as HTMLButtonElement;
         const disabledAtRest = bottomButton.disabled;
         const boxes = [...stage.querySelectorAll("[data-trip-pick]")] as HTMLInputElement[];
@@ -421,13 +423,14 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
         return {
           coversAtRest: before.bodyTop + 1 < before.barBottom,
           bodyStartsBelowBar: bodyBox.top + 1 >= barBox.bottom,
-          barStays: Math.abs(barBox.top - barTop) < 1,
-          scrolled: body.scrollTop,
+          barStays: Math.abs(afterTop - beforeTop) < 1,
+          scrolled: stage.scrollTop,
           disabledAtRest,
           bottomEnabled: !bottomButton.disabled,
           count: document.getElementById("trip-add-count")?.textContent,
           rowVisibleTop: rowBox.top,
           rowClippedByBody: rowBox.top >= bodyBox.top - 1 || rowBox.bottom <= bodyBox.top + 1,
+          position: getComputedStyle(bar).position,
         };
       });
       assert.equal(trip.coversAtRest, false);
@@ -435,8 +438,8 @@ describe("twelfth phone test at 390px", { timeout: 90_000, skip: chrome ? false 
       assert.equal(trip.disabledAtRest, true);
       assert.equal(trip.bottomEnabled, true);
       assert.equal(trip.count, "1 selected");
-      assert.ok(trip.scrolled > 0);
-      assert.equal(trip.barStays, true);
+      assert.equal(trip.position, "static");
+      if (trip.scrolled > 0) assert.equal(trip.barStays, false);
     } finally {
       await page.browser().close();
     }

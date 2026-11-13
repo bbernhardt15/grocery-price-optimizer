@@ -106,6 +106,7 @@ import { missingAccordionHtml, rankSwapSuggestions } from "./shopper/reviewMissi
 import { customizeRowsHtml } from "./shopper/reviewCustomize.js";
 import { placePickedLine } from "./shopper/pickedCart.js";
 import { reviewCheckoutLabel, reviewStoreCardHtml, withCheckoutLabel } from "./shopper/reviewStoreCard.js";
+import { productPhotoHtml } from "./shopper/productPhoto.js";
 import { planStatusHtml, planStatusModel } from "./shopper/reviewProgress.js";
 import {
   buildStoreReadyList,
@@ -156,7 +157,7 @@ import {
   readKrogerTrip,
   saveKrogerTrip,
 } from "./shopper/krogerReturn.js";
-import { matchPick, migrateUnstarredUsuals, readStarredUsuals, readUsuals, rememberUsuals, starUsual, starterList, usualKey } from "./shopper/usuals.js";
+import { matchPick, migrateUnstarredUsuals, readStarredUsuals, readUsuals, rememberUsuals, starUsual, starterList, toggleStarredUsual, usualKey } from "./shopper/usuals.js";
 import { SHELL_CACHE } from "./shopper/betaContext.js";
 import { usualsRowHtml, usualsSummary } from "./shopper/usualsRow.js";
 import { customCatalogProduct, mountImport } from "./shopper/import.js";
@@ -1446,6 +1447,17 @@ function noteAppVisible() {
   rehydrateTrip();
 }
 
+function showKrogerConnected() {
+  const card = document.getElementById("connect-confirm");
+  if (!(card instanceof HTMLElement)) return;
+  card.hidden = false;
+  window.setTimeout(() => {
+    card.hidden = true;
+  }, 2000);
+}
+
+let krogerJustConnected = false;
+
 function toastShellUpdate() {
   try {
     if (localStorage.getItem(SHELL_UPDATED_KEY) !== "1") return;
@@ -1453,6 +1465,7 @@ function toastShellUpdate() {
   } catch {
     return;
   }
+  if (krogerJustConnected) return;
   toast("Updated.", 2400);
 }
 
@@ -1628,14 +1641,7 @@ function rememberKrogerConnected() {
 }
 
 function krogerBannerHtml() {
-  if (!krogerConnectedNow()) return "";
-  const note = cartCouponCallout("Kroger", couponPageFor("Kroger"));
-  return `<section class="kroger-card" data-kroger-banner>
-    <h2>Kroger connected</h2>
-    ${note}
-    <button type="button" class="primary" data-kroger-send>Send to Kroger cart</button>
-    <a href="${KROGER_CART_URL}" data-kroger-cart rel="noopener">Open Kroger cart</a>
-  </section>`;
+  return "";
 }
 
 let krogerRetry = null;
@@ -1760,8 +1766,9 @@ function applyKrogerReturn(parsed) {
   }
   if (marker === "connected" && parsed.kind === "connected") {
     profileConnectResume = true;
+    krogerJustConnected = true;
     rememberKrogerConnected();
-    toast(parsed.message || "Kroger connected. Kroger may still ask you to sign in at checkout.");
+    showKrogerConnected();
     profileUi?.resumeAfterConnect?.();
     return;
   }
@@ -2372,15 +2379,60 @@ async function syncWatch() {
   }
 }
 
+function releaseStoreQuote(name) {
+  const key = String(name || "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!key) return false;
+  if (key === "walmart" || key.startsWith("walmart ")) return true;
+  return [
+    "kroger",
+    "ralphs",
+    "fred meyer",
+    "frys",
+    "fry s",
+    "king soopers",
+    "smiths",
+    "smith s",
+    "harris teeter",
+    "marianos",
+    "mariano s",
+    "pick n save",
+    "metro market",
+    "qfc",
+    "dillons",
+    "dillon s",
+    "bakers",
+    "baker s",
+    "city market",
+    "food 4 less",
+    "foods co",
+    "pay less",
+    "gerbes",
+    "jay c",
+    "jayc",
+    "owens",
+    "owen s",
+    "ruler",
+    "ruler foods",
+  ].some((banner) => key === banner || key.startsWith(`${banner} `));
+}
+
 function quotesForProduct(product, allowSubs) {
   const quotes = [];
   for (const offer of product?.offers ?? []) {
     if (offer.availability === "out_of_stock") continue;
+    if (!releaseStoreQuote(offer.storeName)) continue;
     quotes.push({ storeName: offer.storeName, price: Number(offer.price) });
   }
   if (allowSubs) {
     for (const gap of product?.gaps ?? []) {
       if (!gap.substitute) continue;
+      if (!releaseStoreQuote(gap.storeName)) continue;
       if (quotes.some((quote) => quote.storeName === gap.storeName)) continue;
       quotes.push({ storeName: gap.storeName, price: Number(gap.substitute.price) });
     }
@@ -2499,7 +2551,7 @@ function listRowHtml(entry, locked) {
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
       const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
-        ${listThumbHtml(image, escapeHtml)}
+        ${listThumbHtml(image)}
         <div class="list-copy">
           <label class="got-it">
             <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />
@@ -2898,10 +2950,15 @@ function cardHtml(tile) {
   const sizeRow = `<p class="choice-label">Size</p><div data-size-row>${sizePanel(title, sizes, selected.id, "unit")}</div>`;
   const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
   const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
+  const photo = productPhotoHtml(image, {
+    resolve: mediaUrl,
+    rest: (selected.imageUrls || tile.imageUrls || []).slice(1),
+  });
+  const starred = readStarredUsuals(localStorage).some((row) => usualKey(row) === usualKey({ name: title }));
   return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
     <div class="card-lead">
       <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
-        <img src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />
+        ${photo}
       </button>
       <div class="card-summary">
         ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
@@ -2913,6 +2970,7 @@ function cardHtml(tile) {
             <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
             Add
           </label>
+          <button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(title)}" data-fav-brand="${escapeHtml(brand || "")}" data-fav-id="${escapeHtml(selected.id)}" aria-pressed="${starred ? "true" : "false"}" aria-label="${starred ? "Unfavorite" : "Favorite"} ${escapeHtml(title)}">★</button>
           <div class="stepper">
             <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
             <output>${qty}</output>
@@ -3410,9 +3468,7 @@ function renderSuggestionRows(q) {
       const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
       const price = suggestionPriceLabel(item.bestPrice, "", (value) => money(value));
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
-      const thumb = item.imageUrl
-        ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
-        : "";
+      const thumb = productPhotoHtml(item.imageUrl, { resolve: mediaUrl });
       return `<li role="presentation"><button type="button" class="suggest-option" role="option" data-suggest="${index}" id="suggest-${index}" aria-selected="${index === activeSuggest}">
         ${thumb}
         <span>
@@ -3600,7 +3656,7 @@ function openProduct(product, choices = []) {
       <button type="button" class="text-btn" id="dialog-back">Back</button>
       <button type="button" class="icon-btn" id="dialog-close" aria-label="Close">×</button>
     </div>
-    <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
+    ${productPhotoHtml(product.imageUrls?.[0] || "", { className: "hero", resolve: mediaUrl, rest: (product.imageUrls || []).slice(1) })}
     <h2 id="dialog-title">${escapeHtml(title)}</h2>
     ${note ? `<p class="muted">${escapeHtml(note)}</p>` : ""}
     <p class="price">${escapeHtml(priceText(product))}</p>
@@ -4365,7 +4421,7 @@ function reviewItemRows(items) {
       const price = Number.isFinite(amount) && amount > 0 ? priceFigure(amount) : "";
       const lineKey = String(item.lineId || item.title || "").replace(/"/g, "");
       const source = price ? `<span class="price-source" title="Estimated shelf price. Not a checkout total.">est.</span>` : "";
-      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>${source}` : ""}</li>`;
+      return `<li class="review-line" data-review-line="${escapeHtml(lineKey)}"><span>${escapeHtml(item.title)}${escapeHtml(qty)}</span>${price ? `<strong>${escapeHtml(price)}</strong>${source}` : ""}<button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(item.title || item.name || "")}" data-fav-id="${escapeHtml(item.productId || item.lineId || "")}" aria-pressed="${readStarredUsuals(localStorage).some((row) => usualKey(row) === usualKey({ name: item.title || item.name || "" })) ? "true" : "false"}" aria-label="Favorite ${escapeHtml(item.title || item.name || "item")}">★</button></li>`;
     })
     .join("");
 }
@@ -4380,22 +4436,23 @@ function linePrice(item) {
 function reviewStoreArticle(store, couponSummary, coupons) {
   const total = Number.isFinite(Number(store.subtotal)) ? priceFigure(store.subtotal) : "";
   const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
+  const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
+  const callout = cartCouponCallout(store.storeName, page);
   const couponsHtml = storeCouponMarkup(store, {
-    page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
+    page,
     rows: storeSummary?.rows || [],
     storeSummary,
     clipped: isClipped(localStorage, tripId(), store.storeName),
     canEnter: !planLimited("ownCoupons"),
     open: true,
     coupons,
+    omitLink: Boolean(callout),
   });
   const lines = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item));
   const units = (store.items || []).reduce((sum, item) => sum + (Number(item.quantity) > 0 ? Number(item.quantity) : 0), 0);
   const countLabel = storeLineLabel(lines.length, units);
   const mark = handoffMark(store);
   const action = withCheckoutLabel(primaryAction(store), reviewCheckoutLabel(store));
-  const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
-  const callout = cartCouponCallout(store.storeName, page);
   const walmartNote =
     store.handoff?.action?.type === "walmart_cart"
       ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
@@ -4893,16 +4950,15 @@ function paintTrip() {
   const reviewSnapshot = reviewScrollSnapshot();
   tripEl.innerHTML = `
     ${progress}
-    ${krogerBannerHtml()}
     <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}" data-total="${escapeHtml(String(figures.total))}">
-    ${reviewHead}
-    <section class="savings-card">
+    <section class="savings-card" id="plan-math">
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>
       ${lineItems ? `<ul class="savings-lines">${lineItems}</ul>` : ""}
       ${/^You saved /.test(card.saved || "") ? `<p class="savings-callout" role="status">${escapeHtml(card.saved)}</p>` : card.saved ? `<p>${escapeHtml(card.saved)}</p>` : ""}
       ${card.note && card.note !== ESTIMATE_NOTE ? `<p class="muted">${escapeHtml(card.note)}</p>` : ""}
     </section>
+    ${reviewHead}
     <p class="estimate-note">${escapeHtml(ESTIMATE_NOTE)}</p>
     ${choiceHtml}
     ${savingsLine}
@@ -6667,11 +6723,41 @@ function chooseFlavor(event) {
   paintChoice(card, "[data-flavor]", flavorKey);
   applyFlavor(card, flavorKey);
 }
+document.addEventListener("error", (event) => {
+  const img = event.target;
+  if (!(img instanceof HTMLImageElement) || img.dataset.photo !== "product") return;
+  const rest = String(img.dataset.rest || "").split("\n").map((row) => row.trim()).filter(Boolean);
+  if (rest.length) {
+    img.dataset.rest = rest.slice(1).join("\n");
+    img.src = mediaUrl(rest[0]);
+    return;
+  }
+  const placeholder = document.createElement("span");
+  placeholder.className = "product-placeholder";
+  placeholder.setAttribute("aria-hidden", "true");
+  img.replaceWith(placeholder);
+}, true);
+
 document.addEventListener("pointerup", chooseFlavor, true);
 document.addEventListener("click", chooseFlavor, true);
 document.addEventListener("click", (event) => {
   const target = eventElement(event);
   if (!target) return;
+  const favStar = target.closest("[data-fav-star]");
+  if (favStar) {
+    event.preventDefault();
+    event.stopPropagation();
+    const name = favStar.getAttribute("data-fav-name") || "";
+    const on = toggleStarredUsual(localStorage, {
+      name,
+      brand: favStar.getAttribute("data-fav-brand") || "",
+      catalogId: favStar.getAttribute("data-fav-id") || "",
+    });
+    favStar.setAttribute("aria-pressed", on ? "true" : "false");
+    favStar.setAttribute("aria-label", `${on ? "Unfavorite" : "Favorite"} ${name}`);
+    paintUsuals();
+    return;
+  }
   if (target.closest("[data-share-list]")) {
     event.preventDefault();
     void shareWalkingList();
@@ -8052,7 +8138,7 @@ function closeDrawer(options = {}) {
   const wasOpen = drawer.classList.contains("is-open");
   drawer.classList.remove("is-open");
   syncDrawerMode();
-  if (wasOpen && options.restoreFocus !== false) $("menu-open")?.focus();
+  if (wasOpen && options.restoreFocus !== false) $("menu-open")?.focus({ preventScroll: true });
 }
 
 function focusZipField() {
@@ -9145,6 +9231,11 @@ function showStep(step, reason = "user") {
   paintUsuals();
   paintPlanBar();
   if (reason === "user" && flowStep === "add") window.scrollTo(0, 0);
+  if (reason === "user" && flowStep === "plan") {
+    const math = document.getElementById("plan-math");
+    if (math) math.scrollIntoView({ block: "start" });
+    else window.scrollTo(0, 0);
+  }
 }
 
 function paintPlanBar() {
@@ -9500,7 +9591,7 @@ async function openPreferenceChange(family) {
     const meta = [tile.brand, variant.variantLabel || variant.sizeLabel || ""].filter(Boolean).join(" · ");
     const image = variant.imageUrls?.[0] || tile.imageUrls?.[0] || "";
     return `<button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
-      ${image ? `<img src="${escapeHtml(mediaUrl(image))}" alt="" />` : ""}
+      ${productPhotoHtml(image, { resolve: mediaUrl })}
       <span class="staple-name">${escapeHtml(name)}</span>
       <span class="staple-meta">${escapeHtml(meta)}</span>
     </button>`;
@@ -10063,9 +10154,9 @@ async function boot() {
     consumeKrogerReturn();
     paintKrogerConnected(krogerConnectedNow());
     listRevision = Number(localStorage.getItem(REVISION_KEY) || "0") || 0;
-    if (!landedFromKroger && !profileConnectResume && shouldPromptProfile(localStorage)) profileUi?.open();
     await bootApp();
   } finally {
+    document.documentElement.dataset.boot = "ready";
     if (profileConnectResume) {
       const profileDialog = document.getElementById("profile-onboard");
       if (!profileDialog?.open) profileUi?.resumeAfterConnect?.();
@@ -10939,6 +11030,9 @@ importer = mountImport({
   apiUrl,
   fetchBrowse,
   toast,
+  holdForReceiptSheet() {
+    return Boolean(guide?.openOverImport?.());
+  },
   persistList() {
     saveList();
   },

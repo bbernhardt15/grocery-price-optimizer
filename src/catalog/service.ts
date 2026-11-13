@@ -33,8 +33,9 @@ import { ingestConfig } from "../ingest/config";
 import { noteCatalogDemand } from "../ingest/demand";
 import { readRecordsByUpc, readStoredById, readStoredRecords } from "../ingest/readStore";
 import { upsertCatalogRecords } from "../ingest/upsert";
+import { isReleaseStore, restrictReleaseBanners, restrictReleaseCoverage, restrictReleaseProduct, restrictReleaseTile } from "./releaseStores";
 
-const GAP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
+const GAP_STORES = ["Kroger", "Walmart"];
 const memoryCache = new Map<string, { expiresAt: number; products: BrowseProduct[]; warnings: string[] }>();
 
 export type BrowseQuery = {
@@ -576,6 +577,10 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
   });
   const familyId = query ? familyFromQuery(query) : "";
   let filtered = familyId ? preferRealImages(filterProducts(scope.products, filters)) : filterProducts(scope.products, filters);
+  filtered = filtered.flatMap((product) => {
+    const kept = restrictReleaseProduct(product);
+    return kept ? [kept] : [];
+  });
   if (query && filtered.length === 0) {
     const broader = broadenQuery(query);
     if (broader) {
@@ -594,7 +599,12 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
   const offset = Number(request.cursor ?? "0");
   const limit = Math.min(Math.max(request.limit ?? 24, 1), 48);
   const page = paginateProducts(sorted, offset, limit);
-  const items = page.items.map((family) => withVariantGaps(family, scope.products));
+  const items = page.items
+    .map((family) => withVariantGaps(family, scope.products))
+    .flatMap((family) => {
+      const kept = restrictReleaseTile(family);
+      return kept ? [kept] : [];
+    });
 
   let weeklyAdBanners: WeeklyAdBannerHit[] | undefined;
   if (request.zipCode && flippConsumerEnabled()) {
@@ -606,13 +616,16 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     }
   }
 
+  const facets = facetsFor(facetPool);
+  facets.stores = facets.stores.filter((store) => isReleaseStore(store));
+
   return {
     items,
     total: page.total,
     nextCursor: page.nextCursor,
-    facets: facetsFor(facetPool),
-    coverage: catalogCoverage({ ...coverageFlags(), stored: scope.fromDatabase }),
-    ...(weeklyAdBanners ? { weeklyAdBanners } : {}),
+    facets,
+    coverage: restrictReleaseCoverage(catalogCoverage({ ...coverageFlags(), stored: scope.fromDatabase })),
+    ...(weeklyAdBanners ? { weeklyAdBanners: restrictReleaseBanners(weeklyAdBanners) } : {}),
     warnings: scope.warnings,
     cached: scope.cached,
     catalogSource: scope.fromDatabase ? "database" : catalogSourceOf(scope.products),
@@ -627,14 +640,20 @@ export async function suggestCatalog(query: string, limit = 8): Promise<BrowsePr
   if (ingestConfig().dbFirst && mongoose.connection.readyState === 1) {
     const stored = await readStoredRecords({ query: q, maxScan: 48 });
     if (stored.records.length > 0) {
-      const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q });
+      const matches = sortProducts(filterProducts(groupOffersByUpc(stored.records), { query: q }), "relevance", { query: q }).flatMap((product) => {
+        const kept = restrictReleaseProduct(product);
+        return kept ? [kept] : [];
+      });
       return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
         .slice(0, Math.min(Math.max(limit, 1), 12))
         .map((tile) => preferPackFromQuery(tile, q));
     }
   }
   const known = await loadKnownProducts();
-  const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q });
+  const matches = sortProducts(filterProducts(known, { query: q }), "relevance", { query: q }).flatMap((product) => {
+    const kept = restrictReleaseProduct(product);
+    return kept ? [kept] : [];
+  });
   return rankSearchResults(groupBrowseFamilies(matches), { query: q, family: familyFromQuery(q) })
     .slice(0, Math.min(Math.max(limit, 1), 12))
     .map((tile) => preferPackFromQuery(tile, q));
@@ -649,7 +668,9 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
       const products = groupOffersByUpc(mates.records);
       const product = products.find((entry) => entry.id === id) ?? groupOffersByUpc(records)[0];
       if (product) {
-        return { ...annotateBrowseProduct(product), gaps: gapsForProduct(product, products, GAP_STORES) };
+        const kept = restrictReleaseProduct(product);
+        if (!kept) return null;
+        return { ...annotateBrowseProduct(kept), gaps: gapsForProduct(kept, products, GAP_STORES) };
       }
     }
   }
@@ -658,7 +679,9 @@ export async function getBrowseProduct(id: string): Promise<(BrowseProduct & { g
   if (!product) {
     return null;
   }
-  return { ...annotateBrowseProduct(product), gaps: gapsForProduct(product, known, GAP_STORES) };
+  const kept = restrictReleaseProduct(product);
+  if (!kept) return null;
+  return { ...annotateBrowseProduct(kept), gaps: gapsForProduct(kept, known, GAP_STORES) };
 }
 
 function withVariantGaps(family: BrowseTile, pool: BrowseProduct[]): BrowseTile & { gaps: CatalogGap[] } {

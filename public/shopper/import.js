@@ -9,6 +9,7 @@ import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { armSheetHistory } from "./sheetHistory.js";
 import { shortProductTitle } from "./familyTile.js";
+import { productPhotoHtml } from "./productPhoto.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
 const MIC = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
@@ -611,11 +612,12 @@ export function mountImport(deps) {
               : "";
         foundCards.push(`<li class="import-tile" data-key="${escapeHtml(item.key)}">
           <div class="import-tile-head">
-            ${image ? `<img src="${escapeHtml(media(image))}" alt="" />` : ""}
+            ${productPhotoHtml(image, { resolve: media })}
             <div>
               ${kicker}
               ${brand ? `<p class="brand">${escapeHtml(brand)}</p>` : ""}
               <h3>${escapeHtml(title)}</h3>
+              <button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(title)}" data-fav-brand="${escapeHtml(brand || "")}" data-fav-id="${escapeHtml(product?.id || "")}" aria-label="Favorite ${escapeHtml(title)}">★</button>
               ${flag}
               ${item.shelfNote ? `<p class="import-note">${escapeHtml(item.shelfNote)}</p>` : ""}
             </div>
@@ -1429,6 +1431,7 @@ export function mountImport(deps) {
       );
     }
     toast(addedLabel(addedCount));
+    if (typeof deps.holdForReceiptSheet === "function" && deps.holdForReceiptSheet()) return;
     close();
   }
 
