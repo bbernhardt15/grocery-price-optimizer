@@ -7978,22 +7978,19 @@ $("menu-open")?.addEventListener("click", () => {
 $("drawer-close")?.addEventListener("click", () => closeDrawer());
 $("drawer-scrim")?.addEventListener("click", () => closeDrawer());
 let drawerScrollLock = 0;
-document.addEventListener(
-  "pointerdown",
-  () => {
-    if (document.body.dataset.drawer === "open") drawerScrollLock = window.scrollY;
-  },
-  true
-);
-document.addEventListener(
-  "pointermove",
-  (event) => {
-    if (document.body.dataset.drawer !== "open" || !event.buttons) return;
-    if (event.cancelable) event.preventDefault();
-    if (window.scrollY !== drawerScrollLock) window.scrollTo(0, drawerScrollLock);
-  },
-  { passive: false }
-);
+function lockDrawerScroll() {
+  if (document.body.dataset.drawer === "open") drawerScrollLock = window.scrollY;
+}
+function keepDrawerScroll(event) {
+  if (document.body.dataset.drawer !== "open") return;
+  if ("buttons" in event && !event.buttons) return;
+  if (event.cancelable) event.preventDefault();
+  if (window.scrollY !== drawerScrollLock) window.scrollTo(0, drawerScrollLock);
+}
+document.addEventListener("pointerdown", lockDrawerScroll, true);
+document.addEventListener("mousedown", lockDrawerScroll, true);
+document.addEventListener("pointermove", keepDrawerScroll, { passive: false });
+document.addEventListener("mousemove", keepDrawerScroll);
 
 let drawerSwipeStart = null;
 $("app-drawer")?.addEventListener(
