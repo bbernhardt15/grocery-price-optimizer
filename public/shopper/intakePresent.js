@@ -111,6 +111,17 @@ export function basketTeaser(lines) {
   };
 }
 
+/** A phone with no saved trips is on its first receipt. Bad storage counts as first, too. */
+export function isFirstReceipt(stored) {
+  if (stored == null || stored === "") return true;
+  try {
+    const saved = typeof stored === "string" ? JSON.parse(stored) : stored;
+    return !Array.isArray(saved) || saved.length === 0;
+  } catch {
+    return true;
+  }
+}
+
 export function basketTeaserHtml(lines, options = {}) {
   const teaser = basketTeaser(lines);
   const before = options.firstReceipt

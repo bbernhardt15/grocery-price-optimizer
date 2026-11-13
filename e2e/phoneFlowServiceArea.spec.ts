@@ -52,6 +52,8 @@ test("an in-area ZIP completes the normal path and a plan", async ({ page }) => 
   await suggestion.click();
   await expect(productDialog).toBeHidden();
   await expect(page.locator("#grid .card").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.locator("#suggestions").waitFor({ state: "hidden" }).catch(() => {});
   await page.getByRole("button", { name: /Details for/ }).first().click();
   await expect(productDialog).toBeVisible();
   await expect(productDialog.locator(".price")).toContainText(/\$\d+\.\d{2}/);

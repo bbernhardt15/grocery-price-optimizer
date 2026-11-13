@@ -4,8 +4,10 @@ import { COUPON_PAGES as serverPages, couponPageFor as serverPageFor, publicCoup
 import { STORE_HANDOFF_CONFIG } from "../storeHandoffConfig";
 import {
   COUPON_PAGES,
+  bestCouponLine,
   checklistSentence,
   couponChecklist,
+  couponNamesMatch,
   couponDraftFields,
   couponExpired,
   couponLineLabel,
@@ -75,6 +77,34 @@ describe("sale badge", () => {
       ends: "ends Nov 8",
     });
     assert.equal(saleBadge({ onSale: true, price: 2.14, regularPrice: 2.64, saleEndsOn: "2026-11-08" })?.was, "was $2.64");
+  });
+});
+
+describe("coupon name matching", () => {
+  it("applies a coupon sentence to the cart item and skips an unrelated one", () => {
+    const cart = "Tide PODS Original Laundry Detergent 42 ct";
+    assert.equal(couponNamesMatch("Save $1 on any 2 Tide PODS", cart), true);
+    assert.equal(couponNamesMatch("Tide PODS", cart), true);
+    assert.equal(couponNamesMatch("Bounty paper towels", cart), false);
+    assert.equal(couponNamesMatch("Gain laundry detergent", cart), false);
+    const lines = [
+      { value: "tide", name: cart },
+      { value: "bounty", name: "Bounty Select-A-Size Paper Towels" },
+    ];
+    assert.equal(bestCouponLine(lines, "Save $1 on any 2 Tide PODS")?.value, "tide");
+    assert.equal(bestCouponLine(lines, "Cheerios"), null);
+    const summary = couponSavingsSummary(
+      [
+        {
+          storeName: "Kroger",
+          subtotal: 12.99,
+          items: [{ lineId: "tide", name: cart, price: 12.99, quantity: 2, itemTotal: 12.99 }],
+        },
+      ],
+      [{ id: "c-tide", storeName: "Kroger", lineId: "", itemName: "Save $1 on any 2 Tide PODS", kind: "dollars" as const, amount: 1 }],
+      "2026-11-13"
+    );
+    assert.equal(summary.savings, 1);
   });
 });
 

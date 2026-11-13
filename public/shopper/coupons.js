@@ -245,9 +245,62 @@ export function sameCouponLine(left, right) {
   return String(left.itemName || "").trim().toLowerCase() === String(right.itemName || "").trim().toLowerCase();
 }
 
+const COUPON_STOP = new Set([
+  "a", "an", "the", "on", "of", "and", "or", "for", "with", "your", "you", "any", "save", "off", "when", "buy",
+  "to", "from", "per", "each", "up", "at", "in", "by", "if", "do", "not", "no", "all", "our", "this", "that",
+  "than", "more", "less", "get", "only", "just", "now", "new", "size", "pack", "pk", "ct", "count", "oz", "fl",
+  "lb", "lbs", "gal", "ml", "dozen", "can", "cans", "bottle", "bottles", "original",
+]);
+
+function couponTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[$%]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token && !COUPON_STOP.has(token) && !/^\d+$/.test(token) && token.length > 1);
+}
+
+/**
+ * Coupon wording and a cart line match on shared brand and product tokens.
+ * The coupon name does not have to be a substring of the shelf name.
+ * @returns {number} share of the coupon's tokens found on the item, or 0
+ */
+export function couponMatchScore(couponName, itemName) {
+  const wanted = couponTokens(couponName);
+  const have = new Set(couponTokens(itemName));
+  if (!wanted.length || !have.size) return 0;
+  if (!have.has(wanted[0])) return 0;
+  const shared = wanted.filter((token) => have.has(token));
+  return shared.length / wanted.length;
+}
+
+export function couponNamesMatch(couponName, itemName) {
+  const wanted = couponTokens(couponName);
+  if (!wanted.length) return false;
+  const score = couponMatchScore(couponName, itemName);
+  return wanted.length === 1 ? score === 1 : score >= 0.5;
+}
+
+/** Best cart line for a coupon sentence, or null when nothing is close. */
+export function bestCouponLine(lines, couponName) {
+  let best = null;
+  let bestScore = 0;
+  for (const line of lines || []) {
+    const score = couponMatchScore(couponName, line?.name || line?.text || "");
+    if (score > bestScore) {
+      best = line;
+      bestScore = score;
+    }
+  }
+  const wanted = couponTokens(couponName);
+  const threshold = wanted.length === 1 ? 1 : 0.5;
+  return bestScore >= threshold ? best : null;
+}
+
 function matchesLine(coupon, item) {
   if (coupon.lineId && item?.lineId && coupon.lineId === item.lineId) return true;
-  return String(coupon.itemName || "").trim().toLowerCase() === String(item?.name || "").trim().toLowerCase();
+  return couponNamesMatch(coupon.itemName, item?.name);
 }
 
 export function couponBlockReason(coupon, item, itemTotal, today = todayKey()) {

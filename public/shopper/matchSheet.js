@@ -52,17 +52,32 @@ export function matchBrowseQuery(name) {
     .trim();
 }
 
-/** Drop packaging and non-food rows, then sort flavor then size. Real food ranks first. */
+const EGG_EXCLUDE =
+  /\b(pulp|paper material|egg cartons?|empty carton|packaging|egg rings?|egg cookers?|easter eggs?|plastic eggs?|egg dyes?|egg holders?)\b/i;
+const REAL_EGG = /\b(eggs?|eggland|egg beaters|eggbeaters)\b/i;
+
+function itemText(item) {
+  return `${item?.name || ""} ${item?.catalogName || ""} ${item?.familyName || ""}`;
+}
+
+/** Packaging and novelty eggs leave an egg search. A real egg sold in a carton stays. */
+export function isEggSearchReject(item, query) {
+  if (!/\beggs?\b/i.test(String(query || ""))) return false;
+  const text = itemText(item);
+  const category = `${item?.departmentName || ""} ${item?.departmentId || ""} ${item?.category || ""} ${item?.aisle || ""}`.toLowerCase();
+  if (EGG_EXCLUDE.test(text)) return true;
+  const household = /\b(household|gadget|storage|party|seasonal|kitchen)\b/.test(category);
+  if (household && !REAL_EGG.test(text)) return true;
+  if (/\b(carton|container|tray)\b/i.test(text) && !REAL_EGG.test(text)) return true;
+  if (/\b(iphone|vitamin|tablet)\b/i.test(text) && !REAL_EGG.test(text)) return true;
+  return false;
+}
+
+/** Drop non-egg rows, then sort flavor then size. Real eggs rank first. */
 export function rankFoodMatches(items, query) {
   const ask = String(query || "").toLowerCase();
   const eggs = /\beggs?\b/.test(ask);
-  const packaging = /\b(pulp|paper material|carton|packaging|holds \d+|container|tray)\b/i;
-  const kept = (items || []).filter((item) => {
-    const text = `${item?.name || ""} ${item?.catalogName || ""} ${item?.familyName || ""}`;
-    if (eggs && packaging.test(text) && !/\b(dozen|large eggs|grade|eggland)\b/i.test(text)) return false;
-    if (eggs && /\b(iphone|vitamin|tablet|plant)\b/i.test(text)) return false;
-    return true;
-  });
+  const kept = (items || []).filter((item) => !isEggSearchReject(item, ask));
   const sizeCount = (item) => {
     const label = `${item?.sizeLabel || ""} ${item?.totalSize || ""} ${item?.name || ""}`;
     const match = label.match(/(\d+)\s*(?:ct|count|pk|pack)\b/i);
@@ -74,8 +89,8 @@ export function rankFoodMatches(items, query) {
       const aText = `${a.item?.name || ""} ${a.item?.familyName || ""}`.toLowerCase();
       const bText = `${b.item?.name || ""} ${b.item?.familyName || ""}`.toLowerCase();
       if (eggs) {
-        const aFood = /\beggs?\b/.test(aText) && !packaging.test(aText) ? 0 : 1;
-        const bFood = /\beggs?\b/.test(bText) && !packaging.test(bText) ? 0 : 1;
+        const aFood = REAL_EGG.test(aText) && !EGG_EXCLUDE.test(aText) ? 0 : 1;
+        const bFood = REAL_EGG.test(bText) && !EGG_EXCLUDE.test(bText) ? 0 : 1;
         if (aFood !== bFood) return aFood - bFood;
       }
       const flavor = String(a.item?.flavorLabel || a.item?.variantLabel || "").localeCompare(String(b.item?.flavorLabel || b.item?.variantLabel || ""));
@@ -87,18 +102,50 @@ export function rankFoodMatches(items, query) {
     .map((row) => row.item);
 }
 
-/** Flavor and size belong in the name the shopper sees. */
+const STORE_BRAND = /^(great value|kroger|simple truth|good & gather|marketside|equate)$/i;
+
+function cleanLabel(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function looksLikeSize(value) {
+  return /^\d|\b(?:ct|count|pk|pack|oz|fl oz|lb|gal|ml)\b/i.test(value);
+}
+
+function withoutSize(name, size) {
+  if (!size) return name;
+  const escaped = size.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return name.replace(new RegExp(`[,\\s]*${escaped}$`, "i"), "").replace(/,\s*$/, "").trim();
+}
+
+/** "Coke Cherry" reads as "Cherry Coke". A name that already leads with the flavor stays. */
+function flavorFirst(name, flavor) {
+  const product = name.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  const taste = flavor.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  if (!taste) return product;
+  const lower = product.toLowerCase();
+  const tasteLower = taste.toLowerCase();
+  if (lower === tasteLower || lower.startsWith(`${tasteLower} `)) return product;
+  if (lower.endsWith(` ${tasteLower}`)) {
+    const noun = product.slice(0, product.length - taste.length).replace(/,\s*$/, "").trim();
+    return `${taste} ${noun}`.replace(/\s+/g, " ").trim();
+  }
+  if (lower.includes(tasteLower)) return product;
+  return `${taste} ${product}`.replace(/\s+/g, " ").trim();
+}
+
+/** Flavor, then the product, then the pack size. No comma before the size. */
 export function productDisplayName(tile, variant) {
-  const raw = String(variant?.familyName || tile?.familyName || variant?.name || tile?.name || "Item").replace(/\s+/g, " ").trim();
-  const flavor = String(variant?.flavorLabel || tile?.flavorLabel || variant?.variantLabel || "").replace(/\s+/g, " ").trim();
-  const size = String(variant?.sizeLabel || tile?.sizeLabel || variant?.label || "").replace(/\s+/g, " ").trim();
-  const sizeOnly = !raw || raw === size || /^(?:\d+\s*(?:ct|count|pk|pack|fl oz|oz|lb|gal)\b)/i.test(raw);
-  const base = sizeOnly && flavor ? flavor : raw;
-  const parts = [base];
-  if (flavor && !base.toLowerCase().includes(flavor.toLowerCase())) parts.push(flavor);
-  const titled = parts.join(" ");
-  if (size && !titled.toLowerCase().includes(size.toLowerCase())) return `${titled}, ${size}`;
-  return titled;
+  const raw = cleanLabel(variant?.familyName || tile?.familyName || variant?.name || tile?.name || "Item");
+  const flavorLabel = cleanLabel(variant?.flavorLabel || tile?.flavorLabel || "");
+  const variantLabel = cleanLabel(variant?.variantLabel || "");
+  const flavor = flavorLabel || (variantLabel && !looksLikeSize(variantLabel) ? variantLabel : "");
+  const size = cleanLabel(variant?.sizeLabel || tile?.sizeLabel || variant?.label || (looksLikeSize(variantLabel) ? variantLabel : ""));
+  let base = flavorFirst(withoutSize(raw, size), flavor);
+  const brand = cleanLabel(variant?.brand || tile?.brand || "");
+  if (brand && STORE_BRAND.test(brand) && !base.toLowerCase().includes(brand.toLowerCase())) base = `${brand} ${base}`;
+  if (size && !base.toLowerCase().includes(size.toLowerCase())) return `${base} ${size}`.replace(/\s+/g, " ").trim();
+  return base;
 }
 
 export function mountMatchSheet(deps) {

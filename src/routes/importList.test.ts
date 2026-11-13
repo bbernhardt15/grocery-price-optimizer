@@ -304,6 +304,31 @@ describe("import routes", () => {
     assert.ok(missingBody.coupon.gaps.includes("amount"));
   });
 
+  it("parses a fixture coupon screenshot without a live vision call", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    const fixture = JSON.parse(readFileSync(new URL("../import/fixtures/tide-pods-coupon.json", import.meta.url), "utf8"));
+    const shot = Buffer.from("tide-pods-coupon-fixture").toString("base64");
+    setImportRuntime({
+      lookup: async () => ["8.8.8.8"],
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(origin)) return originalFetch(input, init);
+        calls.push(url);
+        return jsonResponse({ choices: [{ message: { content: JSON.stringify(fixture) } }] });
+      },
+    });
+    const read = await post("/api/import/coupon", { imageBase64: shot, mimeType: "image/jpeg" }, "device-tide-coupon");
+    assert.equal(read.status, 200);
+    const body = (await read.json()) as { source: string; coupon: { itemName: string; amount: number; minQuantity: number } };
+    assert.equal(body.source, "screenshot");
+    assert.equal(body.coupon.itemName, "Save $1 on any 2 Tide PODS");
+    assert.equal(body.coupon.amount, 1);
+    assert.equal(body.coupon.minQuantity, 2);
+    assert.ok(calls.some((url) => url.includes("/chat/completions")));
+  });
+
   it("reads a photo and a voice memo when a key is set, without logging them", async () => {
     process.env.OPENAI_API_KEY = "test-key";
     process.env.IMPORT_AI_PROVIDER = "off";

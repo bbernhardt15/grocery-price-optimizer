@@ -37,7 +37,7 @@ import { commitLearnedCard } from "./learnedStable.js";
 import { syncTripAddBar } from "./tripActionBar.js";
 import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
-import { orderTitle, readLiveHtml, readingPhaseText, storeChoiceHtml, foundLabel } from "./intakePresent.js";
+import { isFirstReceipt, orderTitle, readLiveHtml, readingPhaseText, storeChoiceHtml, foundLabel } from "./intakePresent.js";
 import { READING_RECEIPT, readCardTitle } from "./receiptReading.js";
 import { captureRuleScroll, restoreRuleScroll, revealInside } from "./ruleScroll.js";
 import { lightTap } from "./phone.js";
@@ -159,8 +159,7 @@ export function mountProfileOnboarding(deps = {}) {
 
   function firstReceiptOnDevice() {
     try {
-      const saved = JSON.parse(localStorage.getItem("gg-past-trips") || "[]");
-      return !Array.isArray(saved) || saved.length === 0;
+      return isFirstReceipt(localStorage.getItem("gg-past-trips"));
     } catch {
       return true;
     }

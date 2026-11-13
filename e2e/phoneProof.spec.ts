@@ -223,16 +223,13 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   await page.locator("[data-learned-mode='cheapest']").first().click();
   await expect(page.locator("[data-learned-mode='cheapest']").first()).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("Not on this receipt")).toHaveCount(0);
-  const stage = page.locator("#profile-stage");
-  await stage.evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-  });
+  await expect(page.locator(".basket-teaser")).toBeVisible();
   const learnedFit = await page.evaluate(() => {
     const scroller = document.querySelector("#profile-stage");
     const next = document.querySelector("#profile-next");
-    const rows = [...scroller.querySelectorAll(".learned-row, .basket-teaser")];
-    const last = rows[rows.length - 1];
-    if (!scroller || !next || !last) return null;
+    const last = scroller instanceof HTMLElement ? scroller.querySelector(".basket-teaser p:last-child") : null;
+    if (!(scroller instanceof HTMLElement) || !next || !last) return null;
+    scroller.scrollTop = scroller.scrollHeight;
     const frame = scroller.getBoundingClientRect();
     const nextBox = next.getBoundingClientRect();
     const lastBox = last.getBoundingClientRect();
@@ -241,12 +238,17 @@ test("the reading cart moves right and the status does not cycle backward", asyn
       intersects,
       lastVisible: lastBox.top >= frame.top - 1 && lastBox.bottom <= frame.bottom + 1,
       lastAboveButton: lastBox.bottom <= nextBox.top + 1,
+      lastTop: Math.round(lastBox.top),
+      lastBottom: Math.round(lastBox.bottom),
+      frameTop: Math.round(frame.top),
+      frameBottom: Math.round(frame.bottom),
+      nextTop: Math.round(nextBox.top),
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
     };
   });
-  expect(learnedFit).not.toBeNull();
-  expect(learnedFit?.intersects).toBe(false);
-  expect(learnedFit?.lastVisible).toBe(true);
-  expect(learnedFit?.lastAboveButton).toBe(true);
+  expect(learnedFit, JSON.stringify(learnedFit)).toMatchObject({ intersects: false, lastVisible: true, lastAboveButton: true });
   await page.screenshot({ path: "/opt/cursor/artifacts/onboarding-learned.png" });
 });
 

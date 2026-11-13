@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { couponReadApplies, parseCouponVision } from "./couponVision";
 
@@ -54,6 +55,16 @@ describe("coupon screenshot reading", () => {
     assert.equal(read.amount, null);
     assert.equal(read.expiresOn, "");
     assert.ok(read.gaps.includes("amount"));
+  });
+
+  it("reads a Tide PODS coupon fixture without calling a vision model", () => {
+    const fixture = JSON.parse(readFileSync(new URL("./fixtures/tide-pods-coupon.json", import.meta.url), "utf8"));
+    const read = parseCouponVision(JSON.stringify(fixture));
+    assert.equal(read.storeName, "Kroger");
+    assert.equal(read.itemName, "Save $1 on any 2 Tide PODS");
+    assert.equal(read.amount, 1);
+    assert.equal(read.minQuantity, 2);
+    assert.deepEqual(read.gaps, []);
   });
 
   it("withholds the discount until the printed quantity or spend is met", () => {

@@ -126,6 +126,7 @@ import {
   readCoupons,
   removeCoupon,
   saleBadgeMarkup,
+  bestCouponLine,
   couponDraftFields,
   couponLineLabel,
   shopCouponHint,
@@ -7769,9 +7770,11 @@ document.addEventListener("change", (event) => {
         if (mismatch) return;
         const line = host.querySelector("[data-coupon-line]");
         if (line instanceof HTMLSelectElement && fields.itemName) {
-          const wanted = fields.itemName.toLowerCase();
-          const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
-          if (match) line.value = match.value;
+          const match = bestCouponLine(
+            [...line.options].map((option) => ({ value: option.value, name: option.textContent || "" })),
+            fields.itemName
+          );
+          if (match?.value) line.value = match.value;
         }
         const amount = host.querySelector("[data-coupon-amount]");
         const kind = host.querySelector("[data-coupon-kind]");

@@ -77,6 +77,13 @@ describe("walkthrough gaps the audit still needed", () => {
       lines: [{ name: "Ground Beef" }],
     });
     assert.doesNotMatch(meat, /Not on this receipt/);
+    assert.match(meat, /data-missing-skip="meat"/);
+    assert.match(meat, /Leave Meat &amp; Seafood off/);
+    const skipped = learnedSummaryHtml([{ family: "ground-beef", label: "Ground beef", mode: "cheapest" }], {
+      lines: [{ name: "Ground Beef" }],
+      skippedFamilies: new Set(["meat"]),
+    });
+    assert.match(skipped, /Meat &amp; Seafood left off/);
     const prefs = meatPreferenceHtml("");
     assert.match(prefs, /data-meat-pref/);
     assert.match(prefs, /Use the lowest Meat &amp; Seafood price/);

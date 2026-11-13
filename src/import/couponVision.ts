@@ -7,7 +7,7 @@
 import { parseModelJson } from "./aiSchema";
 
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
-const NAME = /^[\p{L}\p{N}][\p{L}\p{N}&'’.,/+% -]{0,119}$/u;
+const NAME = /^[\p{L}\p{N}][\p{L}\p{N}&'’.,/+%$ -]{0,119}$/u;
 
 export type CouponRead = {
   storeName: string;
