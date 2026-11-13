@@ -465,18 +465,18 @@ export function mountGuide(deps = {}) {
     event?.stopPropagation?.();
     closeVisible("dismiss");
   }
-  host.addEventListener("pointerup", (event) => {
+  let dismissGestureAt = 0;
+  function dismissFromPointer(event) {
     const raw = event.target;
     const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
-    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
-  });
+    if (!element?.closest("[data-guide-dismiss]")) return;
+    dismissGestureAt = Date.now();
+    dismissOpenPrompt(event);
+  }
+  host.addEventListener("pointerup", dismissFromPointer);
   host.addEventListener("click", onGuideClick);
   receiptDialog.addEventListener("click", onGuideClick);
-  receiptDialog.addEventListener("pointerup", (event) => {
-    const raw = event.target;
-    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
-    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
-  });
+  receiptDialog.addEventListener("pointerup", dismissFromPointer);
 
   function onGuideClick(event) {
     const raw = event.target;
@@ -487,6 +487,10 @@ export function mountGuide(deps = {}) {
     event.guideHandled = true;
     event.stopPropagation();
     if (button.hasAttribute("data-guide-dismiss")) {
+      if (Date.now() - dismissGestureAt < 700) {
+        dismissGestureAt = 0;
+        return;
+      }
       dismissOpenPrompt(event);
       return;
     }

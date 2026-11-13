@@ -9,7 +9,7 @@ const sharedUse = {
   deviceScaleFactor: devices["iPhone 13"].deviceScaleFactor,
   isMobile: true,
   hasTouch: true,
-  trace: "retain-on-failure" as const,
+  trace: "off" as const,
 };
 
 export default defineConfig({
@@ -39,7 +39,7 @@ export default defineConfig({
         hasTouch: true,
         deviceScaleFactor: 3,
         baseURL: `http://127.0.0.1:${phonePort}`,
-        trace: "retain-on-failure",
+        trace: "off",
       },
     },
     {

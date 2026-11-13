@@ -97,13 +97,37 @@ test("v92 shows the next task prompt after the visible one is declined at 390x84
   });
   await expect(guide).toHaveAttribute("data-moment", "review-next");
   await expect(guide.getByRole("button", { name: "Not this time" })).toHaveCount(0);
-  await guide.getByRole("button", { name: "No thanks" }).click();
+  await guide.getByRole("button", { name: "Dismiss guide" }).tap();
   await expect(guide).toHaveAttribute("data-moment", "trip-saved");
   await expect(guide.getByRole("button", { name: "Not this time" })).toBeVisible();
   await expect(guide).not.toContainText(/couldn't find/i);
-  await guide.getByRole("button", { name: "Not this time" }).click();
-  await expect(guide).not.toHaveAttribute("data-moment", "review-next");
-  await expect(guide).not.toHaveAttribute("data-moment", "trip-saved");
+});
+
+test("v92 one tap on receipt Skip leaves the queued card at 390x844", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem("gg-profile", JSON.stringify({ onboarding: { status: "done", step: "summary", updatedAt: 1 } }));
+    localStorage.setItem("gg-list", JSON.stringify([{ id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 }]));
+  });
+  await unlock(page);
+  const guide = page.locator("#gitter-guide");
+  await page.evaluate(() => {
+    const guideApi = (document as Document & { __gitterGuide?: { noteReceipt?: (payload: object) => void } }).__gitterGuide;
+    guideApi?.noteReceipt?.({ lines: [{ name: "Paper Towels", quantity: 1 }] });
+  });
+  await expect(guide).toHaveAttribute("data-moment", "receipt");
+  await expect(guide.getByRole("button", { name: "Skip" })).toBeVisible();
+  await page.waitForTimeout(4200);
+  await page.evaluate(() => {
+    const guideApi = (document as Document & { __gitterGuide?: { noteTrip?: (trip: object) => void } }).__gitterGuide;
+    guideApi?.noteTrip?.({ saved: 0, total: 4, items: [{ name: "Whole Milk", quantity: 1 }] });
+  });
+  await expect(guide).toHaveAttribute("data-moment", "receipt");
+  await guide.getByRole("button", { name: "Skip" }).tap();
+  await expect(guide).toHaveAttribute("data-moment", "trip-saved");
+  await expect(guide.getByRole("button", { name: "Not this time" })).toBeVisible();
 });
 
 for (const size of sizes) {

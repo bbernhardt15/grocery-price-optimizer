@@ -249,15 +249,62 @@ const COUPON_STOP = new Set([
   "a", "an", "the", "on", "of", "and", "or", "for", "with", "your", "you", "any", "save", "off", "when", "buy",
   "to", "from", "per", "each", "up", "at", "in", "by", "if", "do", "not", "no", "all", "our", "this", "that",
   "than", "more", "less", "get", "only", "just", "now", "new", "size", "pack", "pk", "ct", "count", "oz", "fl",
-  "lb", "lbs", "gal", "ml", "dozen", "can", "cans", "bottle", "bottles", "variety", "varieties",
+  "lb", "lbs", "gal", "gallon", "ml", "dozen", "can", "cans", "bottle", "bottles", "variety", "varieties", "flavor", "flavors", "flavour", "flavours", "product", "products",
 ]);
 
-/** Flavor words. A cart variant the coupon does not name blocks the match, unless the coupon says any variety. */
-const COUPON_VARIANTS = ["caffeine free", "honey nut", "diet", "zero", "cherry", "vanilla", "light"];
+/** Flavor and type words. One side having a modifier the other lacks blocks the match. */
+const COUPON_VARIANTS = [
+  "caffeine free",
+  "honey nut",
+  "fat free",
+  "lactose free",
+  "vitamin d",
+  "2pct",
+  "1pct",
+  "almond",
+  "oat",
+  "soy",
+  "chocolate",
+  "strawberry",
+  "skim",
+  "whole",
+  "diet",
+  "zero",
+  "cherry",
+  "vanilla",
+  "light",
+];
+
+const GENERIC_NOUNS = new Set([
+  "milk",
+  "detergent",
+  "laundry",
+  "bread",
+  "egg",
+  "eggs",
+  "cheese",
+  "yogurt",
+  "butter",
+  "juice",
+  "water",
+  "soda",
+  "cereal",
+  "coffee",
+  "pasta",
+  "rice",
+  "chicken",
+  "beef",
+  "towel",
+  "towels",
+  "paper",
+  "soap",
+  "shampoo",
+]);
 
 function normalizeCouponText(value) {
   return String(value || "")
     .toLowerCase()
+    .replace(/(\d+)\s*%/g, "$1pct")
     .replace(/[$%]/g, " ")
     .replace(/[-/]+/g, " ")
     .replace(/[^a-z0-9\s]+/g, " ")
@@ -268,7 +315,14 @@ function normalizeCouponText(value) {
 
 function allowsAnyVariety(text) {
   if (/\b(?:any|all)\s+variet(?:y|ies)\b/.test(text)) return true;
-  return /\bany\s+(?!\d+\b|two\b|three\b|four\b|five\b)[a-z]/.test(text);
+  if (/\b(?:any|all)\s+flavou?rs?\b/.test(text)) return true;
+  if (/\bany\s+[a-z0-9]+\s+products?\b/.test(text)) return true;
+  const named = text.match(/\bany\s+([a-z0-9]+)\b/);
+  if (!named) return false;
+  const word = named[1];
+  if (/^\d+$/.test(word)) return false;
+  if (/^(?:size|sizes|pk|pack|packs|ct|count|oz|fl|lb|lbs|gal|gallon|ml|bottle|bottles|can|cans)$/.test(word)) return false;
+  return true;
 }
 
 function pullVariants(text) {
@@ -305,7 +359,9 @@ function couponParts(value) {
 export function couponMatchScore(couponName, itemName) {
   const coupon = couponParts(couponName);
   const item = couponParts(itemName);
-  if (!coupon.tokens.length) return 0;
+  if (!coupon.tokens.length && !coupon.variants.length) return 0;
+  const specific = coupon.tokens.some((token) => !GENERIC_NOUNS.has(token));
+  if (!specific && !coupon.variants.length) return 0;
   if (!item.tokens.length && !item.variants.length) return 0;
   const couponVariants = new Set(coupon.variants);
   const itemVariants = new Set(item.variants);
