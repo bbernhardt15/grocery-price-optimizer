@@ -524,7 +524,10 @@ export function ingestConfig(): IngestConfig {
     walmartDailyBudget: intEnv("WALMART_INGEST_DAILY_BUDGET", 500, 1, WALMART_AFFILIATE_DAILY_CAP),
     walmartMinIntervalMs: intEnv("WALMART_INGEST_MIN_INTERVAL_MS", 10_000, 0, 120_000),
     krogerDailyBudget: intEnv("KROGER_INGEST_DAILY_BUDGET", 4000, 1, 100_000),
-    krogerMinIntervalMs: intEnv("KROGER_INGEST_MIN_INTERVAL_MS", 500, 0, 120_000),
+    // 500ms with an 8,000-call day produced 20 Kroger 429s in about 10 minutes
+    // (2026-11-13, 7:47-7:57 AM ET) and filled the 20-error window. 2.5s is the
+    // default gap. A 429 then pauses the crawl on top of this gap.
+    krogerMinIntervalMs: intEnv("KROGER_INGEST_MIN_INTERVAL_MS", 2_500, 0, 120_000),
     krogerPageLimit: intEnv("KROGER_PAGE_LIMIT", 50, 1, 200),
     krogerMaxPagesPerTerm: intEnv("KROGER_MAX_PAGES_PER_TERM", 8, 1, 40),
     locationDailyBudget: intEnv("KROGER_LOCATION_DAILY_BUDGET", 200, 1, 1600),

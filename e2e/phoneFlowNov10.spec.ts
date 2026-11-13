@@ -275,7 +275,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#usuals-toggle")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v90");
+    await expect(page.locator("#app-version")).toContainText("v91");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -621,7 +621,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v90 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v91 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {

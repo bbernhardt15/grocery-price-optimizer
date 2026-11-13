@@ -82,6 +82,17 @@ type KrogerProductItem = {
   inventory?: KrogerInventory;
 };
 
+const RATE_HEADER = /^(retry-after|ratelimit-.*|x-ratelimit-.*|x-rate-limit-.*)$/i;
+
+function krogerRateHeaders(response: Response): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    if (!value.trim() || !RATE_HEADER.test(key)) return;
+    out[key.toLowerCase()] = value.slice(0, 200);
+  });
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export class KrogerPricingError extends Error {
   readonly code: "missing_credentials" | "http" | "network";
 
@@ -90,17 +101,22 @@ export class KrogerPricingError extends Error {
   /** Response body from a failed HTTP call, trimmed. No Authorization header. */
   readonly body?: string;
 
+  /** Retry-After and rate-limit headers only. */
+  readonly headers?: Record<string, string>;
+
   constructor(
     message: string,
     code: "missing_credentials" | "http" | "network" = "http",
     status?: number,
-    body?: string
+    body?: string,
+    headers?: Record<string, string>
   ) {
     super(message);
     this.name = "KrogerPricingError";
     this.code = code;
     this.status = status;
     this.body = body;
+    this.headers = headers;
   }
 }
 
@@ -372,7 +388,9 @@ export class KrogerService {
       throw new KrogerPricingError(
         `Kroger locations request failed (${response.status}) for ZIP ${zip}`,
         "http",
-        response.status
+        response.status,
+        undefined,
+        krogerRateHeaders(response)
       );
     }
 
@@ -550,7 +568,8 @@ export class KrogerService {
         `Kroger products request failed (${response.status})`,
         "http",
         response.status,
-        body
+        body,
+        krogerRateHeaders(response)
       );
     }
 

@@ -2116,6 +2116,97 @@ describe("catalog ingestion", () => {
     assert.equal(saved?.checkpoint?.phase, "queries");
   });
 
+  it("pauses the Kroger crawl after one 429 and does not call again until Retry-After", async () => {
+    const upc = "0000000094065";
+    const key = upcKey(upc);
+    assert.ok(key);
+    const now = new Date("2026-11-13T12:57:00.000Z");
+    await CatalogMaster.deleteMany({ key });
+    await CatalogOffer.deleteMany({ productKey: key });
+    await CatalogMaster.create({
+      key,
+      name: "Organic Fresh Green Bell Pepper",
+      brand: "Produce",
+      departmentId: "produce",
+      upc,
+      walmartItemId: "pepper-1",
+      lastSeenAt: now,
+      status: "active",
+    });
+    await CatalogMaster.updateMany({ key: { $ne: key } }, { $set: { matchKrogerAt: now, matchKrogerVariant: 0 } });
+    await IngestCheckpoint.deleteMany({ provider: "kroger" });
+    await IngestCheckpoint.create({
+      provider: "kroger",
+      status: "running",
+      checkpoint: {
+        termsVersion: KROGER_TERMS_VERSION,
+        phase: "queries",
+        plannedZips: ["45103"],
+        zipCursor: 1,
+        locations: [{ zip: "45103", locationId: "01400386" }],
+        locationIndex: 0,
+        queryIndex: 4,
+        start: 0,
+        pageIndex: 0,
+        attempts: 0,
+        pendingZips: [],
+        clientErrorStreak: 0,
+        cycleStartedAt: now.toISOString(),
+      },
+    });
+    let calls = 0;
+    const config = ingestConfig();
+    config.krogerDailyBudget = 20;
+    config.krogerMinIntervalMs = 0;
+    config.matchLookupShare = 1;
+    config.refreshShare = 0;
+    config.refreshShareWalmart = 0;
+    config.refreshShareKroger = 0;
+    const limited = new Error("Kroger products request failed (429)");
+    (limited as Error & { status: number; headers: Record<string, string> }).status = 429;
+    (limited as Error & { headers: Record<string, string> }).headers = { "retry-after": "120" };
+    const client = {
+      resolveLocation: async () => "01400386",
+      page: async () => {
+        throw new Error("discovery should not run");
+      },
+      lookupProductId: async () => {
+        calls += 1;
+        throw limited;
+      },
+    };
+    const first = await stepKroger({
+      client,
+      maxCalls: 2,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => now,
+    });
+    assert.equal(first.paused, "rate");
+    assert.equal(calls, 1);
+    const held = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{
+      recentErrors?: Array<{ status?: number; headers?: Record<string, string> }>;
+      checkpoint?: { rateCooldownUntil?: string; rateStrikes?: number };
+    }>();
+    assert.equal(held?.recentErrors?.length, 1);
+    assert.equal(held?.recentErrors?.[0]?.status, 429);
+    assert.equal(held?.recentErrors?.[0]?.headers?.["retry-after"], "120");
+    assert.equal(held?.checkpoint?.rateStrikes, 1);
+    assert.equal(held?.checkpoint?.rateCooldownUntil, new Date(now.getTime() + 120_000).toISOString());
+    const during = await stepKroger({
+      client,
+      maxCalls: 2,
+      store: new MemoryBudgetStore(),
+      sleep: async () => undefined,
+      config,
+      now: () => new Date(now.getTime() + 1_000),
+    });
+    assert.equal(during.paused, "rate");
+    assert.equal(during.calls, 0);
+    assert.equal(calls, 1);
+  });
+
   it("clears a premature refresh exclusion and is idempotent", async () => {
     await CatalogMaster.create({
       key: "other-ensure",

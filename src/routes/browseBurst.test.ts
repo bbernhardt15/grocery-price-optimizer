@@ -57,7 +57,7 @@ describe("browse burst keeps version and a partial plan", () => {
     assert.equal(version.status, 200);
     assert.ok(versionMs < 1000, `version took ${versionMs}ms`);
     const versionBody = (await version.json()) as { shell?: string };
-    assert.equal(versionBody.shell, "v90");
+    assert.equal(versionBody.shell, "v91");
     const planStarted = Date.now();
     const plan = await fetch(`${origin}/api/optimize-list`, {
       method: "POST",

@@ -96,15 +96,47 @@ export function isGroceryUpc(upc: string | undefined | null): boolean {
   if (digits.length === 11 && digits[0] !== "0") {
     digits = `0${digits}`;
   }
+  if (walmartPlaceholderUpc(digits)) return false;
   if (digits.length === 12) return true;
   if ((digits.length === 8 || digits.length === 13 || digits.length === 14) && hasStandardCheckDigit(digits)) {
     return true;
   }
+  if (krogerPluProductId(digits)) return true;
+  if (digits.length === 9 && digits[0] !== "2") return true;
   if (digits.length === 13 && !hasStandardCheckDigit(digits)) {
+    if (walmartPlaceholderUpc(digits) || digits[2] === "2") return false;
     const body = digits.replace(/^0+/, "");
-    return body.length >= 10 && body.length <= 12;
+    return body.length >= 8 && body.length <= 12;
   }
   return false;
+}
+
+/**
+ * IFPS produce PLU. Conventional codes are 4 digits from 3000 to 4999.
+ * Organic is a 9 in front of that PLU. Kroger stores either form zero-padded
+ * to 13 digits, with no check digit.
+ */
+export function producePlu(value: string | null | undefined): string | null {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  if (!digits || walmartPlaceholderUpc(digits)) return null;
+  const body = digits.replace(/^0+/, "");
+  if (digits.length !== body.length && digits.length !== 13) return null;
+  if (!(body.length === 4 || (body.length === 5 && body.startsWith("9")))) return null;
+  const plu = body.length === 5 ? Number(body.slice(1)) : Number(body);
+  if (plu < 3000 || plu > 4999) return null;
+  return body;
+}
+
+/** 13-digit Kroger productId for a produce PLU. Null when the code is not one. */
+export function krogerPluProductId(value: string | null | undefined): string | null {
+  const plu = producePlu(value);
+  return plu ? plu.padStart(13, "0") : null;
+}
+
+/** Walmart fills a missing UPC with 009999… placeholders. Those are not Kroger ids. */
+export function walmartPlaceholderUpc(value: string | null | undefined): boolean {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  return /^0*9999/.test(digits);
 }
 
 function rejectedRetailCode(digits: string): boolean {
@@ -161,7 +193,11 @@ export function catalogJoinKey(record: {
  * digit accidentally passes the GS1 check.
  */
 export function krogerProductIdForLookup(upc: string | undefined | null, read?: GtinRead): string | null {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return pluId;
   const digits = upc?.replace(/\D/g, "") ?? "";
+  if (walmartPlaceholderUpc(digits)) return null;
+  if (digits.length === 9 && digits[0] !== "2") return digits.padStart(13, "0");
   if (read?.source === "kroger-product-id") {
     const parsed = parseGtin(digits, { source: "kroger-product-id" });
     return parsed?.upcBody ? parsed.upcBody.padStart(13, "0") : null;
@@ -273,7 +309,10 @@ export function storeLookupFormats(value: string | null | undefined): StoreLooku
  * different product. Shorter and longer codes are normalized once.
  */
 export function krogerRequestId(upc: string | undefined | null): string | null {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return pluId;
   const digits = upc?.replace(/\D/g, "") ?? "";
+  if (walmartPlaceholderUpc(digits)) return null;
   if (digits.length === 13) return krogerProductIdForLookup(digits, { source: "kroger-product-id" });
   return krogerProductIdForLookup(digits);
 }
