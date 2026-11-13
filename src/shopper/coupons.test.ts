@@ -81,24 +81,39 @@ describe("sale badge", () => {
 });
 
 describe("coupon name matching", () => {
-  it("applies a coupon sentence to the cart item and skips an unrelated one", () => {
-    const cart = "Tide PODS Original Laundry Detergent 42 ct";
-    assert.equal(couponNamesMatch("Save $1 on any 2 Tide PODS", cart), true);
-    assert.equal(couponNamesMatch("Tide PODS", cart), true);
-    assert.equal(couponNamesMatch("Bounty paper towels", cart), false);
-    assert.equal(couponNamesMatch("Gain laundry detergent", cart), false);
+  it("matches the coupon sentence and rejects the wrong brand, variant, or original-only name", () => {
+    const tide = "Tide PODS Original Laundry Detergent 42 ct";
+    assert.equal(couponNamesMatch("Save $1 on any 2 Tide PODS", tide), true);
+    assert.equal(couponNamesMatch("Tide PODS", tide), true);
+    assert.equal(couponNamesMatch("Bounty paper towels", tide), false);
+    assert.equal(couponNamesMatch("Gain laundry detergent", tide), false);
+    assert.equal(couponNamesMatch("original", tide), false);
+    assert.equal(couponNamesMatch("Tide Original", tide), true);
+    assert.equal(couponNamesMatch("Tide Original", "Tide PODS 42 ct"), true);
+    assert.equal(couponNamesMatch("Coke", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any Coke", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Coca-Cola", "Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Coca-Cola Cherry", "Cherry Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Diet Coke", "Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("Cheerios", "Honey Nut Cheerios"), false);
+    assert.equal(couponNamesMatch("any Cheerios", "Honey Nut Cheerios"), true);
+    assert.equal(couponNamesMatch("Honey Nut Cheerios", "Cheerios"), false);
+    assert.equal(couponNamesMatch("Honey Nut Cheerios", "Honey Nut Cheerios 18 oz"), true);
     const lines = [
-      { value: "tide", name: cart },
+      { value: "tide", name: tide },
       { value: "bounty", name: "Bounty Select-A-Size Paper Towels" },
+      { value: "diet", name: "Diet Coke 12 pk" },
+      { value: "coke", name: "Coke 12 pk" },
     ];
     assert.equal(bestCouponLine(lines, "Save $1 on any 2 Tide PODS")?.value, "tide");
-    assert.equal(bestCouponLine(lines, "Cheerios"), null);
+    assert.equal(bestCouponLine(lines, "Coke")?.value, "coke");
+    assert.equal(bestCouponLine(lines, "Coca-Cola Cherry"), null);
     const summary = couponSavingsSummary(
       [
         {
           storeName: "Kroger",
           subtotal: 12.99,
-          items: [{ lineId: "tide", name: cart, price: 12.99, quantity: 2, itemTotal: 12.99 }],
+          items: [{ lineId: "tide", name: tide, price: 12.99, quantity: 2, itemTotal: 12.99 }],
         },
       ],
       [{ id: "c-tide", storeName: "Kroger", lineId: "", itemName: "Save $1 on any 2 Tide PODS", kind: "dollars" as const, amount: 1 }],

@@ -249,53 +249,93 @@ const COUPON_STOP = new Set([
   "a", "an", "the", "on", "of", "and", "or", "for", "with", "your", "you", "any", "save", "off", "when", "buy",
   "to", "from", "per", "each", "up", "at", "in", "by", "if", "do", "not", "no", "all", "our", "this", "that",
   "than", "more", "less", "get", "only", "just", "now", "new", "size", "pack", "pk", "ct", "count", "oz", "fl",
-  "lb", "lbs", "gal", "ml", "dozen", "can", "cans", "bottle", "bottles", "original",
+  "lb", "lbs", "gal", "ml", "dozen", "can", "cans", "bottle", "bottles", "variety", "varieties",
 ]);
 
-function couponTokens(value) {
+/** Flavor words. A cart variant the coupon does not name blocks the match, unless the coupon says any variety. */
+const COUPON_VARIANTS = ["caffeine free", "honey nut", "diet", "zero", "cherry", "vanilla", "light"];
+
+function normalizeCouponText(value) {
   return String(value || "")
     .toLowerCase()
     .replace(/[$%]/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[-/]+/g, " ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\bcoca\s+cola\b/g, "coke")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function allowsAnyVariety(text) {
+  if (/\b(?:any|all)\s+variet(?:y|ies)\b/.test(text)) return true;
+  return /\bany\s+(?!\d+\b|two\b|three\b|four\b|five\b)[a-z]/.test(text);
+}
+
+function pullVariants(text) {
+  let rest = text;
+  const found = [];
+  for (const phrase of COUPON_VARIANTS) {
+    const pattern = new RegExp(`\\b${phrase}\\b`, "g");
+    if (!pattern.test(rest)) continue;
+    found.push(phrase);
+    rest = rest.replace(new RegExp(`\\b${phrase}\\b`, "g"), " ");
+  }
+  return { variants: found, rest: rest.replace(/\s+/g, " ").trim() };
+}
+
+function productTokens(text) {
+  return text
     .split(/\s+/)
-    .filter((token) => token && !COUPON_STOP.has(token) && !/^\d+$/.test(token) && token.length > 1);
+    .filter((token) => token && token !== "original" && !COUPON_STOP.has(token) && !/^\d+$/.test(token) && token.length > 1);
+}
+
+function couponParts(value) {
+  const text = normalizeCouponText(value);
+  const anyVariety = allowsAnyVariety(text);
+  const { variants, rest } = pullVariants(text);
+  return { anyVariety, variants, tokens: productTokens(rest) };
 }
 
 /**
- * Coupon wording and a cart line match on shared brand and product tokens.
- * The coupon name does not have to be a substring of the shelf name.
- * @returns {number} share of the coupon's tokens found on the item, or 0
+ * Coupon wording and a cart line match on brand aliases and product tokens.
+ * A variant on only one side blocks the match, unless the coupon says any variety.
+ * "original" is neutral: it is not required on the cart line.
+ * @returns {number} 1 when the names agree, otherwise 0
  */
 export function couponMatchScore(couponName, itemName) {
-  const wanted = couponTokens(couponName);
-  const have = new Set(couponTokens(itemName));
-  if (!wanted.length || !have.size) return 0;
-  if (!have.has(wanted[0])) return 0;
-  const shared = wanted.filter((token) => have.has(token));
-  return shared.length / wanted.length;
+  const coupon = couponParts(couponName);
+  const item = couponParts(itemName);
+  if (!coupon.tokens.length) return 0;
+  if (!item.tokens.length && !item.variants.length) return 0;
+  const couponVariants = new Set(coupon.variants);
+  const itemVariants = new Set(item.variants);
+  if (!coupon.anyVariety) {
+    for (const variant of itemVariants) {
+      if (!couponVariants.has(variant)) return 0;
+    }
+  }
+  for (const variant of couponVariants) {
+    if (!itemVariants.has(variant)) return 0;
+  }
+  const have = new Set(item.tokens);
+  if (!coupon.tokens.every((token) => have.has(token))) return 0;
+  return 1;
 }
 
 export function couponNamesMatch(couponName, itemName) {
-  const wanted = couponTokens(couponName);
-  if (!wanted.length) return false;
-  const score = couponMatchScore(couponName, itemName);
-  return wanted.length === 1 ? score === 1 : score >= 0.5;
+  return couponMatchScore(couponName, itemName) === 1;
 }
 
 /** Best cart line for a coupon sentence, or null when nothing is close. */
 export function bestCouponLine(lines, couponName) {
   let best = null;
-  let bestScore = 0;
   for (const line of lines || []) {
-    const score = couponMatchScore(couponName, line?.name || line?.text || "");
-    if (score > bestScore) {
+    if (couponNamesMatch(couponName, line?.name || line?.text || "")) {
       best = line;
-      bestScore = score;
+      break;
     }
   }
-  const wanted = couponTokens(couponName);
-  const threshold = wanted.length === 1 ? 1 : 0.5;
-  return bestScore >= threshold ? best : null;
+  return best;
 }
 
 function matchesLine(coupon, item) {

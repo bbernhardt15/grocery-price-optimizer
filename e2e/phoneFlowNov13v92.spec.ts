@@ -45,6 +45,67 @@ test("v92 receipt can leave meat off at 390x844", async ({ page }) => {
   await expect(page.getByText("Not on this receipt")).toHaveCount(0);
 });
 
+test("v92 shows the next task prompt after the visible one is declined at 390x844", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem("gg-profile", JSON.stringify({ onboarding: { status: "done", step: "summary", updatedAt: 1 } }));
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify([
+        { id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 },
+        { id: "custom:mystery", itemId: "custom:mystery", name: "Mystery Sauce", quantity: 1 },
+      ])
+    );
+  });
+  await page.route("**/api/optimize-list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        total: 3.2,
+        pendingStores: [],
+        pricingByStore: [
+          { storeName: "Kroger", check: "ok" },
+          { storeName: "Walmart", check: "ok" },
+        ],
+        unavailable: ["Mystery Sauce"],
+        stores: [
+          {
+            storeName: "Kroger",
+            subtotal: 3.2,
+            items: [{ lineId: "milk", name: "Whole Milk", title: "Whole Milk", price: 3.2, quantity: 1, itemTotal: 3.2, storeName: "Kroger" }],
+          },
+        ],
+      }),
+    });
+  });
+  await unlock(page);
+  await page.locator('[data-flow="plan"]').click();
+  const guide = page.locator("#gitter-guide");
+  await expect(guide).toHaveAttribute("data-moment", "review-next");
+  await expect(guide.getByRole("button", { name: "No thanks" })).toBeVisible();
+  await page.waitForTimeout(4200);
+  await page.evaluate(() => {
+    const guideApi = (document as Document & { __gitterGuide?: { noteTrip?: (trip: object) => void } }).__gitterGuide;
+    guideApi?.noteTrip?.({
+      saved: 0,
+      total: 3.2,
+      items: [{ name: "Whole Milk", quantity: 1 }],
+    });
+  });
+  await expect(guide).toHaveAttribute("data-moment", "review-next");
+  await expect(guide.getByRole("button", { name: "Not this time" })).toHaveCount(0);
+  await guide.getByRole("button", { name: "No thanks" }).click();
+  await expect(guide).toHaveAttribute("data-moment", "trip-saved");
+  await expect(guide.getByRole("button", { name: "Not this time" })).toBeVisible();
+  await expect(guide).not.toContainText(/couldn't find/i);
+  await guide.getByRole("button", { name: "Not this time" }).click();
+  await expect(guide).not.toHaveAttribute("data-moment", "review-next");
+  await expect(guide).not.toHaveAttribute("data-moment", "trip-saved");
+});
+
 for (const size of sizes) {
   test(`v92 welcome covers a fresh load at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dequeuePrompt, resolveQueuedPrompt } from "../../public/guide.js";
+import { dequeuePrompt, reduceGuideQueue, resolveQueuedPrompt } from "../../public/guide.js";
 
 describe("guide prompt queue", () => {
   it("shows one prompt, replaces quiet cards, and waits behind a task card", () => {
@@ -29,5 +29,22 @@ describe("guide prompt queue", () => {
     const next = dequeuePrompt(again.queue);
     assert.equal(next.show?.line, "Needs a look.");
     assert.deepEqual(next.queue, []);
+  });
+
+  it("keeps the visible prompt while a second task waits, and decline records the visible one", () => {
+    const review = { moment: "review-next", line: "I couldn't find Mystery Sauce." };
+    const saved = { moment: "trip-saved", line: "Trip saved." };
+    let state = reduceGuideQueue({ current: null, queue: [] }, { type: "sync", incoming: review });
+    assert.equal(state.current?.moment, "review-next");
+    state = reduceGuideQueue(state, { type: "sync", incoming: saved });
+    assert.equal(state.current?.moment, "review-next");
+    assert.equal(state.queue[0]?.moment, "trip-saved");
+    const hidden = reduceGuideQueue(state, { type: "hide" });
+    assert.equal(hidden.current, null);
+    assert.equal(hidden.queue[0]?.moment, "trip-saved");
+    const closed = reduceGuideQueue(state, { type: "close", decision: "decline" });
+    assert.deepEqual(closed.recorded, { moment: "review-next", decision: "decline" });
+    assert.equal(closed.current?.moment, "trip-saved");
+    assert.deepEqual(closed.queue, []);
   });
 });
