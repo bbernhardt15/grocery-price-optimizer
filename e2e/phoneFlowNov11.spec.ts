@@ -245,15 +245,14 @@ for (const size of sizes) {
     await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
     await expect(page.locator("[data-coupon-amount]")).toBeVisible();
     await page.locator("[data-coupon-amount]").evaluate((node) => node.scrollIntoView({ block: "center" }));
-    const formFits = await page.evaluate(() => {
+    await expect.poll(async () => page.evaluate(() => {
       const field = document.querySelector("[data-coupon-amount]");
       const dock = document.querySelector("#bottom-dock");
       if (!(field instanceof HTMLElement) || !(dock instanceof HTMLElement)) return false;
       const box = field.getBoundingClientRect();
       const dockBox = dock.getBoundingClientRect();
       return box.width > 0 && box.right <= window.innerWidth + 1 && box.bottom <= dockBox.top + 1 && box.top >= 0;
-    });
-    expect(formFits).toBe(true);
+    })).toBe(true);
     await page.locator('#step-bar [data-flow="shop"]').click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
     await expect(page.locator("#gitter-guide")).toBeHidden();
