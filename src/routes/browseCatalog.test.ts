@@ -65,10 +65,12 @@ describe("browse catalog routes", () => {
     assert.ok(body.items.length > 0);
     assert.ok(body.items.every((item) => /milk|egg|butter|yogurt|cheese/i.test(item.name)));
     assert.ok(body.items[0].bestOffer.price <= body.items[1].bestOffer.price);
-    const national = body.items.find((item) => item.name === "Whole Milk" && item.gaps.some((gap) => gap.storeName === "Aldi"));
+    const dumped = JSON.stringify(body);
+    assert.doesNotMatch(dumped, /Aldi|Target|Publix/);
+    const national = body.items.find((item) => item.name === "Whole Milk");
     assert.ok(national);
-    const aldi = national.gaps.find((gap) => gap.storeName === "Aldi");
-    assert.equal(aldi?.substitute?.name, "Whole Milk");
+    assert.equal(national.gaps.some((gap) => /aldi|target|publix/i.test(gap.storeName)), false);
+    assert.ok(national.gaps.every((gap) => /kroger|walmart/i.test(gap.storeName)));
     const walmart = body.coverage.find((store) => store.storeName === "Walmart");
     assert.equal(walmart?.mode, "demo_only");
   });

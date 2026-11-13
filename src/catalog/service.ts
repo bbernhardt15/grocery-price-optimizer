@@ -33,9 +33,9 @@ import { ingestConfig } from "../ingest/config";
 import { noteCatalogDemand } from "../ingest/demand";
 import { readRecordsByUpc, readStoredById, readStoredRecords } from "../ingest/readStore";
 import { upsertCatalogRecords } from "../ingest/upsert";
-import { restrictReleaseBanners, restrictReleaseCoverage, restrictReleaseProduct, restrictReleaseTile } from "./releaseStores";
+import { isReleaseStore, restrictReleaseBanners, restrictReleaseCoverage, restrictReleaseProduct, restrictReleaseTile } from "./releaseStores";
 
-const GAP_STORES = ["Aldi", "Kroger", "Target", "Walmart"];
+const GAP_STORES = ["Kroger", "Walmart"];
 const memoryCache = new Map<string, { expiresAt: number; products: BrowseProduct[]; warnings: string[] }>();
 
 export type BrowseQuery = {
@@ -616,11 +616,14 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     }
   }
 
+  const facets = facetsFor(facetPool);
+  facets.stores = facets.stores.filter((store) => isReleaseStore(store));
+
   return {
     items,
     total: page.total,
     nextCursor: page.nextCursor,
-    facets: facetsFor(facetPool),
+    facets,
     coverage: restrictReleaseCoverage(catalogCoverage({ ...coverageFlags(), stored: scope.fromDatabase })),
     ...(weeklyAdBanners ? { weeklyAdBanners: restrictReleaseBanners(weeklyAdBanners) } : {}),
     warnings: scope.warnings,

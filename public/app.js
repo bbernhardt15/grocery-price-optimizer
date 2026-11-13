@@ -106,6 +106,7 @@ import { missingAccordionHtml, rankSwapSuggestions } from "./shopper/reviewMissi
 import { customizeRowsHtml } from "./shopper/reviewCustomize.js";
 import { placePickedLine } from "./shopper/pickedCart.js";
 import { reviewCheckoutLabel, reviewStoreCardHtml, withCheckoutLabel } from "./shopper/reviewStoreCard.js";
+import { productPhotoHtml } from "./shopper/productPhoto.js";
 import { planStatusHtml, planStatusModel } from "./shopper/reviewProgress.js";
 import {
   buildStoreReadyList,
@@ -2378,15 +2379,60 @@ async function syncWatch() {
   }
 }
 
+function releaseStoreQuote(name) {
+  const key = String(name || "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!key) return false;
+  if (key === "walmart" || key.startsWith("walmart ")) return true;
+  return [
+    "kroger",
+    "ralphs",
+    "fred meyer",
+    "frys",
+    "fry s",
+    "king soopers",
+    "smiths",
+    "smith s",
+    "harris teeter",
+    "marianos",
+    "mariano s",
+    "pick n save",
+    "metro market",
+    "qfc",
+    "dillons",
+    "dillon s",
+    "bakers",
+    "baker s",
+    "city market",
+    "food 4 less",
+    "foods co",
+    "pay less",
+    "gerbes",
+    "jay c",
+    "jayc",
+    "owens",
+    "owen s",
+    "ruler",
+    "ruler foods",
+  ].some((banner) => key === banner || key.startsWith(`${banner} `));
+}
+
 function quotesForProduct(product, allowSubs) {
   const quotes = [];
   for (const offer of product?.offers ?? []) {
     if (offer.availability === "out_of_stock") continue;
+    if (!releaseStoreQuote(offer.storeName)) continue;
     quotes.push({ storeName: offer.storeName, price: Number(offer.price) });
   }
   if (allowSubs) {
     for (const gap of product?.gaps ?? []) {
       if (!gap.substitute) continue;
+      if (!releaseStoreQuote(gap.storeName)) continue;
       if (quotes.some((quote) => quote.storeName === gap.storeName)) continue;
       quotes.push({ storeName: gap.storeName, price: Number(gap.substitute.price) });
     }
@@ -2505,7 +2551,7 @@ function listRowHtml(entry, locked) {
       const image = mediaUrl(entry.product.imageUrls?.[0] || "");
       const heading = listItemTitle(entry.product);
       return `<li class="list-row${entry.checked ? " done" : ""}">
-        ${listThumbHtml(image, escapeHtml)}
+        ${listThumbHtml(image)}
         <div class="list-copy">
           <label class="got-it">
             <input type="checkbox" data-list-check="${escapeHtml(itemId)}" ${entry.checked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="Check off ${escapeHtml(heading.title)}" />
@@ -2904,9 +2950,10 @@ function cardHtml(tile) {
   const sizeRow = `<p class="choice-label">Size</p><div data-size-row>${sizePanel(title, sizes, selected.id, "unit")}</div>`;
   const variantNote = selected.variantLabel || selected.label || tile.variantLabel || "";
   const image = selected.imageUrls?.[0] || tile.imageUrls?.[0] || "";
-  const photo = image
-    ? `<img data-photo="product" src="${escapeHtml(mediaUrl(image))}" data-rest="${escapeHtml((selected.imageUrls || tile.imageUrls || []).slice(1).join("\n"))}" alt="" />`
-    : `<span class="product-placeholder" aria-hidden="true"></span>`;
+  const photo = productPhotoHtml(image, {
+    resolve: mediaUrl,
+    rest: (selected.imageUrls || tile.imageUrls || []).slice(1),
+  });
   const starred = readStarredUsuals(localStorage).some((row) => usualKey(row) === usualKey({ name: title }));
   return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
     <div class="card-lead">
@@ -3421,9 +3468,7 @@ function renderSuggestionRows(q) {
       const facts = suggestionFacts(item).map((fact) => highlightHtml(fact, q));
       const price = suggestionPriceLabel(item.bestPrice, "", (value) => money(value));
       const meta = [...facts, price ? escapeHtml(price) : ""].filter(Boolean).join(" · ");
-      const thumb = item.imageUrl
-        ? `<img src="${escapeHtml(mediaUrl(item.imageUrl))}" alt="" />`
-        : "";
+      const thumb = productPhotoHtml(item.imageUrl, { resolve: mediaUrl });
       return `<li role="presentation"><button type="button" class="suggest-option" role="option" data-suggest="${index}" id="suggest-${index}" aria-selected="${index === activeSuggest}">
         ${thumb}
         <span>
@@ -3611,7 +3656,7 @@ function openProduct(product, choices = []) {
       <button type="button" class="text-btn" id="dialog-back">Back</button>
       <button type="button" class="icon-btn" id="dialog-close" aria-label="Close">×</button>
     </div>
-    <img class="hero" src="${escapeHtml(mediaUrl(product.imageUrls?.[0] || ""))}" alt="" />
+    ${productPhotoHtml(product.imageUrls?.[0] || "", { className: "hero", resolve: mediaUrl, rest: (product.imageUrls || []).slice(1) })}
     <h2 id="dialog-title">${escapeHtml(title)}</h2>
     ${note ? `<p class="muted">${escapeHtml(note)}</p>` : ""}
     <p class="price">${escapeHtml(priceText(product))}</p>
@@ -4391,22 +4436,23 @@ function linePrice(item) {
 function reviewStoreArticle(store, couponSummary, coupons) {
   const total = Number.isFinite(Number(store.subtotal)) ? priceFigure(store.subtotal) : "";
   const storeSummary = (couponSummary.byStore || []).find((row) => row.storeName === store.storeName);
+  const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
+  const callout = cartCouponCallout(store.storeName, page);
   const couponsHtml = storeCouponMarkup(store, {
-    page: store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName),
+    page,
     rows: storeSummary?.rows || [],
     storeSummary,
     clipped: isClipped(localStorage, tripId(), store.storeName),
     canEnter: !planLimited("ownCoupons"),
     open: true,
     coupons,
+    omitLink: Boolean(callout),
   });
   const lines = dedupeReviewLines(store.items || [], (item) => shortItemTitle(item));
   const units = (store.items || []).reduce((sum, item) => sum + (Number(item.quantity) > 0 ? Number(item.quantity) : 0), 0);
   const countLabel = storeLineLabel(lines.length, units);
   const mark = handoffMark(store);
   const action = withCheckoutLabel(primaryAction(store), reviewCheckoutLabel(store));
-  const page = store.handoff?.coupon?.url ? store.handoff.coupon : couponPageFor(store.storeName);
-  const callout = cartCouponCallout(store.storeName, page);
   const walmartNote =
     store.handoff?.action?.type === "walmart_cart"
       ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
@@ -9545,7 +9591,7 @@ async function openPreferenceChange(family) {
     const meta = [tile.brand, variant.variantLabel || variant.sizeLabel || ""].filter(Boolean).join(" · ");
     const image = variant.imageUrls?.[0] || tile.imageUrls?.[0] || "";
     return `<button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
-      ${image ? `<img src="${escapeHtml(mediaUrl(image))}" alt="" />` : ""}
+      ${productPhotoHtml(image, { resolve: mediaUrl })}
       <span class="staple-name">${escapeHtml(name)}</span>
       <span class="staple-meta">${escapeHtml(meta)}</span>
     </button>`;
@@ -10984,6 +11030,9 @@ importer = mountImport({
   apiUrl,
   fetchBrowse,
   toast,
+  holdForReceiptSheet() {
+    return Boolean(guide?.openOverImport?.());
+  },
   persistList() {
     saveList();
   },

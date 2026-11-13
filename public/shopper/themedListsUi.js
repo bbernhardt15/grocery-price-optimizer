@@ -5,6 +5,7 @@
 import { displayProductName } from "./familyTile.js";
 import { activeChoice, scaleQuantity, slotMatches } from "./themedLists.js";
 import { ICON_THEMED, inlineLoaderHtml } from "./addTabIcons.js";
+import { productPhotoHtml } from "./productPhoto.js";
 
 function text(escapeHtml, value) {
   return escapeHtml(value || "");
@@ -44,7 +45,7 @@ export function pickerTileHtml(tile, selectedId, escapeHtml, imageSrc) {
   const rawImage = selected?.imageUrls?.[0] || tile?.imageUrls?.[0] || "";
   const image = imageSrc ? imageSrc(rawImage) : rawImage;
   return `<article class="pick-tile">
-    <img src="${text(escapeHtml, image)}" alt="" />
+    ${productPhotoHtml(image)}
     <div class="pick-copy">
       ${brand ? `<p class="brand">${text(escapeHtml, brand)}</p>` : ""}
       <h3>${text(escapeHtml, title)}</h3>

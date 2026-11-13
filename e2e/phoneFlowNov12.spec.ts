@@ -129,7 +129,7 @@ for (const size of sizes) {
     await unlock(page);
     await page.locator('#bottom-dock [data-flow="plan"]').tap();
     await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
-    const coupons = page.getByRole("link", { name: "Open Kroger digital coupons" });
+    const coupons = page.getByRole("link", { name: "Kroger digital coupons" });
     await expect(coupons).toBeVisible();
     const popup = page.waitForEvent("popup");
     await coupons.tap();

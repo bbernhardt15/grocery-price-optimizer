@@ -7,6 +7,7 @@ import { getUserProfile, saveUserProfile } from "./profile.js";
 import { familyLabel, forgetPreference, unblockProduct } from "./productPreference.js";
 import { modeLabel, setCategoryPreference } from "./categoryPreference.js";
 import { meatPreferenceHtml } from "./receiptCopy.js";
+import { productPhotoHtml } from "./productPhoto.js";
 
 function escapeText(value) {
   return String(value || "")
@@ -36,7 +37,7 @@ export function mountMyProducts(deps = {}) {
     const rows = prefs.length
       ? prefs
           .map((pref) => {
-            const image = pref.imageUrl ? `<img src="${escapeText(pref.imageUrl)}" alt="" />` : `<span class="staple-fallback" aria-hidden="true"></span>`;
+            const image = productPhotoHtml(pref.imageUrl);
             const meta = [pref.brand, pref.sizeLabel].filter(Boolean).join(" · ");
             return `<li class="my-product">
               ${image}
