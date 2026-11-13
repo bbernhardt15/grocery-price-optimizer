@@ -14,8 +14,12 @@ async function unlock(page: Page) {
 
 async function openReceipt(page: Page) {
   const start = page.getByRole("button", { name: "Get started" });
-  if (await start.isVisible().catch(() => false)) await start.tap();
-  await page.locator("#profile-zip").pressSequentially("45103");
+  const zip = page.locator("#profile-zip");
+  await expect(async () => {
+    if (await start.isVisible().catch(() => false)) await start.tap();
+    await expect(zip).toBeVisible();
+  }).toPass();
+  await zip.pressSequentially("45103");
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
   await page.locator("#profile-zip-done").tap();
   await page.locator("#profile-next").tap();
