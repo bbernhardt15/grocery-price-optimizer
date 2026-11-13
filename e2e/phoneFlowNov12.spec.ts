@@ -39,7 +39,7 @@ for (const size of sizes) {
   test(`Nov 12 receipt, brands, and a background price check at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await unlock(page);
-    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v90");
+    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v91");
     await openReceipt(page);
     await page.route("**/api/import/receipt", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 2500));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MemoryBudgetStore, RateGate, backoffDelayMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
+import { MemoryBudgetStore, RateGate, backoffDelayMs, krogerRateCooldownUntil, retryAfterMs, retryClass, utcDay, walmartCooldownUntil } from "./budget";
 import { effectiveShares, lookupCallsForTick, nextTickTurn, tickCallSplit, walmartEffectiveShares } from "./config";
 
 describe("lookup share", () => {
@@ -223,6 +223,21 @@ describe("ingest throttle", () => {
     assert.equal(midday, "2026-09-30T00:00:00.000Z");
     const evening = walmartCooldownUntil(new Date("2026-09-29T20:30:00.000Z"), 4);
     assert.equal(evening, "2026-09-30T02:30:00.000Z");
+  });
+
+  it("pauses Kroger longer on each 429 and keeps a longer Retry-After", () => {
+    const now = new Date("2026-11-13T12:47:00.000Z");
+    assert.equal(krogerRateCooldownUntil(now, 1, null), "2026-11-13T12:47:30.000Z");
+    assert.equal(krogerRateCooldownUntil(now, 2, null), "2026-11-13T12:48:00.000Z");
+    assert.equal(krogerRateCooldownUntil(now, 3, null), "2026-11-13T12:49:00.000Z");
+    assert.equal(krogerRateCooldownUntil(now, 1, 120_000), "2026-11-13T12:49:00.000Z");
+    const error = Object.assign(new Error("429"), { status: 429, headers: { "retry-after": "120" } });
+    assert.equal(retryAfterMs(error, now), 120_000);
+    const dated = Object.assign(new Error("429"), {
+      status: 429,
+      headers: { "retry-after": "Fri, 13 Nov 2026 12:49:00 GMT" },
+    });
+    assert.equal(retryAfterMs(dated, now), 120_000);
   });
 
   it("resets the budget on the next UTC day", async () => {

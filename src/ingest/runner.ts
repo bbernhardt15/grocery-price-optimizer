@@ -10,8 +10,10 @@ import {
   backoffDelayMs,
   httpStatusOf,
   ingestErrorDetail,
+  krogerRateCooldownUntil,
   MongoBudgetStore,
   RateGate,
+  retryAfterMs,
   retryClass,
   WALMART_RATE_HALT_STRIKES,
   walmartCooldownUntil,
@@ -130,6 +132,10 @@ export type KrogerCheckpoint = {
   serverStrikes?: number;
   /** Do not call the products API again until this time. The failed calls were refunded. */
   serverCooldownUntil?: string;
+  /** Consecutive 429s. A successful products call clears the count. */
+  rateStrikes?: number;
+  /** Do not call Kroger again until this time. One 429 sets it; later ticks wait. */
+  rateCooldownUntil?: string;
   cycleStartedAt: string;
 };
 
@@ -252,6 +258,8 @@ function asKroger(value: unknown, now: Date): KrogerCheckpoint {
     matchHits: typeof record.matchHits === "number" ? record.matchHits : 0,
     serverStrikes: typeof record.serverStrikes === "number" ? record.serverStrikes : 0,
     serverCooldownUntil: typeof record.serverCooldownUntil === "string" ? record.serverCooldownUntil : undefined,
+    rateStrikes: typeof record.rateStrikes === "number" ? record.rateStrikes : 0,
+    rateCooldownUntil: typeof record.rateCooldownUntil === "string" ? record.rateCooldownUntil : undefined,
     termFallback: readKrogerTermFallback(record.termFallback),
     idQueue: readKrogerIdQueue(record.idQueue),
     krogerRefreshSingle: record.krogerRefreshSingle === true,
@@ -1040,7 +1048,9 @@ function krogerMatchLocation(cp: KrogerCheckpoint): string | undefined {
 function noteKrogerProductSuccess(cp: KrogerCheckpoint): void {
   cp.attempts = 0;
   cp.serverStrikes = 0;
+  cp.rateStrikes = 0;
   delete cp.serverCooldownUntil;
+  delete cp.rateCooldownUntil;
 }
 
 export async function stepKroger(options: {
@@ -1557,6 +1567,10 @@ export async function stepKroger(options: {
 
   while (calls < options.maxCalls) {
     await new Promise((resolve) => setImmediate(resolve));
+    if (epochMs(cp.rateCooldownUntil) > nowFn().getTime()) {
+      paused = "rate";
+      break;
+    }
     if (epochMs(cp.serverCooldownUntil) > nowFn().getTime()) {
       paused = "server";
       break;
@@ -1954,6 +1968,14 @@ async function failKroger(
 ): Promise<{ checkpoint: KrogerCheckpoint; paused: string | null; status: string; error: IngestErrorDetail; stop: boolean }> {
   const detail = ingestErrorDetail("kroger", error, params, now);
   const kind = retryClass(error);
+  if (kind === "rate") {
+    cp.rateStrikes = (cp.rateStrikes ?? 0) + 1;
+    cp.attempts = cp.rateStrikes;
+    const until = krogerRateCooldownUntil(now, cp.rateStrikes, retryAfterMs(error, now));
+    cp.rateCooldownUntil = until;
+    cp.nextAllowedAt = until;
+    return { checkpoint: cp, paused: "rate", status: "paused", error: detail, stop: true };
+  }
   if (kind === "server") {
     cp.serverStrikes = (cp.serverStrikes ?? 0) + 1;
     const delay = backoffDelayMs(cp.serverStrikes, 2_000, 15 * 60_000);

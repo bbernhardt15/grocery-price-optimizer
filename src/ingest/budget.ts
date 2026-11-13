@@ -155,6 +155,28 @@ export function walmartCooldownUntil(now: Date, strikes: number): string {
   return new Date(Math.min(resume, midnight)).toISOString();
 }
 
+/** Retry-After in milliseconds. HTTP-date and delta-seconds are both accepted. */
+export function retryAfterMs(error: unknown, now: Date): number | null {
+  const headers = responseHeadersOf(error);
+  const raw = headers?.["retry-after"];
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const dated = Date.parse(raw);
+  if (Number.isFinite(dated)) return Math.max(0, dated - now.getTime());
+  return null;
+}
+
+/**
+ * How long a Kroger 429 pauses the crawl.
+ * The pause grows from 30s, and a Retry-After longer than that wins.
+ */
+export function krogerRateCooldownUntil(now: Date, strikes: number, retryAfter: number | null): string {
+  const exponential = Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, strikes - 1));
+  const wait = Math.max(exponential, retryAfter ?? 0);
+  return new Date(now.getTime() + wait).toISOString();
+}
+
 /** Exponential backoff with optional jitter. `rand` is 0..1; tests pass 0. */
 export function backoffDelayMs(
   attempt: number,
