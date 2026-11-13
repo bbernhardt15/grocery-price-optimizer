@@ -410,7 +410,7 @@ export function createListHome(deps) {
         const phrase = missing.length === 1 ? `${missing[0]} is on your list to match` : `${missing.join(", ")} are on your list to match`;
         deps.toast(`Added ${added} items. ${phrase}.`);
       } else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
-      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
+      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"} to your trip.`);
       else deps.toast(`${title} is already on your list.`);
       deps.haptic();
       if (view) closeDialog();
@@ -493,7 +493,7 @@ export function createListHome(deps) {
         deps.toast(`Added ${added} items. ${phrase}.`);
       }
       else if (swapped.length) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}. A favorite changed — you'll see it on the plan.`);
-      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"}.`);
+      else if (added) deps.toast(`Added ${added} ${added === 1 ? "item" : "items"} to your trip.`);
       else deps.toast(`${model.title} is already on your list.`);
       deps.haptic();
       if (view) closeDialog();

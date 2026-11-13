@@ -257,7 +257,7 @@ for (const size of sizes) {
       return Boolean(help.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
     expect(order).toBe(true);
-    await expect(version).toHaveText(/v91 · [0-9a-f]{7}/i);
+    await expect(version).toHaveText(/v92 · [0-9a-f]{7}/i);
   });
 
   test(`v90 change search stays on Kroger and Walmart at ${size.width}x${size.height}`, async ({ page }) => {
@@ -298,7 +298,7 @@ for (const size of sizes) {
     await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
     await page.locator("#profile-zip-done").tap();
     await page.locator("#profile-next").tap();
-    if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
       await page.locator("#store-connect-later").tap();
     }
     await page.getByText("Paste order text instead").tap();

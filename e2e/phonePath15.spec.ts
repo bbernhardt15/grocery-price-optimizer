@@ -16,7 +16,7 @@ test("teaching receipt keeps Name brand tappable, hides store-brand name chips, 
   await page.locator("#profile-zip-done").click();
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
-  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+  if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
     const later = page.locator("#store-connect-later");
     if (await later.isVisible()) await later.click();
     else await page.locator("#profile-next").click();

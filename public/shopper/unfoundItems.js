@@ -50,15 +50,19 @@ export function unfoundCopyText(names) {
 /** @param {string[] | null | undefined} names */
 export function toFindRecords(names) {
   return (names || [])
-    .map((name) => clean(name))
+    .map((row) => clean(typeof row === "string" ? row : row?.name))
     .filter(Boolean)
     .map((name) => ({ name, status: UNFOUND_STATUS }));
 }
 
-function linkHtml(link, name, escapeHtml) {
-  if (!link?.label) return "";
-  const store = /walmart/i.test(link.label) ? "Walmart" : /kroger/i.test(link.label) ? "Kroger" : "";
-  return `<button type="button" class="text-btn" data-match-search="${escapeHtml(name)}" data-match-store="${escapeHtml(store)}">${escapeHtml(link.label)}<span class="sr-only"> for ${escapeHtml(name)}</span></button>`;
+/** The same unmatched names for Review and the in-store list. */
+export function unmatchedItemNames(plan) {
+  const records = Array.isArray(plan?.toFindInStore) && plan.toFindInStore.length ? plan.toFindInStore : plan?.unavailable;
+  return toFindRecords(records).map((row) => row.name);
+}
+
+function searchButton(name, escapeHtml) {
+  return `<button type="button" class="text-btn" data-match-search="${escapeHtml(name)}" aria-label="Search">Search</button>`;
 }
 
 /**
@@ -69,11 +73,10 @@ export function unfoundSectionHtml(names, escapeHtml = escapeText) {
   if (!list.length) return "";
   const rows = list
     .map((name) => {
-      const links = unfoundSearchLinks(name);
       return `<li class="missing-row" data-swipe="1">
         <p>${escapeHtml(name)}</p>
         <p class="muted">To find in store. Swipe left or use Remove. A name can't be added to the Kroger or Walmart cart from here.</p>
-        <div class="unfound-links">${linkHtml(links.kroger, name, escapeHtml)}${linkHtml(links.walmart, name, escapeHtml)}<button type="button" class="text-btn" data-missing-remove="${escapeHtml(name)}">Remove</button></div>
+        <div class="unfound-links">${searchButton(name, escapeHtml)}<button type="button" class="text-btn" data-missing-remove="${escapeHtml(name)}">Remove</button></div>
       </li>`;
     })
     .join("");
@@ -127,11 +130,11 @@ export function unfoundShopSectionHtml(section, escapeHtml = escapeText) {
   const rows = section.groups
     .flatMap((group) => group.items || [])
     .map((item) => {
-      const links = unfoundSearchLinks(item.name);
+      const name = clean(item.name);
       return `<div class="shop-line">
-        <p class="shop-name">${escapeHtml(item.name)}</p>
+        <p class="shop-name">${escapeHtml(name)}</p>
         <p class="muted">To find in store</p>
-        <div class="unfound-links">${linkHtml(links.kroger, item.name, escapeHtml)}${linkHtml(links.walmart, item.name, escapeHtml)}</div>
+        <div class="unfound-links">${searchButton(name, escapeHtml)}</div>
       </div>`;
     })
     .join("");

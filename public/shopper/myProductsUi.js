@@ -146,15 +146,7 @@ export function mountAlwaysPrompt(deps = {}) {
   const storage = deps.storage || localStorage;
   let pending = null;
 
-  function ask(product, familyLabelText) {
-    pending = product;
-    const title = document.getElementById("always-title");
-    const body = document.getElementById("always-body");
-    const name = familyLabelText || "this";
-    if (title) title.textContent = `Always use this ${name.toLowerCase()}?`;
-    if (body) body.textContent = "We'll use it the next time you ask. Just this time leaves it as a one-off.";
-    if (!dialog.open) dialog.showModal();
-  }
+  function ask() {}
 
   document.getElementById("always-yes")?.addEventListener("click", () => {
     if (pending) deps.onAnswer?.("always", pending);

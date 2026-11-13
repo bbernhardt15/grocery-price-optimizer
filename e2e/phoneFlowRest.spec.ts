@@ -26,7 +26,7 @@ async function reachReceipts(page: Page) {
   await reachStores(page);
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
-  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+  if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
     await page.locator("#store-connect-later").click();
   }
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
@@ -228,6 +228,8 @@ test("a connected Kroger return opens receipts and keeps the ZIP", async ({ page
   await page.locator("#profile-next").click();
   await expect(page.locator("#store-connect-now")).toBeVisible();
   await page.locator("#store-connect-now").click();
+  await expect(page.getByRole("heading", { name: "Kroger connected" })).toBeVisible();
+  await page.locator("#store-connect-later").click();
   await expect(page.getByRole("heading", { name: "Teach Gitter your usual groceries" })).toBeVisible();
   await expect.poll(async () => page.evaluate(() => localStorage.getItem("gg-zip"))).toMatch(/45103/);
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem("gg-profile") || "{}").onboarding?.step)).toBe("receipts");
@@ -683,7 +685,7 @@ test("a Walmart match stays in that cart through save, reload, and a new plan", 
   });
   await unlock(page);
   await page.locator("#step-bar [data-flow='plan']").click();
-  await expect(page.locator("[data-match-search='Eggs'][data-match-store='Walmart']")).toBeVisible();
+  await expect(page.locator("[data-match-search='Eggs']")).toBeVisible();
   await page.evaluate(() => {
     const pad = document.createElement("div");
     pad.id = "scroll-pad";
@@ -693,14 +695,14 @@ test("a Walmart match stays in that cart through save, reload, and a new plan", 
   });
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(400);
-  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLButtonElement).click());
+  await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLButtonElement).click());
   await expect(page.locator("#match-sheet")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(before + 80);
   await expect.poll(() => page.evaluate(() => Math.abs(window.scrollY - 640) < 80)).toBe(true);
   await page.locator("#match-close").click();
   await expect.poll(() => page.evaluate(() => Math.abs(window.scrollY - 640) < 80)).toBe(true);
-  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLButtonElement).click());
-  await page.getByRole("button", { name: /Great Value/ }).click();
+  await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLButtonElement).click());
+  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);
   await page.reload();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);

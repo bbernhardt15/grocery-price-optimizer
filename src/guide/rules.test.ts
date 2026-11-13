@@ -290,8 +290,7 @@ describe("Gitter guide rules", () => {
     assert.deepEqual(
       missing.chips.map((chip) => [chip.label, chip.action, chip.url]),
       [
-        [links.kroger.label, "open-search", links.kroger.url],
-        [links.walmart.label, "open-search", links.walmart.url],
+        [ "Search", "open-search", undefined ],
         ["No thanks", "later", undefined],
       ]
     );

@@ -52,6 +52,55 @@ export function matchBrowseQuery(name) {
     .trim();
 }
 
+/** Drop packaging and non-food rows, then sort flavor then size. Real food ranks first. */
+export function rankFoodMatches(items, query) {
+  const ask = String(query || "").toLowerCase();
+  const eggs = /\beggs?\b/.test(ask);
+  const packaging = /\b(pulp|paper material|carton|packaging|holds \d+|container|tray)\b/i;
+  const kept = (items || []).filter((item) => {
+    const text = `${item?.name || ""} ${item?.catalogName || ""} ${item?.familyName || ""}`;
+    if (eggs && packaging.test(text) && !/\b(dozen|large eggs|grade|eggland)\b/i.test(text)) return false;
+    if (eggs && /\b(iphone|vitamin|tablet|plant)\b/i.test(text)) return false;
+    return true;
+  });
+  const sizeCount = (item) => {
+    const label = `${item?.sizeLabel || ""} ${item?.totalSize || ""} ${item?.name || ""}`;
+    const match = label.match(/(\d+)\s*(?:ct|count|pk|pack)\b/i);
+    return match ? Number(match[1]) : 0;
+  };
+  return kept
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aText = `${a.item?.name || ""} ${a.item?.familyName || ""}`.toLowerCase();
+      const bText = `${b.item?.name || ""} ${b.item?.familyName || ""}`.toLowerCase();
+      if (eggs) {
+        const aFood = /\beggs?\b/.test(aText) && !packaging.test(aText) ? 0 : 1;
+        const bFood = /\beggs?\b/.test(bText) && !packaging.test(bText) ? 0 : 1;
+        if (aFood !== bFood) return aFood - bFood;
+      }
+      const flavor = String(a.item?.flavorLabel || a.item?.variantLabel || "").localeCompare(String(b.item?.flavorLabel || b.item?.variantLabel || ""));
+      if (flavor) return flavor;
+      const size = sizeCount(a.item) - sizeCount(b.item);
+      if (size) return size;
+      return a.index - b.index;
+    })
+    .map((row) => row.item);
+}
+
+/** Flavor and size belong in the name the shopper sees. */
+export function productDisplayName(tile, variant) {
+  const raw = String(variant?.familyName || tile?.familyName || variant?.name || tile?.name || "Item").replace(/\s+/g, " ").trim();
+  const flavor = String(variant?.flavorLabel || tile?.flavorLabel || variant?.variantLabel || "").replace(/\s+/g, " ").trim();
+  const size = String(variant?.sizeLabel || tile?.sizeLabel || variant?.label || "").replace(/\s+/g, " ").trim();
+  const sizeOnly = !raw || raw === size || /^(?:\d+\s*(?:ct|count|pk|pack|fl oz|oz|lb|gal)\b)/i.test(raw);
+  const base = sizeOnly && flavor ? flavor : raw;
+  const parts = [base];
+  if (flavor && !base.toLowerCase().includes(flavor.toLowerCase())) parts.push(flavor);
+  const titled = parts.join(" ");
+  if (size && !titled.toLowerCase().includes(size.toLowerCase())) return `${titled}, ${size}`;
+  return titled;
+}
+
 export function mountMatchSheet(deps) {
   if (!deps || typeof document === "undefined" || document.getElementById("match-sheet")) {
     return document.getElementById("match-sheet") ? { open() {} } : null;
@@ -81,7 +130,8 @@ export function mountMatchSheet(deps) {
         const id = String(row.id || "");
         const label = String(row.label || "Item");
         const price = row.price ? `<span class="muted">${escapeText(row.price)}</span>` : "";
-        return `<button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}"><span>${escapeText(label)}</span>${price}</button>`;
+        const store = escapeText(row.store || "");
+        return `<div class="match-row"><button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}" data-match-store="${store}"><span>${escapeText(label)}</span>${price}</button><button type="button" class="text-btn" data-match-favorite="${escapeText(id)}" data-match-store="${store}">Mark as favorite</button></div>`;
       })
       .join("");
   }
@@ -143,23 +193,32 @@ export function mountMatchSheet(deps) {
         return;
       }
       const body = await response.json().catch(() => ({}));
-      const items = Array.isArray(body.items) ? body.items : [];
+      const items = rankFoodMatches(Array.isArray(body.items) ? body.items : [], browseQuery || name);
       products.clear();
       const rows = [];
       for (const item of items) {
         const id = String(item?.id || item?.defaultVariantId || "");
         if (!id) continue;
-        const offer = offerFor(item, storeName) || offerFor(item, "");
         products.set(id, item);
-        const label = String(item.familyName || item.name || "Item");
+        const named = productDisplayName(item, item);
         const brand = String(item.brand || "").trim();
-        const price = offer ? offer.price : Number(item.bestOffer?.price ?? item.price);
-        rows.push({
-          id,
-          label: brand && !label.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${label}` : label,
-          price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
-          store: offer?.store || storeName,
-        });
+        const titled = brand && !named.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${named}` : named;
+        const offers = storeName
+          ? [offerFor(item, storeName) || offerFor(item, "")].filter(Boolean)
+          : (Array.isArray(item.offers) ? item.offers : [])
+              .map((offer) => ({ store: String(offer?.storeName || ""), price: Number(offer?.price) }))
+              .filter((offer) => offer.store);
+        const choices = offers.length ? offers : [offerFor(item, "") || { store: "", price: Number(item.bestOffer?.price ?? item.price) }];
+        for (const offer of choices) {
+          const price = Number(offer?.price);
+          const where = offer?.store || "";
+          rows.push({
+            id,
+            label: where && !storeName ? `${titled} · ${where}` : titled,
+            price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
+            store: where || storeName,
+          });
+        }
       }
       shown = rows;
       paint(rows, rows.length ? "" : storeName ? `Nothing at ${storeName} in Grocery Gitter. That item stays off the ${storeName} cart.` : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
@@ -209,11 +268,13 @@ export function mountMatchSheet(deps) {
       if (query) void search(query);
       return;
     }
-    const target = event.target instanceof Element ? event.target.closest("[data-match-pick]") : null;
+    const favorite = event.target instanceof Element ? event.target.closest("[data-match-favorite]") : null;
+    const target = favorite || (event.target instanceof Element ? event.target.closest("[data-match-pick]") : null);
     if (!target) return;
     event.preventDefault();
-    const product = products.get(target.getAttribute("data-match-pick") || "");
-    if (product) deps.onPick?.(product, query, storeName);
+    const product = products.get(target.getAttribute("data-match-favorite") || target.getAttribute("data-match-pick") || "");
+    const pickedStore = target.getAttribute("data-match-store") || storeName;
+    if (product) deps.onPick?.(product, query, pickedStore, { favorite: Boolean(favorite) });
     dialog.close();
   });
   dialog.addEventListener("close", () => {

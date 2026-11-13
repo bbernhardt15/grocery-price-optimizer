@@ -64,7 +64,7 @@ test("onboarding, prices, review, in-store, share, and import", async ({ page })
   await shot(page, "02-stores");
   await page.locator("#profile-next").click();
   await expect(page.locator("#profile-title")).toHaveText(/Connect a store\?|Teach Gitter your usual groceries/);
-  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+  if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
     await page.locator("#store-connect-later").click();
   }
   await expect(page.getByText("Teach Gitter your usual groceries")).toBeVisible();

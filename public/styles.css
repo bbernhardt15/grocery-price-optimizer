@@ -443,11 +443,17 @@ body[data-dept-list="open"] .dept-nav {
 .brand, .size, .unit, .gap, .muted { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .choice-label { margin: 2px 0 0; color: var(--muted); font-size: 0.75rem; font-weight: 650; }
 .choice-row {
-  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  max-width: 100%;
 }
 .choice-chip {
-  flex: 0 1 auto;
-  max-width: 100%;
+  width: 100%;
+  flex: none;
+  max-width: none;
   min-height: 44px;
   height: auto;
   border-radius: 999px;
@@ -1108,7 +1114,7 @@ dialog.shopping-mode .ready-check input { width: 1.7rem; height: 1.7rem; }
   pointer-events: auto;
 }
 .toast {
-  position: fixed; z-index: 30; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
+  position: fixed; z-index: 200; left: 50%; bottom: calc(var(--bar-h) + 8px); transform: translateX(-50%) translateY(12px);
   background: #1c1917; color: #fffdfb; padding: 10px 12px 10px 16px; border-radius: 999px;
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; justify-content: space-between;
@@ -1569,12 +1575,15 @@ dialog.profile-onboard[data-step="connect"] .profile-actions {
 dialog.profile-onboard[data-step="learned"] .sheet-body {
   min-height: 0;
 }
+.learned-row img, .summary-row img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  aspect-ratio: 1;
+  flex: none;
+}
 dialog.profile-onboard[data-step="learned"] #profile-stage {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 20px;
-  scroll-padding-bottom: 20px;
+  overflow-anchor: auto;
 }
 dialog.profile-onboard[data-step="learned"] .profile-actions {
   position: static !important;

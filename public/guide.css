@@ -78,14 +78,24 @@ body:has(#gitter-guide:not([hidden]))::before {
      button inside a pointer-events:none ancestor, so the card itself is hit-tested. */
   pointer-events: auto;
   animation: gitter-guide-in 180ms ease;
-  overflow: auto;
+  overflow: visible;
 }
 
 @media (max-height: 740px) {
   .gitter-guide {
-    max-height: min(34vh, 220px);
+    max-height: calc(100svh - var(--bar-h) - var(--keyboard, 0px) - 16px - var(--safe-top));
     bottom: calc(var(--bar-h) + 8px);
+    overflow: visible;
   }
+}
+@media (max-height: 520px) {
+  .gitter-guide {
+    max-height: min(34vh, 220px);
+    overflow: auto;
+  }
+}
+body[data-step="shop"] #gitter-guide {
+  display: none !important;
 }
 .gitter-guide[hidden],
 body:has(dialog[open]) #gitter-guide,
@@ -189,8 +199,8 @@ body:has(#gitter-guide:not([hidden])) .body {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
-  max-height: min(42vh, 320px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   pointer-events: auto;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;

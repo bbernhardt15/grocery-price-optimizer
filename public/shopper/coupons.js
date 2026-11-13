@@ -495,37 +495,24 @@ function couponFormMarkup(store) {
       return `<option value="${escapeHtml(lineId)}">${escapeHtml(item.name)}</option>`;
     })
     .join("");
-  if (!options) return `<p class="muted">Add items to this store before you enter a coupon.</p>`;
+  if (!options) return `<p class="muted">Add items to this store before you add a coupon.</p>`;
   const storeName = escapeHtml(store.storeName || "");
   return `<form class="coupon-form" data-coupon-store="${storeName}">
-    <p class="coupon-form-title">Add a coupon you already have</p>
-    <p class="muted">Clip it at the store first. A screenshot is read with the same photo reader as a receipt. You confirm the result before it changes the estimate. An expired coupon, the wrong store, or a buy-more rule that is not met stays out.</p>
-    <label>Upload a coupon photo
+    <p class="coupon-form-title">Add a coupon from a screenshot</p>
+    <p class="muted">Take a photo of the coupon. Grocery Gitter reads it, matches it to an item in this cart, and applies it to the estimate.</p>
+    <label class="coupon-shot-label">Coupon screenshot
       <input data-coupon-shot type="file" accept="image/*" />
     </label>
     <p class="coupon-shot-note" data-coupon-shot-note hidden></p>
+    <button type="button" class="ghost" data-coupon-retake hidden>Retake screenshot</button>
+    <select data-coupon-line hidden>${options}</select>
+    <input type="hidden" data-coupon-amount value="" />
+    <input type="hidden" data-coupon-kind value="dollars" />
+    <input type="hidden" data-coupon-expires value="" />
     <input type="hidden" data-coupon-min-qty value="" />
     <input type="hidden" data-coupon-min-spend value="" />
     <input type="hidden" data-coupon-conditions value="" />
     <input type="hidden" data-coupon-source value="" />
-    <label>Item
-      <select data-coupon-line required>${options}</select>
-    </label>
-    <div class="coupon-amount">
-      <label>Amount off
-        <input data-coupon-amount type="number" inputmode="decimal" min="0.01" step="0.01" required />
-      </label>
-      <label>Dollars or percent
-        <select data-coupon-kind>
-          <option value="dollars">Dollars</option>
-          <option value="percent">Percent</option>
-        </select>
-      </label>
-    </div>
-    <label>Expires, if it has a date
-      <input data-coupon-expires type="date" />
-    </label>
-    <button type="button" class="ghost" data-add-coupon>Add coupon</button>
     <p class="coupon-form-error" data-coupon-error role="alert" hidden></p>
   </form>`;
 }

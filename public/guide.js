@@ -176,6 +176,15 @@ export function mountGuide(deps = {}) {
     }
   }
 
+  const promptQueue = [];
+  const quietMoments = new Set(["welcome", "keep-building", "before-review", "running-low"]);
+
+  function taskDialogOpen() {
+    const profile = doc.getElementById("profile-onboard");
+    const importer = doc.getElementById("import-dialog");
+    return Boolean(profile?.open || importer?.open);
+  }
+
   function hidePrompt() {
     host.hidden = true;
     host.removeAttribute("data-moment");
@@ -191,12 +200,24 @@ export function mountGuide(deps = {}) {
       dismiss.setAttribute("aria-label", DISMISS_LABEL);
     }
     lockPage(false);
+    const next = promptQueue.shift();
+    if (next) paint(next);
   }
 
   function paint(prompt) {
     if (!prompt) {
       host.hidden = true;
       host.removeAttribute("data-moment");
+      return;
+    }
+    const receiptOpen = receiptDialog?.open;
+    const midTask = taskDialogOpen() || receiptOpen || Boolean(doc.querySelector("dialog[open]:not(#gitter-receipt-sheet)"));
+    if (midTask && quietMoments.has(prompt.moment)) {
+      if (!host.hidden && quietMoments.has(host.dataset.moment || "")) host.hidden = true;
+      return;
+    }
+    if (receiptOpen) {
+      host.hidden = true;
       return;
     }
     const chipKey = (prompt.chips || []).map((chip) => `${chip.id}:${chip.label}`).join("|");
@@ -525,6 +546,7 @@ export function mountGuide(deps = {}) {
     for (const node of [...host.childNodes]) receiptDialog.appendChild(node.cloneNode(true));
     receiptDialog.querySelector("[data-guide-dismiss]")?.addEventListener("click", dismissOpenPrompt);
     if (!receiptDialog.open) receiptDialog.showModal();
+    host.hidden = true;
     importDialog.inert = true;
     const first = receiptDialog.querySelector("[data-guide-name], button");
     if (first instanceof HTMLElement) first.focus();

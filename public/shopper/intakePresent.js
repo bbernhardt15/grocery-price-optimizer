@@ -111,11 +111,13 @@ export function basketTeaser(lines) {
   };
 }
 
-export function basketTeaserHtml(lines) {
+export function basketTeaserHtml(lines, options = {}) {
   const teaser = basketTeaser(lines);
-  const before = teaser.before
-    ? `<div><span>Last time</span><strong>${escapeText(teaser.before)}</strong></div>`
-    : `<div><span>Last time</span><strong>Your favorites</strong></div>`;
+  const before = options.firstReceipt
+    ? `<div><span>This order</span><strong>Your first receipt</strong></div>`
+    : teaser.before
+      ? `<div><span>Last time</span><strong>${escapeText(teaser.before)}</strong></div>`
+      : `<div><span>Last time</span><strong>Your favorites</strong></div>`;
   return `<aside class="basket-teaser">
     <p class="basket-kicker">Your usual basket</p>
     <div class="basket-compare">

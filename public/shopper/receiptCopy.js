@@ -275,7 +275,7 @@ export function learnedSummaryHtml(learned, options = {}) {
         })
         .join("")}</div></section>`
     : "";
-  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${missing}${basketTeaserHtml(options.lines)}</div>`;
+  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines, { firstReceipt: options.firstReceipt })}</div>`;
 }
 
 /** After Confirm: pick which learned lines join this trip. */
