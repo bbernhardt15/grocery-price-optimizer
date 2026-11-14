@@ -262,12 +262,12 @@ test("receipt choices stay selected after the guide repaints", async ({ page }) 
   await page.evaluate(() =>
     fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
   );
+  await page.locator("#step-bar [data-flow='plan']").click();
   const guide = page.locator("#gitter-guide");
   await expect(guide).toContainText("These were on past receipts but aren't on this list.");
   await guide.locator("[data-guide-name='Whole Milk']").click();
-  await page.waitForTimeout(450);
   await expect(guide.locator("[data-guide-name='Whole Milk']")).toHaveAttribute("aria-pressed", "true");
-  await guide.getByRole("button", { name: "Add selected" }).click();
+  await guide.getByRole("button", { name: "Add selected" }).evaluate((button) => button.click());
   await expect(page.locator("#bar-count")).toContainText("1");
 });
 
@@ -497,9 +497,10 @@ test("Refine budget stays reachable when the viewport is short", async ({ page }
   expect(budget).toBeTruthy();
   expect(budget!.y).toBeGreaterThan(0);
   expect(budget!.y + budget!.height).toBeLessThan(430);
-  const priced = await page.locator("label:has(#filter-priced)").boundingBox();
-  expect(priced).toBeTruthy();
-  expect(priced!.y + priced!.height).toBeLessThan(430);
+  const mine = await page.locator("label:has(#filter-mine)").boundingBox();
+  expect(mine).toBeTruthy();
+  expect(mine!.y + mine!.height).toBeLessThan(430);
+  await expect(page.locator("#filter-priced")).toHaveCount(0);
 });
 
 test("favorites is its own screen and a flavor survives reload", async ({ page }) => {
@@ -702,7 +703,7 @@ test("a Walmart match stays in that cart through save, reload, and a new plan", 
   await page.locator("#match-close").click();
   await expect.poll(() => page.evaluate(() => Math.abs(window.scrollY - 640) < 80)).toBe(true);
   await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLButtonElement).click());
-  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
+  await page.locator(".match-pick", { hasText: /Great Value.*Walmart/ }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);
   await page.reload();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("gg-list") || "[]").some((row: { preferredStore?: string }) => row.preferredStore === "Walmart"))).toBe(true);
@@ -787,6 +788,7 @@ test("four receipt suggestions can be selected and added", async ({ page }) => {
   });
   await unlock(page);
   await page.evaluate(() => fetch("/api/import/receipt", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+  await page.locator("#step-bar [data-flow='plan']").click();
   const guide = page.locator("#gitter-guide");
   await expect(guide).toContainText("These were on past receipts but aren't on this list.");
   for (const name of ["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"]) {

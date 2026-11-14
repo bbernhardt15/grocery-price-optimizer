@@ -210,9 +210,6 @@ function rowHtml(item, escapeHtml) {
       <button type="button" data-theme-inc="${text(escapeHtml, item.id)}" aria-label="Increase ${text(escapeHtml, item.label)}">+</button>
     </div>
     <button type="button" class="text-btn" data-slot-change="${text(escapeHtml, item.id)}">Change</button>
-    <label class="theme-brand">Brand for this list
-      <input data-theme-brand="${text(escapeHtml, item.id)}" value="${text(escapeHtml, item.brand || "")}" maxlength="40" autocomplete="off" />
-    </label>
   </li>`;
 }
 
@@ -236,7 +233,7 @@ export function checklistHtml(state, escapeHtml, options = {}) {
       <h2 id="list-sheet-title"><span class="theme-icon" aria-hidden="true">${themeIcon(state.listId)}</span> ${text(escapeHtml, state.title)}</h2>
       <button type="button" class="text-btn" data-sheet-close>Close</button>
     </div>
-    <p class="theme-lead">Untick anything you don't need. A saved brand for this list sits under each line.</p>
+    <p class="theme-lead">Untick anything you don't need.</p>
     ${diet}
     <div class="party" role="group" aria-label="How many people">
       <span id="theme-party-label">How many people</span>

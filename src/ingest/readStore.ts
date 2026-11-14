@@ -161,11 +161,7 @@ export async function readStoredRecords(scope: {
     if (krogerPool.length === 0) {
       krogerPool = kroger.filter((offer) => offer.locationId === kroger[0]?.locationId);
     }
-    warnings.push(
-      zip
-        ? `Kroger prices are for a seeded store, not ZIP ${zip} yet. The ingestion job prices a new ZIP on its next pass.`
-        : "Kroger prices are for a seeded store. Enter a ZIP so that store can be refreshed."
-    );
+    warnings.push(zip ? "Some Kroger prices aren't ready for your ZIP yet." : "Add a ZIP to see Kroger prices for your stores.");
   }
   const other = offers.filter((offer) => offer.storeName.toLowerCase() !== "kroger");
   const chosen = [...other, ...krogerPool];

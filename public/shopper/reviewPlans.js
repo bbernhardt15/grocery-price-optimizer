@@ -94,6 +94,7 @@ export function collectPlanLines(stores) {
   const groups = new Map();
   for (const store of stores || []) {
     for (const item of store?.items || []) {
+      if (!item.storeName && store?.storeName) item.storeName = store.storeName;
       const key = collectKey(item) || `row:${groups.size}`;
       const qty = Math.max(1, Math.floor(Number(item?.quantity) || 1));
       const existing = groups.get(key);
@@ -110,7 +111,8 @@ export function collectPlanLines(stores) {
         continue;
       }
       const lineId = clean(item?.lineId);
-      if (!lineId || existing.lineIds.has(lineId)) existing.quantity = Math.max(existing.quantity, qty);
+      const sameStore = normalizeStoreKey(existing.storeName) === normalizeStoreKey(item?.storeName);
+      if (!lineId || existing.lineIds.has(lineId) || !sameStore) existing.quantity = Math.max(existing.quantity, qty);
       else {
         existing.lineIds.add(lineId);
         existing.quantity += qty;

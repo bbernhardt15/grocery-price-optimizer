@@ -73,7 +73,7 @@ export function mountMyProducts(deps = {}) {
     const note = seen
       ? ""
       : `<div class="nudge" id="products-note">
-          <p>Review the products you buy. Tap a category you never buy.</p>
+          <p>Review the products you buy. Buying is on. Tap a category to leave it off.</p>
           <div class="starter-actions">
             <button type="button" class="primary" data-review-products>Review my products</button>
             <button type="button" class="text-btn" data-products-later>Maybe later</button>

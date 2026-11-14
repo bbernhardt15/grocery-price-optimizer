@@ -370,7 +370,9 @@ export function mountProfileOnboarding(deps = {}) {
     const connectedTitle = step.id === "connect" && connectStatus?.connected ? "Kroger connected" : "";
     if (title) title.textContent = connectedTitle || (tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : step.title);
     if (hint) {
-      const hintText = tripChoice
+      const hintText = connectedTitle
+        ? ""
+        : tripChoice
         ? "Pick the lines to shop, or start empty."
         : learned
           ? ""

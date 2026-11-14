@@ -275,7 +275,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#usuals-toggle")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v92");
+    await expect(page.locator("#app-version")).toContainText("v93");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -606,11 +606,11 @@ for (const size of [
     await page.locator("#search").press("Enter");
     const card = page.locator("#grid .card").filter({ has: page.locator("[data-flavor='diet']") }).first();
     await expect(card).toBeVisible();
-    await expect(card.locator("[data-size-id][aria-checked='true']")).toContainText(/12\s*pk/i);
+    await expect(card.locator("[data-size-id][aria-checked='true'], .size-current")).toContainText(/12\s*pk/i);
     const diet = card.getByRole("radio", { name: "Diet" });
     await diet.click();
     await expect(diet).toHaveAttribute("aria-checked", "true");
-    await expect(card.locator("[data-size-id][aria-checked='true']")).toContainText(/12\s*pk/i);
+    await expect(card.locator("[data-size-id][aria-checked='true'], .size-current")).toContainText(/12\s*pk/i);
   });
 
   test(`the menu shows the shell version and commit at ${size.width}x${size.height}`, async ({ page }) => {
@@ -621,7 +621,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v92 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v93 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {

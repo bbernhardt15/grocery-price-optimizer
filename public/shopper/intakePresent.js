@@ -133,7 +133,7 @@ export function basketTeaserHtml(lines, options = {}) {
     <p class="basket-kicker">Your usual basket</p>
     <div class="basket-compare">
       ${before}
-      <div><span>Next trip</span><strong>${escapeText(teaser.after)}</strong></div>
+      <div class="basket-promise"><span>Next trip</span><strong>${escapeText(teaser.after)}</strong></div>
     </div>
     <p>${escapeText(teaser.note)}</p>
   </aside>`;

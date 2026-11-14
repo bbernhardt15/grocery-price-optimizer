@@ -23,12 +23,12 @@ export function categoryGateHtml(input) {
   const declined = new Set(input?.declined || []);
   const chips = (input?.categories || [])
     .map((category) => {
-      const on = declined.has(category.id);
-      return `<button type="button" class="mini-chip gate-chip" data-gate="${escapeText(category.id)}" aria-pressed="${on ? "true" : "false"}">${escapeText(category.label)}</button>`;
+      const leftOff = declined.has(category.id);
+      return `<button type="button" class="mini-chip gate-chip" data-gate="${escapeText(category.id)}" aria-pressed="${leftOff ? "true" : "false"}"><span>${escapeText(category.label)}</span> <span class="gate-state">${leftOff ? "Left off" : "Buying"}</span></button>`;
     })
     .join("");
-  return `<p class="profile-label">Tap a category you never buy. Everything else stays available.</p>
-    <div class="mini-row gate-grid" role="group" aria-label="Categories you don't buy">${chips}</div>
+  return `<p class="profile-label">Every category starts as Buying. Tap one to leave it off. Left off means we will not shop it.</p>
+    <div class="mini-row gate-grid" role="group" aria-label="Categories you buy">${chips}</div>
     <button type="button" class="ghost" id="profile-use-defaults">Use defaults: cheapest for everything I skip</button>`;
 }
 

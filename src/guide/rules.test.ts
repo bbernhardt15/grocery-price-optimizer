@@ -102,8 +102,18 @@ describe("Gitter guide rules", () => {
       },
     });
     for (let i = 0; i < 56; i += 1) session = noteReceipt(session, { lines: [{ name: `Item ${i}`, quantity: 1 }] });
+    const duringBuild = decideGuide({
+      ...view({ step: "add" }),
+      settings: emptyGuideSettings(),
+      session,
+      usuals: [
+        { name: "Large Eggs", times: 2 },
+        { name: "Whole Milk", times: 9 },
+      ],
+    });
+    assert.notEqual(duringBuild?.moment, "receipt");
     const prompt = decideGuide({
-      ...view(),
+      ...view({ step: "plan" }),
       settings: emptyGuideSettings(),
       session,
       usuals: [
@@ -116,7 +126,7 @@ describe("Gitter guide rules", () => {
     assert.equal(prompt.line, receiptLine(6, 59));
     assert.equal(prompt.chips.some((chip) => chip.action === "show-rest"), true);
     const revealed = decideGuide({
-      ...view(),
+      ...view({ step: "plan" }),
       settings: emptyGuideSettings(),
       session: revealReceiptPicks(session),
       usuals: [
@@ -412,7 +422,8 @@ describe("Gitter guide rules", () => {
     assert.match(low?.line || "", /Eggs/);
     assert.equal(decideGuide({ ...view({ itemCount: 1, listNames: ["Yogurt"] }), settings, session })?.moment, "before-review");
     const receipt = noteReceipt(session, { lines: [{ name: "Yogurt", quantity: 1 }] });
-    assert.equal(decideGuide({ ...view(), settings, session: receipt })?.moment, "receipt");
+    assert.notEqual(decideGuide({ ...view({ step: "add" }), settings, session: receipt })?.moment, "receipt");
+    assert.equal(decideGuide({ ...view({ step: "plan" }), settings, session: receipt })?.moment, "receipt");
     assert.equal(decideGuide({ ...view(), settings, session: noteShown(receipt, "receipt") }), null);
   });
 

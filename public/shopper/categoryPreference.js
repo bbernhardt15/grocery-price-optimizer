@@ -162,7 +162,10 @@ export function favoriteWizardSteps() {
     id: category.id,
     label: category.label,
     search: category.search || category.label,
-    brands: [...knownBrandNames(category.id), "Kroger", "Simple Truth", "Great Value"].filter((name, index, all) => all.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index).slice(0, 8),
+    brands: [...knownBrandNames(category.id)]
+      .filter((name, index, all) => all.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index)
+      .filter((name) => !/^(kroger|simple truth|great value|good & gather|marketside|equate|private selection)$/i.test(name))
+      .slice(0, 8),
     flavors: (category.attributes || []).slice(0, 6).map((row) => ({ id: row.id, label: row.label || row.id })),
   }));
 }

@@ -71,40 +71,23 @@ for (const size of sizes) {
     await page.getByRole("button", { name: "Add 7 items to my trip" }).tap();
     const sheet = page.locator("#gitter-receipt-sheet");
     const importer = page.locator("#import-dialog");
-    await expect(sheet).toBeVisible();
-    await expect(importer).toHaveAttribute("open", "");
-    await expect(sheet).toContainText("These were on past receipts but aren't on this list.");
-    const box = await sheet.boundingBox();
-    expect(box).toBeTruthy();
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(size.height + 1);
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(size.width + 1);
-    const metrics = await sheet.evaluate((el) => {
-      const list = el.querySelector(".gitter-guide-chips");
-      return { scroll: list?.scrollHeight || 0, client: list?.clientHeight || 0, kids: list?.children.length || 0 };
+    await expect(sheet).toBeHidden();
+    if (await importer.evaluate((node) => node.hasAttribute("open"))) await page.locator("#import-close").tap();
+    await page.route("**/api/optimize-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ partial: false, pendingStores: [], pricingByStore: [{ storeName: "Kroger", check: "ok" }], total: 1, stores: [{ storeName: "Kroger", subtotal: 1, items: [{ lineId: "milk", name: "Milk", price: 1, quantity: 1, itemTotal: 1, storeName: "Kroger" }] }] }),
+      });
     });
-    expect(metrics.kids).toBeGreaterThan(2);
-    expect(metrics.scroll).toBeGreaterThan(metrics.client + 4);
-    await sheet.locator(".gitter-guide-chips").evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    expect(await sheet.locator(".gitter-guide-chips").evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-    const pick = sheet.locator("[data-guide-name='Paper Towels']");
+    await page.locator("#step-bar [data-flow='plan']").tap();
+    const guide = page.locator("#gitter-guide");
+    await expect(guide).toContainText("These were on past receipts but aren't on this list.");
+    const pick = guide.locator("[data-guide-name='Paper Towels']");
     await pick.tap();
     await expect(pick).toHaveAttribute("aria-pressed", "true");
-    const covered = await page.evaluate(() => {
-      const close = document.getElementById("import-close");
-      const dialog = document.getElementById("import-dialog");
-      if (!(close instanceof HTMLElement) || !(dialog instanceof HTMLElement)) return { inert: false, blocked: false };
-      const box = close.getBoundingClientRect();
-      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-      return { inert: dialog.inert === true, blocked: top !== close && !close.contains(top) };
-    });
-    expect(covered.inert).toBe(true);
-    expect(covered.blocked).toBe(true);
-    await sheet.getByRole("button", { name: "Add selected" }).tap();
-    await expect(sheet).toBeHidden();
+    await guide.getByRole("button", { name: "Add selected" }).tap();
+    await expect(guide).not.toHaveAttribute("data-moment", "receipt");
     const names = await tripNames(page);
     expect(names).toEqual(expect.arrayContaining(["Milk", "Eggs", "Bread", "Bananas", "Cheddar", "Yogurt", "Butter", "Paper Towels"]));
     expect(names).toHaveLength(8);
@@ -119,17 +102,24 @@ for (const size of sizes) {
     await expect(page.locator("#import-dialog")).toHaveAttribute("open", "");
     await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-usuals") || "[]") as Array<{ starred?: boolean; name?: string }>).some((row) => row.starred && /Milk/i.test(row.name || "")))).toBe(true);
     await page.getByRole("button", { name: "Add 7 items to my trip" }).tap();
-    const sheet = page.locator("#gitter-receipt-sheet");
-    await expect(sheet).toBeVisible();
-    await sheet.locator("[data-guide-action='later']").tap();
-    await expect(sheet).toBeHidden();
-    await expect(page.locator("#import-dialog")).toHaveAttribute("open", "");
-    await expect(page.locator("#gitter-guide")).toBeHidden();
+    await expect(page.locator("#gitter-receipt-sheet")).toBeHidden();
+    if (await page.locator("#import-dialog").evaluate((node) => node.hasAttribute("open"))) await page.locator("#import-close").tap();
+    await page.route("**/api/optimize-list", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ partial: false, pendingStores: [], pricingByStore: [{ storeName: "Kroger", check: "ok" }], total: 1, stores: [{ storeName: "Kroger", subtotal: 1, items: [{ lineId: "milk", name: "Milk", price: 1, quantity: 1, itemTotal: 1, storeName: "Kroger" }] }] }),
+      });
+    });
+    await page.locator("#step-bar [data-flow='plan']").tap();
+    const guide = page.locator("#gitter-guide");
+    await expect(guide).toHaveAttribute("data-moment", "receipt");
+    await guide.locator("[data-guide-action='later']").tap();
+    await expect(guide).not.toHaveAttribute("data-moment", "receipt");
     const names = await tripNames(page);
     expect(names.filter((name) => ["Milk", "Eggs", "Bread", "Bananas", "Cheddar", "Yogurt", "Butter"].includes(name))).toHaveLength(7);
     expect(names).not.toContain("Paper Towels");
     expect(names).not.toContain("U by Kotex Tampons");
-    await page.locator("#import-close").tap();
     await page.locator("#menu-open").tap();
     await expect(page.locator("#settings-open")).toBeVisible();
     await page.locator("#settings-open").tap();
@@ -257,7 +247,7 @@ for (const size of sizes) {
       return Boolean(help.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
     expect(order).toBe(true);
-    await expect(version).toHaveText(/v92 · [0-9a-f]{7}/i);
+    await expect(version).toHaveText(/v93 · [0-9a-f]{7}/i);
   });
 
   test(`v90 change search stays on Kroger and Walmart at ${size.width}x${size.height}`, async ({ page }) => {
