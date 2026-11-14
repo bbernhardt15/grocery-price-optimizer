@@ -129,5 +129,9 @@ describe("store connection offer", () => {
     assert.match(offer.walmart, /no account connection/i);
     assert.equal(storeConnectCopy({ stores: ["Walmart"], oauthConfigured: true }).showNow, false);
     assert.equal(storeConnectCopy({ stores: ["Kroger"], oauthConfigured: false }).showNow, false);
+    const connected = storeConnectCopy({ stores: ["Kroger"], oauthConfigured: true, connected: true });
+    assert.equal(connected.title, "Kroger connected");
+    assert.equal(connected.later, "Continue");
+    assert.equal(connected.showNow, false);
   });
 });

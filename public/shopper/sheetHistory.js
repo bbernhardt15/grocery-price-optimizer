@@ -17,8 +17,14 @@ export function armSheetHistory(dialog, win) {
   dialog.dataset.sheetHistory = "1";
   let pushed = false;
   let fromPop = false;
+  let expectPop = false;
   const key = dialog.id || "sheet";
   view.addEventListener("popstate", () => {
+    if (expectPop) {
+      expectPop = false;
+      pushed = false;
+      return;
+    }
     if (!dialog.open) {
       pushed = false;
       return;
@@ -34,10 +40,11 @@ export function armSheetHistory(dialog, win) {
     }
     if (!pushed) return;
     pushed = false;
+    expectPop = true;
     try {
       view.history.back();
     } catch {
-      /* already at the first entry */
+      expectPop = false;
     }
   });
   return {

@@ -35,6 +35,7 @@
       html[data-resolved="dark"], html[data-resolved="dark"] body { background: #1c221e; color-scheme: dark; }
       html.beta-gate-hold .shell,
       html.beta-gate-hold dialog { visibility: hidden; }
+      html.welcome-hold .shell { visibility: hidden; }
     </style>
     <script>
       (function () {
@@ -43,6 +44,21 @@
           if (String(code).trim()) return;
         } catch (err) {}
         document.documentElement.classList.add("beta-gate-hold");
+      })();
+    </script>
+    <script>
+      (function () {
+        try {
+          var legacy = localStorage.getItem("gg-onboarding-done") === "1";
+          var raw = localStorage.getItem("gg-profile");
+          var show = false;
+          if (!raw) show = !legacy;
+          else {
+            var status = (JSON.parse(raw).onboarding || {}).status;
+            show = status !== "done" && status !== "skipped";
+          }
+          if (show) document.documentElement.classList.add("welcome-hold");
+        } catch (err) {}
       })();
     </script>
     <meta name="description" content="Grocery Gitter — browse groceries by department, compare prices, and split the trip across stores." />
@@ -145,7 +161,7 @@
             <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
             <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
           </section>
-          <p id="app-version" class="muted app-version">v91</p>
+          <p id="app-version" class="muted app-version">v92</p>
           </div>
         </aside>
       </div>

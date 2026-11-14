@@ -4,8 +4,10 @@ import { COUPON_PAGES as serverPages, couponPageFor as serverPageFor, publicCoup
 import { STORE_HANDOFF_CONFIG } from "../storeHandoffConfig";
 import {
   COUPON_PAGES,
+  bestCouponLine,
   checklistSentence,
   couponChecklist,
+  couponNamesMatch,
   couponDraftFields,
   couponExpired,
   couponLineLabel,
@@ -75,6 +77,65 @@ describe("sale badge", () => {
       ends: "ends Nov 8",
     });
     assert.equal(saleBadge({ onSale: true, price: 2.14, regularPrice: 2.64, saleEndsOn: "2026-11-08" })?.was, "was $2.64");
+  });
+});
+
+describe("coupon name matching", () => {
+  it("matches the coupon sentence and rejects the wrong brand, variant, or original-only name", () => {
+    const tide = "Tide PODS Original Laundry Detergent 42 ct";
+    assert.equal(couponNamesMatch("Save $1 on any 2 Tide PODS", tide), true);
+    assert.equal(couponNamesMatch("Tide PODS", tide), true);
+    assert.equal(couponNamesMatch("Bounty paper towels", tide), false);
+    assert.equal(couponNamesMatch("Gain laundry detergent", tide), false);
+    assert.equal(couponNamesMatch("original", tide), false);
+    assert.equal(couponNamesMatch("Tide Original", tide), true);
+    assert.equal(couponNamesMatch("Tide Original", "Tide PODS 42 ct"), true);
+    assert.equal(couponNamesMatch("Coke", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any Coke", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("any size Coke", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any 12 pk", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any 2", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any variety Coke", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("any flavor Coke", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("all varieties of Coke", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("any variety", "Diet Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("any Coke products", "Diet Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Milk", "Almond Milk"), false);
+    assert.equal(couponNamesMatch("Milk", "Chocolate Milk"), false);
+    assert.equal(couponNamesMatch("Milk", "Whole Milk 1 gal"), false);
+    assert.equal(couponNamesMatch("detergent", tide), false);
+    assert.equal(couponNamesMatch("Kroger 2% Milk", "Kroger Vitamin D Milk gallon"), false);
+    assert.equal(couponNamesMatch("Kroger 2% Milk", "Kroger 2% Milk gallon"), true);
+    assert.equal(couponNamesMatch("Almond Milk", "Almond Milk 64 oz"), true);
+    assert.equal(couponNamesMatch("Chocolate Milk", "Almond Milk"), false);
+    assert.equal(couponNamesMatch("Coca-Cola", "Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Coca-Cola Cherry", "Cherry Coke 12 pk"), true);
+    assert.equal(couponNamesMatch("Diet Coke", "Coke 12 pk"), false);
+    assert.equal(couponNamesMatch("Cheerios", "Honey Nut Cheerios"), false);
+    assert.equal(couponNamesMatch("any Cheerios", "Honey Nut Cheerios"), true);
+    assert.equal(couponNamesMatch("Honey Nut Cheerios", "Cheerios"), false);
+    assert.equal(couponNamesMatch("Honey Nut Cheerios", "Honey Nut Cheerios 18 oz"), true);
+    const lines = [
+      { value: "tide", name: tide },
+      { value: "bounty", name: "Bounty Select-A-Size Paper Towels" },
+      { value: "diet", name: "Diet Coke 12 pk" },
+      { value: "coke", name: "Coke 12 pk" },
+    ];
+    assert.equal(bestCouponLine(lines, "Save $1 on any 2 Tide PODS")?.value, "tide");
+    assert.equal(bestCouponLine(lines, "Coke")?.value, "coke");
+    assert.equal(bestCouponLine(lines, "Coca-Cola Cherry"), null);
+    const summary = couponSavingsSummary(
+      [
+        {
+          storeName: "Kroger",
+          subtotal: 12.99,
+          items: [{ lineId: "tide", name: tide, price: 12.99, quantity: 2, itemTotal: 12.99 }],
+        },
+      ],
+      [{ id: "c-tide", storeName: "Kroger", lineId: "", itemName: "Save $1 on any 2 Tide PODS", kind: "dollars" as const, amount: 1 }],
+      "2026-11-13"
+    );
+    assert.equal(summary.savings, 1);
   });
 });
 

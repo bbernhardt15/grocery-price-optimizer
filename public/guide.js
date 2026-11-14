@@ -31,6 +31,66 @@ import {
   writeGuideSettings,
 } from "./guide-rules.js";
 
+const QUIET_MOMENTS = new Set(["welcome", "keep-building", "before-review", "running-low"]);
+
+function promptIdentity(prompt) {
+  return `${prompt?.moment || ""}\n${prompt?.line || ""}`;
+}
+
+/**
+ * One card is on screen. A quiet prompt replaces another quiet prompt.
+ * A second task prompt waits until the card that is up is dismissed.
+ * Welcome and the other quiet prompts are dropped while a task dialog is open.
+ */
+export function resolveQueuedPrompt(queue, visible, incoming, options = {}) {
+  const pending = Array.isArray(queue) ? queue.slice() : [];
+  if (!incoming?.moment) return { queue: pending, show: null };
+  if (options.midTask && QUIET_MOMENTS.has(incoming.moment)) return { queue: pending, show: null };
+  const dropIncoming = (rows) => rows.filter((row) => promptIdentity(row) !== promptIdentity(incoming));
+  if (!visible?.moment || visible.moment === incoming.moment || QUIET_MOMENTS.has(visible.moment)) {
+    return { queue: dropIncoming(pending), show: incoming };
+  }
+  if (!pending.some((row) => promptIdentity(row) === promptIdentity(incoming))) pending.push(incoming);
+  return { queue: pending, show: null };
+}
+
+export function dequeuePrompt(queue) {
+  const pending = Array.isArray(queue) ? queue.slice() : [];
+  const show = pending.shift() || null;
+  return { queue: pending, show };
+}
+
+/**
+ * Sync and dismiss, without the DOM. `current` stays on the card that is
+ * actually visible. A second task prompt waits in `queue`. Hiding the card
+ * does not throw that queue away. Closing records the visible moment, then
+ * shows the next queued prompt.
+ */
+export function reduceGuideQueue(state, event) {
+  const current = state?.current || null;
+  const queue = Array.isArray(state?.queue) ? state.queue.slice() : [];
+  if (!event || event.type === "hide") return { current: null, queue, recorded: null };
+  if (event.type === "sync") {
+    if (!event.incoming?.moment) return { current: null, queue, recorded: null };
+    const decision = resolveQueuedPrompt(queue, current, event.incoming, { midTask: Boolean(event.midTask) });
+    if (!decision.show) return { current, queue: decision.queue, recorded: null };
+    return { current: decision.show, queue: decision.queue, recorded: null };
+  }
+  if (event.type === "close") {
+    const recorded = { moment: current?.moment || "", decision: event.decision || "decline" };
+    const next = dequeuePrompt(queue);
+    return { current: next.show || null, queue: next.queue, recorded };
+  }
+  return { current, queue, recorded: null };
+}
+
+function forgetShown(session, moment) {
+  if (!moment || !session?.shown?.[moment]) return session;
+  const shown = { ...session.shown };
+  delete shown[moment];
+  return { ...session, shown };
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -176,9 +236,19 @@ export function mountGuide(deps = {}) {
     }
   }
 
-  function hidePrompt() {
+  const promptQueue = [];
+  const quietMoments = QUIET_MOMENTS;
+
+  function taskDialogOpen() {
+    const profile = doc.getElementById("profile-onboard");
+    const importer = doc.getElementById("import-dialog");
+    return Boolean(profile?.open || importer?.open);
+  }
+
+  function hidePrompt(showNext) {
     host.hidden = true;
     host.removeAttribute("data-moment");
+    host.removeAttribute("data-guide-line");
     host.removeAttribute("data-chips");
     host.setAttribute("role", "region");
     host.removeAttribute("aria-modal");
@@ -191,13 +261,52 @@ export function mountGuide(deps = {}) {
       dismiss.setAttribute("aria-label", DISMISS_LABEL);
     }
     lockPage(false);
+    current = null;
+    if (!showNext) return;
+    const decision = dequeuePrompt(promptQueue);
+    promptQueue.length = 0;
+    promptQueue.push(...decision.queue);
+    if (decision.show) {
+      current = decision.show;
+      paint(decision.show);
+    }
+  }
+
+  function visibleMoment() {
+    if (!host.hidden && host.dataset.moment) return host.dataset.moment;
+    return current?.moment || "";
+  }
+
+  function closeVisible(kind) {
+    const moment = visibleMoment();
+    if ((kind === "decline" || kind === "dismiss") && moment) session = noteDeclined(session, moment);
+    if (kind === "shown" && moment) session = noteShown(session, moment);
+    if (kind === "dismiss" && moment !== "receipt") persist(dismissGuide(settings));
+    closeReceiptSheet();
+    hidePrompt(true);
+    return moment;
   }
 
   function paint(prompt) {
     if (!prompt) {
       host.hidden = true;
       host.removeAttribute("data-moment");
-      return;
+      return null;
+    }
+    const receiptOpen = receiptDialog?.open;
+    const midTask = taskDialogOpen() || receiptOpen || Boolean(doc.querySelector("dialog[open]:not(#gitter-receipt-sheet)"));
+    const visible = host.hidden ? null : { moment: host.dataset.moment || "", line: host.dataset.guideLine || "" };
+    const decision = resolveQueuedPrompt(promptQueue, visible, prompt, { midTask: midTask || receiptOpen });
+    promptQueue.length = 0;
+    promptQueue.push(...decision.queue);
+    if (!decision.show) {
+      if ((midTask || receiptOpen) && !host.hidden && quietMoments.has(host.dataset.moment || "")) host.hidden = true;
+      return null;
+    }
+    prompt = decision.show;
+    if (receiptOpen && prompt.moment !== "receipt") {
+      host.hidden = true;
+      return null;
     }
     const chipKey = (prompt.chips || []).map((chip) => `${chip.id}:${chip.label}`).join("|");
     const same = host.dataset.moment === prompt.moment && host.dataset.chips === chipKey && !host.hidden;
@@ -208,6 +317,7 @@ export function mountGuide(deps = {}) {
         );
     host.hidden = false;
     host.dataset.moment = prompt.moment;
+    host.dataset.guideLine = prompt.line || "";
     host.dataset.singleDismiss = prompt.moment === "review-next" ? "" : (prompt.chips || []).some((chip) => chip?.id === "no") ? "1" : "";
     const kicker = host.querySelector(".gitter-guide-kicker");
     if (kicker) kicker.textContent = prompt.moment === "review-next" ? "Needs a look" : "Gitter";
@@ -242,6 +352,7 @@ export function mountGuide(deps = {}) {
         dismiss.setAttribute("aria-label", DISMISS_LABEL);
       }
     }
+    return prompt;
   }
 
   function typeLine(line) {
@@ -303,17 +414,21 @@ export function mountGuide(deps = {}) {
       }
       const previousMoment = current?.moment || "";
       session = result.session;
-      current = result.current;
-      if (result.current && result.current.moment !== previousMoment) promptShownAt = now;
       if (result.defer && !result.hidden) {
-        if (!current) hidePrompt();
+        if (!current) hidePrompt(false);
         return;
       }
       if (result.hidden || !result.current) {
-        hidePrompt();
+        hidePrompt(false);
         return;
       }
-      paint(result.current);
+      const shown = paint(result.current);
+      if (shown) {
+        current = shown;
+        if (shown.moment !== previousMoment) promptShownAt = now;
+      } else if (current && result.current.moment !== current.moment && !host.hidden) {
+        session = forgetShown(session, result.current.moment);
+      }
     } catch {
       /* a guide miss must not block the list */
     }
@@ -348,25 +463,20 @@ export function mountGuide(deps = {}) {
     if (element && !element.closest("[data-guide-dismiss]")) return;
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    const moment = current?.moment || host.dataset.moment || "";
-    if (moment) session = noteDeclined(session, moment);
-    current = null;
-    closeReceiptSheet();
-    if (moment !== "receipt") persist(dismissGuide(settings));
-    hidePrompt();
+    closeVisible("dismiss");
   }
-  host.addEventListener("pointerup", (event) => {
+  let dismissGestureAt = 0;
+  function dismissFromPointer(event) {
     const raw = event.target;
     const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
-    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
-  });
+    if (!element?.closest("[data-guide-dismiss]")) return;
+    dismissGestureAt = Date.now();
+    dismissOpenPrompt(event);
+  }
+  host.addEventListener("pointerup", dismissFromPointer);
   host.addEventListener("click", onGuideClick);
   receiptDialog.addEventListener("click", onGuideClick);
-  receiptDialog.addEventListener("pointerup", (event) => {
-    const raw = event.target;
-    const element = raw instanceof Element ? raw : raw instanceof Node ? raw.parentElement : null;
-    if (element?.closest("[data-guide-dismiss]")) dismissOpenPrompt(event);
-  });
+  receiptDialog.addEventListener("pointerup", dismissFromPointer);
 
   function onGuideClick(event) {
     const raw = event.target;
@@ -377,11 +487,16 @@ export function mountGuide(deps = {}) {
     event.guideHandled = true;
     event.stopPropagation();
     if (button.hasAttribute("data-guide-dismiss")) {
+      if (Date.now() - dismissGestureAt < 700) {
+        dismissGestureAt = 0;
+        return;
+      }
       dismissOpenPrompt(event);
       return;
     }
     if (button.hasAttribute("data-guide-off")) {
       persist(setGuideEnabled(settings, false));
+      promptQueue.length = 0;
       current = null;
       host.hidden = true;
       deps.onQuiet?.();
@@ -405,12 +520,8 @@ export function mountGuide(deps = {}) {
         .map((chip) => chip.getAttribute("data-guide-name") || "")
         .map((name) => name.trim())
         .filter(Boolean);
-    if (!names.length) return;
-      const moment = current?.moment || host.dataset.moment || "";
-      if (moment) session = noteShown(session, moment);
-      current = null;
-      closeReceiptSheet();
-      host.hidden = true;
+      if (!names.length) return;
+      const moment = closeVisible("shown");
       deps.onAction?.("commit-picks", { names, moment });
       return;
     }
@@ -424,31 +535,18 @@ export function mountGuide(deps = {}) {
       names,
       url: button.getAttribute("data-guide-url") || "",
       label: button.textContent || "",
-      moment: current?.moment || host.dataset.moment || "",
+      moment: visibleMoment(),
     };
-    if (action === "later") {
-      session = noteDeclined(session, detail.moment);
-      current = null;
-      closeReceiptSheet();
-      host.hidden = true;
-      deps.onAction?.(action, detail);
-      return;
-    }
-    if (action === "save-list") {
-      session = noteDeclined(session, detail.moment || "trip-saved");
-      current = null;
-      host.hidden = true;
+    if (action === "later" || action === "save-list") {
+      detail.moment = closeVisible("decline");
       deps.onAction?.(action, detail);
       return;
     }
     if (action === "close-guide") {
-      session = noteShown(session, detail.moment || "keep-building");
-      current = null;
-      host.hidden = true;
+      closeVisible("shown");
       return;
     }
-    current = null;
-    host.hidden = true;
+    detail.moment = closeVisible("shown");
     deps.onAction?.(action, detail);
   }
 
@@ -457,6 +555,7 @@ export function mountGuide(deps = {}) {
     if (!(target instanceof Element) || target.id !== "settings-guide") return;
     persist(setGuideEnabled(settings, target.checked));
     if (!target.checked) {
+      promptQueue.length = 0;
       current = null;
       host.hidden = true;
       return;
@@ -525,6 +624,7 @@ export function mountGuide(deps = {}) {
     for (const node of [...host.childNodes]) receiptDialog.appendChild(node.cloneNode(true));
     receiptDialog.querySelector("[data-guide-dismiss]")?.addEventListener("click", dismissOpenPrompt);
     if (!receiptDialog.open) receiptDialog.showModal();
+    host.hidden = true;
     importDialog.inert = true;
     const first = receiptDialog.querySelector("[data-guide-name], button");
     if (first instanceof HTMLElement) first.focus();
@@ -536,7 +636,7 @@ export function mountGuide(deps = {}) {
     if (current?.moment === "receipt") {
       session = noteDeclined(session, "receipt");
       current = null;
-      hidePrompt();
+      hidePrompt(true);
     }
   });
 

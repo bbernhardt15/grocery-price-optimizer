@@ -37,9 +37,8 @@ body[data-step="plan"] .savings-card {
   margin: 8px 0 0;
   color: var(--muted);
 }
-.review-skel-card {
-  box-sizing: border-box;
-  min-height: 148px;
+.review-stable[data-review-stable="loading"] .review-skel {
+  display: none;
 }
 .review-store {
   box-sizing: border-box;

@@ -4,6 +4,7 @@ import {
   krogerNameSearchUrl,
   notInCartSection,
   toFindRecords,
+  unmatchedItemNames,
   unfoundCopyText,
   unfoundSectionHtml,
   unfoundShopSectionHtml,
@@ -21,11 +22,11 @@ describe("unfound items", () => {
     assert.doesNotMatch(kroger.href, /cart\/add|addToCart/i);
     assert.doesNotMatch(walmart.href, /addToCart|\/ip\//i);
     const html = unfoundSectionHtml(["Oat milk", "Saffron"]);
-    assert.match(html, /Search at Kroger/);
+    assert.match(html, />Search</);
     assert.match(html, /data-match-search="Oat milk"/);
     assert.match(html, /Shop in store/);
     assert.doesNotMatch(html, /href="https:\/\/www\.kroger\.com/);
-    assert.match(html, /Search at Walmart/);
+    assert.doesNotMatch(html, /Search at Walmart/);
     assert.match(html, /Copy list of unfound items/);
     assert.match(html, /To find in store/);
     assert.equal(unfoundCopyText(["Oat milk", "Saffron"]), "Oat milk\nSaffron");
@@ -33,6 +34,13 @@ describe("unfound items", () => {
     const section = notInCartSection(["Oat milk"]);
     assert.equal(section.groups[0].label, "Not in a cart");
     assert.match(unfoundShopSectionHtml(section), /Not in a cart/);
-    assert.match(unfoundShopSectionHtml(section), /Search at Kroger/);
+    assert.match(unfoundShopSectionHtml(section), />Search</);
+    const names = unmatchedItemNames({
+      toFindInStore: [{ name: "Parmesan Shredded Cheese" }],
+      unavailable: ["Something else"],
+    });
+    assert.deepEqual(names, ["Parmesan Shredded Cheese"]);
+    assert.match(unfoundSectionHtml(names), /Parmesan Shredded Cheese/);
+    assert.match(unfoundShopSectionHtml(notInCartSection(names)), /Parmesan Shredded Cheese/);
   });
 });

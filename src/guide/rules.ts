@@ -493,26 +493,8 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
   }
 
   if (step === "review" && !session.shown["review-next"] && String(input.pricesLabel || "").trim() && unfound.length) {
-    const search = input.search;
     const chips: GuideChip[] = [];
-    if (search?.kroger?.url) {
-      chips.push({
-        id: "kroger",
-        label: search.kroger.label || "Search at Kroger",
-        action: "open-search",
-        url: search.kroger.url,
-        name: unfound[0],
-      });
-    }
-    if (search?.walmart?.url) {
-      chips.push({
-        id: "walmart",
-        label: search.walmart.label || "Search at Walmart",
-        action: "open-search",
-        url: search.walmart.url,
-        name: unfound[0],
-      });
-    }
+    chips.push({ id: "search", label: "Search", action: "open-search", name: unfound[0] });
     chips.push({ id: "no", label: "No thanks", action: "later" });
     return {
       moment: "review-next",

@@ -23,7 +23,7 @@ async function openReceipt(page: Page) {
   await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
   await page.locator("#profile-zip-done").tap();
   await page.locator("#profile-next").tap();
-  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+  if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
     await page.locator("#store-connect-later").tap();
   }
   await page.getByText("Paste order text instead").tap();
@@ -39,7 +39,7 @@ for (const size of sizes) {
   test(`Nov 12 receipt, brands, and a background price check at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await unlock(page);
-    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v91");
+    await expect.poll(async () => page.locator("#app-version").textContent()).toContain("v92");
     await openReceipt(page);
     await page.route("**/api/import/receipt", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 2500));

@@ -103,7 +103,7 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
   expect(deep).toBeGreaterThan(1400);
   for (let pass = 0; pass < 2; pass += 1) {
     const before = await page.evaluate(() => window.scrollY);
-    await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
+    await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLElement).click());
     await page.waitForTimeout(200);
     const open = await page.evaluate(() => window.scrollY);
     await page.locator("#match-close").click();
@@ -113,8 +113,8 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     expect(open).toBe(deep);
     expect(closed).toBe(deep);
   }
-  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
-  await page.getByRole("button", { name: /Great Value/ }).click();
+  await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLElement).click());
+  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
   await page.waitForTimeout(700);
   const picked = await page.evaluate(() => ({
     y: window.scrollY,
@@ -206,8 +206,8 @@ test("a picked match shows in that cart before the price check returns", async (
   release();
   await page.locator("[data-store='Walmart'] .review-lines").waitFor({ state: "attached" });
   const before = await page.evaluate(() => window.scrollY);
-  await page.locator("[data-match-search='Eggs'][data-match-store='Walmart']").evaluate((node) => (node as HTMLElement).click());
-  await page.getByRole("button", { name: /Great Value/ }).click();
+  await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLElement).click());
+  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
   await expect(page.locator("[data-store='Walmart'] [data-picked-line]")).toContainText("Large Eggs");
   await expect(page.locator("[data-unfound]")).not.toContainText("Eggs");
   const after = await page.evaluate(() => window.scrollY);

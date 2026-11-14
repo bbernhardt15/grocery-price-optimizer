@@ -22,8 +22,8 @@ const receipt = readFileSync(new URL("../../public/shopper/receiptCopy.js", impo
 const importer = readFileSync(new URL("../../public/shopper/import.js", import.meta.url), "utf8");
 
 describe("eighth phone test", () => {
-  it("bumps the shell cache to v91", () => {
-    assert.match(sw, /grocery-gitter-shell-v91/);
+  it("bumps the shell cache to v92", () => {
+    assert.match(sw, /grocery-gitter-shell-v92/);
   });
 
   it("derives ZIP from device coordinates and labels a coarse fix", () => {

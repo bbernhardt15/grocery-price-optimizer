@@ -176,7 +176,7 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   expect(await continueGap()).toBeLessThanOrEqual(48);
   await page.screenshot({ path: "/opt/cursor/artifacts/onboarding-zip.png" });
   await page.locator("#profile-next").click();
-  if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+  if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
     await page.locator("#store-connect-later").click();
   }
   const nextBox = await page.locator("#profile-next").boundingBox();
@@ -222,19 +222,14 @@ test("the reading cart moves right and the status does not cycle backward", asyn
   await expect(page.locator("[data-learned-mode='storeBrand']").first()).toBeVisible();
   await page.locator("[data-learned-mode='cheapest']").first().click();
   await expect(page.locator("[data-learned-mode='cheapest']").first()).toHaveAttribute("aria-pressed", "true");
-  const missing = page.locator("[data-missing-dept]").first();
-  await expect(missing).toBeVisible();
-  await missing.click();
-  await expect(missing).toHaveAttribute("aria-pressed", "true");
-  const stage = page.locator("#profile-stage");
-  await stage.evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-  });
+  await expect(page.getByText("Not on this receipt")).toHaveCount(0);
+  await expect(page.locator(".basket-teaser")).toBeVisible();
   const learnedFit = await page.evaluate(() => {
     const scroller = document.querySelector("#profile-stage");
     const next = document.querySelector("#profile-next");
-    const last = document.querySelector(".missing-depts .missing-dept:last-of-type");
-    if (!scroller || !next || !last) return null;
+    const last = scroller instanceof HTMLElement ? scroller.querySelector(".basket-teaser p:last-child") : null;
+    if (!(scroller instanceof HTMLElement) || !next || !last) return null;
+    scroller.scrollTop = scroller.scrollHeight;
     const frame = scroller.getBoundingClientRect();
     const nextBox = next.getBoundingClientRect();
     const lastBox = last.getBoundingClientRect();
@@ -243,12 +238,17 @@ test("the reading cart moves right and the status does not cycle backward", asyn
       intersects,
       lastVisible: lastBox.top >= frame.top - 1 && lastBox.bottom <= frame.bottom + 1,
       lastAboveButton: lastBox.bottom <= nextBox.top + 1,
+      lastTop: Math.round(lastBox.top),
+      lastBottom: Math.round(lastBox.bottom),
+      frameTop: Math.round(frame.top),
+      frameBottom: Math.round(frame.bottom),
+      nextTop: Math.round(nextBox.top),
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
     };
   });
-  expect(learnedFit).not.toBeNull();
-  expect(learnedFit?.intersects).toBe(false);
-  expect(learnedFit?.lastVisible).toBe(true);
-  expect(learnedFit?.lastAboveButton).toBe(true);
+  expect(learnedFit, JSON.stringify(learnedFit)).toMatchObject({ intersects: false, lastVisible: true, lastAboveButton: true });
   await page.screenshot({ path: "/opt/cursor/artifacts/onboarding-learned.png" });
 });
 
@@ -325,11 +325,8 @@ test("a coupon screenshot review applies only the eligible discount", async ({ p
   await page.locator("[data-coupon-shot]").setInputFiles({ name: "kroger.png", mimeType: "image/png", buffer: png });
   await expect(page.locator("[data-coupon-shot-note]")).toContainText("not applied here");
   await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
-  await expect(page.locator("[data-coupon-shot-note]")).toContainText("Read from the screenshot");
-  await expect(page.locator("[data-coupon-amount]")).toHaveValue("1");
-  await expect(page.locator("[data-coupon-expires]")).toHaveValue("2026-12-01");
-  await expect(page.locator("[data-coupon-line]")).toHaveValue("milk");
-  await page.getByRole("button", { name: "Add coupon" }).click();
+  await expect(page.getByText("Amount off")).toHaveCount(0);
+  await expect(page.getByText(/Your coupon/)).toBeVisible();
   await expect(page.locator(".store-coupon-total")).toContainText("$2.18");
   await expect(page.locator(".trip-coupon-total")).toContainText("$2.18");
 });
@@ -506,8 +503,7 @@ test("a Walmart coupon is not applied on the Kroger form", async ({ page }) => {
   await expect(page.locator("[data-coupon-shot-note]")).toContainText("Read Walmart");
   await expect(page.locator("[data-coupon-shot-note]")).toContainText("not applied here");
   await expect(page.locator("[data-coupon-amount]")).toHaveValue("");
-  await page.getByRole("button", { name: "Add coupon" }).click();
-  await expect(page.locator("[data-coupon-error]")).toContainText("not applied here");
+  await expect(page.getByRole("button", { name: "Add coupon" })).toHaveCount(0);
   await expect(page.locator(".store-coupon-total")).toHaveCount(0);
 });
 

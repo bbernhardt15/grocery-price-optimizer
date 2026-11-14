@@ -245,9 +245,158 @@ export function sameCouponLine(left, right) {
   return String(left.itemName || "").trim().toLowerCase() === String(right.itemName || "").trim().toLowerCase();
 }
 
+const COUPON_STOP = new Set([
+  "a", "an", "the", "on", "of", "and", "or", "for", "with", "your", "you", "any", "save", "off", "when", "buy",
+  "to", "from", "per", "each", "up", "at", "in", "by", "if", "do", "not", "no", "all", "our", "this", "that",
+  "than", "more", "less", "get", "only", "just", "now", "new", "size", "pack", "pk", "ct", "count", "oz", "fl",
+  "lb", "lbs", "gal", "gallon", "ml", "dozen", "can", "cans", "bottle", "bottles", "variety", "varieties", "flavor", "flavors", "flavour", "flavours", "product", "products",
+]);
+
+/** Flavor and type words. One side having a modifier the other lacks blocks the match. */
+const COUPON_VARIANTS = [
+  "caffeine free",
+  "honey nut",
+  "fat free",
+  "lactose free",
+  "vitamin d",
+  "2pct",
+  "1pct",
+  "almond",
+  "oat",
+  "soy",
+  "chocolate",
+  "strawberry",
+  "skim",
+  "whole",
+  "diet",
+  "zero",
+  "cherry",
+  "vanilla",
+  "light",
+];
+
+const GENERIC_NOUNS = new Set([
+  "milk",
+  "detergent",
+  "laundry",
+  "bread",
+  "egg",
+  "eggs",
+  "cheese",
+  "yogurt",
+  "butter",
+  "juice",
+  "water",
+  "soda",
+  "cereal",
+  "coffee",
+  "pasta",
+  "rice",
+  "chicken",
+  "beef",
+  "towel",
+  "towels",
+  "paper",
+  "soap",
+  "shampoo",
+]);
+
+function normalizeCouponText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/(\d+)\s*%/g, "$1pct")
+    .replace(/[$%]/g, " ")
+    .replace(/[-/]+/g, " ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\bcoca\s+cola\b/g, "coke")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function allowsAnyVariety(text) {
+  if (/\b(?:any|all)\s+variet(?:y|ies)\b/.test(text)) return true;
+  if (/\b(?:any|all)\s+flavou?rs?\b/.test(text)) return true;
+  if (/\bany\s+[a-z0-9]+\s+products?\b/.test(text)) return true;
+  const named = text.match(/\bany\s+([a-z0-9]+)\b/);
+  if (!named) return false;
+  const word = named[1];
+  if (/^\d+$/.test(word)) return false;
+  if (/^(?:size|sizes|pk|pack|packs|ct|count|oz|fl|lb|lbs|gal|gallon|ml|bottle|bottles|can|cans)$/.test(word)) return false;
+  return true;
+}
+
+function pullVariants(text) {
+  let rest = text;
+  const found = [];
+  for (const phrase of COUPON_VARIANTS) {
+    const pattern = new RegExp(`\\b${phrase}\\b`, "g");
+    if (!pattern.test(rest)) continue;
+    found.push(phrase);
+    rest = rest.replace(new RegExp(`\\b${phrase}\\b`, "g"), " ");
+  }
+  return { variants: found, rest: rest.replace(/\s+/g, " ").trim() };
+}
+
+function productTokens(text) {
+  return text
+    .split(/\s+/)
+    .filter((token) => token && token !== "original" && !COUPON_STOP.has(token) && !/^\d+$/.test(token) && token.length > 1);
+}
+
+function couponParts(value) {
+  const text = normalizeCouponText(value);
+  const anyVariety = allowsAnyVariety(text);
+  const { variants, rest } = pullVariants(text);
+  return { anyVariety, variants, tokens: productTokens(rest) };
+}
+
+/**
+ * Coupon wording and a cart line match on brand aliases and product tokens.
+ * A variant on only one side blocks the match, unless the coupon says any variety.
+ * "original" is neutral: it is not required on the cart line.
+ * @returns {number} 1 when the names agree, otherwise 0
+ */
+export function couponMatchScore(couponName, itemName) {
+  const coupon = couponParts(couponName);
+  const item = couponParts(itemName);
+  if (!coupon.tokens.length && !coupon.variants.length) return 0;
+  const specific = coupon.tokens.some((token) => !GENERIC_NOUNS.has(token));
+  if (!specific && !coupon.variants.length) return 0;
+  if (!item.tokens.length && !item.variants.length) return 0;
+  const couponVariants = new Set(coupon.variants);
+  const itemVariants = new Set(item.variants);
+  if (!coupon.anyVariety) {
+    for (const variant of itemVariants) {
+      if (!couponVariants.has(variant)) return 0;
+    }
+  }
+  for (const variant of couponVariants) {
+    if (!itemVariants.has(variant)) return 0;
+  }
+  const have = new Set(item.tokens);
+  if (!coupon.tokens.every((token) => have.has(token))) return 0;
+  return 1;
+}
+
+export function couponNamesMatch(couponName, itemName) {
+  return couponMatchScore(couponName, itemName) === 1;
+}
+
+/** Best cart line for a coupon sentence, or null when nothing is close. */
+export function bestCouponLine(lines, couponName) {
+  let best = null;
+  for (const line of lines || []) {
+    if (couponNamesMatch(couponName, line?.name || line?.text || "")) {
+      best = line;
+      break;
+    }
+  }
+  return best;
+}
+
 function matchesLine(coupon, item) {
   if (coupon.lineId && item?.lineId && coupon.lineId === item.lineId) return true;
-  return String(coupon.itemName || "").trim().toLowerCase() === String(item?.name || "").trim().toLowerCase();
+  return couponNamesMatch(coupon.itemName, item?.name);
 }
 
 export function couponBlockReason(coupon, item, itemTotal, today = todayKey()) {
@@ -495,37 +644,24 @@ function couponFormMarkup(store) {
       return `<option value="${escapeHtml(lineId)}">${escapeHtml(item.name)}</option>`;
     })
     .join("");
-  if (!options) return `<p class="muted">Add items to this store before you enter a coupon.</p>`;
+  if (!options) return `<p class="muted">Add items to this store before you add a coupon.</p>`;
   const storeName = escapeHtml(store.storeName || "");
   return `<form class="coupon-form" data-coupon-store="${storeName}">
-    <p class="coupon-form-title">Add a coupon you already have</p>
-    <p class="muted">Clip it at the store first. A screenshot is read with the same photo reader as a receipt. You confirm the result before it changes the estimate. An expired coupon, the wrong store, or a buy-more rule that is not met stays out.</p>
-    <label>Upload a coupon photo
+    <p class="coupon-form-title">Add a coupon from a screenshot</p>
+    <p class="muted">Take a photo of the coupon. Grocery Gitter reads it, matches it to an item in this cart, and applies it to the estimate.</p>
+    <label class="coupon-shot-label">Coupon screenshot
       <input data-coupon-shot type="file" accept="image/*" />
     </label>
     <p class="coupon-shot-note" data-coupon-shot-note hidden></p>
+    <button type="button" class="ghost" data-coupon-retake hidden>Retake screenshot</button>
+    <select data-coupon-line hidden>${options}</select>
+    <input type="hidden" data-coupon-amount value="" />
+    <input type="hidden" data-coupon-kind value="dollars" />
+    <input type="hidden" data-coupon-expires value="" />
     <input type="hidden" data-coupon-min-qty value="" />
     <input type="hidden" data-coupon-min-spend value="" />
     <input type="hidden" data-coupon-conditions value="" />
     <input type="hidden" data-coupon-source value="" />
-    <label>Item
-      <select data-coupon-line required>${options}</select>
-    </label>
-    <div class="coupon-amount">
-      <label>Amount off
-        <input data-coupon-amount type="number" inputmode="decimal" min="0.01" step="0.01" required />
-      </label>
-      <label>Dollars or percent
-        <select data-coupon-kind>
-          <option value="dollars">Dollars</option>
-          <option value="percent">Percent</option>
-        </select>
-      </label>
-    </div>
-    <label>Expires, if it has a date
-      <input data-coupon-expires type="date" />
-    </label>
-    <button type="button" class="ghost" data-add-coupon>Add coupon</button>
     <p class="coupon-form-error" data-coupon-error role="alert" hidden></p>
   </form>`;
 }

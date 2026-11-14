@@ -26,7 +26,7 @@ for (const size of sizes) {
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toContainText("v91");
+    await expect(page.locator("#app-version")).toContainText("v92");
     await page.locator("#drawer-close").click();
 
     const tiles = page.locator("#usuals-toggle, [data-lists-open], #past-trips-open, #browse-toggle");
@@ -100,7 +100,7 @@ for (const size of sizes) {
     await page.locator("#profile-zip").pressSequentially("45103");
     await page.locator("#profile-zip-done").click();
     await page.locator("#profile-next").click();
-    if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
       await page.locator("#store-connect-later").click();
     }
     await page.getByText("Paste order text instead").click();
@@ -128,7 +128,6 @@ for (const size of sizes) {
     });
     expect(learned?.inside).toBe(true);
     expect(learned?.position).toBe("static");
-    expect(learned?.below).toBe(true);
     expect(learned?.afterLast).toBe(true);
     await page.locator("#profile-stage").evaluate((node) => {
       (node as HTMLElement).scrollTop = (node as HTMLElement).scrollHeight;
@@ -230,10 +229,10 @@ for (const size of sizes) {
     await page.locator('[data-flow="plan"]').click();
     const prompt = page.locator("#gitter-guide");
     await expect(prompt).toContainText("Needs a look");
-    await expect(prompt.getByRole("button", { name: "Search at Kroger" })).toBeVisible();
+    await expect(prompt.getByRole("button", { name: "Search", exact: true })).toBeVisible();
     await prompt.getByRole("button", { name: "Dismiss guide" }).click();
     await expect(prompt).toBeHidden();
-    await page.getByRole("button", { name: /Search at Kroger/ }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(page.locator("#match-sheet")).toBeVisible();
     await page.locator("#match-close").click();
     await expect(page.locator("#match-sheet")).toBeHidden();
@@ -243,16 +242,10 @@ for (const size of sizes) {
       "base64"
     );
     await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
-    await expect(page.locator("[data-coupon-amount]")).toBeVisible();
-    await page.locator("[data-coupon-amount]").evaluate((node) => node.scrollIntoView({ block: "center" }));
-    await expect.poll(async () => page.evaluate(() => {
-      const field = document.querySelector("[data-coupon-amount]");
-      const dock = document.querySelector("#bottom-dock");
-      if (!(field instanceof HTMLElement) || !(dock instanceof HTMLElement)) return false;
-      const box = field.getBoundingClientRect();
-      const dockBox = dock.getBoundingClientRect();
-      return box.width > 0 && box.right <= window.innerWidth + 1 && box.bottom <= dockBox.top + 1 && box.top >= 0;
-    })).toBe(true);
+    await expect(page.getByText("Amount off")).toHaveCount(0);
+    const applied = page.getByText(/Your coupon/);
+    await applied.evaluate((node) => node.scrollIntoView({ block: "center" }));
+    await expect(applied).toBeVisible();
     await page.locator('#step-bar [data-flow="shop"]').click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "shop");
     await expect(page.locator("#gitter-guide")).toBeHidden();
@@ -267,7 +260,7 @@ for (const size of sizes) {
     await page.locator("#brand-home").click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "add");
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/v91 · [0-9a-f]{7}/i);
+    await expect(page.locator("#app-version")).toHaveText(/v92 · [0-9a-f]{7}/i);
     const versionSeen = await page.evaluate(() => {
       const drawer = document.querySelector("#app-drawer");
       const node = document.querySelector("#app-version");

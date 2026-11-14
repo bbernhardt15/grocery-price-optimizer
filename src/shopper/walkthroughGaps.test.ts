@@ -71,15 +71,19 @@ describe("walkthrough gaps the audit still needed", () => {
 
   it("lets a missing receipt department be saved instead of only described", () => {
     const html = learnedSummaryHtml([{ family: "eggs", label: "Eggs", mode: "brand", brand: "Eggland's" }], {});
-    assert.match(html, /data-missing-dept="produce"/);
-    assert.match(html, /Use the lowest Produce price/);
-    assert.match(html, /Leave Produce off/);
-    assert.doesNotMatch(html, /data-missing-skip="meat"/);
+    assert.doesNotMatch(html, /Not on this receipt/);
+    assert.doesNotMatch(html, /data-missing-dept="produce"/);
     const meat = learnedSummaryHtml([{ family: "ground-beef", label: "Ground beef", mode: "cheapest" }], {
       lines: [{ name: "Ground Beef" }],
     });
+    assert.doesNotMatch(meat, /Not on this receipt/);
     assert.match(meat, /data-missing-skip="meat"/);
     assert.match(meat, /Leave Meat &amp; Seafood off/);
+    const skipped = learnedSummaryHtml([{ family: "ground-beef", label: "Ground beef", mode: "cheapest" }], {
+      lines: [{ name: "Ground Beef" }],
+      skippedFamilies: new Set(["meat"]),
+    });
+    assert.match(skipped, /Meat &amp; Seafood left off/);
     const prefs = meatPreferenceHtml("");
     assert.match(prefs, /data-meat-pref/);
     assert.match(prefs, /Use the lowest Meat &amp; Seafood price/);

@@ -37,7 +37,7 @@ import { commitLearnedCard } from "./learnedStable.js";
 import { syncTripAddBar } from "./tripActionBar.js";
 import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
 import { APPROXIMATE_ZIP_NOTE, fiveDigitZip } from "./deviceZip.js";
-import { orderTitle, readLiveHtml, readingPhaseText, storeChoiceHtml, foundLabel } from "./intakePresent.js";
+import { isFirstReceipt, orderTitle, readLiveHtml, readingPhaseText, storeChoiceHtml, foundLabel } from "./intakePresent.js";
 import { READING_RECEIPT, readCardTitle } from "./receiptReading.js";
 import { captureRuleScroll, restoreRuleScroll, revealInside } from "./ruleScroll.js";
 import { lightTap } from "./phone.js";
@@ -112,6 +112,7 @@ export function mountProfileOnboarding(deps = {}) {
   let skipBeat = null;
   let beatToken = 0;
   let connectStatus = null;
+  let connectHeld = false;
   /** Parsing and brand grouping must both finish before the learned screen exists. */
   let importGate = { parsing: false, grouping: false, revealed: false };
   let beatMarkup = "";
@@ -154,6 +155,14 @@ export function mountProfileOnboarding(deps = {}) {
 
   function choiceButton(id, label, pressed, extra = "") {
     return `<button type="button" class="choice-card" data-choice="${escapeText(id)}" aria-pressed="${pressed ? "true" : "false"}" ${extra}>${escapeText(label)}</button>`;
+  }
+
+  function firstReceiptOnDevice() {
+    try {
+      return isFirstReceipt(localStorage.getItem("gg-past-trips"));
+    } catch {
+      return true;
+    }
   }
 
   function stageHtml(step) {
@@ -259,6 +268,7 @@ export function mountProfileOnboarding(deps = {}) {
           pendingFamilies,
           retryFamilies,
           savedFamilies: savedRules,
+          firstReceipt: firstReceiptOnDevice(),
           skippedFamilies: new Set(
             Object.values(draft.categoryPreferences || {})
               .filter((row) => row?.mode === "never")
@@ -357,7 +367,8 @@ export function mountProfileOnboarding(deps = {}) {
       dialog.dataset.dir = motion;
     }
     if (top) top.hidden = welcome;
-    if (title) title.textContent = tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : step.title;
+    const connectedTitle = step.id === "connect" && connectStatus?.connected ? "Kroger connected" : "";
+    if (title) title.textContent = connectedTitle || (tripChoice ? "Add them to this trip?" : learned ? "Here's what we learned" : step.title);
     if (hint) {
       const hintText = tripChoice
         ? "Pick the lines to shop, or start empty."
@@ -386,8 +397,16 @@ export function mountProfileOnboarding(deps = {}) {
     const actions = document.querySelector("#profile-onboard .profile-actions");
     const form = $("profile-form");
     if (actions && form && actions.parentElement !== form) form.appendChild(actions);
-    if (stage) stage.innerHTML = stageHtml(step);
-    if (learned && actions && stage) stage.appendChild(actions);
+    if (stage) {
+      const nextHtml = stageHtml(step);
+      if (stage.__paint !== nextHtml) {
+        const keep = learned ? stage.scrollTop : 0;
+        stage.__paint = nextHtml;
+        stage.innerHTML = nextHtml;
+        if (learned && keep) stage.scrollTop = keep;
+      }
+    }
+    if (learned && actions && stage && actions.parentElement !== stage) stage.appendChild(actions);
     bindPlaceInput();
     bindReceiptInput();
     if ((step.kind === "place" || step.kind === "zip") && !options.deferStores) paintStoreList();
@@ -574,8 +593,11 @@ export function mountProfileOnboarding(deps = {}) {
   async function loadConnectStatus(names) {
     try {
       const response = await fetch("/api/kroger/auth-status", { headers: { Accept: "application/json" } });
-      connectStatus = response.ok ? await response.json() : { oauthConfigured: false, connected: false };
+      const body = response.ok ? await response.json() : { oauthConfigured: false, connected: false };
+      if (connectHeld) return;
+      connectStatus = body;
     } catch {
+      if (connectHeld) return;
       connectStatus = { oauthConfigured: false, connected: false };
     }
     if (stepId === "place" || stepId === "zip" || stepId === "connect") paintStoreConnect(names);
@@ -1439,6 +1461,7 @@ export function mountProfileOnboarding(deps = {}) {
   }
 
   async function advance(skipped, skipRest) {
+    connectHeld = false;
     const at = Date.now();
     if (dietMode) {
       if (skipped) {
@@ -2156,12 +2179,13 @@ export function mountProfileOnboarding(deps = {}) {
         /* private browsing */
       }
       draft = getUserProfile(storage);
-      stepId = "receipts";
-      receiptPhase = "upload";
+      stepId = "connect";
+      connectHeld = true;
+      connectStatus = { oauthConfigured: true, connected: true };
       returnTo = "";
       draft = persist({
         ...draft,
-        onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "receipts", updatedAt: Date.now() },
+        onboarding: { ...(draft.onboarding || {}), status: "in_progress", step: "connect", updatedAt: Date.now() },
       });
       render();
       if (!dialog.open) dialog.showModal();

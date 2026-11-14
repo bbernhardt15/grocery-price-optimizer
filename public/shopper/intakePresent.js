@@ -111,11 +111,24 @@ export function basketTeaser(lines) {
   };
 }
 
-export function basketTeaserHtml(lines) {
+/** A phone with no saved trips is on its first receipt. Bad storage counts as first, too. */
+export function isFirstReceipt(stored) {
+  if (stored == null || stored === "") return true;
+  try {
+    const saved = typeof stored === "string" ? JSON.parse(stored) : stored;
+    return !Array.isArray(saved) || saved.length === 0;
+  } catch {
+    return true;
+  }
+}
+
+export function basketTeaserHtml(lines, options = {}) {
   const teaser = basketTeaser(lines);
-  const before = teaser.before
-    ? `<div><span>Last time</span><strong>${escapeText(teaser.before)}</strong></div>`
-    : `<div><span>Last time</span><strong>Your favorites</strong></div>`;
+  const before = options.firstReceipt
+    ? `<div><span>This order</span><strong>Your first receipt</strong></div>`
+    : teaser.before
+      ? `<div><span>Last time</span><strong>${escapeText(teaser.before)}</strong></div>`
+      : `<div><span>Last time</span><strong>Your favorites</strong></div>`;
   return `<aside class="basket-teaser">
     <p class="basket-kicker">Your usual basket</p>
     <div class="basket-compare">

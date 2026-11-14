@@ -20,8 +20,18 @@ export function storeConnectCopy(input = {}) {
   const canConnect = Boolean(input.oauthConfigured) && !input.connected && kroger;
   let body = "Kroger sign-in isn't available on this server. You can still shop, and open a cart at checkout.";
   if (input.connected && kroger) {
-    body = "Kroger is already connected. Kroger may still ask you to sign in at checkout.";
-  } else if (canConnect) {
+    return {
+      title: "Kroger connected",
+      body: "You're signed in. This stays here until you tap Continue.",
+      walmart: walmart
+        ? "Walmart has no account connection. Checkout opens a cart link. That is not a sign-in."
+        : "",
+      now: CONNECT_NOW,
+      later: "Continue",
+      showNow: false,
+    };
+  }
+  if (canConnect) {
     body =
       "Optional. Kroger sign-in opens on Kroger's site. We never see your password. Connecting now can skip a login later, but Kroger may still ask you to sign in at checkout.";
   }

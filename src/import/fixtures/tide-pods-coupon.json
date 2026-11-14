@@ -1,0 +1,9 @@
+{
+  "storeName": "Kroger",
+  "itemName": "Save $1 on any 2 Tide PODS",
+  "kind": "dollars",
+  "amount": 1,
+  "expiresOn": "2026-12-31",
+  "minQuantity": 2,
+  "conditions": "When you buy 2"
+}

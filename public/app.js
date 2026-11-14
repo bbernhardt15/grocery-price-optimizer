@@ -126,6 +126,7 @@ import {
   readCoupons,
   removeCoupon,
   saleBadgeMarkup,
+  bestCouponLine,
   couponDraftFields,
   couponLineLabel,
   shopCouponHint,
@@ -199,8 +200,8 @@ import {
   writePlanCache,
 } from "./shopper/planCache.js";
 import { savingsNudge, savingsNudgeHtml } from "./shopper/savingsNudge.js";
-import { notInCartSection, toFindRecords, unfoundCopyText, unfoundSearchLinks, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
-import { mountMatchSheet } from "./shopper/matchSheet.js";
+import { notInCartSection, toFindRecords, unmatchedItemNames, unfoundCopyText, unfoundSearchLinks, unfoundSectionHtml, unfoundShopSectionHtml } from "./shopper/unfoundItems.js";
+import { mountMatchSheet, rankFoodMatches, productDisplayName } from "./shopper/matchSheet.js";
 import { CLEAR_TRIP_EVENT, COMPLETE_TRIP_EVENT, FINISH_TRIP_UNDO_MS } from "./shopper/tripActions.js";
 import { clearCompletedTrip, readCompletedAt, restoreWouldResurrect, writeCompletedTrip } from "./shopper/tripCompletion.js";
 import { mergeSavedStores, setShowAdStores, visibleStoreNames } from "./shopper/storeScope.js";
@@ -2933,7 +2934,7 @@ function cardHtml(tile) {
   const entry = findListEntry(selected.id);
   const checked = entry ? "checked" : "";
   const qty = entry?.quantity ?? 1;
-  const title = tile.familyName || tile.name;
+  const title = productDisplayName(tile, selected);
   const brand = brandLine(tile, title);
   const flavors = Array.isArray(tile.flavors) ? tile.flavors : [];
   const flavorKey = selected.flavorKey || "";
@@ -3182,7 +3183,7 @@ async function loadPage(reset) {
     weeklyAdBanners = cached.weeklyAdBanners || [];
     total = cached.total ?? 0;
     nextCursor = cached.nextCursor;
-    const items = cached.items || [];
+    const items = query ? rankFoodMatches(cached.items || [], query) : cached.items || [];
     for (const product of items) rememberTile(product);
     gridEl.innerHTML = items.map(cardHtml).join("");
     applyClientFilters();
@@ -3223,7 +3224,8 @@ async function loadPage(reset) {
     total = body.total ?? 0;
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
-    const items = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
+    const ranked = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
+    const items = query ? rankFoodMatches(ranked, query) : ranked;
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
     if (reset) showProfileWarning(viewed.warning);
@@ -4930,7 +4932,7 @@ function paintTrip() {
     .join("");
   const savingsLine = !checksOpen && plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
   const nudge = checksOpen || mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
-  const missingNames = lastOptimize?.unavailable || [];
+  const missingNames = unmatchedItemNames(lastOptimize);
   const missing = planning && missingNames.length
     ? `<p class="matching-progress" role="status">Matching ${missingNames.length} ${missingNames.length === 1 ? "item" : "items"}…</p>`
     : unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
@@ -6669,7 +6671,7 @@ function walkingListText() {
   const view = currentTrip();
   const checks = view?.stores?.length ? mergedTripChecks(view.stores) : {};
   const route = view?.stores?.length ? inStoreRoute(dedupeTripStores(view.stores, checks), checks) : [];
-  const unfound = notInCartSection(lastOptimize?.toFindInStore?.length ? lastOptimize.toFindInStore : lastOptimize?.unavailable);
+  const unfound = notInCartSection(unmatchedItemNames(lastOptimize));
   if (unfound) route.push(unfound);
   if (!route.length) return "";
   return inStoreShareText(route);
@@ -6739,6 +6741,38 @@ document.addEventListener("error", (event) => {
 }, true);
 
 document.addEventListener("pointerup", chooseFlavor, true);
+let cardSwipe = null;
+document.addEventListener("pointerdown", (event) => {
+  const node = event.target instanceof Element ? event.target : null;
+  const card = node?.closest("#grid .card");
+  if (!card || node.closest("button, input, a, label, select")) {
+    cardSwipe = null;
+    return;
+  }
+  cardSwipe = { id: event.pointerId, x: event.clientX, y: event.clientY, card };
+}, true);
+document.addEventListener("pointerup", (event) => {
+  if (!cardSwipe || event.pointerId !== cardSwipe.id) return;
+  const dx = event.clientX - cardSwipe.x;
+  const dy = event.clientY - cardSwipe.y;
+  const card = cardSwipe.card;
+  cardSwipe = null;
+  if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  const id = card.dataset.productId || "";
+  if (dx > 0) {
+    const box = card.querySelector("[data-check]");
+    const was = box instanceof HTMLInputElement && box.checked;
+    if (box instanceof HTMLInputElement && !was) box.click();
+    toastAction(was ? "Already on your trip" : "Added to your trip", "Undo", () => {
+      if (!was && box instanceof HTMLInputElement && box.checked) box.click();
+    });
+    return;
+  }
+  const star = card.querySelector("[data-fav-star]");
+  const wasOn = star?.getAttribute("aria-pressed") === "true";
+  star?.click();
+  toastAction(wasOn ? "Removed from favorites" : "Marked as favorite", "Undo", () => star?.click());
+}, true);
 document.addEventListener("click", chooseFlavor, true);
 document.addEventListener("click", (event) => {
   const target = eventElement(event);
@@ -6755,6 +6789,7 @@ document.addEventListener("click", (event) => {
     });
     favStar.setAttribute("aria-pressed", on ? "true" : "false");
     favStar.setAttribute("aria-label", `${on ? "Unfavorite" : "Favorite"} ${name}`);
+    toast(on ? "Marked as favorite" : "Removed from favorites");
     paintUsuals();
     return;
   }
@@ -6937,9 +6972,16 @@ document.addEventListener("click", (event) => {
     if (wrap) wrap.hidden = false;
     showCouponForm.hidden = true;
     const shot = wrap?.querySelector("[data-coupon-shot]");
-    if (showCouponForm.hasAttribute("data-coupon-screenshot") && shot instanceof HTMLInputElement) shot.click();
-    const field = wrap?.querySelector("[data-coupon-line]");
-    if (field instanceof HTMLElement) field.focus();
+    if (shot instanceof HTMLInputElement) shot.click();
+    return;
+  }
+  if (target.closest("[data-coupon-retake]")) {
+    const form = target.closest("form");
+    const shot = form?.querySelector("[data-coupon-shot]");
+    if (shot instanceof HTMLInputElement) {
+      shot.value = "";
+      shot.click();
+    }
     return;
   }
   if (target.closest("[data-add-coupon]")) {
@@ -7008,6 +7050,13 @@ document.addEventListener("click", (event) => {
   const prefChange = target.closest("[data-pref-change]");
   if (prefChange) {
     void openPreferenceChange(prefChange.getAttribute("data-pref-change") || "");
+    return;
+  }
+  const prefFav = target.closest("[data-pref-favorite]");
+  if (prefFav) {
+    const family = prefFav.getAttribute("data-pref-family") || "";
+    const product = productsById.get(prefFav.getAttribute("data-pref-favorite") || "");
+    if (product) choosePreference(family, product, { favorite: true });
     return;
   }
   const prefPick = target.closest("[data-pref-pick]");
@@ -7667,7 +7716,11 @@ document.addEventListener("change", (event) => {
     const note = form?.querySelector("[data-coupon-shot-note]");
     const file = target.files?.[0];
     if (!file || !form) {
-      if (note) note.hidden = true;
+      if (note) {
+        note.hidden = false;
+        note.textContent = "No screenshot was chosen.";
+      }
+      form?.querySelector("[data-coupon-retake]")?.removeAttribute("hidden");
       return;
     }
     if (note) {
@@ -7679,7 +7732,7 @@ document.addEventListener("change", (event) => {
       const data = String(reader.result || "");
       const imageBase64 = data.includes(",") ? data.split(",")[1] : "";
       if (!imageBase64) {
-        if (note) note.textContent = "That screenshot could not be read. Type the amount you can see.";
+        if (note) note.textContent = "Couldn't read that coupon. Retake the screenshot.";
         return;
       }
       try {
@@ -7694,7 +7747,8 @@ document.addEventListener("change", (event) => {
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-          if (note) note.textContent = body.error || "Photo reading isn't available. Type the amount you can see.";
+          if (note) note.textContent = body.error || "Couldn't read that coupon. Retake the screenshot.";
+          form.querySelector("[data-coupon-retake]")?.removeAttribute("hidden");
           return;
         }
         const fields = couponDraftFields(body.coupon || body);
@@ -7716,15 +7770,17 @@ document.addEventListener("change", (event) => {
         if (mismatch) return;
         const line = host.querySelector("[data-coupon-line]");
         if (line instanceof HTMLSelectElement && fields.itemName) {
-          const wanted = fields.itemName.toLowerCase();
-          const match = [...line.options].find((option) => option.textContent.toLowerCase().includes(wanted));
-          if (match) line.value = match.value;
+          const match = bestCouponLine(
+            [...line.options].map((option) => ({ value: option.value, name: option.textContent || "" })),
+            fields.itemName
+          );
+          if (match?.value) line.value = match.value;
         }
         const amount = host.querySelector("[data-coupon-amount]");
         const kind = host.querySelector("[data-coupon-kind]");
         const expires = host.querySelector("[data-coupon-expires]");
         if (amount instanceof HTMLInputElement && fields.amount) amount.value = fields.amount;
-        if (kind instanceof HTMLSelectElement && fields.kind) kind.value = fields.kind;
+        if ((kind instanceof HTMLSelectElement || kind instanceof HTMLInputElement) && fields.kind) kind.value = fields.kind;
         if (expires instanceof HTMLInputElement && fields.expiresOn) expires.value = fields.expiresOn;
         const minQty = host.querySelector("[data-coupon-min-qty]");
         const minSpend = host.querySelector("[data-coupon-min-spend]");
@@ -7734,8 +7790,22 @@ document.addEventListener("change", (event) => {
         if (minSpend instanceof HTMLInputElement) minSpend.value = fields.minSpend ? String(fields.minSpend) : "";
         if (conditions instanceof HTMLInputElement) conditions.value = fields.conditions || "";
         if (source instanceof HTMLInputElement) source.value = "screenshot";
+        const matched = line instanceof HTMLSelectElement && Boolean(line.value) && fields.amount;
+        if (!matched) {
+          if (liveNote) {
+            liveNote.hidden = false;
+            liveNote.textContent = fields.amount
+              ? "Couldn't match that coupon to an item in this cart. Retake the screenshot."
+              : "Couldn't read that coupon. Retake the screenshot.";
+          }
+          host.querySelector("[data-coupon-retake]")?.removeAttribute("hidden");
+          return;
+        }
+        host.querySelector("[data-coupon-retake]")?.setAttribute("hidden", "");
+        addOwnCoupon(host);
       } catch {
-        if (note) note.textContent = "Photo reading didn't answer. Type the amount you can see.";
+        if (note) note.textContent = "Couldn't read that coupon. Retake the screenshot.";
+        form.querySelector("[data-coupon-retake]")?.removeAttribute("hidden");
       }
     };
     reader.readAsDataURL(file);
@@ -7765,7 +7835,7 @@ document.addEventListener("click", (event) => {
     paintFavorites();
     return;
   }
-  const brand = target.closest("[data-fav-brand]");
+  const brand = target.closest("[data-fav-brand]:not([data-fav-star])");
   const flavor = target.closest("[data-fav-flavor]");
   if (brand || flavor) {
     const family = (brand || flavor).getAttribute("data-fav-family") || "";
@@ -7775,7 +7845,7 @@ document.addEventListener("click", (event) => {
       const name = brand.getAttribute("data-fav-brand") || "";
       const on = brand.getAttribute("aria-pressed") === "true";
       saveFavoriteChoice(family, { brand: on ? "" : name, variant: current.variant || "" });
-      toast(on ? "Cleared that brand." : `Saved ${name}.`);
+      toast(on ? "Removed from favorites" : "Marked as favorite");
     } else {
       const id = flavor.getAttribute("data-fav-flavor") || "";
       const attributes = new Set(current.attributes || []);
@@ -9326,7 +9396,7 @@ function renderShop() {
   const done = doneMessage(progress);
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const route = inStoreRoute(stores, checks);
-  const unfoundRoute = notInCartSection(lastOptimize?.toFindInStore?.length ? lastOptimize.toFindInStore : lastOptimize?.unavailable);
+  const unfoundRoute = notInCartSection(unmatchedItemNames(lastOptimize));
   if (unfoundRoute) route.push(unfoundRoute);
   const html = route
     .map((section) => {
@@ -9498,9 +9568,11 @@ function lists() {
       },
       onEditFavorites: () => profileUi?.openFavorites?.(),
       onFavorite: (product, slotId) => {
-        const next = learnPreference(getUserProfile(localStorage), product, { family: slotId, source: "swap", replace: true });
+        const learned = learnPreference(getUserProfile(localStorage), product, { family: slotId, source: "swap", replace: true, locked: true });
+        const next = learnCategoryFromProduct(acceptAlways(learned, product, "swap"), product);
         saveUserProfile(localStorage, next);
-        if (shouldAskAlways(next, product)) alwaysPrompt?.ask(product, familyLabel(slotId) || slotId);
+        scheduleAccountSync();
+        toast("Marked as favorite");
       },
     });
   }
@@ -9590,11 +9662,14 @@ async function openPreferenceChange(family) {
     const name = tile.familyName || tile.name || label;
     const meta = [tile.brand, variant.variantLabel || variant.sizeLabel || ""].filter(Boolean).join(" · ");
     const image = variant.imageUrls?.[0] || tile.imageUrls?.[0] || "";
-    return `<button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
-      ${productPhotoHtml(image, { resolve: mediaUrl })}
-      <span class="staple-name">${escapeHtml(name)}</span>
-      <span class="staple-meta">${escapeHtml(meta)}</span>
-    </button>`;
+    return `<div class="staple-pick">
+      <button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
+        ${productPhotoHtml(image, { resolve: mediaUrl })}
+        <span class="staple-name">${escapeHtml(name)}</span>
+        <span class="staple-meta">${escapeHtml(meta)}</span>
+      </button>
+      <button type="button" class="text-btn" data-pref-favorite="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">Mark as favorite</button>
+    </div>`;
   }).join("");
   productDialog.innerHTML = `<div class="sheet-body">
     <h2 id="dialog-title">Change ${escapeHtml(label.toLowerCase())}</h2>
@@ -9606,9 +9681,9 @@ async function openPreferenceChange(family) {
   productDialog.querySelector("#dialog-close").onclick = () => productDialog.close();
 }
 
-function choosePreference(family, product) {
+function choosePreference(family, product, options = {}) {
   const profile = getUserProfile(localStorage);
-  const locked = Boolean(profile.productPreferences?.[family]?.locked);
+  const locked = Boolean(profile.productPreferences?.[family]?.locked) || Boolean(options.favorite);
   for (const [id, entry] of [...list]) {
     if (entry.preferenceFamily === family) list.delete(id);
   }
@@ -9620,7 +9695,12 @@ function choosePreference(family, product) {
     lock: locked,
     skipAsk: true,
   });
-  if (!locked) alwaysPrompt?.ask(product, familyLabel(family) || family);
+  if (options.favorite) {
+    const next = learnCategoryFromProduct(acceptAlways(getUserProfile(localStorage), product, "swap"), product);
+    saveUserProfile(localStorage, next);
+    scheduleAccountSync();
+    toast("Marked as favorite");
+  }
 }
 
 async function loadFamilyShelf(families) {
@@ -10158,8 +10238,7 @@ async function boot() {
   } finally {
     document.documentElement.dataset.boot = "ready";
     if (profileConnectResume) {
-      const profileDialog = document.getElementById("profile-onboard");
-      if (!profileDialog?.open) profileUi?.resumeAfterConnect?.();
+      profileUi?.resumeAfterConnect?.();
     } else if (!landedFromKroger) {
       const profileDialog = document.getElementById("profile-onboard");
       if (shouldPromptProfile(localStorage)) {
@@ -10168,6 +10247,7 @@ async function boot() {
       else guide?.holdAfterReturn?.();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
+    document.documentElement.classList.remove("welcome-hold");
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
     if (wantsAlerts && onboard?.open) {
@@ -10201,28 +10281,43 @@ function resolvedNeedNames() {
 
 async function fillNeedsSearch(name, store, listId, host) {
   host.hidden = false;
-  host.innerHTML = `<p class="muted">Searching ${escapeHtml(store)}…</p>`;
+  const both = !store || store === "both";
+  host.innerHTML = `<p class="muted">Searching ${both ? "Kroger and Walmart" : escapeHtml(store)}…</p>`;
   try {
-    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=6`);
+    const browse = pricedApi(`/api/catalog/browse?q=${encodeURIComponent(name)}&limit=12`);
     const response = browse ? await fetchBrowse(browse, {}, 8000) : null;
     const body = await response?.json().catch(() => ({}));
-    const tiles = Array.isArray(body?.items) ? body.items.slice(0, 4) : [];
-    if (!tiles.length) {
-      host.innerHTML = `<p class="muted">Nothing at ${escapeHtml(store)} for that name.</p>`;
+    const tiles = Array.isArray(body?.items) ? body.items : [];
+    const ranked = rankFoodMatches(tiles, name);
+    if (!ranked.length) {
+      host.innerHTML = `<p class="muted">Nothing at Kroger or Walmart for that name.</p>`;
       return;
     }
-    host.innerHTML = tiles
+    host.innerHTML = ranked
+      .slice(0, 8)
       .map((tile) => {
         const variant = (Array.isArray(tile.variants) && tile.variants.find((item) => item.id === tile.defaultVariantId)) || tile.variants?.[0] || tile;
         const id = variant.id || tile.id;
         if (!id) return "";
         productsById.set(id, { ...tile, ...variant, id, familyName: tile.familyName || variant.name });
-        const label = variant.variantLabel || variant.name || tile.familyName || tile.name;
-        return `<button type="button" data-needs-pick="${escapeHtml(id)}" data-needs-id="${escapeHtml(listId)}">${escapeHtml(label)} at ${escapeHtml(store)}</button>`;
+        const label = productDisplayName(tile, variant);
+        const offers = [];
+        for (const offer of [...(variant.offers || []), ...(tile.offers || [])]) {
+          const storeName = String(offer?.storeName || "").trim();
+          if (storeName && !offers.some((row) => row.storeName === storeName)) offers.push({ storeName });
+        }
+        if (!offers.length) {
+          const storeName = String(variant.bestOffer?.storeName || tile.bestOffer?.storeName || variant.storeName || tile.storeName || "").trim();
+          if (storeName) offers.push({ storeName });
+        }
+        const rows = offers.length ? offers : [{ storeName: "" }];
+        return rows
+          .map((offer) => `<button type="button" data-needs-pick="${escapeHtml(id)}" data-needs-id="${escapeHtml(listId)}">${escapeHtml(label)}${offer.storeName ? ` at ${escapeHtml(offer.storeName)}` : ""}</button>`)
+          .join("");
       })
       .join("");
   } catch {
-    host.innerHTML = `<p class="muted">Couldn't search ${escapeHtml(store)}.</p>`;
+    host.innerHTML = `<p class="muted">Couldn't search ${both ? "those stores" : escapeHtml(store)}.</p>`;
   }
 }
 
@@ -10241,8 +10336,7 @@ function openNeedsInput() {
       const name = entry.product?.familyName || entry.product?.name || "Item";
       const id = entry.itemId || entry.product?.id;
       return `<li class="needs-row" data-needs-row="${escapeHtml(id)}"><span>${escapeHtml(name)}</span>
-        <button type="button" data-needs-search="Kroger" data-needs-name="${escapeHtml(name)}" data-needs-id="${escapeHtml(id)}">Search at Kroger</button>
-        <button type="button" data-needs-search="Walmart" data-needs-name="${escapeHtml(name)}" data-needs-id="${escapeHtml(id)}">Search at Walmart</button>
+        <button type="button" data-needs-search="both" data-needs-name="${escapeHtml(name)}" data-needs-id="${escapeHtml(id)}">Search</button>
         <div class="needs-results" hidden></div>
         <button type="button" data-needs-remove="${escapeHtml(id)}">Remove</button>
         <button type="button" data-needs-keep="${escapeHtml(id)}">Keep as-is</button></li>`;
@@ -10847,10 +10941,7 @@ function guideView() {
   }
   const showingSavingsCard = flowStep === "plan" && mode !== "single" && !tripEdits.keepSplit && Boolean(savingsNudge(plans));
   const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
-  const resolved = resolvedNeedNames();
-  const unfound = genuineUnfound(lastOptimize?.unavailable, lastOptimize?.pricingByStore).filter(
-    (name) => !resolved.some((saved) => guideNamesMatch(saved, name))
-  );
+  const unfound = unmatchedItemNames(lastOptimize);
   return {
     step: flowStep,
     itemCount: list.size,
@@ -10961,13 +11052,26 @@ guide = mountGuide({
 matchSheet = mountMatchSheet({
   apiUrl,
   fetchBrowse,
-  onPick(product, name, store) {
+  onPick(product, name, store, options = {}) {
     const wanted = String(name || "").trim();
     for (const [id, entry] of [...list]) {
       const labels = [entry?.product?.name, entry?.product?.familyName, entry?.product?.catalogName].filter(Boolean);
       if (labels.some((label) => guideNamesMatch(wanted, label))) list.delete(id);
     }
-    addProduct(product, 1, { quiet: true, source: "match", skipAsk: true, skipLearn: true, preferredStore: store || "" });
+    addProduct(product, 1, {
+      quiet: true,
+      source: "match",
+      skipAsk: true,
+      skipLearn: !options.favorite,
+      lock: Boolean(options.favorite),
+      preferredStore: store || "",
+    });
+    if (options.favorite) {
+      const next = learnCategoryFromProduct(acceptAlways(getUserProfile(localStorage), product, "match"), product);
+      saveUserProfile(localStorage, next);
+      scheduleAccountSync();
+      toast("Marked as favorite");
+    }
     const added = findListEntry(product.id);
     if (added && store) added.preferredStore = store;
     const offer = (Array.isArray(product.offers) ? product.offers : product.bestOffer ? [product.bestOffer] : []).find((row) =>

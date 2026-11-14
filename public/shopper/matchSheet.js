@@ -52,6 +52,102 @@ export function matchBrowseQuery(name) {
     .trim();
 }
 
+const EGG_EXCLUDE =
+  /\b(pulp|paper material|egg cartons?|empty carton|packaging|egg rings?|egg cookers?|easter eggs?|plastic eggs?|egg dyes?|egg holders?)\b/i;
+const REAL_EGG = /\b(eggs?|eggland|egg beaters|eggbeaters)\b/i;
+
+function itemText(item) {
+  return `${item?.name || ""} ${item?.catalogName || ""} ${item?.familyName || ""}`;
+}
+
+/** Packaging and novelty eggs leave an egg search. A real egg sold in a carton stays. */
+export function isEggSearchReject(item, query) {
+  if (!/\beggs?\b/i.test(String(query || ""))) return false;
+  const text = itemText(item);
+  const category = `${item?.departmentName || ""} ${item?.departmentId || ""} ${item?.category || ""} ${item?.aisle || ""}`.toLowerCase();
+  if (EGG_EXCLUDE.test(text)) return true;
+  const household = /\b(household|gadget|storage|party|seasonal|kitchen)\b/.test(category);
+  if (household && !REAL_EGG.test(text)) return true;
+  if (/\b(carton|container|tray)\b/i.test(text) && !REAL_EGG.test(text)) return true;
+  if (/\b(iphone|vitamin|tablet)\b/i.test(text) && !REAL_EGG.test(text)) return true;
+  return false;
+}
+
+/** Drop non-egg rows, then sort flavor then size. Real eggs rank first. */
+export function rankFoodMatches(items, query) {
+  const ask = String(query || "").toLowerCase();
+  const eggs = /\beggs?\b/.test(ask);
+  const kept = (items || []).filter((item) => !isEggSearchReject(item, ask));
+  const sizeCount = (item) => {
+    const label = `${item?.sizeLabel || ""} ${item?.totalSize || ""} ${item?.name || ""}`;
+    const match = label.match(/(\d+)\s*(?:ct|count|pk|pack)\b/i);
+    return match ? Number(match[1]) : 0;
+  };
+  return kept
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aText = `${a.item?.name || ""} ${a.item?.familyName || ""}`.toLowerCase();
+      const bText = `${b.item?.name || ""} ${b.item?.familyName || ""}`.toLowerCase();
+      if (eggs) {
+        const aFood = REAL_EGG.test(aText) && !EGG_EXCLUDE.test(aText) ? 0 : 1;
+        const bFood = REAL_EGG.test(bText) && !EGG_EXCLUDE.test(bText) ? 0 : 1;
+        if (aFood !== bFood) return aFood - bFood;
+      }
+      const flavor = String(a.item?.flavorLabel || a.item?.variantLabel || "").localeCompare(String(b.item?.flavorLabel || b.item?.variantLabel || ""));
+      if (flavor) return flavor;
+      const size = sizeCount(a.item) - sizeCount(b.item);
+      if (size) return size;
+      return a.index - b.index;
+    })
+    .map((row) => row.item);
+}
+
+const STORE_BRAND = /^(great value|kroger|simple truth|good & gather|marketside|equate)$/i;
+
+function cleanLabel(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function looksLikeSize(value) {
+  return /^\d|\b(?:ct|count|pk|pack|oz|fl oz|lb|gal|ml)\b/i.test(value);
+}
+
+function withoutSize(name, size) {
+  if (!size) return name;
+  const escaped = size.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return name.replace(new RegExp(`[,\\s]*${escaped}$`, "i"), "").replace(/,\s*$/, "").trim();
+}
+
+/** "Coke Cherry" reads as "Cherry Coke". A name that already leads with the flavor stays. */
+function flavorFirst(name, flavor) {
+  const product = name.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  const taste = flavor.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  if (!taste) return product;
+  const lower = product.toLowerCase();
+  const tasteLower = taste.toLowerCase();
+  if (lower === tasteLower || lower.startsWith(`${tasteLower} `)) return product;
+  if (lower.endsWith(` ${tasteLower}`)) {
+    const noun = product.slice(0, product.length - taste.length).replace(/,\s*$/, "").trim();
+    return `${taste} ${noun}`.replace(/\s+/g, " ").trim();
+  }
+  if (lower.includes(tasteLower)) return product;
+  return `${taste} ${product}`.replace(/\s+/g, " ").trim();
+}
+
+/** Flavor, then the product, then the pack size. No comma before the size. */
+export function productDisplayName(tile, variant) {
+  const raw = cleanLabel(variant?.familyName || tile?.familyName || variant?.name || tile?.name || "Item");
+  const flavorLabel = cleanLabel(variant?.flavorLabel || tile?.flavorLabel || "");
+  const variantLabel = cleanLabel(variant?.variantLabel || "");
+  const flavor = flavorLabel || (variantLabel && !looksLikeSize(variantLabel) ? variantLabel : "");
+  const size = cleanLabel(variant?.sizeLabel || tile?.sizeLabel || variant?.label || (looksLikeSize(variantLabel) ? variantLabel : ""));
+  let base = flavorFirst(withoutSize(raw, size), flavor);
+  const brand = cleanLabel(variant?.brand || tile?.brand || "");
+  if (brand && STORE_BRAND.test(brand) && !base.toLowerCase().includes(brand.toLowerCase())) base = `${brand} ${base}`;
+  if (size && !base.toLowerCase().includes(size.toLowerCase())) return `${base} ${size}`.replace(/\s+/g, " ").trim();
+  return base;
+}
+
 export function mountMatchSheet(deps) {
   if (!deps || typeof document === "undefined" || document.getElementById("match-sheet")) {
     return document.getElementById("match-sheet") ? { open() {} } : null;
@@ -81,7 +177,8 @@ export function mountMatchSheet(deps) {
         const id = String(row.id || "");
         const label = String(row.label || "Item");
         const price = row.price ? `<span class="muted">${escapeText(row.price)}</span>` : "";
-        return `<button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}"><span>${escapeText(label)}</span>${price}</button>`;
+        const store = escapeText(row.store || "");
+        return `<div class="match-row"><button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}" data-match-store="${store}"><span>${escapeText(label)}</span>${price}</button><button type="button" class="text-btn" data-match-favorite="${escapeText(id)}" data-match-store="${store}">Mark as favorite</button></div>`;
       })
       .join("");
   }
@@ -143,23 +240,32 @@ export function mountMatchSheet(deps) {
         return;
       }
       const body = await response.json().catch(() => ({}));
-      const items = Array.isArray(body.items) ? body.items : [];
+      const items = rankFoodMatches(Array.isArray(body.items) ? body.items : [], browseQuery || name);
       products.clear();
       const rows = [];
       for (const item of items) {
         const id = String(item?.id || item?.defaultVariantId || "");
         if (!id) continue;
-        const offer = offerFor(item, storeName) || offerFor(item, "");
         products.set(id, item);
-        const label = String(item.familyName || item.name || "Item");
+        const named = productDisplayName(item, item);
         const brand = String(item.brand || "").trim();
-        const price = offer ? offer.price : Number(item.bestOffer?.price ?? item.price);
-        rows.push({
-          id,
-          label: brand && !label.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${label}` : label,
-          price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
-          store: offer?.store || storeName,
-        });
+        const titled = brand && !named.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${named}` : named;
+        const offers = storeName
+          ? [offerFor(item, storeName) || offerFor(item, "")].filter(Boolean)
+          : (Array.isArray(item.offers) ? item.offers : [])
+              .map((offer) => ({ store: String(offer?.storeName || ""), price: Number(offer?.price) }))
+              .filter((offer) => offer.store);
+        const choices = offers.length ? offers : [offerFor(item, "") || { store: "", price: Number(item.bestOffer?.price ?? item.price) }];
+        for (const offer of choices) {
+          const price = Number(offer?.price);
+          const where = offer?.store || "";
+          rows.push({
+            id,
+            label: where && !storeName ? `${titled} · ${where}` : titled,
+            price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
+            store: where || storeName,
+          });
+        }
       }
       shown = rows;
       paint(rows, rows.length ? "" : storeName ? `Nothing at ${storeName} in Grocery Gitter. That item stays off the ${storeName} cart.` : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
@@ -209,11 +315,13 @@ export function mountMatchSheet(deps) {
       if (query) void search(query);
       return;
     }
-    const target = event.target instanceof Element ? event.target.closest("[data-match-pick]") : null;
+    const favorite = event.target instanceof Element ? event.target.closest("[data-match-favorite]") : null;
+    const target = favorite || (event.target instanceof Element ? event.target.closest("[data-match-pick]") : null);
     if (!target) return;
     event.preventDefault();
-    const product = products.get(target.getAttribute("data-match-pick") || "");
-    if (product) deps.onPick?.(product, query, storeName);
+    const product = products.get(target.getAttribute("data-match-favorite") || target.getAttribute("data-match-pick") || "");
+    const pickedStore = target.getAttribute("data-match-store") || storeName;
+    if (product) deps.onPick?.(product, query, pickedStore, { favorite: Boolean(favorite) });
     dialog.close();
   });
   dialog.addEventListener("close", () => {

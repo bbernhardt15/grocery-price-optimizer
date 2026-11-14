@@ -205,7 +205,7 @@ for (const size of [
     await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
     await page.locator("#profile-zip-done").click();
     await page.locator("#profile-next").click();
-    if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
       await page.locator("#store-connect-later").click();
     }
     await page.getByText("Paste order text instead").click();
@@ -226,7 +226,7 @@ for (const size of [
     await expect(page.locator("#profile-store-list input, #profile-store-list button").first()).toBeVisible();
     await page.locator("#profile-zip-done").click();
     await page.locator("#profile-next").click();
-    if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
       await page.locator("#store-connect-later").click();
     }
     await expect(page.locator("[data-faq]")).toHaveJSProperty("open", false);
@@ -275,7 +275,7 @@ for (const size of [
     await unlock(page);
     await expect(page.locator("#usuals-toggle")).toBeVisible();
     await expect(page.locator("#usuals-count")).toHaveText("1");
-    await expect(page.locator("#app-version")).toContainText("v91");
+    await expect(page.locator("#app-version")).toContainText("v92");
     await page.locator("#menu-open").click();
     await expect(page.locator("#app-version")).toBeVisible();
   });
@@ -621,7 +621,7 @@ for (const size of [
     });
     await unlock(page);
     await page.locator("#menu-open").click();
-    await expect(page.locator("#app-version")).toHaveText(/^v91 · [0-9a-f]{7}$/i);
+    await expect(page.locator("#app-version")).toHaveText(/^v92 · [0-9a-f]{7}$/i);
   });
 
   test(`the receipt cart moves as reading progresses at ${size.width}x${size.height}`, async ({ page }) => {
@@ -639,7 +639,7 @@ for (const size of [
     await page.locator("#profile-zip").pressSequentially("45103");
     await page.locator("#profile-zip-done").click();
     await page.locator("#profile-next").click();
-    if ((await page.locator("#profile-title").textContent()) === "Connect a store?") {
+    if (/Connect a store\?|Kroger connected/.test((await page.locator("#profile-title").textContent()) || "")) {
       await page.locator("#store-connect-later").click();
     }
     await page.getByText("Paste order text instead").click();
@@ -693,7 +693,7 @@ for (const size of [
     await page.locator("[data-flow='plan']").click();
     const sheet = page.locator("#needs-input");
     await expect(sheet).toBeVisible();
-    await sheet.getByRole("button", { name: "Search at Kroger" }).click();
+    await sheet.getByRole("button", { name: "Search", exact: true }).click();
     await sheet.getByRole("button", { name: /Kroger Marinara at Kroger/ }).click();
     await expect(page.locator("body")).toHaveAttribute("data-step", "plan");
     await expect(page.locator("#gitter-guide")).not.toContainText(/couldn't find Mystery Sauce/i);
