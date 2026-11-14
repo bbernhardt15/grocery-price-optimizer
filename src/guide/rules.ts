@@ -473,7 +473,7 @@ export function decideGuide(input: GuideInput = {}): Prompt | null {
     };
   }
 
-  if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
+  if (step === "review" && !session.shown.receipt && session.receipt && session.receipt.count > 0) {
     const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
     const available = receiptPicks(offList, usuals, Math.max(offList.length, 1));
     const picks = session.receipt.showAll ? available : available.slice(0, 6);

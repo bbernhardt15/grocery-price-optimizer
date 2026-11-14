@@ -180,12 +180,12 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
       assert.equal(plan.summary, true);
       assert.equal(plan.shop, false);
 
-      await inPage(page, `
+      const shop = await inPage<any>(page, `
         document.body.dataset.step = "shop";
         const title = document.getElementById("brand-title");
         if (title) title.textContent = "In the store";
+        ${MEASURE_CHROME}
       `);
-      const shop = await inPage<any>(page, MEASURE_CHROME);
       assert.equal(shop.steps, true);
       assert.equal(shop.summary, false);
       assert.equal(shop.shop, true);

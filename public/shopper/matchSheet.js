@@ -73,19 +73,56 @@ export function isEggSearchReject(item, query) {
   return false;
 }
 
-/** Drop non-egg rows, then sort flavor then size. Real eggs rank first. */
-export function rankFoodMatches(items, query) {
+export const UNAVAILABLE_MATCH = "Not currently available at your stores.";
+
+function queryWords(text) {
+  return String(text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word && word.length > 1 && !/^(the|and|for|with|of|at)$/.test(word));
+}
+
+/** How closely a shelf row matches the words the shopper typed. */
+export function foodMatchScore(item, phrase) {
+  const want = queryWords(phrase);
+  const hay = `${item?.brand || ""} ${item?.name || ""} ${item?.familyName || ""} ${item?.sizeLabel || ""} ${item?.flavorLabel || ""}`.toLowerCase();
+  let score = 0;
+  for (const word of want) if (hay.includes(word)) score += 2;
+  if (/\b(kroger|great value)\b/.test(String(phrase || "").toLowerCase()) && /\b(kroger|great value)\b/.test(hay)) score += 4;
+  if (/\blarge\b/.test(hay) && /\blarge\b/.test(String(phrase || "").toLowerCase())) score += 3;
+  if (/\bwhite\b/.test(hay) && /\bwhite\b/.test(String(phrase || "").toLowerCase())) score += 3;
+  if (/\bgrade\s*a\b/.test(hay) && /\bgrade\s*a\b/.test(String(phrase || "").toLowerCase())) score += 3;
+  if (/\b12\b/.test(String(phrase || "")) && /\b12\b/.test(hay)) score += 2;
+  return score;
+}
+
+/** A broader search when the exact name is missing from the catalog. */
+export function similarQueries(name) {
+  const text = String(name || "").toLowerCase();
+  const extra = [];
+  if (/\blysol\b/.test(text)) extra.push("disinfectant", "cleaner");
+  if (/\b(tide|detergent|pods)\b/.test(text)) extra.push("laundry detergent");
+  if (/\b(coke|coca)\b/.test(text)) extra.push("soda");
+  const words = queryWords(text).filter((word) => !/^(kroger|walmart|large|white|grade|eggs?|size)$/.test(word));
+  if (words.length) extra.push(words[0]);
+  return [...new Set(extra)].slice(0, 2);
+}
+
+/** Drop non-egg rows, then prefer the typed staple, then flavor, then size. */
+export function rankFoodMatches(items, query, phrase = "") {
   const ask = String(query || "").toLowerCase();
-  const eggs = /\beggs?\b/.test(ask);
-  const kept = (items || []).filter((item) => !isEggSearchReject(item, ask));
+  const hint = String(phrase || query || "");
+  const eggs = /\beggs?\b/.test(`${ask} ${hint.toLowerCase()}`);
+  const kept = (items || []).filter((item) => !isEggSearchReject(item, eggs ? `${ask} eggs` : ask));
   const sizeCount = (item) => {
     const label = `${item?.sizeLabel || ""} ${item?.totalSize || ""} ${item?.name || ""}`;
     const match = label.match(/(\d+)\s*(?:ct|count|pk|pack)\b/i);
     return match ? Number(match[1]) : 0;
   };
   return kept
-    .map((item, index) => ({ item, index }))
+    .map((item, index) => ({ item, index, score: foodMatchScore(item, hint) }))
     .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
       const aText = `${a.item?.name || ""} ${a.item?.familyName || ""}`.toLowerCase();
       const bText = `${b.item?.name || ""} ${b.item?.familyName || ""}`.toLowerCase();
       if (eggs) {
@@ -178,7 +215,8 @@ export function mountMatchSheet(deps) {
         const label = String(row.label || "Item");
         const price = row.price ? `<span class="muted">${escapeText(row.price)}</span>` : "";
         const store = escapeText(row.store || "");
-        return `<div class="match-row"><button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}" data-match-store="${store}"><span>${escapeText(label)}</span>${price}</button><button type="button" class="text-btn" data-match-favorite="${escapeText(id)}" data-match-store="${store}">Mark as favorite</button></div>`;
+        const starred = row.starred ? "true" : "false";
+        return `<article class="match-card"><button type="button" class="fav-star match-star" data-match-favorite="${escapeText(id)}" data-match-store="${store}" aria-pressed="${starred}" aria-label="${row.starred ? "Unfavorite" : "Favorite"} ${escapeText(label)}">★</button><button type="button" class="ghost match-pick" data-match-pick="${escapeText(id)}" data-match-store="${store}"><span>${escapeText(label)}</span>${price}</button></article>`;
       })
       .join("");
   }
@@ -190,7 +228,7 @@ export function mountMatchSheet(deps) {
     const note = message ? `<p class="muted" role="status">${escapeText(message)}</p>` : "";
     const again = retry ? `<button type="button" class="ghost" data-match-retry>Try this search again</button>` : "";
     if (!list && !note && !again) {
-      host.innerHTML = `<p class="muted" role="status">Nothing close in Grocery Gitter.</p>`;
+      host.innerHTML = `<p class="muted" role="status">${escapeText(UNAVAILABLE_MATCH)}</p>`;
       return;
     }
     host.innerHTML = `${list}${note}${again}`;
@@ -227,21 +265,14 @@ export function mountMatchSheet(deps) {
       saved = "";
     }
     const browseQuery = matchBrowseQuery(name) || name;
-    const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(browseQuery)}&limit=48`, saved);
-    if (!priced) {
+    const specific = String(name || "").replace(/\s+/g, " ").trim();
+    const asks = [...new Set([specific, browseQuery].filter(Boolean))];
+    if (!withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(asks[0] || browseQuery)}&limit=48`, saved)) {
       paint([], "Add a ZIP to see store prices.");
       shown = [];
       return;
     }
-    try {
-      const response = await requestMatchBrowse(apiUrl(priced), deps.fetchBrowse);
-      if (!response.ok) {
-        showBusy(kept);
-        return;
-      }
-      const body = await response.json().catch(() => ({}));
-      const items = rankFoodMatches(Array.isArray(body.items) ? body.items : [], browseQuery || name);
-      products.clear();
+    function rowsFrom(items) {
       const rows = [];
       for (const item of items) {
         const id = String(item?.id || item?.defaultVariantId || "");
@@ -264,11 +295,51 @@ export function mountMatchSheet(deps) {
             label: where && !storeName ? `${titled} · ${where}` : titled,
             price: Number.isFinite(price) && price > 0 ? `$${price.toFixed(2)}` : "",
             store: where || storeName,
+            starred: Boolean(deps.isStarred?.(item, titled)),
           });
         }
       }
+      return rows;
+    }
+    async function loadAsk(ask) {
+      const priced = withServiceZip(`/api/catalog/browse?q=${encodeURIComponent(ask)}&limit=48`, saved);
+      if (!priced) return { missingZip: true, items: [] };
+      const response = await requestMatchBrowse(apiUrl(priced), deps.fetchBrowse);
+      if (!response.ok) return { busy: true, items: [] };
+      const body = await response.json().catch(() => ({}));
+      return { items: Array.isArray(body.items) ? body.items : [] };
+    }
+    try {
+      const merged = new Map();
+      for (const ask of asks) {
+        const loaded = await loadAsk(ask);
+        if (loaded.busy && !merged.size) {
+          showBusy(kept);
+          return;
+        }
+        for (const item of loaded.items || []) {
+          const id = String(item?.id || item?.defaultVariantId || "");
+          if (id && !merged.has(id)) merged.set(id, item);
+        }
+      }
+      const items = rankFoodMatches([...merged.values()], browseQuery || name, specific);
+      products.clear();
+      const rows = rowsFrom(items);
+      if (!rows.length) {
+        const ideas = similarQueries(specific);
+        const suggested = [];
+        for (const ask of ideas) {
+          const loaded = await loadAsk(ask);
+          const more = rankFoodMatches(loaded.items || [], ask, ask).slice(0, 4);
+          suggested.push(...rowsFrom(more));
+          if (suggested.length) break;
+        }
+        shown = suggested;
+        paint(suggested, suggested.length ? `${UNAVAILABLE_MATCH} Similar items:` : UNAVAILABLE_MATCH);
+        return;
+      }
       shown = rows;
-      paint(rows, rows.length ? "" : storeName ? `Nothing at ${storeName} in Grocery Gitter. That item stays off the ${storeName} cart.` : "Nothing close in Grocery Gitter. You can keep shopping in the store.");
+      paint(rows, "");
     } catch {
       showBusy(kept);
     }
@@ -316,12 +387,21 @@ export function mountMatchSheet(deps) {
       return;
     }
     const favorite = event.target instanceof Element ? event.target.closest("[data-match-favorite]") : null;
-    const target = favorite || (event.target instanceof Element ? event.target.closest("[data-match-pick]") : null);
+    if (favorite) {
+      event.preventDefault();
+      const product = products.get(favorite.getAttribute("data-match-favorite") || "");
+      if (!product) return;
+      const on = Boolean(deps.onStar?.(product));
+      favorite.setAttribute("aria-pressed", on ? "true" : "false");
+      favorite.setAttribute("aria-label", `${on ? "Unfavorite" : "Favorite"} ${favorite.getAttribute("aria-label")?.replace(/^(?:Unfavorite|Favorite)\s+/, "") || "item"}`);
+      return;
+    }
+    const target = event.target instanceof Element ? event.target.closest("[data-match-pick]") : null;
     if (!target) return;
     event.preventDefault();
-    const product = products.get(target.getAttribute("data-match-favorite") || target.getAttribute("data-match-pick") || "");
+    const product = products.get(target.getAttribute("data-match-pick") || "");
     const pickedStore = target.getAttribute("data-match-store") || storeName;
-    if (product) deps.onPick?.(product, query, pickedStore, { favorite: Boolean(favorite) });
+    if (product) deps.onPick?.(product, query, pickedStore, { favorite: false });
     dialog.close();
   });
   dialog.addEventListener("close", () => {

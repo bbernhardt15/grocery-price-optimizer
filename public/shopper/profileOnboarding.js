@@ -55,7 +55,7 @@ const EXTRA = [
   {
     id: "products",
     title: "Review my products",
-    hint: "Tap a category you never buy. Everything else stays available.",
+    hint: "Every category starts as Buying. Tap one to leave it off.",
     kind: "products",
   },
 ];

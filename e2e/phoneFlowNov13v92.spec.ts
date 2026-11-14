@@ -38,11 +38,12 @@ test("v92 receipt can leave meat off at 390x844", async ({ page }) => {
   await page.getByText("Paste order text instead").tap();
   await page.locator("#profile-receipt-paste").fill("Ground Beef\n1.0 x $5.99");
   await page.getByRole("button", { name: "Read my receipts" }).tap();
-  const leave = page.getByRole("button", { name: "Leave Meat & Seafood off" });
-  await expect(leave).toBeVisible();
-  await leave.tap();
-  await expect(page.locator("#profile-stage")).toContainText("Meat & Seafood left off.");
+  await expect(page.getByText("This receipt includes meat")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Leave Meat & Seafood off" })).toHaveCount(0);
   await expect(page.getByText("Not on this receipt")).toHaveCount(0);
+  const promise = page.locator(".basket-promise strong");
+  await expect(promise).toHaveText("We'll find it for less.");
+  await expect.poll(async () => promise.evaluate((node) => node.getClientRects().length)).toBe(1);
 });
 
 test("v92 shows the next task prompt after the visible one is declined at 390x844", async ({ page }) => {
@@ -111,12 +112,26 @@ test("v92 one tap on receipt Skip leaves the queued card at 390x844", async ({ p
     localStorage.setItem("gg-profile", JSON.stringify({ onboarding: { status: "done", step: "summary", updatedAt: 1 } }));
     localStorage.setItem("gg-list", JSON.stringify([{ id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 }]));
   });
+  await page.route("**/api/optimize-list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        partial: false,
+        pendingStores: [],
+        pricingByStore: [{ storeName: "Kroger", check: "ok" }],
+        total: 1,
+        stores: [{ storeName: "Kroger", subtotal: 1, items: [{ lineId: "milk", name: "Whole Milk", price: 1, quantity: 1, itemTotal: 1, storeName: "Kroger" }] }],
+      }),
+    });
+  });
   await unlock(page);
   const guide = page.locator("#gitter-guide");
   await page.evaluate(() => {
     const guideApi = (document as Document & { __gitterGuide?: { noteReceipt?: (payload: object) => void } }).__gitterGuide;
     guideApi?.noteReceipt?.({ lines: [{ name: "Paper Towels", quantity: 1 }] });
   });
+  await page.locator("#step-bar [data-flow='plan']").click();
   await expect(guide).toHaveAttribute("data-moment", "receipt");
   await expect(guide.getByRole("button", { name: "Skip" })).toBeVisible();
   await page.waitForTimeout(4200);
@@ -151,7 +166,7 @@ for (const size of sizes) {
     });
     await unlock(page);
     await page.locator("#menu-open").tap();
-    await expect(page.locator("#app-version")).toHaveText(/v92 · [0-9a-f]{7}/i);
+    await expect(page.locator("#app-version")).toHaveText(/v93 · [0-9a-f]{7}/i);
     await page.evaluate(() => {
       const row = document.createElement("div");
       row.className = "choice-row";

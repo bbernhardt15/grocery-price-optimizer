@@ -70,8 +70,12 @@ export function starterList(id) {
 /** @param {{ name?: string, brand?: string, catalogId?: string, id?: string }} item */
 export function usualKey(item) {
   const id = clean(item?.catalogId || item?.id);
+  const flavor = norm(item?.flavor || item?.flavorLabel);
+  const size = norm(item?.size || item?.sizeLabel);
+  const variant = [flavor, size].filter(Boolean).join(":");
+  if (id && variant) return `id:${id}:${variant}`;
   if (id) return `id:${id}`;
-  return `name:${norm(item?.brand)}:${norm(item?.name)}`;
+  return `name:${norm(item?.brand)}:${norm(item?.name)}${variant ? `:${variant}` : ""}`;
 }
 
 /**
@@ -88,6 +92,8 @@ export function readUsuals(storage) {
         name: clean(row.name),
         brand: clean(row.brand),
         catalogId: clean(row.catalogId),
+        flavor: clean(row.flavor),
+        size: clean(row.size),
         quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)),
         times: Math.max(1, Math.floor(Number(row.times) || 1)),
         lastAt: Number(row.lastAt) || 0,
@@ -145,6 +151,8 @@ export function rememberUsuals(storage, items, at = Date.now(), options = {}) {
       name,
       brand: clean(item?.brand || prior?.brand),
       catalogId: clean(item?.catalogId || item?.id || prior?.catalogId),
+      flavor: clean(item?.flavor || item?.flavorLabel || prior?.flavor),
+      size: clean(item?.size || item?.sizeLabel || prior?.size),
       quantity: Math.max(1, Math.floor(Number(item?.quantity) || prior?.quantity || 1)),
       times: (prior?.times || 0) + 1,
       lastAt: at,

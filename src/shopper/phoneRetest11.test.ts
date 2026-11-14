@@ -29,7 +29,7 @@ const importer = readFileSync(new URL("../../public/shopper/import.js", import.m
 
 describe("eleventh phone test", () => {
   it("bumps the shell cache to v92", () => {
-    assert.match(sw, /grocery-gitter-shell-v92/);
+    assert.match(sw, /grocery-gitter-shell-v93/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {

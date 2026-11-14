@@ -78,7 +78,17 @@ export function shopperCopy(text) {
   const value = clean(text);
   if (!value || OPERATOR_COPY.test(value)) return "";
   if (/products request failed|locations request failed/i.test(value)) return "";
+  if (/seeded store|ingestion job/i.test(value)) return "Some prices aren't ready for your ZIP yet.";
   return value;
+}
+
+/** A lower savings number needs the same comparison the banner already uses. */
+export function savingsChangeNote(before, after) {
+  const previous = Number(before);
+  const next = Number(after);
+  if (!Number.isFinite(previous) || !Number.isFinite(next)) return "";
+  if (next >= previous - 0.009) return "";
+  return `You saved ${priceFigure(previous - next)} less than the last plan. Savings compare the cheapest way to buy this list with buying the same items at one store.`;
 }
 
 /**

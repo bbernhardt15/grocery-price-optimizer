@@ -317,7 +317,7 @@ test("a coupon screenshot review applies only the eligible discount", async ({ p
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
+  await page.getByRole("button", { name: "Add coupons" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64"
@@ -391,15 +391,8 @@ test("a tailgate bun brand is kept and adds the catalog bun", async ({ page }) =
   await unlock(page);
   await page.locator("[data-lists-open]").click();
   await page.locator("[data-list-open='tailgate']").click();
-  const brand = page.locator("[data-theme-brand='burger-buns']");
-  await expect(page.locator("[data-theme-brand='soda']")).toBeVisible();
-  await page.screenshot({ path: "/opt/cursor/artifacts/tailgate-brand.png" });
-  await brand.fill("Pepperidge Farm");
-  await page.reload();
-  await page.locator("[data-lists-open]").click();
-  await page.locator("[data-list-open='tailgate']").click();
-  await expect(page.locator("[data-theme-brand='burger-buns']")).toHaveValue("Pepperidge Farm");
-  await page.locator("[data-theme-brand='burger-buns']").fill("Martin's");
+  await expect(page.locator("[data-theme-brand]")).toHaveCount(0);
+  await expect(page.getByText("Brand for this list")).toHaveCount(0);
   await page.locator("[data-sheet-add='tailgate']").click();
   await expect(page.locator("#bar-count")).toContainText("5 items");
   const dismiss = page.getByRole("button", { name: "Dismiss guide" });
@@ -494,7 +487,7 @@ test("a Walmart coupon is not applied on the Kroger form", async ({ page }) => {
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
+  await page.getByRole("button", { name: "Add coupons" }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64"

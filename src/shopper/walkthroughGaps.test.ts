@@ -63,8 +63,8 @@ describe("walkthrough gaps the audit still needed", () => {
       finder: "",
       escapeHtml: (value: string) => String(value),
     });
-    assert.match(html, /data-slot-brand="burger-buns"/);
-    assert.match(html, /Brand for this list/);
+    assert.doesNotMatch(html, /data-slot-brand="burger-buns"/);
+    assert.doesNotMatch(html, /Brand for this list/);
     const saved = setOverride(emptyBook(), "tailgate", "burger-buns", { name: "Buns", brand: "Martin's" }, 5);
     assert.equal(saved.overrides.tailgate["burger-buns"].brand, "Martin's");
   });
@@ -77,13 +77,13 @@ describe("walkthrough gaps the audit still needed", () => {
       lines: [{ name: "Ground Beef" }],
     });
     assert.doesNotMatch(meat, /Not on this receipt/);
-    assert.match(meat, /data-missing-skip="meat"/);
-    assert.match(meat, /Leave Meat &amp; Seafood off/);
+    assert.doesNotMatch(meat, /This receipt includes meat/);
+    assert.doesNotMatch(meat, /data-missing-skip="meat"/);
     const skipped = learnedSummaryHtml([{ family: "ground-beef", label: "Ground beef", mode: "cheapest" }], {
       lines: [{ name: "Ground Beef" }],
       skippedFamilies: new Set(["meat"]),
     });
-    assert.match(skipped, /Meat &amp; Seafood left off/);
+    assert.doesNotMatch(skipped, /Meat &amp; Seafood left off/);
     const prefs = meatPreferenceHtml("");
     assert.match(prefs, /data-meat-pref/);
     assert.match(prefs, /Use the lowest Meat &amp; Seafood price/);

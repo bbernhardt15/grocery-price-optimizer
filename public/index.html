@@ -161,7 +161,7 @@
             <a class="menu-row" id="help-privacy" href="/privacy"><span class="menu-icon" aria-hidden="true">Priv</span><span>Privacy</span></a>
             <a class="menu-row" id="help-terms" href="/terms"><span class="menu-icon" aria-hidden="true">Terms</span><span>Terms</span></a>
           </section>
-          <p id="app-version" class="muted app-version">v92</p>
+          <p id="app-version" class="muted app-version">v93</p>
           </div>
         </aside>
       </div>
@@ -204,12 +204,11 @@
           <section id="favorites-screen" class="favorites-screen" hidden aria-labelledby="favorites-title">
             <div class="list-head">
               <h2 id="favorites-title" tabindex="-1">Your favorites</h2>
-              <button type="button" class="text-btn" id="favorites-close">Back to Build</button>
             </div>
             <p class="muted">Only items you starred. Brand setup for each aisle stays in the menu.</p>
             <div id="favorites-prefs"></div>
-            <h3>Remembered items</h3>
             <ul id="favorites-usuals" class="usuals-list"></ul>
+            <button type="button" class="primary favorites-back" id="favorites-close">Back to Build</button>
           </section>
           <section id="browse" class="browse">
             <button type="button" id="browse-toggle" class="feature-card browse-toggle" aria-expanded="false" aria-controls="browse-panel">
@@ -290,10 +289,11 @@
                       <option value="">All brands</option>
                     </select>
                   </label>
-                  <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
-                  <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
-                  <label class="check-row"><input id="filter-priced" type="checkbox" /> Has a shelf price</label>
-                  <label class="check-row"><input id="filter-mine" type="checkbox" /> My saved brands</label>
+                  <div class="refine-checks">
+                    <label class="check-row"><input id="filter-sale" type="checkbox" /> On sale</label>
+                    <label class="check-row"><input id="filter-budget" type="checkbox" /> Budget-friendly brands</label>
+                    <label class="check-row"><input id="filter-mine" type="checkbox" /> My saved brands</label>
+                  </div>
                   <div class="filter-actions">
                     <button type="submit" class="primary">Show items</button>
                     <button type="button" class="ghost" id="filters-clear">Clear</button>

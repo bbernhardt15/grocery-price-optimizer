@@ -330,7 +330,7 @@ function decideGuide(input = {}) {
       ]
     };
   }
-  if (!session.shown.receipt && session.receipt && session.receipt.count > 0) {
+  if (step === "review" && !session.shown.receipt && session.receipt && session.receipt.count > 0) {
     const offList = session.receipt.lines.filter((line) => line?.name && !onList(line.name, listNames));
     const available = receiptPicks(offList, usuals, Math.max(offList.length, 1));
     const picks = session.receipt.showAll ? available : available.slice(0, 6);
@@ -349,7 +349,8 @@ function decideGuide(input = {}) {
     }
   }
   if (step === "review" && !session.shown["review-next"] && String(input.pricesLabel || "").trim() && unfound.length) {
-    const chips = [{ id: "search", label: "Search", action: "open-search", name: unfound[0] }];
+    const chips = [];
+    chips.push({ id: "search", label: "Search", action: "open-search", name: unfound[0] });
     chips.push({ id: "no", label: "No thanks", action: "later" });
     return {
       moment: "review-next",

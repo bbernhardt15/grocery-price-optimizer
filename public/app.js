@@ -165,7 +165,7 @@ import { customCatalogProduct, mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
 import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
-import { calmPriceNote, ESTIMATE_NOTE, plainSwap, priceFigure, savingsCard, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
+import { calmPriceNote, ESTIMATE_NOTE, plainSwap, priceFigure, savingsCard, savingsChangeNote, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
 import { dedupeTripStores, inStoreSendHtml } from "./shopper/tripLines.js";
 import { armHandoff, createReturnWatch, dismissReturnChoice, returnPromptDecision } from "./shopper/returnPrompt.js";
@@ -1328,8 +1328,11 @@ function clearTripItems() {
   publishTripState();
   void pushAccountList();
   renderEstimate();
-  if (flowStep === "plan") paintTrip();
-  if (flowStep === "shop") renderShop();
+  if (flowStep === "plan" || flowStep === "shop") showStep("add", "user");
+  else {
+    if (flowStep === "plan") paintTrip();
+    if (flowStep === "shop") renderShop();
+  }
   toastAction("Trip cleared.", "Undo", () => {
     if (!undoTrip) return;
     for (const [id, entry] of undoTrip) {
@@ -2822,7 +2825,7 @@ function applyVariant(card, variantId) {
   productsById.set(variant.id, stored);
   card.dataset.productId = variant.id;
   card.dataset.selectedFlavor = variant.flavorKey || "";
-  const title = stored.familyName || stored.name;
+  const title = productDisplayName(family || stored, stored);
   const images = variant.imageUrls?.length ? variant.imageUrls : family?.imageUrls || [];
   const img = card.querySelector("img");
   if (img) {
@@ -2833,6 +2836,20 @@ function applyVariant(card, variantId) {
   if (open) {
     open.setAttribute("data-open", variant.id);
     open.setAttribute("aria-label", `Details for ${title}`);
+  }
+  const heading = card.querySelector("h3");
+  if (heading) heading.textContent = title;
+  const star = card.querySelector("[data-fav-star]");
+  if (star) {
+    star.setAttribute("data-fav-name", title);
+    star.setAttribute("data-fav-id", variant.id);
+    star.setAttribute("data-fav-flavor", stored.flavorLabel || "");
+    star.setAttribute("data-fav-size", stored.sizeLabel || stored.label || "");
+    const pressed = readStarredUsuals(localStorage).some(
+      (row) => usualKey(row) === usualKey({ catalogId: variant.id, name: title, flavor: stored.flavorLabel || "", size: stored.sizeLabel || stored.label || "" })
+    );
+    star.setAttribute("aria-pressed", pressed ? "true" : "false");
+    star.setAttribute("aria-label", `${pressed ? "Unfavorite" : "Favorite"} ${title}`);
   }
   const priceEl = card.querySelector("[data-price]");
   if (priceEl) priceEl.textContent = priceText(variant);
@@ -2910,6 +2927,11 @@ function sizePanel(title, sizes, selectedId, sort) {
     .map((id) => byId.get(id))
     .filter(Boolean);
   const basis = verdict.basis && verdict.basis !== "item" ? verdict.basis : ordered.find((variant) => variant.valueBasis)?.valueBasis || null;
+  if (ordered.length <= 1) {
+    const only = ordered[0];
+    const label = only?.label || only?.sizeLabel || "This size";
+    return `<p class="size-current">Current selection <span>${escapeHtml(label)}</span></p>`;
+  }
   const showUnitToggle = hasUnits;
   const active = showUnitToggle && mode === "unit" ? "unit" : "item";
   const options = ordered
@@ -2918,7 +2940,8 @@ function sizePanel(title, sizes, selectedId, sort) {
       const badge = verdict.winnerId === variant.id ? `<span class="best-badge">Best value</span>` : "";
       const unit = active === "item" ? "" : variant.valueText ? `<span class="size-unit">${escapeHtml(variant.valueText)}</span>` : "";
       const pack = active === "item" ? `<span class="size-unit">${escapeHtml(money(variant.price))}</span>` : unit;
-      return `<li><button type="button" class="size-option" role="radio" aria-checked="${on}" data-size-id="${escapeHtml(variant.id)}"><span class="size-name">${escapeHtml(variant.label || variant.sizeLabel || "Size")}</span>${badge}${pack}</button></li>`;
+      const current = on ? `<span class="size-current-label">Current selection</span>` : "";
+      return `<li><button type="button" class="size-option" role="radio" aria-checked="${on}" data-size-id="${escapeHtml(variant.id)}">${current}<span class="size-name">${escapeHtml(variant.label || variant.sizeLabel || "Size")}</span>${badge}${pack}</button></li>`;
     })
     .join("");
   const toggle = showUnitToggle
@@ -2955,7 +2978,16 @@ function cardHtml(tile) {
     resolve: mediaUrl,
     rest: (selected.imageUrls || tile.imageUrls || []).slice(1),
   });
-  const starred = readStarredUsuals(localStorage).some((row) => usualKey(row) === usualKey({ name: title }));
+  const starred = readStarredUsuals(localStorage).some(
+    (row) =>
+      usualKey(row) ===
+      usualKey({
+        catalogId: selected.id,
+        name: title,
+        flavor: selected.flavorLabel || "",
+        size: selected.sizeLabel || selected.label || "",
+      })
+  );
   return `<article class="card" data-family-key="${escapeHtml(tile.familyKey || "")}" data-product-id="${escapeHtml(selected.id)}" data-selected-flavor="${escapeHtml(flavorKey)}" data-size-sort="unit" data-qty="1">
     <div class="card-lead">
       <button class="card-open" type="button" data-open="${escapeHtml(selected.id)}" aria-label="Details for ${escapeHtml(title)}">
@@ -2971,7 +3003,7 @@ function cardHtml(tile) {
             <input type="checkbox" data-check="${escapeHtml(selected.id)}" ${checked} aria-label="Add ${escapeHtml(title)}${variantNote ? `, ${escapeHtml(variantNote)},` : ""} to my list" />
             Add
           </label>
-          <button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(title)}" data-fav-brand="${escapeHtml(brand || "")}" data-fav-id="${escapeHtml(selected.id)}" aria-pressed="${starred ? "true" : "false"}" aria-label="${starred ? "Unfavorite" : "Favorite"} ${escapeHtml(title)}">★</button>
+          <button type="button" class="fav-star" data-fav-star="1" data-fav-name="${escapeHtml(title)}" data-fav-brand="${escapeHtml(brand || "")}" data-fav-id="${escapeHtml(selected.id)}" data-fav-flavor="${escapeHtml(selected.flavorLabel || "")}" data-fav-size="${escapeHtml(selected.sizeLabel || selected.label || "")}" aria-pressed="${starred ? "true" : "false"}" aria-label="${starred ? "Unfavorite" : "Favorite"} ${escapeHtml(title)}">★</button>
           <div class="stepper">
             <button type="button" data-dec="${escapeHtml(selected.id)}" aria-label="Decrease quantity of ${escapeHtml(title)}">−</button>
             <output>${qty}</output>
@@ -3474,7 +3506,7 @@ function renderSuggestionRows(q) {
       return `<li role="presentation"><button type="button" class="suggest-option" role="option" data-suggest="${index}" id="suggest-${index}" aria-selected="${index === activeSuggest}">
         ${thumb}
         <span>
-          <span class="suggest-name">${highlightHtml(item.name || "", q)}</span>
+          <span class="suggest-name">${highlightHtml(productDisplayName(item, item) || item.name || "", q)}</span>
           ${meta ? `<span class="suggest-meta">${meta}</span>` : ""}
         </span>
       </button></li>`;
@@ -3637,7 +3669,7 @@ function closeProductDetail(fromHistory = false) {
 }
 
 function openProduct(product, choices = []) {
-  const title = product.familyName || product.name;
+  const title = productDisplayName(product, product);
   const note = product.variantLabel || product.sizeLabel || "";
   const sizes = (choices.length ? choices : Array.isArray(product.variants) ? product.variants : [])
     .map((item) => ({
@@ -3645,14 +3677,14 @@ function openProduct(product, choices = []) {
       label: item.label || item.variantLabel || item.sizeLabel || item.name || "",
     }))
     .filter((item) => item.id && item.label);
-  const sizeHtml = sizes.length
-    ? `<div class="choice-row" role="group" aria-label="Size">${sizes
-        .map(
-          (item, index) =>
-            `<button type="button" class="chip" data-detail-size="${escapeHtml(item.id)}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(item.label)}</button>`
-        )
-        .join("")}</div>`
-    : "";
+  const sizeHtml = sizes.length <= 1
+    ? `<p class="size-current">Current selection <span>${escapeHtml(sizes[0]?.label || note || "This size")}</span></p>`
+    : `<div class="choice-row" role="group" aria-label="Size">${sizes
+        .map((item, index) => {
+          const on = index === 0;
+          return `<button type="button" class="chip" data-detail-size="${escapeHtml(item.id)}" aria-pressed="${on ? "true" : "false"}">${on ? "Current selection " : ""}${escapeHtml(item.label)}</button>`;
+        })
+        .join("")}</div>`;
   productDialog.innerHTML = `<div class="sheet-body detail-sheet">
     <div class="detail-bar">
       <button type="button" class="text-btn" id="dialog-back">Back</button>
@@ -4459,10 +4491,16 @@ function reviewStoreArticle(store, couponSummary, coupons) {
     store.handoff?.action?.type === "walmart_cart"
       ? `<p class="handoff-note">Opens a Walmart link. You review the cart there. This does not sign in to your Walmart account.</p>`
       : "";
+  const failed = (lastOptimize?.pricingByStore || []).some((row) => {
+    const same = String(row?.storeName || "").toLowerCase() === String(store.storeName || "").toLowerCase();
+    const check = String(row?.check || "");
+    return same && check && check !== "ok";
+  });
   return reviewStoreCardHtml({
     name: store.storeName,
     countLabel,
     total,
+    retryHtml: failed ? `<button type="button" class="ghost" data-plan-retry="1">Retry</button>` : "",
     minHeight: 0,
     markHtml: `<span class="handoff-mark" data-handoff="${escapeHtml(mark.kind)}">${escapeHtml(mark.label)}</span>`,
     actionHtml: `${callout}${action}${walmartNote}`,
@@ -4780,6 +4818,7 @@ function placeReviewAnchor(snapshot) {
 }
 
 let reviewUserOwned = false;
+let lastSavingsShown = null;
 
 function restoreReviewScroll(snapshot) {
   refreshAnchorWatch += 1;
@@ -4844,7 +4883,8 @@ function paintTrip() {
   const plannedBest = plans?.best?.stores;
   const bestStores = presentPlan(plannedBest?.length ? plannedBest : view.stores);
   const lines = bestStores.flatMap((store) => store.items || []);
-  const card = savingsCard(singleStoreSavings(lines));
+  const comparison = singleStoreSavings(lines);
+  const card = savingsCard(comparison);
   const figures = cartCardFigures(bestStores);
   if (card.lines?.length && Number(figures.total) > 0) {
     card.lines = card.lines.map((line) => (line.label === "This plan" ? { ...line, value: priceFigure(figures.total) } : line));
@@ -4880,6 +4920,11 @@ function paintTrip() {
       card.note = "";
     }
   } else if (plans && !/^You saved /.test(card.saved || "")) card.saved = savingsVersusBaseline(plans);
+  if (!checksOpen) {
+    const change = savingsChangeNote(lastSavingsShown, comparison.savings);
+    if (change) card.note = [card.note, change].filter((line) => line && line !== ESTIMATE_NOTE).join(" ");
+    lastSavingsShown = comparison.savings;
+  }
   const coupons = readCoupons(localStorage);
   const couponSummary = couponSavingsSummary(view.stores, coupons, todayKey());
   const hasCoupons = (couponSummary.byStore || []).some((row) => (row.rows || []).length);
@@ -4912,9 +4957,22 @@ function paintTrip() {
         <button type="button" data-plan-mode="spread" aria-pressed="${mode === "spread" ? "true" : "false"}">Best price<span>${escapeHtml(bestDetail)}</span></button>
         <button type="button" data-plan-mode="fewer" aria-pressed="${mode === "fewer" ? "true" : "false"}">Fewer stores<span>${escapeHtml(formatPlanDetail(plans.fewer))} · ${escapeHtml(fewerExtra)}</span></button>
       </section>`;
+  const failedOnly = (lastOptimize?.pricingByStore || [])
+    .filter((row) => row?.storeName && row?.check && row.check !== "ok")
+    .map((row) => String(row.storeName))
+    .filter((name, index, all) => all.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index);
   const panel = (name, stores, hidden) => {
     const pending = !hidden && planning ? reviewPendingCardsHtml(pendingReviewNames(lastOptimize, stores)) : "";
-    return `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}${pending}</div></div>`;
+    const retries = hidden
+      ? ""
+      : failedOnly
+          .filter((storeName) => !(stores || []).some((store) => String(store.storeName || "").toLowerCase() === storeName.toLowerCase()))
+          .map(
+            (storeName) =>
+              `<article class="calm-store review-store" data-store="${escapeHtml(storeName)}"><header class="review-store-head"><h3 class="store-fold-name">${escapeHtml(storeName)}</h3><button type="button" class="ghost" data-plan-retry="1">Retry</button><p class="muted">This store didn't finish.</p></header></article>`
+          )
+          .join("");
+    return `<div data-plan-panel="${name}"${hidden ? " hidden" : ""}><div class="store-grid">${stores.map((store) => reviewStoreArticle(store, couponSummary, coupons)).join("")}${retries}${pending}</div></div>`;
   };
   const noteSets = coverageNotesFor(plans, lastOptimize?.pricingByStore);
   const visibleNotes = coverageVisible([...noteSets.unchecked, ...noteSets.missing], {
@@ -4924,25 +4982,21 @@ function paintTrip() {
   const coverage = visibleNotes
     .map((note) => {
       const raw = String(note.text || "");
-      const retry = /retry/i.test(raw);
       const sentence = raw.replace(/,?\s*retry\.?$/i, ".").replace(/\.\.$/, ".");
-      const button = retry ? ` <button type="button" class="text-btn" data-plan-retry="1">Retry</button>` : "";
-      return `<p class="coverage-note"><span>${escapeHtml(sentence)}</span>${button}</p>`;
+      return `<p class="coverage-note"><span>${escapeHtml(sentence)}</span></p>`;
     })
     .join("");
   const savingsLine = !checksOpen && plans?.baseline ? `<p class="plan-savings-line">${escapeHtml(savingsVersusBaseline(plans))}</p>` : "";
   const nudge = checksOpen || mode === "single" || tripEdits.keepSplit ? null : savingsNudge(plans);
   const missingNames = unmatchedItemNames(lastOptimize);
-  const missing = planning && missingNames.length
-    ? `<p class="matching-progress" role="status">Matching ${missingNames.length} ${missingNames.length === 1 ? "item" : "items"}…</p>`
-    : unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
+  const missing = unfoundSectionHtml(missingNames, escapeHtml) || missingAccordionHtml(missingNames);
   const progress = "";
   const singleStores = plans?.single ? presentPlan(plans.single.stores) : [];
   const shown = mode === "custom" ? customStores : mode === "single" ? singleStores : mode === "fewer" ? fewerStores : bestStores;
   const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
   const age = pricesUpdatedLabel(pricedAt, Date.now());
-  const reviewHead = `<div class="review-head">
-      ${age ? `<p class="prices-age">${escapeHtml(age)}</p>` : ""}
+  const reviewHead = age ? `<p class="prices-age">${escapeHtml(age)}</p>` : "";
+  const reviewActions = `<div class="review-head review-actions-below">
       <div class="review-head-actions">
         <button type="button" class="text-btn" id="plan-refresh" title="Checks these stores again and keeps the prices already on screen">Check these prices again</button>
         <button type="button" class="text-btn" data-complete-trip="1">Save this trip</button>
@@ -4970,6 +5024,7 @@ function paintTrip() {
     ${showFewer ? panel("fewer", fewerStores, mode !== "fewer") : ""}
     ${mode === "single" ? panel("single", singleStores, false) : ""}
     ${mode === "custom" ? panel("custom", customStores, false) : ""}
+    ${reviewActions}
     ${emptyCheckedStoreHtml(shown)}
     ${missing}
     ${showCouponEstimate ? `<section class="coupon-estimate">${couponSummaryMarkup(couponSummary)}</section>` : ""}
@@ -5031,7 +5086,7 @@ async function fillMissingSuggestions() {
       if (fillMissingSuggestions.generation !== generation || !host.isConnected) return;
       const ranked = rankSwapSuggestions(name, body.items || []);
       if (!ranked.length) {
-        host.innerHTML = `<p class="muted">Nothing close in the catalog.</p>`;
+        host.innerHTML = `<p class="muted">Not currently available at your stores.</p>`;
         continue;
       }
       host.innerHTML = ranked
@@ -5045,7 +5100,7 @@ async function fillMissingSuggestions() {
         })
         .join("");
     } catch {
-      if (host.isConnected) host.innerHTML = `<p class="muted">Nothing close in the catalog.</p>`;
+      if (host.isConnected) host.innerHTML = `<p class="muted">Not currently available at your stores.</p>`;
     }
   }
 }
@@ -5680,9 +5735,8 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   const earlyFallback = window.setTimeout(() => {
     if (!planning || planAbort !== controller) return;
     paintPlanningStatus();
-    if (streamedPlan && planIsShowable(streamedPlan) && !tripEl?.querySelector("[data-review-shell]")) {
-      commitDisplayedPlan({ ...streamedPlan, partial: true }, { zip, prefetch: quiet && stay });
-      holdVisibleReview("Some stores are still checking. These prices are ready to use.");
+    if (streamedPlan && tripEl?.querySelector("[data-review-shell]")) {
+      holdVisibleReview("Checking store prices");
     } else if (flowStep === "plan" && !planReady(lastOptimize)) {
       paintReviewLoading("Still checking. Prices that are ready will show here. Retry if a store stalls.");
     }
@@ -5690,9 +5744,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   planBtn.disabled = false;
   setBusy(trigger, true);
   setBusy(document.querySelector('[data-flow="plan"]'), true);
-  const preview = !planReady(lastOptimize) ? listPlanFallback() : null;
-  if (preview && planIsShowable(preview)) renderTrip(preview, { keepEdits: true, force: true });
-  else if (flowStep === "plan" && holdVisibleReview()) {
+  if (flowStep === "plan" && holdVisibleReview("Checking store prices")) {
     /* the priced list stays. Refresh must not swap in the short loading shell. */
   }
   else if (flowStep === "plan") paintReviewLoading();
@@ -5746,7 +5798,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       if (shown && planIsShowable(shown)) {
         if (Array.isArray(result?.pendingStores) && result.pendingStores.length) shown.pendingStores = result.pendingStores;
         streamedPlan = shown;
-        if (commitDisplayedPlan(shown, { zip, prefetch: quiet && stay })) clearPlanTabBusy();
+        if (tripEl?.querySelector("[data-review-shell]")) holdVisibleReview("Checking store prices");
         return;
       }
       if (flowStep === "plan" && !planReady(lastOptimize)) paintReviewLoading();
@@ -6786,11 +6838,13 @@ document.addEventListener("click", (event) => {
       name,
       brand: favStar.getAttribute("data-fav-brand") || "",
       catalogId: favStar.getAttribute("data-fav-id") || "",
+      flavor: favStar.getAttribute("data-fav-flavor") || "",
+      size: favStar.getAttribute("data-fav-size") || "",
     });
     favStar.setAttribute("aria-pressed", on ? "true" : "false");
     favStar.setAttribute("aria-label", `${on ? "Unfavorite" : "Favorite"} ${name}`);
     toast(on ? "Marked as favorite" : "Removed from favorites");
-    paintUsuals();
+    if (!document.querySelector("dialog[open]")) paintUsuals();
     return;
   }
   if (target.closest("[data-share-list]")) {
@@ -7820,8 +7874,19 @@ document.addEventListener("click", (event) => {
     const input = form?.querySelector("input");
     const family = form?.getAttribute("data-fav-find") || "";
     if (family && input) {
-      saveFavoriteVariant(family, input.value);
-      toast(input.value.trim() ? `We'll look for “${input.value.trim()}” on the ${family} aisle.` : "Cleared that product search.");
+      const text = input.value.trim();
+      saveFavoriteVariant(family, text);
+      if (!text) {
+        toast("Cleared that product search.");
+        return;
+      }
+      query = text;
+      if (searchEl) searchEl.value = text;
+      closeFavorites();
+      showStep("add", "user");
+      openBrowse();
+      void loadPage(true);
+      toast(`Searching for “${text}”.`);
     }
     return;
   }
@@ -7843,9 +7908,15 @@ document.addEventListener("click", (event) => {
     const current = profile.categoryPreferences?.[family] || {};
     if (brand) {
       const name = brand.getAttribute("data-fav-brand") || "";
-      const on = brand.getAttribute("aria-pressed") === "true";
-      saveFavoriteChoice(family, { brand: on ? "" : name, variant: current.variant || "" });
-      toast(on ? "Removed from favorites" : "Marked as favorite");
+      if (brand.getAttribute("data-fav-mode") === "storeBrand") {
+        const on = current.mode === "storeBrand";
+        saveFavoriteChoice(family, { brand: "", mode: on ? "skip" : "storeBrand", variant: current.variant || "" });
+        toast(on ? "Store brand cleared." : "Store brand. Kroger or Great Value, depending on the store.");
+      } else {
+        const on = brand.getAttribute("aria-pressed") === "true";
+        saveFavoriteChoice(family, { brand: on ? "" : name, mode: on ? "skip" : "brand", variant: current.variant || "" });
+        toast(on ? "Removed from favorites" : "Marked as favorite");
+      }
     } else {
       const id = flavor.getAttribute("data-fav-flavor") || "";
       const attributes = new Set(current.attributes || []);
@@ -9140,8 +9211,9 @@ function brandAisleHtml() {
       ${brandChips ? `<p class="choice-label">Brand</p><div class="choice-row" role="group" aria-label="Brand for ${escapeHtml(step.label)}">${brandChips}</div>` : ""}
       <p class="choice-label">Store brand</p>
       <div class="choice-row" role="group" aria-label="Store brand for ${escapeHtml(step.label)}">
-        ${["Kroger", "Simple Truth", "Great Value", "Good & Gather"].map((name) => `<button type="button" class="choice-chip" data-fav-brand="${escapeHtml(name)}" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${name.toLowerCase() === String(brand).toLowerCase() ? "true" : "false"}">${escapeHtml(name)}</button>`).join("")}
+        <button type="button" class="choice-chip" data-fav-brand="Store brand" data-fav-mode="storeBrand" data-fav-family="${escapeHtml(step.id)}" aria-pressed="${pref.mode === "storeBrand" ? "true" : "false"}">Store brand</button>
       </div>
+      <p class="muted">Store brand uses Kroger at Kroger and Great Value at Walmart.</p>
       ${flavorChips ? `<p class="choice-label">${choiceLabel}</p><div class="choice-row" role="group" aria-label="${choiceLabel} for ${escapeHtml(step.label)}">${flavorChips}</div><p class="muted">Pick any that apply. This aisle only.</p>` : ""}
       <form class="favorites-row" data-fav-find="${escapeHtml(step.id)}">
         <label>Specific product
@@ -9162,7 +9234,6 @@ function paintFavorites() {
   if (title) title.textContent = brands ? "Brands by aisle" : "Your favorites";
   const screen = $("favorites-screen");
   screen?.querySelector(":scope > .muted")?.toggleAttribute("hidden", brands);
-  screen?.querySelector("h3")?.toggleAttribute("hidden", brands);
   const host = $("favorites-prefs");
   if (host) host.innerHTML = brands ? brandAisleHtml() : "";
   const listHost = $("favorites-usuals");
@@ -9247,6 +9318,7 @@ function showStep(step, reason = "user") {
     if (lists?.open) lists.close();
     if (lists) lists.innerHTML = "";
   }
+  if (priorStep === "add" && flowStep === "plan") document.__gitterGuide?.sync?.();
   if (priorStep !== flowStep) {
     if (priorStep === "plan" && flowStep !== "plan") {
       releaseRefreshScrollGuard(refreshAnchorWatch);
@@ -11052,6 +11124,30 @@ guide = mountGuide({
 matchSheet = mountMatchSheet({
   apiUrl,
   fetchBrowse,
+  isStarred(product, title) {
+    return readStarredUsuals(localStorage).some(
+      (row) =>
+        usualKey(row) ===
+        usualKey({
+          catalogId: product?.id,
+          name: title || product?.name,
+          flavor: product?.flavorLabel || "",
+          size: product?.sizeLabel || "",
+        })
+    );
+  },
+  onStar(product) {
+    const title = productDisplayName(product, product);
+    const on = toggleStarredUsual(localStorage, {
+      name: title,
+      brand: product?.brand || "",
+      catalogId: product?.id || "",
+      flavor: product?.flavorLabel || "",
+      size: product?.sizeLabel || "",
+    });
+    toast(on ? "Marked as favorite" : "Removed from favorites");
+    return on;
+  },
   onPick(product, name, store, options = {}) {
     const wanted = String(name || "").trim();
     for (const [id, entry] of [...list]) {
@@ -11078,7 +11174,7 @@ matchSheet = mountMatchSheet({
       store ? String(row?.storeName || "").trim().toLowerCase() === String(store).trim().toLowerCase() : Number(row?.price) > 0
     );
     const catalogPrice = Number(offer?.price ?? product.bestOffer?.price ?? product.price);
-    const title = String(product.familyName || product.name || wanted || "Item");
+    const title = productDisplayName(product, product) || String(wanted || "Item");
     const lineId = `pref-${product.id || title}`;
     const placed = placePickedLine(document, {
       storeName: store || offer?.storeName || "",
@@ -11146,6 +11242,18 @@ importer = mountImport({
   },
   shapeReview(review) {
     return shapeImportReview(review, getUserProfile(localStorage));
+  },
+  isOnList(product, name) {
+    if (product?.id && findListEntry(product.id)) return true;
+    const wanted = String(name || product?.name || product?.familyName || "").trim().toLowerCase();
+    if (!wanted) return false;
+    for (const entry of list.values()) {
+      const labels = [entry.product?.name, entry.product?.familyName, entry.product?.catalogName]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+      if (labels.some((label) => label === wanted || label.includes(wanted) || wanted.includes(label))) return true;
+    }
+    return false;
   },
   prepareAdd(item, product) {
     const profile = getUserProfile(localStorage);
