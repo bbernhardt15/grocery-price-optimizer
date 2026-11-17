@@ -2442,9 +2442,7 @@ body[data-browse="open"] #shelf-entry { display: none !important; }
 .store-fold-name { font-family: var(--display); font-size: 1.25rem; }
 .review-refresh-slot {
   display: block;
-  box-sizing: border-box;
-  min-height: 44px;
-  margin: 0 0 12px;
+  overflow-anchor: none;
 }
 .review-refresh-note {
   position: static;
