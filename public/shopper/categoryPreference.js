@@ -429,7 +429,7 @@ export function nameBrandsFor(products, familyId) {
     counts.set(canon.key, row);
   }
   return [...counts.values()]
-    .sort((a, b) => b.score - a.score || b.count - a.count || a.brand.localeCompare(b.brand))
+    .sort((a, b) => a.brand.localeCompare(b.brand) || b.count - a.count)
     .slice(0, 24);
 }
 

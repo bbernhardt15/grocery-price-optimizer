@@ -107,7 +107,9 @@ export const WALMART_NAME_DENY: readonly ScopeRule[] = [
     test: /\b(?:closet organizers?|storage cabinets?|shelving units?|bookcases?|dressers?)\b/i,
   },
   { id: "furniture", test: /\b(?:sofas?|couches?|mattresses?|nightstands?|sectionals?)\b/i },
-  { id: "electronics", test: /\b(?:televisions?|laptops?|headphones?)\b|\b\d{2,3}\s*(?:inch|in)\s+tvs?\b/i },
+  { id: "electronics", test: /\b(?:televisions?|laptops?|headphones?|iphones?|ipads?|applecare\+?|apple\s*watch(?:es)?|macbooks?|airpods|smartphones?)\b|\b\d{2,3}\s*(?:inch|in)\s+tvs?\b/i },
+  { id: "live-plant", test: /\b(?:live plants?|potted plants?|nursery)\b/i },
+  { id: "faux-fruit", test: /\bfaux\b[^.]{0,24}\bfruits?\b|\bartificial\s+fruits?\b/i },
 ];
 
 function segmentsOf(categories: string[]): string[] {

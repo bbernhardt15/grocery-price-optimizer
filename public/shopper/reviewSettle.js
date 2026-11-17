@@ -16,6 +16,7 @@
  */
 
 import { adoptReviewResult, planIsComplete, readPlanCache, shouldReusePlan, writePlanCache } from "./planCache.js";
+import { lineCharge } from "./tripPlan.js";
 
 export function roundMoney(value) {
   const amount = Number(value);
@@ -29,14 +30,7 @@ export function roundMoney(value) {
  * @param {object | null | undefined} item
  */
 export function lineAmount(item) {
-  const quantity = Number(item?.quantity);
-  const count = Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
-  if (count <= 0) return 0;
-  const price = Number(item?.price);
-  if (Number.isFinite(price)) return roundMoney(price * count);
-  const explicit = Number(item?.itemTotal);
-  if (Number.isFinite(explicit)) return roundMoney(explicit);
-  return 0;
+  return lineCharge(item);
 }
 
 /** @param {Array<{ items?: object[] }> | null | undefined} stores */

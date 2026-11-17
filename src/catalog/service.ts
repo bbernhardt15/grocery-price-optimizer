@@ -66,6 +66,8 @@ export type BrowsePage = {
   warnings: string[];
   cached: boolean;
   catalogSource: "demo" | "mixed" | "live" | "database";
+  /** True when the number is a page or a scan cap, not the aisle size. */
+  partial?: boolean;
 };
 
 function ttlMs(envName: string, fallbackMinutes: number): number {
@@ -379,7 +381,7 @@ async function firstPageFeed(work: Promise<RawCatalogRecord[]>, warnings: string
 async function loadScope(
   scope: { departmentId?: string; query?: string; maxScan?: number },
   zipCode?: string
-): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean }> {
+): Promise<{ products: BrowseProduct[]; warnings: string[]; cached: boolean; fromDatabase: boolean; capped?: boolean }> {
   const query = scope.query?.trim();
   const departmentId = scope.departmentId?.trim();
   if (query && query.length >= 2) {
@@ -414,6 +416,7 @@ async function loadScope(
         warnings,
         cached: true,
         fromDatabase: true,
+        capped: stored.capped,
       };
     }
   }
@@ -629,6 +632,7 @@ export async function browseCatalog(request: BrowseQuery): Promise<BrowsePage> {
     warnings: scope.warnings,
     cached: scope.cached,
     catalogSource: scope.fromDatabase ? "database" : catalogSourceOf(scope.products),
+    partial: Boolean(scope.capped) || page.nextCursor != null,
   };
 }
 

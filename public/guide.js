@@ -518,11 +518,11 @@ export function mountGuide(deps = {}) {
       return;
     }
     if (action === "commit-picks") {
-      const names = [...root.querySelectorAll("[data-guide-action='toggle-pick'][aria-pressed='true']")]
+      const pressed = [...root.querySelectorAll("[data-guide-action='toggle-pick'][aria-pressed='true']")];
+      const names = pressed
         .map((chip) => chip.getAttribute("data-guide-name") || "")
         .map((name) => name.trim())
         .filter(Boolean);
-      if (!names.length) return;
       const moment = closeVisible("shown");
       deps.onAction?.("commit-picks", { names, moment });
       return;

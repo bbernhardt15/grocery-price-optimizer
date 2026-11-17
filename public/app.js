@@ -165,6 +165,7 @@ import { customCatalogProduct, mountImport } from "./shopper/import.js";
 import { askIntent } from "./shopper/askIntent.js";
 import { describeMeal, mealPlan } from "./shopper/mealIdeas.js";
 import { createListHome } from "./shopper/listHome.js";
+import { readBook, rememberStarredSlot, writeBook } from "./shopper/themedLists.js";
 import { calmPriceNote, ESTIMATE_NOTE, plainSwap, priceFigure, savingsCard, savingsChangeNote, shelfNote, shopperCopy } from "./shopper/calmPlan.js";
 import { aisleIsKnown, cachedTrip, doneMessage, inStoreRoute, shopProgress, swapChoices } from "./shopper/inStore.js";
 import { dedupeTripStores, inStoreSendHtml } from "./shopper/tripLines.js";
@@ -472,6 +473,15 @@ function clearStuckLayers() {
 }
 
 function goHome() {
+  const typed = String(searchEl?.value || query || "").trim();
+  if (typed) {
+    query = "";
+    browseOpen = false;
+    activeDepartment = "all";
+    if (searchEl) searchEl.value = "";
+    closeSuggestions();
+    syncBrowse();
+  }
   clearStuckLayers();
   const open = [...document.querySelectorAll("dialog[open]")].map((dialog) => dialog.id);
   const transition = homeTransition(open);
@@ -3098,7 +3108,12 @@ function bindKeyboardInset() {
     const fullHeight = Math.round(window.innerHeight || viewport?.height || 0);
     if (fullHeight) document.documentElement.style.setProperty("--vv-height", `${fullHeight}px`);
     if (insets.keyboard > 80 && document.activeElement instanceof HTMLElement) {
-      document.activeElement.scrollIntoView({ block: "center", inline: "nearest" });
+      const field = document.activeElement;
+      if (field.id === "search") {
+        const bar = document.querySelector(".topbar")?.getBoundingClientRect().height || 64;
+        const top = field.getBoundingClientRect().top;
+        window.scrollBy({ top: top - bar - 12, left: 0 });
+      } else field.scrollIntoView({ block: "center", inline: "nearest" });
     }
   };
   apply();
@@ -3279,7 +3294,8 @@ async function loadPage(reset) {
         resultCountEl.textContent = `Your ${familyLabel(viewed.resolved.family) || "usual"}`;
       } else {
         const label = query ? `Results for “${query}”` : activeDepartment === "all" ? "All departments" : departments.find((d) => d.id === activeDepartment)?.name || "Aisle";
-        resultCountEl.textContent = `${total} ${total === 1 ? "product" : "products"} · ${label}`;
+        const counted = !body.partial && Number.isFinite(total);
+        resultCountEl.textContent = counted ? `${total} ${total === 1 ? "product" : "products"} · ${label}` : label;
       }
       if (reset) {
         aisleCache.set(cacheKey, {
@@ -4588,6 +4604,25 @@ function clearReviewRefresh() {
 
 /** Keep the priced Review on screen while a refresh is in flight. The note does not change the page height. */
 function holdVisibleReview(status) {
+  if (flowStep === "shop" && planReady(lastOptimize)) {
+    clearReviewRefresh();
+    return false;
+  }
+  const text = status || "Checking store prices";
+  if (flowStep === "shop") {
+    const shop = document.getElementById("shop");
+    if (!(shop instanceof HTMLElement)) return false;
+    let note = shop.querySelector("[data-review-refresh]");
+    if (!(note instanceof HTMLElement)) {
+      note = document.createElement("p");
+      note.className = "shop-checking-banner";
+      note.setAttribute("data-review-refresh", "1");
+      note.setAttribute("role", "status");
+      shop.insertBefore(note, shop.firstChild);
+    }
+    note.textContent = text;
+    return true;
+  }
   const shell = tripEl?.querySelector("[data-review-shell]");
   if (!(shell instanceof HTMLElement)) return false;
   shell.setAttribute("aria-busy", "true");
@@ -4599,7 +4634,7 @@ function holdVisibleReview(status) {
     note.setAttribute("role", "status");
     document.body.appendChild(note);
   }
-  note.textContent = status || "Checking store prices";
+  note.textContent = text;
   return true;
 }
 
@@ -4916,7 +4951,6 @@ function paintTrip() {
     if (!waiting && overlap.eligibleCount > 0 && Number(overlap.savings) > 0.009) {
       const partial = savingsCard(overlap);
       card.title = partial.title || "Savings on the items both stores priced";
-      card.lines = partial.lines || [];
       card.saved = `You saved ${priceFigure(overlap.savings)} using Grocery Gitter`;
       const leftOut = overlap.excluded?.length || 0;
       card.note = leftOut
@@ -5946,9 +5980,13 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
       if (flowStep === "plan" && tripEl?.querySelector(".matching-progress")) paintTrip();
       const statusBlock = document.getElementById("plan-status-block");
       if (statusBlock) statusBlock.remove();
-      if (timeoutNote && tripEl?.querySelector("[data-review-shell]")) {
+      if (timeoutNote && flowStep === "plan" && tripEl?.querySelector("[data-review-shell]")) {
         holdVisibleReview(timeoutNote);
         if (refreshHeldScroll != null) writeReviewScroll(refreshHeldScroll);
+      } else if (timeoutNote && flowStep === "plan" && !planReady(lastOptimize)) {
+        paintReviewLoading(REVIEW_GAVE_UP_STATUS);
+      } else if (flowStep === "shop") {
+        clearReviewRefresh();
       }
       planAbort = null;
       planBtn.disabled = list.size === 0;
@@ -6858,6 +6896,17 @@ document.addEventListener("click", (event) => {
     });
     favStar.setAttribute("aria-pressed", on ? "true" : "false");
     favStar.setAttribute("aria-label", `${on ? "Unfavorite" : "Favorite"} ${name}`);
+    if (on) {
+      const book = readBook(localStorage);
+      const nextBook = rememberStarredSlot(book, {
+        id: favStar.getAttribute("data-fav-id") || "",
+        name,
+        brand: favStar.getAttribute("data-fav-brand") || "",
+        sizeLabel: favStar.getAttribute("data-fav-size") || "",
+        flavorLabel: favStar.getAttribute("data-fav-flavor") || "",
+      });
+      if (nextBook !== book) writeBook(localStorage, nextBook);
+    }
     toast(on ? "Marked as favorite" : "Removed from favorites");
     if (!document.querySelector("dialog[open]")) paintUsuals();
     return;
@@ -9616,8 +9665,9 @@ function lists() {
         const response = await fetchBrowse(browse, {}, PLAN_TIMEOUT_MS);
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "The shelf didn't load.");
-        for (const tile of body.items || []) rememberTile(tile);
-        return body.items || [];
+        const ranked = rankFoodMatches(body.items || [], query, query, eggRankStore());
+        for (const tile of ranked) rememberTile(tile);
+        return ranked;
       },
       productById: (id) => productsById.get(id),
       hasProduct: (id) => Boolean(findListEntry(id)),
@@ -9662,6 +9712,17 @@ function lists() {
       },
       onEditFavorites: () => profileUi?.openFavorites?.(),
       onFavorite: (product, slotId) => {
+        const name = product?.familyName || product?.catalogName || product?.name || "";
+        if (name) {
+          starUsual(localStorage, {
+            name,
+            brand: product?.brand || "",
+            catalogId: product?.id || product?.defaultVariantId || "",
+            flavor: product?.flavorLabel || "",
+            size: product?.sizeLabel || product?.variantLabel || "",
+          });
+          paintUsuals();
+        }
         const learned = learnPreference(getUserProfile(localStorage), product, { family: slotId, source: "swap", replace: true, locked: true });
         const next = learnCategoryFromProduct(acceptAlways(learned, product, "swap"), product);
         saveUserProfile(localStorage, next);
@@ -10345,7 +10406,9 @@ async function boot() {
       else guide?.holdAfterReturn?.();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
-    document.documentElement.classList.remove("welcome-hold");
+    const onboardOpen = document.getElementById("profile-onboard")?.open;
+    if (onboardOpen) requestAnimationFrame(() => document.documentElement.classList.remove("welcome-hold"));
+    else document.documentElement.classList.remove("welcome-hold");
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
     if (wantsAlerts && onboard?.open) {

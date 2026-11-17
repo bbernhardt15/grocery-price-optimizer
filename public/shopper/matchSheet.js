@@ -198,6 +198,18 @@ export function productDisplayName(tile, variant) {
   const flavor = flavorLabel || (variantLabel && !looksLikeSize(variantLabel) ? variantLabel : "");
   const size = cleanLabel(variant?.sizeLabel || tile?.sizeLabel || variant?.label || (looksLikeSize(variantLabel) ? variantLabel : ""));
   let base = flavorFirst(withoutSize(raw, size), flavor);
+  if (flavor && !/\bdiet\b/i.test(flavor)) base = base.replace(/\bdiet\b/gi, " ");
+  const seen = new Set();
+  base = base
+    .split(/\s+/)
+    .filter((word) => {
+      const key = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!key || key === "pop" || key === "regular") return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(" ");
   const brand = cleanLabel(variant?.brand || tile?.brand || "");
   if (brand && STORE_BRAND.test(brand) && !base.toLowerCase().includes(brand.toLowerCase())) base = `${brand} ${base}`;
   if (size && !base.toLowerCase().includes(size.toLowerCase())) return `${base} ${size}`.replace(/\s+/g, " ").trim();

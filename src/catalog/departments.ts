@@ -157,7 +157,7 @@ const RULES: readonly Rule[] = [
   { test: /\bbreakfast\b/i, departmentId: "breakfast" },
   { test: /coffee|tea bag|green tea|black tea/i, departmentId: "beverages", subcategory: "Coffee & Tea" },
   { test: /orange juice|apple juice|\bjuice\b/i, departmentId: "beverages", subcategory: "Juice" },
-  { test: /soda|cola|sparkling water|\bwater\b/i, departmentId: "beverages", subcategory: "Soda" },
+  { test: /soda|cola|\bcoke\b|sparkling water|\bwater\b/i, departmentId: "beverages", subcategory: "Soda" },
   { test: /beverage|drink/i, departmentId: "beverages" },
   { test: /\bsnack/i, departmentId: "snacks" },
   { test: /bagel|muffin|croissant/i, departmentId: "bakery", subcategory: "Rolls & Bagels" },
@@ -171,7 +171,7 @@ const RULES: readonly Rule[] = [
   { test: /\bmeat\b/i, departmentId: "meat-seafood" },
   { test: /\b(?:creme|cream)\s+eggs?\b/i, departmentId: "snacks", subcategory: "Candy" },
   { test: /\b(?:easter\s+eggs?|egg\s+dyes?|egg\s+color(?:ing|s)?|plastic\s+eggs?|egg\s+decorating)\b/i, departmentId: "other" },
-  { test: /lamisil|\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|alocane|americaine|birchwood)\b|\b(?:pain\s+relief|muscle|cold\s+sore|hem+orrh?oid\w*|antifungal|diaper\s+rash|shaving|face|facial|eye|hand|foot)\s+creams?\b|\b(?:ointments?|insoles?|forefoot|high\s+heels?|scar\s+therapy|\bcbd\b)\b/i, departmentId: "personal-care", subcategory: "Health" },
+  { test: /lamisil|\b(?:bengay|abreva|aspercreme|icy\s*hot|voltaren|neosporin|cortizone|hydrocortisone|preparation\s+h|alocane|americaine|birchwood|calamine)\b|\b(?:jock\s*itch|athlete'?s\s*foot|anti-?itch|antifungal|bed\s*sores?|pain\s+reliev\w*|roll-?on)\b|\b(?:pain\s+relief|muscle|cold\s+sore|hem+orrh?oid\w*|antifungal|diaper\s+rash|shaving|face|facial|eye|hand|foot)\s+creams?\b|\b(?:ointments?|insoles?|forefoot|high\s+heels?|scar\s+therapy|\bcbd\b)\b/i, departmentId: "personal-care", subcategory: "Health" },
   { test: /\bdiscontinued\b/i, departmentId: "other" },
   { test: /\beggnog\b/i, departmentId: "dairy-eggs" },
   { test: /\beggs?\b/i, departmentId: "dairy-eggs", subcategory: "Eggs" },
@@ -179,7 +179,7 @@ const RULES: readonly Rule[] = [
   { test: /yogurt/i, departmentId: "dairy-eggs", subcategory: "Yogurt" },
   { test: /butter|margarine/i, departmentId: "dairy-eggs", subcategory: "Butter" },
   { test: /\b(?:heavy|whipping|sour)\s+creams?\b|\bcream\s+cheese\b|\bcreamers?\b|\bhalf\s*(?:&|and)\s*half\b|\bmilk\b|\bdairy\b/i, departmentId: "dairy-eggs", subcategory: "Milk" },
-  { test: /banana|apple|berry|fruit|avocado|grape/i, departmentId: "produce", subcategory: "Fruit" },
+  { test: /\b(?:bananas?|avocados?|grapes?|applesauce)\b|\bapples\b|\bfresh\s+fruit\b|\bberries\b/i, departmentId: "produce", subcategory: "Fruit" },
   { test: /\bcarrots?\b/i, departmentId: "produce", subcategory: "Vegetables" },
   { test: /spinach|lettuce|vegetable|broccoli|herb|onion|potato|bok choy|kale|arugula/i, departmentId: "produce", subcategory: "Vegetables" },
   { test: /produce/i, departmentId: "produce" },
@@ -499,6 +499,50 @@ const TOPICAL_CARE = /\b(?:lip\s*care|lip\s*balms?|cocoa butter|lotions?|body bu
 
 /** Creams and ointments. Gels stay with tablets so glucose gel and liquid gels stay oral. */
 const TOPICAL_MEDICINE = /\b(?:creams?|ointments?|lotions?|balms?|anti-?itch)\b/i;
+
+/**
+ * Electronics, services, and health products that were stored in a food aisle.
+ * Browse hides these from food and can pull the health ones into Personal Care.
+ */
+export const MISFILED_GROCERY_NAME =
+  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|\*{2,}\s*discontinued/i;
+
+/** The aisle a shopper should see, even when the stored department is stale. */
+export function browseDepartment(categories: string[] | undefined, name: string, stored?: string): string {
+  const mapped = mapToDepartment(categories, name);
+  if (mapped.signal === "excluded") return "other";
+  if (mapped.departmentId !== "other") return mapped.departmentId;
+  const kept = (stored || "").trim().toLowerCase();
+  return kept && kept !== "other" ? kept : "other";
+}
+
+export type AisleMismatch = {
+  name: string;
+  stored: string;
+  mapped: string;
+  reason: string;
+};
+
+/** Rows whose stored aisle is not the aisle the current mapper would show. */
+export function reportAisleMismatches(
+  rows: readonly { name: string; categories?: string[]; departmentId?: string }[]
+): AisleMismatch[] {
+  const mismatches: AisleMismatch[] = [];
+  for (const row of rows) {
+    const stored = (row.departmentId || "").trim().toLowerCase();
+    const mapped = mapToDepartment(row.categories, row.name);
+    const shown = browseDepartment(row.categories, row.name, stored);
+    if (!stored || stored === shown) continue;
+    if (stored === "other" && shown === "other") continue;
+    mismatches.push({
+      name: row.name,
+      stored,
+      mapped: shown,
+      reason: mapped.reason || "",
+    });
+  }
+  return mismatches;
+}
 
 /** Names that matched dairy because they say cream or egg, but are not food. */
 export const DAIRY_FALSE_FRIEND =

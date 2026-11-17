@@ -144,6 +144,7 @@ export function receiptUploadHtml() {
 }
 
 const BRAND_FALLBACK = ["Kroger", "Simple Truth", "Great Value"];
+const STORE_BRAND = /^(kroger|simple truth|great value|good & gather|marketside|equate)$/i;
 
 export function brandChipMarkup(brands, options = {}) {
   const pending = Boolean(options.pending);
@@ -152,7 +153,9 @@ export function brandChipMarkup(brands, options = {}) {
     return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands" aria-busy="true"><p class="brand-loading" role="status">Loading brands</p><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span></div></fieldset>`;
   }
   const given = (brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
-  const names = given.length ? given : BRAND_FALLBACK;
+  const nameBrandRule = options.rule === "brand" || options.rule === "cheapestPicks";
+  const usable = nameBrandRule ? given.filter((brand) => !STORE_BRAND.test(brand)) : given;
+  const names = usable.length ? usable : nameBrandRule ? [] : BRAND_FALLBACK;
   const buttons = names
     .map((brand) => {
       const on = Boolean(options.selected?.has?.(String(brand).toLowerCase()));
@@ -192,8 +195,10 @@ function learnedPickerHtml(row, brands, options = {}) {
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
   const storeOnly = row?.mode === "storeBrand";
-  const names = storeOnly ? "" : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "", retry: options.retry });
-  const storeNote = storeOnly ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>` : "";
+  const names = storeOnly
+    ? ""
+    : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "", retry: options.retry, rule: nameBrand ? "brand" : "" });
+  const storeNote = storeOnly ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>` : nameBrand ? `<p class="muted store-brand-note">Name brands only. Store brands stay off this card.</p>` : "";
   const pickedCount = selected.size;
   const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
   const rule = (mode, label) => {
@@ -210,7 +215,7 @@ function learnedPickerHtml(row, brands, options = {}) {
         ${rule("cheapest", "Cheapest overall")}
       </div>
     </fieldset>
-    <button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>
+    ${/meat|seafood/i.test(`${row?.family || ""} ${row?.label || ""}`) ? `<button type="button" class="text-btn rule-never" data-learned-mode="never" data-learned-family="${family}">I don't buy it</button>` : ""}
     ${storeNote}
     ${names}
   </div>`;

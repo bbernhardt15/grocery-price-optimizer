@@ -80,7 +80,12 @@ describe("receipt preferences", () => {
     assert.equal(storeOnly.includes("brand-pick"), false);
     assert.match(storeOnly, /data-learned-mode="brand"/);
     assert.match(row, /data-learned-mode="cheapest"/);
-    assert.match(row, /data-learned-mode="never"/);
+    assert.equal(row.includes('data-learned-mode="never"'), false);
+    const meat = learnedSummaryHtml([{ family: "meat", label: "Meat", mode: "storeBrand" }], {
+      editingFamily: "meat",
+      brandsByFamily: { meat: [] },
+    });
+    assert.match(meat, /data-learned-mode="never"/);
     assert.match(row, /data-learned-brand="Tide"/);
     assert.match(row, /aria-pressed="true"/);
     const ice = learnedSummaryHtml([{ family: "ice-cream", label: "Ice cream", mode: "brand", brand: "Talenti" }], {

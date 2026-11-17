@@ -223,9 +223,34 @@ export function moveOptionLabel(offer, currentPrice) {
   return text;
 }
 
+/** One line's shelf total. A price that is already the line total is not multiplied again. */
+export function lineCharge(item) {
+  const qty = Math.max(0, Math.floor(Number(item?.quantity) || 0));
+  if (qty <= 0) return 0;
+  const price = Number(item?.price);
+  const total = Number(item?.itemTotal);
+  let unit = Number.NaN;
+  if (Number.isFinite(price) && price >= 0) {
+    if (qty > 1 && Number.isFinite(total) && total > 0 && Math.abs(price - total) < 0.02) unit = total / qty;
+    else unit = price;
+  } else if (Number.isFinite(total) && total >= 0) unit = total / qty;
+  if (!Number.isFinite(unit)) return 0;
+  return roundMoney(unit * qty);
+}
+
+function offerUnit(item, offerPrice) {
+  const raw = Number(offerPrice);
+  const qty = Math.max(1, Math.floor(Number(item?.quantity) || 1));
+  const total = Number(item?.itemTotal);
+  if (Number.isFinite(raw) && qty > 1 && Number.isFinite(total) && total > 0 && Math.abs(raw - total) < 0.02) {
+    return roundMoney(total / qty);
+  }
+  return Number.isFinite(raw) ? raw : Number.NaN;
+}
+
 function lineFromOffer(item, offer) {
   const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-  const price = Number(offer.price);
+  const price = offerUnit(item, offer.price);
   const same = sameStore(offer.storeName, item.storeName) || (!cleanText(item.storeName) && !offerIsSwap(offer));
   const size = cleanText(offer.size) || (same ? cleanText(item.size) : undefined);
   const aisle = cleanText(offer.aisle) || (same ? cleanText(item.aisle) : undefined);
@@ -467,15 +492,20 @@ export function singleStoreSavings(lines) {
     let total = 0;
     const missing = [];
     for (const line of priced) {
+      if (sameStore(line.storeName, storeName)) {
+        total += lineCharge(line);
+        continue;
+      }
       const rows = (line.offers || []).filter((row) => sameStore(row.storeName, storeName));
       const exact = rows.find((row) => !offerIsSwap(row));
       const hasExactSomewhere = (line.offers || []).some((row) => row && !offerIsSwap(row));
       const offer = exact || (hasExactSomewhere ? undefined : rows[0]);
-      if (!offer || !Number.isFinite(Number(offer.price))) {
+      const unit = offer ? offerUnit(line, offer.price) : Number.NaN;
+      if (!Number.isFinite(unit)) {
         missing.push(String(line.name || "Item"));
         continue;
       }
-      total += Number(line.quantity) * Number(offer.price);
+      total += roundMoney(Number(line.quantity) * unit);
     }
     if (missing.length > 0) incompleteStores.push({ storeName, missing });
     else completeStores.push({ storeName, total: roundMoney(total) });
