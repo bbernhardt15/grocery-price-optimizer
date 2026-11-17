@@ -101,3 +101,73 @@ test("v94 search stays visible, the logo clears it, and the price note is inline
   await expect(search).toHaveValue("");
   await expect(page.locator("#browse-label")).toHaveText("Browse the catalog by aisle");
 });
+
+test("v94 review price note does not cover a list row at 390x844", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const plan = {
+    total: 6.4,
+    partial: false,
+    pendingStores: [],
+    pricingByStore: [{ storeName: "Kroger", check: "ok" }],
+    stores: [
+      {
+        storeName: "Kroger",
+        subtotal: 6.4,
+        items: [
+          { lineId: "milk", name: "Milk", price: 3.2, quantity: 2, itemTotal: 6.4, storeName: "Kroger" },
+          { lineId: "bread", name: "Bread", price: 3, quantity: 1, itemTotal: 3, storeName: "Kroger" },
+        ],
+      },
+    ],
+  };
+  await page.route("**/sw.js", (route) => route.abort());
+  await page.route("**/api/optimize-list", async (route) => {
+    calls += 1;
+    if (calls > 1) await held;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(plan) });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem(
+      "gg-list",
+      JSON.stringify([
+        { id: "milk", itemId: "milk", name: "Milk", quantity: 2 },
+        { id: "bread", itemId: "bread", name: "Bread", quantity: 1 },
+      ])
+    );
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+  });
+  await unlock(page);
+  await page.locator("[data-flow='plan']").click();
+  const fold = page.locator("#trip details.store-fold");
+  await fold.evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  await expect(page.locator("[data-review-line='milk']")).toBeVisible();
+  await page.locator("#plan-refresh").evaluate((button) => (button as HTMLButtonElement).click());
+  const note = page.locator("[data-review-refresh]");
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("Checking store prices");
+  const overlap = await page.evaluate(() => {
+    const bar = document.querySelector("[data-review-refresh]")?.getBoundingClientRect();
+    if (!bar) return true;
+    const rows = [...document.querySelectorAll(".review-line, .calm-item, [data-review-line]")];
+    return rows.some((row) => {
+      const box = row.getBoundingClientRect();
+      if (box.height < 2 || box.width < 2) return false;
+      const vertical = box.top < bar.bottom - 1 && box.bottom > bar.top + 1;
+      const horizontal = box.left < bar.right - 1 && box.right > bar.left + 1;
+      return vertical && horizontal;
+    });
+  });
+  expect(overlap).toBe(false);
+  const position = await note.evaluate((node) => getComputedStyle(node).position);
+  expect(position).toBe("static");
+  release();
+});

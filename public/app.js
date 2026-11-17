@@ -4602,7 +4602,7 @@ function clearReviewRefresh() {
   tripEl?.querySelector("[data-review-shell]")?.removeAttribute("aria-busy");
 }
 
-/** Keep the priced Review on screen while a refresh is in flight. The note does not change the page height. */
+/** Keep the priced Review on screen while a refresh is in flight. The note sits in a reserved row. */
 function holdVisibleReview(status) {
   if (flowStep === "shop" && planReady(lastOptimize)) {
     clearReviewRefresh();
@@ -4626,13 +4626,14 @@ function holdVisibleReview(status) {
   const shell = tripEl?.querySelector("[data-review-shell]");
   if (!(shell instanceof HTMLElement)) return false;
   shell.setAttribute("aria-busy", "true");
-  let note = document.querySelector("[data-review-refresh]");
+  const slot = shell.querySelector("[data-review-refresh-slot]") || shell;
+  let note = slot.querySelector("[data-review-refresh]");
   if (!(note instanceof HTMLElement)) {
     note = document.createElement("p");
     note.className = "review-refresh-note";
     note.setAttribute("data-review-refresh", "1");
     note.setAttribute("role", "status");
-    document.body.appendChild(note);
+    slot.appendChild(note);
   }
   note.textContent = text;
   return true;
@@ -5054,6 +5055,7 @@ function paintTrip() {
   tripEl.innerHTML = `
     ${progress}
     <div data-review-shell data-signature="${escapeHtml(plans?.signature || "")}" data-total="${escapeHtml(String(figures.total))}">
+    <div class="review-refresh-slot" data-review-refresh-slot></div>
     <section class="savings-card" id="plan-math">
       <p class="savings-kicker">We'll handle the math.</p>
       <h2>${escapeHtml(card.title)}</h2>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { browseDepartment, mapToDepartment, reportAisleMismatches } from "../catalog/departments";
+import { browseDepartment, isTopicalCareName, mapToDepartment, reportAisleMismatches } from "../catalog/departments";
 import { flavorWanted, preferFlavorFromQuery } from "../catalog/family";
 import { groceryLeaves } from "../ingest/walmartWalk";
 import { namesMatch } from "../guide/rules";
@@ -24,6 +24,13 @@ describe("v94 walkthrough", () => {
     assert.equal(browseDepartment(undefined, "Equate Jock Itch Powder Spray", "dairy-eggs"), "personal-care");
     assert.equal(browseDepartment(undefined, "ALFLEXIL Pain Relief Roll-On", "dairy-eggs"), "personal-care");
     assert.equal(browseDepartment(undefined, "Bananas", "produce"), "produce");
+    assert.equal(isTopicalCareName("Boiron Arnicare Cream Homeopathic Medicine for Pain Relief"), true);
+    assert.equal(isTopicalCareName("Sour Cream"), false);
+    assert.equal(mapToDepartment(undefined, "Boiron Arnicare Cream Homeopathic Medicine for Pain Relief Muscle Pain & Stiffness").departmentId, "personal-care");
+    assert.equal(mapToDepartment(["Dairy"], "Boiron Arnicare Cream").departmentId, "personal-care");
+    assert.equal(mapToDepartment(undefined, "Sour Cream").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Philadelphia Cream Cheese").departmentId, "dairy-eggs");
+    assert.equal(mapToDepartment(undefined, "Vanilla Ice Cream").departmentId, "frozen");
     assert.equal(browseDepartment(undefined, "Kroger Grade A Large White Eggs 12 ct", "dairy-eggs"), "dairy-eggs");
     const leaves = groceryLeaves({
       categories: [
@@ -185,6 +192,9 @@ describe("v94 walkthrough", () => {
     const css = readFileSync(new URL("../../public/styles.css", import.meta.url), "utf8");
     const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
     assert.match(css, /\.shop-checking-banner \{[^}]*position: static/);
+    assert.match(css, /\.review-refresh-note \{[^}]*position: static/);
+    assert.doesNotMatch(css, /\.review-refresh-note \{[^}]*position:\s*fixed/);
+    assert.match(app, /data-review-refresh-slot/);
     assert.match(app, /flowStep === \"shop\"/);
     assert.match(css, /\.match-star \{ position: static/);
     assert.match(app, /shop-checking-banner/);

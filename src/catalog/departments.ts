@@ -500,12 +500,35 @@ const TOPICAL_CARE = /\b(?:lip\s*care|lip\s*balms?|cocoa butter|lotions?|body bu
 /** Creams and ointments. Gels stay with tablets so glucose gel and liquid gels stay oral. */
 const TOPICAL_MEDICINE = /\b(?:creams?|ointments?|lotions?|balms?|anti-?itch)\b/i;
 
+/** Food uses of cream. These stay in dairy, frozen, or pantry. */
+const FOOD_CREAM =
+  /\b(?:ice\s+creams?|gelatos?|sour\s+creams?|cream\s+cheeses?|whipp(?:ed|ing)\s+creams?|heavy\s+creams?|light\s+creams?|coffee\s+creamers?|creamers?|half\s*(?:&|and)\s*half|cream\s+sodas?|buttercreams?|cream\s+of\b|creamed\b)\b/i;
+
+const TOPICAL_FORM = /\b(?:creams?|cr[eè]mes?|gels?|lotions?|ointments?|roll-?ons?|balms?|salves?)\b/i;
+
+/**
+ * A medicinal or topical product. Food creams stay out so "sour cream"
+ * does not follow the word cream into personal care.
+ */
+export function isTopicalCareName(name: string): boolean {
+  const text = String(name || "").replace(/\s+/g, " ").trim();
+  if (!text || FOOD_CREAM.test(text)) return false;
+  if (/\b(?:teas?|coffee)\b/i.test(text) && !TOPICAL_FORM.test(text)) return false;
+  if (/\b(?:lotions?|ointments?|roll-?ons?|balms?|salves?|liniments?)\b/i.test(text)) return true;
+  if (/\b(?:homeopath\w*|arnica\w*)\b/i.test(text)) return true;
+  if (/\b(?:pain|itch|rash|muscle|joint|hemorrh?oid\w*)\b/i.test(text) && /\b(?:relief|creams?|gels?|lotions?|ointments?|roll-?ons?|sprays?|balms?)\b/i.test(text)) return true;
+  if (TOPICAL_FORM.test(text) && /\b(?:hand|face|facial|body|skin|foot|heel|diaper|rash|pain|muscle|joint|moisturi\w*|therapeutic|medicated)\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Electronics, services, and health products that were stored in a food aisle.
  * Browse hides these from food and can pull the health ones into Personal Care.
  */
 export const MISFILED_GROCERY_NAME =
-  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|\*{2,}\s*discontinued/i;
+  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|homeopath|arnica|ointments?|lotions?|roll-?ons?|\bpain\s+relief\b|topicals?|\*{2,}\s*discontinued/i;
 
 /** The aisle a shopper should see, even when the stored department is stale. */
 export function browseDepartment(categories: string[] | undefined, name: string, stored?: string): string {
@@ -812,6 +835,13 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   }
   if (/\b(?:training pants|pull-?ups)\b/i.test(text)) {
     return { mapped: departmentFromName("baby", "training-pants", "Diapers"), blockHealth: true };
+  }
+  if (/\b(?:pasta|spaghetti)\b/i.test(text) && /\bbeauty\b/i.test(text)) {
+    return { mapped: departmentFromName("pantry", "pasta", "Pasta & Rice"), blockHealth: true };
+  }
+  if (isTopicalCareName(text)) {
+    const bucket = /\b(?:homeopath\w*|arnica\w*|\bpain\b|medicin\w*|analgesic)\b/i.test(text) ? "Health" : "Body";
+    return { mapped: personalCareFromName(bucket, "topical"), blockHealth: false };
   }
   if (NUTRITION_DRINK.test(text)) {
     return { mapped: departmentFromName("beverages", "nutrition-drink"), blockHealth: true };

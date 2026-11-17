@@ -2440,10 +2440,25 @@ body[data-browse="open"] #shelf-entry { display: none !important; }
 }
 .store-fold summary::-webkit-details-marker { display: none; }
 .store-fold-name { font-family: var(--display); font-size: 1.25rem; }
+.review-refresh-slot {
+  display: block;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: 0 0 12px;
+}
 .review-refresh-note {
-  position: fixed; z-index: 8; left: 50%; top: calc(68px + var(--safe-top));
-  transform: translateX(-50%); margin: 0; background: var(--ink); color: var(--bg);
-  border-radius: 999px; padding: 8px 14px; font-weight: 700; pointer-events: none;
+  position: static;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 14px;
+  font-weight: 700;
 }
 .shop-checking-banner {
   position: static; display: block; margin: 0 0 12px;
