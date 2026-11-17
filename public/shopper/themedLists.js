@@ -632,6 +632,28 @@ export function rememberEverywhere(book, listId, slotId, choice, at = Date.now()
   return clearOverride(setFavorite(book, slotId, choice, at), listId, slotId, at);
 }
 
+/** A starred product that names a themed slot becomes that slot's every-list favorite. */
+export function slotForFavorite(name) {
+  const text = String(name || "").toLowerCase();
+  if (!text) return null;
+  for (const slot of Object.values(SLOTS)) {
+    const words = String(slot.search || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2);
+    if (words.length && words.every((word) => text.includes(word))) return slot;
+  }
+  return null;
+}
+
+export function rememberStarredSlot(book, product, at = Date.now()) {
+  const slot = slotForFavorite(product?.familyName || product?.name || product?.catalogName || "");
+  if (!slot) return book;
+  const choice = choiceFromProduct(product, at);
+  if (!choice) return book;
+  return setFavorite(book, slot.id, choice, at);
+}
+
 export function newListId(at = Date.now()) {
   return `ml-${at.toString(36)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 40);
 }

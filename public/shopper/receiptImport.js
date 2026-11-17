@@ -7,6 +7,14 @@
 import { imageBlobs } from "./receiptImages.js";
 import { PHOTO_OFF_RECEIPT } from "./receiptCopy.js";
 
+/** The reading screen stays up long enough to confirm the file was accepted. */
+export const RECEIPT_READ_HOLD_MS = 1500;
+
+export function receiptRevealDelay(startedAt, now = Date.now(), hold = RECEIPT_READ_HOLD_MS) {
+  const elapsed = Math.max(0, Number(now) - Number(startedAt) || 0);
+  return Math.max(0, hold - elapsed);
+}
+
 const receiptReads = new Map();
 
 export function resetReceiptReads() {

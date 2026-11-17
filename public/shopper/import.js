@@ -25,6 +25,15 @@ export function checkedReviewCount(items) {
   return (items || []).filter((item) => item?.accepted && (item.selectedId || item.custom)).length;
 }
 
+/** Size chips stay on the flavor the shopper already picked. */
+export function sizesForFlavor(product) {
+  const variants = Array.isArray(product?.variants) ? product.variants : [];
+  const flavor = String(product?.flavorKey || "");
+  if (!flavor) return variants;
+  const same = variants.filter((variant) => String(variant?.flavorKey || "") === flavor);
+  return same.length ? same : variants;
+}
+
 export function acceptLabel(count) {
   if (count === 1) return "Add 1 item to my trip";
   return `Add ${count} items to my trip`;
@@ -598,7 +607,7 @@ export function mountImport(deps) {
         const title = reviewProductTitle(product, item.raw || item.name);
         const brand = product?.brand && !String(title).toLowerCase().includes(String(product.brand).toLowerCase()) ? product.brand : "";
         const image = product?.imageUrls?.[0] || "";
-        const sizeButtons = (product?.variants || [])
+        const sizeButtons = sizesForFlavor(product)
           .map((variant) => {
             const label = sizeName(variant);
             if (!label) return "";

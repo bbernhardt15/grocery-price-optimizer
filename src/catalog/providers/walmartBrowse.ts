@@ -169,12 +169,16 @@ async function loadTaxonomy(): Promise<Taxon[]> {
 }
 
 function categoryIdForDepartment(nodes: Taxon[], departmentId: string): string | undefined {
+  const brand = /^(?:apple|applecare\+?|iphone|ipad)$/i;
   const matches = nodes.filter((node) => {
+    if (brand.test(node.name.trim())) return false;
     const mapped = mapToDepartment([node.path, node.name], node.name);
-    return mapped.departmentId === departmentId;
+    return mapped.departmentId === departmentId && mapped.signal !== "excluded" && !mapped.generalMerchandise;
   });
-  matches.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.name.length - b.name.length);
-  return matches[0]?.id;
+  const rooted = matches.filter((node) => /^(?:food|grocery|fresh|dairy|household|health|personal|baby|pet)\b/i.test(node.path));
+  const pool = rooted.length ? rooted : matches;
+  pool.sort((a, b) => b.path.split("/").length - a.path.split("/").length || a.name.length - b.name.length);
+  return pool[0]?.id;
 }
 
 function toRecords(products: CatalogProduct[], departmentId?: string): RawCatalogRecord[] {
@@ -186,12 +190,11 @@ function toRecords(products: CatalogProduct[], departmentId?: string): RawCatalo
     }
     if (departmentId) {
       const mapped = mapToDepartment(raw.categories, raw.name);
-      if (mapped.departmentId !== departmentId && mapped.departmentId !== "other") {
+      if (mapped.signal === "excluded" || mapped.generalMerchandise || mapped.departmentId !== departmentId) {
         continue;
       }
-      if (mapped.departmentId === "other") {
-        raw.departmentId = departmentId;
-      }
+      raw.departmentId = mapped.departmentId;
+      if (mapped.subcategory) raw.subcategory = mapped.subcategory;
     }
     records.push(raw);
   }

@@ -31,8 +31,9 @@ import { categoryDetailHtml, categoryGateHtml } from "./categoryStage.js";
 import { normalizeZipInput, zipAdvanceError } from "./onboarding.js";
 import { outOfAreaMessage } from "./serviceArea.js";
 import { applyLearnedReceipts } from "./receiptApply.js";
-import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml, rememberedNameBrand } from "./receiptCopy.js";
+import { applyLearnedChoice, learnedCardInnerHtml, learnedSummaryHtml, learnedTripChoiceHtml, receiptUploadHtml, rememberedNameBrand, storeBrandsFor } from "./receiptCopy.js";
 import { importStageHtml, learnedViewReady } from "./learnedGate.js";
+import { receiptRevealDelay } from "./receiptImport.js";
 import { commitLearnedCard } from "./learnedStable.js";
 import { syncTripAddBar } from "./tripActionBar.js";
 import { bindZipEntry, syncZipPlaceholder, zipEntryFieldHtml } from "./zipEntry.js";
@@ -105,12 +106,14 @@ export function mountProfileOnboarding(deps = {}) {
   let brandShelves = {};
   let brandRetry = {};
   let lazyFamily = "";
+  const brandChipOrder = new Map();
   let resumeStatus = "";
   let dietMode = false;
   let zipApproximate = false;
   /** @type {(() => void) | null} */
   let skipBeat = null;
   let beatToken = 0;
+  let readStartedAt = 0;
   let connectStatus = null;
   let connectHeld = false;
   /** Parsing and brand grouping must both finish before the learned screen exists. */
@@ -265,6 +268,7 @@ export function mountProfileOnboarding(deps = {}) {
           lines: receiptLines,
           editingFamily,
           brandsByFamily,
+          stores: draft.shopStores || [],
           pendingFamilies,
           retryFamilies,
           savedFamilies: savedRules,
@@ -291,7 +295,15 @@ export function mountProfileOnboarding(deps = {}) {
       const attributes = categoryDraft.attributes?.length ? categoryDraft.attributes : !categoryDraft.touched ? saved.attributes || [] : categoryDraft.attributes || [];
       const lazy = Boolean(lazyFamily);
       const ready = loadedFor === current?.id;
-      const brands = ready ? nameBrandsFor(shelf, current?.id || "") : [];
+      const ranked = ready ? nameBrandsFor(shelf, current?.id || "") : [];
+      const familyKey = current?.id || "";
+      if (ranked.length && !brandChipOrder.has(familyKey)) brandChipOrder.set(familyKey, ranked.map((row) => row.brand));
+      const savedOrder = brandChipOrder.get(familyKey) || [];
+      const byBrand = new Map(ranked.map((row) => [row.brand.toLowerCase(), row]));
+      const brands = savedOrder.map((name) => byBrand.get(String(name).toLowerCase())).filter(Boolean);
+      for (const row of ranked) {
+        if (!brands.some((item) => item.brand.toLowerCase() === row.brand.toLowerCase())) brands.push(row);
+      }
       const askBrand = ready && asksNameBrand(shelf, current?.id || "");
       return `${ready ? "" : `<div class="read-skel" aria-hidden="true"><span></span><span></span><span></span></div>`}${categoryDetailHtml({
         category: current,
@@ -766,15 +778,12 @@ export function mountProfileOnboarding(deps = {}) {
     const detected = row?.mode === "brand" || row?.mode === "cheapestPicks" ? (row.brands || []).concat(row.brand || []) : [];
     const names = [];
     const seen = new Set();
-    for (const name of [...detected, ...known, ...shelfNames].map((item) => displayBrand(item)).filter(Boolean)) {
-      if (!name || isStoreBrand(name) || isProduceFamily(row?.family)) continue;
+    for (const name of [...detected, ...known, ...shelfNames, ...storeBrandsFor(draft.shopStores)].map((item) => displayBrand(item)).filter(Boolean)) {
+      if (!name || (isStoreBrand(name) && !storeBrandsFor(draft.shopStores).some((brand) => brand.toLowerCase() === name.toLowerCase()))) continue;
       const key = brandKey(name);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       names.push(name);
-    }
-    if (!names.length && !isProduceFamily(row?.family)) {
-      for (const name of ["Kroger", "Simple Truth", "Great Value"]) names.push(name);
     }
     return names.slice(0, 24);
   }
@@ -1259,6 +1268,7 @@ export function mountProfileOnboarding(deps = {}) {
         pending: !brandShelves[row.family],
         retry: Boolean(brandRetry[row.family]),
         saved: Boolean(options.saved),
+        stores: draft.shopStores || [],
       });
     });
     if (options.reveal) {
@@ -1272,6 +1282,9 @@ export function mountProfileOnboarding(deps = {}) {
     beatMarkup = "";
     if (receiptPhase !== "reading") return;
     if (importGate.parsing || importGate.grouping) return;
+    const wait = receiptRevealDelay(readStartedAt);
+    if (wait) await new Promise((resolve) => window.setTimeout(resolve, wait));
+    if (receiptPhase !== "reading") return;
     importGate = { parsing: false, grouping: false, revealed: true };
     showLearned();
   }
@@ -1344,6 +1357,7 @@ export function mountProfileOnboarding(deps = {}) {
     beatToken += 1;
     const readToken = beatToken;
     beatMarkup = "";
+    readStartedAt = Date.now();
     startReadTicker();
     learnedRows = [];
     receiptLines = [];

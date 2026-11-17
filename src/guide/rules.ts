@@ -255,11 +255,23 @@ export function normalizeName(value: unknown): string {
     .trim();
 }
 
+function foldProductName(value: unknown): string {
+  return normalizeName(value)
+    .replace(/\bstuff\b/g, "stuf")
+    .replace(/\boreos\b/g, "oreo")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function namesMatch(left: unknown, right: unknown): boolean {
-  const a = normalizeName(left);
-  const b = normalizeName(right);
+  const a = foldProductName(left);
+  const b = foldProductName(right);
   if (!a || !b) return false;
   if (a === b) return true;
+  const leftWords = a.split(" ").filter((word) => word.length > 2);
+  const rightWords = new Set(b.split(" ").filter((word) => word.length > 2));
+  const shared = leftWords.filter((word) => rightWords.has(word));
+  if (shared.length >= 2 && (shared.includes("oreo") || shared.includes("coke") || shared.includes("cola"))) return true;
   const shorter = a.length <= b.length ? a : b;
   const longer = a.length <= b.length ? b : a;
   if (shorter.length < 3) return false;

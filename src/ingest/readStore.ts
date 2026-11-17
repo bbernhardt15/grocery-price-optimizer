@@ -3,7 +3,7 @@ import type { CatalogProduct } from "../optimizeGroceryList";
 import { parseGroceryUnit } from "../pricing/parseGroceryUnit";
 import type { RawCatalogRecord } from "../catalog/types";
 import { escapeRegex } from "../escapeRegex";
-import { DAIRY_FALSE_FRIEND } from "../catalog/departments";
+import { browseDepartment, DAIRY_FALSE_FRIEND, MISFILED_GROCERY_NAME } from "../catalog/departments";
 import { ingestConfig } from "./config";
 import { CatalogMaster, CatalogOffer, type CatalogMasterDoc, type CatalogOfferDoc } from "./models";
 
@@ -27,14 +27,32 @@ function departmentClause(departmentId?: string): Record<string, unknown> {
   return { departmentId: { $ne: "other" } };
 }
 
+const FOOD_AISLES = new Set([
+  "produce",
+  "dairy-eggs",
+  "meat-seafood",
+  "bakery",
+  "deli",
+  "pantry",
+  "frozen",
+  "snacks",
+  "beverages",
+  "breakfast",
+]);
+
 const MASTER_FIELDS = "key upc name brand imageUrls departmentId subcategory categoryPaths size familyKey familyName variantLabel";
+
+function nameGuard(departmentId?: string): Record<string, unknown> {
+  const food = !departmentId || departmentId === "all" || FOOD_AISLES.has(departmentId);
+  return { name: { $not: food ? MISFILED_GROCERY_NAME : /^\s*\*+\s*discontinued/i } };
+}
 const OFFER_FIELDS = "productKey storeName price priceSource retailerItemId locationId zip size onSale availability productUrl";
 
 async function findMasters(scope: { departmentId?: string; query?: string }, maxScan?: number): Promise<CatalogMasterDoc[]> {
   const config = ingestConfig();
   const limit = Math.max(24, Math.min(config.browseScan, Math.floor(maxScan ?? config.browseScan)));
   const tokens = tokensOf(scope.query ?? "");
-  const visible = { status: { $ne: "discontinued" as const }, outOfScope: { $ne: true } };
+  const visible = { status: { $ne: "discontinued" as const }, outOfScope: { $ne: true }, ...nameGuard(scope.departmentId) };
   const department = departmentClause(scope.departmentId);
   if (tokens.length > 0) {
     try {
@@ -130,13 +148,33 @@ export async function readStoredRecords(scope: {
   zipCode?: string;
   locationId?: string;
   maxScan?: number;
-}): Promise<{ records: RawCatalogRecord[]; warnings: string[]; storeNames: string[] }> {
+}): Promise<{ records: RawCatalogRecord[]; warnings: string[]; storeNames: string[]; capped: boolean }> {
   if (mongoose.connection.readyState !== 1) {
-    return { records: [], warnings: [], storeNames: [] };
+    return { records: [], warnings: [], storeNames: [], capped: false };
   }
   const masters = await findMasters(scope, scope.maxScan);
+  const limit = Math.max(24, Math.min(ingestConfig().browseScan, Math.floor(scope.maxScan ?? ingestConfig().browseScan)));
+  let capped = masters.length >= limit;
+  if (scope.departmentId === "personal-care" && !scope.query) {
+    const health = await CatalogMaster.find({
+      status: { $ne: "discontinued" },
+      outOfScope: { $ne: true },
+      departmentId: { $in: [...FOOD_AISLES] },
+      name: MISFILED_GROCERY_NAME,
+    })
+      .limit(40)
+      .select(MASTER_FIELDS)
+      .lean<CatalogMasterDoc[]>();
+    const seen = new Set(masters.map((master) => master.key));
+    for (const master of health) {
+      if (seen.has(master.key)) continue;
+      if (browseDepartment(master.categoryPaths, master.name, master.departmentId) !== "personal-care") continue;
+      masters.push(master);
+      seen.add(master.key);
+    }
+  }
   if (masters.length === 0) {
-    return { records: [], warnings: [], storeNames: [] };
+    return { records: [], warnings: [], storeNames: [], capped };
   }
   const keys = masters.map((master) => master.key);
   const offers = await CatalogOffer.find({
@@ -176,7 +214,7 @@ export async function readStoredRecords(scope: {
     records.push(recordFrom(master, offer));
     storeNames.add(offer.storeName);
   }
-  return { records, warnings, storeNames: [...storeNames] };
+  return { records, warnings, storeNames: [...storeNames], capped };
 }
 
 export async function readStoredById(id: string): Promise<RawCatalogRecord[]> {

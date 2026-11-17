@@ -43,6 +43,10 @@ const STORE_BRANDS = new Set(
     "clancy's",
     "specially selected",
     "aldi",
+    "sam's choice",
+    "sams choice",
+    "member's mark",
+    "members mark",
   ].map((brand) => brand.toLowerCase())
 );
 

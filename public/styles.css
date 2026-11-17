@@ -394,8 +394,13 @@ body[data-dept-list="open"] .dept-nav {
   overflow: auto;
   padding: 4px 0 8px;
 }
-.choice-row, .size-list, .size-option, #browse-toggle, #search, button.card-open, #chip-hint {
+html[data-keyboard="1"] #browse-toggle { position: static; }
+.choice-row, .size-list, .size-option, #browse-toggle, button.card-open, #chip-hint {
   scroll-margin-top: 12px;
+  scroll-margin-bottom: calc(var(--bar-h) + 320px);
+}
+#search {
+  scroll-margin-top: calc(76px + var(--safe-top));
   scroll-margin-bottom: calc(var(--bar-h) + 320px);
 }
 .chip, .dept-link {
@@ -661,9 +666,10 @@ body[data-favorites="open"] #past-trips-home { display: none !important; }
 .gate-chip[aria-pressed="true"] { background: transparent; color: var(--muted); border-style: dashed; }
 .gate-chip .gate-state { display: block; font-size: 0.75rem; font-weight: 750; }
 .size-current { margin: 6px 0 0; font-weight: 750; }
-.match-card { position: relative; display: block; }
-.match-card .match-pick { width: 100%; padding-right: 48px; text-align: left; }
-.match-star { position: absolute; top: 8px; right: 8px; z-index: 1; }
+.match-card { position: relative; display: flex; align-items: center; gap: 8px; }
+.match-card .match-pick { flex: 1; min-width: 0; width: auto; padding-right: 8px; text-align: left; display: flex; justify-content: space-between; gap: 8px; }
+.match-card .match-pick span { min-width: 0; }
+.match-star { position: static; flex: none; }
 #alerts-dialog { z-index: 140; }
 #alerts-dialog[open] {
   position: fixed;
@@ -1574,7 +1580,15 @@ dialog.profile-onboard #profile-stage {
   overflow-anchor: none;
   padding-bottom: 12px;
 }
-dialog.profile-onboard[open] { z-index: 80; }
+dialog.profile-onboard[open] {
+  z-index: 200;
+  background: var(--bg);
+  box-shadow: 0 0 0 100vmax var(--bg);
+}
+html.welcome-hold .shell,
+html.welcome-hold .card,
+body:has(#profile-onboard[open]) #grid,
+body:has(#profile-onboard[open]) .card { visibility: hidden; }
 dialog.profile-onboard .profile-actions {
   position: sticky;
   bottom: 0;
@@ -2426,10 +2440,28 @@ body[data-browse="open"] #shelf-entry { display: none !important; }
 }
 .store-fold summary::-webkit-details-marker { display: none; }
 .store-fold-name { font-family: var(--display); font-size: 1.25rem; }
+.review-refresh-slot {
+  display: block;
+  overflow-anchor: none;
+}
 .review-refresh-note {
-  position: fixed; z-index: 8; left: 50%; top: calc(68px + var(--safe-top));
-  transform: translateX(-50%); margin: 0; background: var(--ink); color: var(--bg);
-  border-radius: 999px; padding: 8px 14px; font-weight: 700; pointer-events: none;
+  position: static;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 14px;
+  font-weight: 700;
+}
+.shop-checking-banner {
+  position: static; display: block; margin: 0 0 12px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 14px; padding: 10px 14px; font-weight: 700;
 }
 .review-lines { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .review-line { display: flex; justify-content: space-between; gap: 12px; }

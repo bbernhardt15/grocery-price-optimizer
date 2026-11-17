@@ -86,7 +86,7 @@ test("a real wheel scroll during a held refresh survives the plan redraw", async
     await page.waitForTimeout(700);
     await page.mouse.move(180, 520);
     await page.mouse.wheel(0, distance);
-    await page.waitForTimeout(200);
+    await expect.poll(async () => page.evaluate(() => window.scrollY), { timeout: 2000 }).toBeGreaterThan(80);
     const pending = await page.evaluate(() => window.scrollY);
     expect(pending).toBeGreaterThan(80);
     release();

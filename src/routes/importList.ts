@@ -401,7 +401,7 @@ router.post("/import/photo", async (req, res) => {
     res.status(400).json({ error: IMPORT_MESSAGES.tooBig, code: "too_large" });
     return;
   }
-  const photoKey = `photo:${contentHash(image)}`;
+  const photoKey = `photo:${clientKey(req, res)}:${contentHash(image)}`;
   const cachedPhoto = readReceiptCache(photoKey);
   if (cachedPhoto) {
     console.info(`receipt stage=photo cache=hit ms=0 bytes=${image.length}`);
@@ -687,7 +687,7 @@ router.post("/import/pdf", async (req, res) => {
     res.status(status).json({ error, ...(code ? { code } : {}) });
   };
 
-  const pdfKey = `pdf:${contentHash(pdf)}`;
+  const pdfKey = `pdf:${clientKey(req, res)}:${contentHash(pdf)}`;
   const cachedPdf = readReceiptCache(pdfKey);
   if (cachedPdf && typeof cachedPdf === "object") {
     emit({ type: "progress", stage: "done", message: "Already read this file.", ratio: 1 });

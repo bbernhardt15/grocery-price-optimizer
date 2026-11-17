@@ -236,7 +236,7 @@ const DEFS = [
     attr("packaged", "Packaged", /\b(?:packaged|clamshell|container|chopped)\b/i),
     attr("organic", "Organic", /\borganic\b/i),
   ]),
-  food("lettuce", "Lettuce", "lettuce", 19, ["produce"], ["Vegetables"], ["lettuce"], ["romaine", "iceberg", "butter", "green", "red", "leaf", "organic", "hearts", "shredded", "head"], [CANDY, PET, SOUP], /\blettuce\b/i, [], null, [
+  food("lettuce", "Lettuce", "lettuce", 19, ["produce"], ["Vegetables"], ["lettuce"], ["romaine", "iceberg", "butter", "green", "red", "leaf", "organic", "hearts", "shredded", "head"], [CANDY, PET, SOUP], /\blettuce\b/i, ["dole", "fresh express"], null, [
     attr("romaine", "Romaine head", /\bromaine\b/i),
     attr("hearts", "Hearts", /\bhearts?\b/i),
     attr("packaged", "Packaged", /\b(?:packaged|bag|clamshell)\b/i),
@@ -256,7 +256,7 @@ const DEFS = [
     attr("packaged", "Packaged", /\b(?:clamshell|container|packaged)\b/i),
     attr("organic", "Organic", /\borganic\b/i),
   ]),
-  food("bananas", "Bananas", "bananas", 22, ["produce"], ["Fruit"], ["banana", "bananas"], ["organic", "fresh", "bunch"], [/\b(?:chip|chips|pudding|bread|candy)\b/i, CANDY], /\bbananas?\b/i, [], null, []),
+  food("bananas", "Bananas", "bananas", 22, ["produce"], ["Fruit"], ["banana", "bananas"], ["organic", "fresh", "bunch"], [/\b(?:chip|chips|pudding|bread|candy)\b/i, CANDY], /\bbananas?\b/i, ["chiquita", "dole"], null, []),
   food("peanut-butter", "Peanut butter", "peanut butter", 23, ["pantry"], ["Condiments"], ["peanut butter"], ["creamy", "crunchy", "smooth", "natural", "organic", "no", "stir"], [/\b(?:cup|cups|candy|cookie|pie|cracker|sandwich|cereal)\b/i, CANDY, /\bcookie\s+butter\b/i], /peanut butter/i, ["jif", "skippy", "peter pan", "smucker's", "smucker's natural", "justin's"], { dim: "weight", ideal: 16, min: 12, max: 40 }, [
     attr("creamy", "Creamy", /\bcreamy\b/i),
     attr("crunchy", "Crunchy", /\bcrunchy\b/i),

@@ -732,6 +732,42 @@ export function packCountOf(variant: { label?: string; variantLabel?: string; si
   return match ? Number(match[1]) : 0;
 }
 
+/** Cherry coke is Cherry, not Diet Cherry, unless the query says diet. */
+export function flavorWanted(query: string): string {
+  const text = String(query || "").toLowerCase();
+  const diet = /\bdiet\b/.test(text);
+  if (/\bcherry\b/.test(text)) return diet ? "diet cherry" : "cherry";
+  if (/\bvanilla\b/.test(text)) return diet ? "diet vanilla" : "vanilla";
+  if (diet) return "diet";
+  return "";
+}
+
+export function preferFlavorFromQuery<
+  T extends {
+    defaultVariantId: string;
+    flavorLabel?: string;
+    variants: Array<{ id: string; flavorKey?: string; flavorLabel?: string }>;
+  },
+>(tile: T, query: string): T {
+  const wanted = flavorWanted(query);
+  if (!wanted) return tile;
+  const exact = tile.variants.find((variant) => {
+    const key = String(variant.flavorKey || "").toLowerCase();
+    const label = String(variant.flavorLabel || "").toLowerCase();
+    return key === wanted || label === wanted;
+  });
+  const diet = wanted.startsWith("diet");
+  const match =
+    exact ||
+    tile.variants.find((variant) => {
+      const key = `${variant.flavorKey || ""} ${variant.flavorLabel || ""}`.toLowerCase();
+      if (!diet && /\bdiet\b/.test(key)) return false;
+      return key.includes(wanted);
+    });
+  if (!match) return tile;
+  return { ...tile, defaultVariantId: match.id, flavorLabel: match.flavorLabel || tile.flavorLabel };
+}
+
 /** A search like "coke 12" opens that pack, not the best-value bottle. */
 export function preferPackFromQuery<
   T extends {
@@ -739,15 +775,17 @@ export function preferPackFromQuery<
     variants: Array<{ id: string; label?: string; variantLabel?: string; sizeLabel?: string; count?: number | null; flavorKey?: string; flavorLabel?: string }>;
   },
 >(tile: T, query: string): T {
+  const flavored = preferFlavorFromQuery(tile, query);
   const wanted = String(query || "").match(/\b(6|8|12|18|24|30|32|36)\b/);
-  if (!wanted) return tile;
+  if (!wanted) return flavored;
+  tile = flavored;
   const n = Number(wanted[1]);
   const matches = tile.variants.filter((variant) => packCountOf(variant) === n);
   if (!matches.length) return tile;
   const classic = matches.find(
     (variant) => !variant.flavorKey || variant.flavorKey === "classic" || variant.flavorLabel === "Classic" || variant.flavorLabel === "Original"
   );
-  const match = classic || matches[0]!;
+  const match = matches.find((variant) => variant.id === flavored.defaultVariantId) || classic || matches[0]!;
   if (match.id === tile.defaultVariantId) return tile;
   return { ...tile, defaultVariantId: match.id };
 }

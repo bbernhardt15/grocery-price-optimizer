@@ -149,11 +149,19 @@ test("Refresh keeps the Review list and scroll until the new prices arrive", asy
   expect(placed.scrollY).toBeGreaterThan(200);
   await page.locator("#plan-refresh").evaluate((button) => (button as HTMLButtonElement).click());
   await page.waitForTimeout(400);
-  expect(await page.evaluate(() => window.scrollY)).toBe(placed.scrollY);
   await expect(lines).toHaveCount(80);
-  await expect(page.locator("[data-review-refresh]")).toBeVisible();
-  const heldLine = await anchor.evaluate((node) => node.getBoundingClientRect().top);
-  expect(Math.abs(heldLine - placed.lineTop)).toBeLessThan(2);
+  const note = page.locator("[data-review-refresh]");
+  await expect(note).toBeVisible();
+  const covered = await page.evaluate(() => {
+    const bar = document.querySelector("[data-review-refresh]")?.getBoundingClientRect();
+    if (!bar || getComputedStyle(document.querySelector("[data-review-refresh]")!).position === "fixed") return true;
+    return [...document.querySelectorAll("[data-review-line]")].some((row) => {
+      const box = row.getBoundingClientRect();
+      if (box.height < 2) return false;
+      return box.top < bar.bottom - 1 && box.bottom > bar.top + 1 && box.left < bar.right - 1 && box.right > bar.left + 1;
+    });
+  });
+  expect(covered).toBe(false);
   release();
   await expect(lines).toHaveCount(12);
   await expect(fold).toHaveJSProperty("open", true);
