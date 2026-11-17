@@ -9439,13 +9439,14 @@ function paintPlanBar() {
   if (shopCount) shopCount.textContent = copy.countLabel;
   if (shopTotal) shopTotal.textContent = about;
   if (shopDone) shopDone.disabled = !copy.enabled;
-  document.body.dataset.chrome = bottomChrome(flowStep);
+  const visible = document.body.dataset.step || flowStep;
+  document.body.dataset.chrome = bottomChrome(visible);
   document.querySelectorAll("[data-flow]").forEach((button) => {
-    if (button.getAttribute("data-flow") === flowStep) button.setAttribute("aria-current", "step");
+    if (button.getAttribute("data-flow") === visible) button.setAttribute("aria-current", "step");
     else button.removeAttribute("aria-current");
   });
   const title = $("brand-title");
-  if (title) title.textContent = stepTitle(flowStep);
+  if (title) title.textContent = stepTitle(visible);
   guide?.sync?.();
 }
 
