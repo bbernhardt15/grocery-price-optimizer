@@ -7,7 +7,8 @@ import { groceryLeaves } from "../ingest/walmartWalk";
 import { namesMatch } from "../guide/rules";
 import { productDisplayName } from "../../public/shopper/matchSheet.js";
 import { sizesForFlavor } from "../../public/shopper/import.js";
-import { learnedCardInnerHtml } from "../../public/shopper/receiptCopy.js";
+import { brandsForRule, learnedCardInnerHtml, storeBrandsFor } from "../../public/shopper/receiptCopy.js";
+import { receiptRevealDelay } from "../../public/shopper/receiptImport.js";
 import { nameBrandsFor } from "../../public/shopper/categoryPreference.js";
 import { cartCardFigures } from "../../public/shopper/reviewSettle.js";
 import { singleStoreSavings } from "../../public/shopper/tripPlan.js";
@@ -137,19 +138,47 @@ describe("v94 walkthrough", () => {
     assert.match(bananas, /Name brands only/);
     assert.equal(bananas.includes("I don't buy it"), false);
     assert.equal(bananas.includes("Store brand only"), false);
+    const lettuce = learnedCardInnerHtml(
+      { family: "lettuce", label: "Lettuce", mode: "brand" },
+      { editing: true, brands: ["Great Value", "Dole"], stores: ["Kroger"] }
+    );
+    assert.equal(lettuce.includes("Great Value"), false);
+    assert.match(lettuce, /Dole/);
+    const krogerOnly = storeBrandsFor(["Kroger"]);
+    assert.equal(krogerOnly.includes("Great Value"), false);
+    assert.ok(krogerOnly.includes("Kroger"));
+    assert.deepEqual(brandsForRule(["Chiquita", "Kroger", "Great Value"], "brand", ["Kroger"]), ["Chiquita"]);
+    assert.deepEqual(brandsForRule(["Chiquita", "Kroger", "Great Value"], "storeBrand", ["Kroger"]), ["Kroger"]);
+    const cheapest = learnedCardInnerHtml(
+      { family: "bananas", label: "Bananas", mode: "cheapest" },
+      { editing: true, brands: ["Chiquita", "Kroger"], stores: ["Kroger"] }
+    );
+    assert.equal(cheapest.includes("brand-pick"), false);
+    assert.equal(cheapest.includes("store-brand-note"), false);
     const meat = learnedCardInnerHtml({ family: "meat", label: "Meat", mode: "storeBrand" }, { editing: true, brands: [] });
     assert.match(meat, /I don't buy it/);
   });
 
+  it("keeps the receipt reading step on screen and does not share a parse across sessions", () => {
+    assert.equal(receiptRevealDelay(1_000, 1_200), 1300);
+    assert.equal(receiptRevealDelay(1_000, 3_000), 0);
+    const app = readFileSync(new URL("../../public/app.js", import.meta.url), "utf8");
+    const route = readFileSync(new URL("../../src/routes/importList.ts", import.meta.url), "utf8");
+    assert.match(app, /x-device-id": deviceId\(\)/);
+    assert.match(route, /photo:\$\{clientKey\(req, res\)\}/);
+    assert.match(route, /pdf:\$\{clientKey\(req, res\)\}/);
+  });
+
   it("keeps brand chip order stable", () => {
     const products = [
-      { id: "z", name: "Zesta Crackers", brand: "Zesta", departmentId: "snacks" },
-      { id: "c", name: "Cheez-It Crackers", brand: "Cheez-It", departmentId: "snacks" },
+      { id: "bull", name: "Bull's Eye BBQ Sauce", brand: "Bull's Eye", departmentId: "pantry" },
+      { id: "ray", name: "Sweet Baby Ray's BBQ Sauce", brand: "Sweet Baby Ray's", departmentId: "pantry" },
     ];
-    const first = nameBrandsFor(products, "crackers").map((row) => row.brand);
-    const second = nameBrandsFor(products.slice().reverse(), "crackers").map((row) => row.brand);
-    assert.deepEqual(first, second);
-    assert.deepEqual(first, [...first].sort((a, b) => a.localeCompare(b)));
+    const first = nameBrandsFor(products, "bbq-sauce").map((row) => row.brand);
+    const again = nameBrandsFor(products, "bbq-sauce").map((row) => row.brand);
+    assert.deepEqual(again, first);
+    assert.equal(first[0], "Bull's Eye");
+    assert.notEqual(first.at(-1), "Bull's Eye");
   });
 
   it("does not overlay the price check and lays the match star in the row", () => {

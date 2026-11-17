@@ -1580,8 +1580,15 @@ dialog.profile-onboard #profile-stage {
   overflow-anchor: none;
   padding-bottom: 12px;
 }
-dialog.profile-onboard[open] { z-index: 200; background: var(--bg); }
-html.welcome-hold .card { visibility: hidden; }
+dialog.profile-onboard[open] {
+  z-index: 200;
+  background: var(--bg);
+  box-shadow: 0 0 0 100vmax var(--bg);
+}
+html.welcome-hold .shell,
+html.welcome-hold .card,
+body:has(#profile-onboard[open]) #grid,
+body:has(#profile-onboard[open]) .card { visibility: hidden; }
 dialog.profile-onboard .profile-actions {
   position: sticky;
   bottom: 0;

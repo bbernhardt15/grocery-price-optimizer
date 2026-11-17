@@ -370,6 +370,19 @@ describe("import routes", () => {
     assert.equal(again.items?.[0]?.name, "bananas");
   });
 
+  it("does not reuse a receipt read from a different device", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.IMPORT_VISION_PROVIDER = "openai";
+    process.env.IMPORT_AI_PROVIDER = "off";
+    const image = Buffer.from("session-receipt-bytes").toString("base64");
+    const first = await post("/api/import/photo", { imageBase64: image, mimeType: "image/jpeg" }, "device-session-a");
+    assert.equal(first.status, 200);
+    calls.length = 0;
+    const second = await post("/api/import/photo", { imageBase64: image, mimeType: "image/jpeg" }, "device-session-b");
+    assert.equal(second.status, 200);
+    assert.ok(calls.some((url) => url.includes("/chat/completions")));
+  });
+
   it("suggests a goal only when AI is configured and stops at the daily cap", async () => {
     process.env.OPENAI_API_KEY = "test-key";
     process.env.IMPORT_AI_PROVIDER = "openai";

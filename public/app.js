@@ -10406,9 +10406,9 @@ async function boot() {
       else guide?.holdAfterReturn?.();
     }
     else releasePageForTaps(new Set(["cart-ready"]));
-    const onboardOpen = document.getElementById("profile-onboard")?.open;
-    if (onboardOpen) requestAnimationFrame(() => document.documentElement.classList.remove("welcome-hold"));
-    else document.documentElement.classList.remove("welcome-hold");
+    const dropHold = () => document.documentElement.classList.remove("welcome-hold");
+    if (document.getElementById("profile-onboard")?.open) requestAnimationFrame(() => requestAnimationFrame(dropHold));
+    else dropHold();
     const wantsAlerts = new URLSearchParams(location.search).get("alerts") === "1";
     const onboard = $("onboarding");
     if (wantsAlerts && onboard?.open) {
@@ -10906,7 +10906,7 @@ async function postImport(path, body, onProgress) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-device-id": localStorage.getItem("gg-device") || "gg-device",
+      "x-device-id": deviceId(),
     },
     body: JSON.stringify(sent),
   });

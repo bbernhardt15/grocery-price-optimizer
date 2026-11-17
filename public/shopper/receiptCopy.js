@@ -4,6 +4,7 @@
  */
 
 import { basketTeaserHtml, frequencyLine, learnedCategory, modeLine } from "./intakePresent.js";
+import { isStoreBrand } from "./productPreference.js";
 import { learnedActionsHtml } from "./learnedActions.js";
 import { learnedRulePillHtml } from "./learnedRule.js";
 import { joinBrandName, tripAddHtml } from "./tripAdd.js";
@@ -143,8 +144,48 @@ export function receiptUploadHtml() {
   </div>`;
 }
 
-const BRAND_FALLBACK = ["Kroger", "Simple Truth", "Great Value"];
-const STORE_BRAND = /^(kroger|simple truth|great value|good & gather|marketside|equate)$/i;
+const CHAIN_BRANDS = {
+  kroger: ["kroger", "simple truth", "private selection"],
+  walmart: ["great value", "marketside", "equate", "sam's choice", "sams choice"],
+  target: ["good & gather", "market pantry", "up & up", "favorite day"],
+};
+
+export function storeBrandsFor(stores) {
+  const selected = (stores || []).map((store) => String(store || "").toLowerCase());
+  const names = [];
+  if (selected.some((store) => store.includes("kroger"))) names.push("Kroger", "Simple Truth", "Private Selection");
+  if (selected.some((store) => store.includes("walmart"))) names.push("Great Value", "Marketside", "Equate", "Sam's Choice");
+  if (selected.some((store) => store.includes("target"))) names.push("Good & Gather", "Market Pantry", "Up & Up");
+  return names;
+}
+
+function chainOf(brand) {
+  const key = String(brand || "").trim().toLowerCase();
+  for (const [chain, names] of Object.entries(CHAIN_BRANDS)) {
+    if (names.some((name) => key === name)) return chain;
+  }
+  return "";
+}
+
+/** A store brand is shown only for a chain the shopper selected. Name brands are not chained. */
+export function brandFitsStores(brand, stores) {
+  const chain = chainOf(brand);
+  if (!chain) return !isStoreBrand(brand);
+  const selected = (stores || []).map((store) => String(store || "").toLowerCase());
+  return selected.some((store) => store.includes(chain));
+}
+
+/**
+ * Chips for one learned rule.
+ * Name brand is name brands only. Store brand is the selected chains only.
+ * Cheapest overall is every brand, so it has no chips.
+ */
+export function brandsForRule(brands, mode, stores) {
+  const list = (brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
+  if (mode === "cheapest") return [];
+  if (mode === "storeBrand") return list.filter((brand) => isStoreBrand(brand) && brandFitsStores(brand, stores));
+  return list.filter((brand) => !isStoreBrand(brand));
+}
 
 export function brandChipMarkup(brands, options = {}) {
   const pending = Boolean(options.pending);
@@ -152,10 +193,8 @@ export function brandChipMarkup(brands, options = {}) {
   if (pending) {
     return `<fieldset class="brand-group"><legend>Brands</legend><div class="brand-picks" role="group" aria-label="Brands" aria-busy="true"><p class="brand-loading" role="status">Loading brands</p><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span><span class="brand-skel" aria-hidden="true"></span></div></fieldset>`;
   }
-  const given = (brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
-  const nameBrandRule = options.rule === "brand" || options.rule === "cheapestPicks";
-  const usable = nameBrandRule ? given.filter((brand) => !STORE_BRAND.test(brand)) : given;
-  const names = usable.length ? usable : nameBrandRule ? [] : BRAND_FALLBACK;
+  const names = brandsForRule(brands, options.rule || "brand", options.stores || []);
+  if (!names.length && !pending) return "";
   const buttons = names
     .map((brand) => {
       const on = Boolean(options.selected?.has?.(String(brand).toLowerCase()));
@@ -176,7 +215,14 @@ export function learnedCardInnerHtml(row, options = {}) {
   const metaBits = [mode !== choice ? mode : "", frequencyLine(row)].filter(Boolean);
   const meta = metaBits.length ? `<p class="learned-meta">${escapeText(metaBits.join(" · "))}</p>` : "";
   const pending = Boolean(options.pending);
-  const picker = options.editing ? learnedPickerHtml(row, options.brands || [], { pending, saved: Boolean(options.saved), retry: Boolean(options.retry) }) : "";
+  const picker = options.editing
+    ? learnedPickerHtml(row, options.brands || [], {
+        pending,
+        saved: Boolean(options.saved),
+        retry: Boolean(options.retry),
+        stores: options.stores || [],
+      })
+    : "";
   return `<div class="learned-copy">
           <h3>${escapeText(row?.label || row?.family)}</h3>
           ${learnedRulePillHtml(row)}
@@ -190,15 +236,28 @@ export function learnedCardInnerHtml(row, options = {}) {
 
 function learnedPickerHtml(row, brands, options = {}) {
   const family = escapeText(row?.family || "");
-  const nameBrand = row?.mode === "brand" || row?.mode === "cheapestPicks";
+  const mode = row?.mode || "brand";
+  const nameBrand = mode === "brand" || mode === "cheapestPicks";
   const selected = new Set(
     (row?.brands?.length ? row.brands : nameBrand && row?.brand ? [row.brand] : []).map((brand) => String(brand).toLowerCase())
   );
-  const storeOnly = row?.mode === "storeBrand";
-  const names = storeOnly
-    ? ""
-    : brandChipMarkup(brands, { pending: options.pending, selected, family: row?.family || "", retry: options.retry, rule: nameBrand ? "brand" : "" });
-  const storeNote = storeOnly ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>` : nameBrand ? `<p class="muted store-brand-note">Name brands only. Store brands stay off this card.</p>` : "";
+  const storeOnly = mode === "storeBrand";
+  const names =
+    mode === "cheapest"
+      ? ""
+      : brandChipMarkup(brands, {
+          pending: options.pending,
+          selected,
+          family: row?.family || "",
+          retry: options.retry,
+          rule: mode,
+          stores: options.stores || [],
+        });
+  const storeNote = storeOnly
+    ? `<p class="muted store-brand-note">Store brand only. Name brands stay off this card.</p>`
+    : mode === "brand"
+      ? `<p class="muted store-brand-note">Name brands only. Store brands stay off this card.</p>`
+      : "";
   const pickedCount = selected.size;
   const showPicks = pickedCount > 1 || row?.mode === "cheapestPicks";
   const rule = (mode, label) => {
@@ -243,6 +302,7 @@ export function learnedSummaryHtml(learned, options = {}) {
             pending,
             retry: Boolean(options.retryFamilies?.[row.family]),
             saved: Boolean(options.savedFamilies?.has?.(row.family)),
+            stores: options.stores || [],
           });
           return `<section class="summary-row learned-row" data-learned-row="${escapeText(row.family)}" tabindex="-1">${inner}</section>`;
         })

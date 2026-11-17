@@ -400,7 +400,6 @@ export function cutsInShelf(products, familyId) {
 }
 
 export function nameBrandsFor(products, familyId) {
-  if (isProduceFamily(familyId)) return [];
   const known = knownBrandNames(familyId);
   const counts = new Map();
   for (const product of products || []) {
@@ -428,9 +427,7 @@ export function nameBrandsFor(products, familyId) {
     }
     counts.set(canon.key, row);
   }
-  return [...counts.values()]
-    .sort((a, b) => a.brand.localeCompare(b.brand) || b.count - a.count)
-    .slice(0, 24);
+  return [...counts.values()].slice(0, 24);
 }
 
 /** Name brand is a question only when the shelf has several real brands. */
