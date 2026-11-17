@@ -1832,13 +1832,29 @@ dialog.profile-onboard[data-step="receipts"] .drop-zone { min-height: 92px; padd
   height: 44px;
   min-width: 44px;
   min-height: 44px;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-size: 1.35rem;
   line-height: 1;
 }
+.fav-star[aria-pressed="true"] {
+  background: #f6e27a;
+  border-color: #a16207;
+  color: #a16207;
+}
+.staple-pick { position: relative; }
+.staple-star { position: absolute; top: 8px; right: 8px; z-index: 1; }
+.review-store-edit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 8px;
+}
+.review-store-edit p { margin: 0; font-weight: 750; }
+.review-store-edit button { min-height: 44px; }
 .product-placeholder {
   display: block;
   width: 72px;

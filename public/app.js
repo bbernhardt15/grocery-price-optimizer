@@ -3215,7 +3215,7 @@ async function loadPage(reset) {
     weeklyAdBanners = cached.weeklyAdBanners || [];
     total = cached.total ?? 0;
     nextCursor = cached.nextCursor;
-    const items = query ? rankFoodMatches(cached.items || [], query) : cached.items || [];
+    const items = query ? rankFoodMatches(cached.items || [], query, query, eggRankStore()) : cached.items || [];
     for (const product of items) rememberTile(product);
     gridEl.innerHTML = items.map(cardHtml).join("");
     applyClientFilters();
@@ -3257,7 +3257,7 @@ async function loadPage(reset) {
     nextCursor = body.nextCursor;
     if (reset) fillFacets(body.facets ?? {});
     const ranked = rankSearchResults((body.items ?? []).filter((item) => !discontinuedTitle(item)), searchRankContext(query));
-    const items = query ? rankFoodMatches(ranked, query) : ranked;
+    const items = query ? rankFoodMatches(ranked, query, query, eggRankStore()) : ranked;
     for (const product of items) rememberTile(product);
     const viewed = reset ? shelfForProfile(items, query) : { items, warning: "", resolved: null };
     if (reset) showProfileWarning(viewed.warning);
@@ -3342,7 +3342,9 @@ async function loadPage(reset) {
   } finally {
     if (generation !== catalogGeneration) return;
     loading = false;
+    const stepNow = document.body.dataset.step || "";
     syncStepVisibility();
+    if (stepNow) publishStep(stepNow);
     if (reset && nextCursor && sentinelEl.getBoundingClientRect().top < window.innerHeight + 40) {
       void loadPage(false);
     }
@@ -3788,6 +3790,13 @@ function emptyCheckedStoreHtml(stores) {
   const notes = emptyStoreNotes(selectedStoreNames(), stores);
   if (!notes.length) return "";
   return `<ul class="empty-store-notes">${notes.map((note) => `<li class="empty-store-note">${escapeHtml(note)}</li>`).join("")}</ul>`;
+}
+
+function eggRankStore() {
+  const names = selectedStoreNames();
+  if (names.some((name) => name.toLowerCase() === "kroger")) return "Kroger";
+  if (names.some((name) => name.toLowerCase() === "walmart")) return "Walmart";
+  return names[0] || "";
 }
 
 function selectedStoreNames() {
@@ -4995,7 +5004,11 @@ function paintTrip() {
   const shown = mode === "custom" ? customStores : mode === "single" ? singleStores : mode === "fewer" ? fewerStores : bestStores;
   const pricedAt = Number(lastOptimize?.pricedAt) || readPlanCache(localStorage)?.savedAt || 0;
   const age = pricesUpdatedLabel(pricedAt, Date.now());
-  const reviewHead = age ? `<p class="prices-age">${escapeHtml(age)}</p>` : "";
+  const reviewHead = `${age ? `<p class="prices-age">${escapeHtml(age)}</p>` : ""}
+    <div class="review-store-edit">
+      <p>Stores</p>
+      <button type="button" id="review-edit-stores">Edit</button>
+    </div>`;
   const reviewActions = `<div class="review-head review-actions-below">
       <div class="review-head-actions">
         <button type="button" class="text-btn" id="plan-refresh" title="Checks these stores again and keeps the prices already on screen">Check these prices again</button>
@@ -5040,6 +5053,7 @@ function paintTrip() {
   $("plan-refresh")?.addEventListener("click", () => {
     void planTrip({ stay: true, force: true, trigger: $("plan-refresh") });
   });
+  $("review-edit-stores")?.addEventListener("click", () => openDrawer({ focus: "stores" }));
   tripEl.querySelector("[data-nudge-single]")?.addEventListener("click", () => selectReviewMode("single"));
   tripEl.querySelector("[data-nudge-keep]")?.addEventListener("click", () => {
     tripEdits = { ...tripEdits, keepSplit: true, planMode: "spread", planChosen: true };
@@ -5650,6 +5664,7 @@ async function planTrip({ stay = false, trigger = null, force = false, quiet = f
   if (!stay) {
     tabGuard = noteTabInteraction(tabGuard);
     flowStep = "plan";
+    publishStep(flowStep);
     try {
       localStorage.setItem(STEP_KEY, flowStep);
     } catch {
@@ -8220,7 +8235,8 @@ function openDrawer(options = {}) {
   if (!drawer) return;
   drawer.classList.add("is-open");
   syncDrawerMode();
-  const target = options.focus === "zip" ? zipEl : $("drawer-title");
+  const target = options.focus === "stores" ? $("store-picker") : options.focus === "zip" ? zipEl : $("drawer-title");
+  if (options.focus === "stores") $("store-picker")?.scrollIntoView({ block: "nearest" });
   if (target) {
     target.focus();
   }
@@ -9138,8 +9154,12 @@ function syncStepVisibility() {
   if (showMore && !add) showMore.hidden = true;
   if (tripEl) tripEl.hidden = flowStep !== "plan";
   if (shop) shop.hidden = flowStep !== "shop";
-  document.body.dataset.step = flowStep;
   syncBrowse();
+}
+
+/** The visible step. A catalog or boot refresh must not assign this. */
+function publishStep(step) {
+  document.body.dataset.step = step;
 }
 
 function closeFavorites() {
@@ -9302,6 +9322,7 @@ function showStep(step, reason = "user") {
   hidePullStatus();
   const priorStep = flowStep;
   flowStep = readFlowStep(step);
+  publishStep(flowStep);
   try {
     localStorage.setItem(STEP_KEY, flowStep);
   } catch {
@@ -9734,13 +9755,17 @@ async function openPreferenceChange(family) {
     const name = tile.familyName || tile.name || label;
     const meta = [tile.brand, variant.variantLabel || variant.sizeLabel || ""].filter(Boolean).join(" · ");
     const image = variant.imageUrls?.[0] || tile.imageUrls?.[0] || "";
+    const starName = productDisplayName(tile, variant);
+    const starred = readStarredUsuals(localStorage).some(
+      (row) => usualKey(row) === usualKey({ catalogId: variant.id, name: starName, flavor: variant.flavorLabel || "", size: variant.sizeLabel || "" })
+    );
     return `<div class="staple-pick">
+      <button type="button" class="fav-star staple-star" data-fav-star="1" data-fav-name="${escapeHtml(starName)}" data-fav-brand="${escapeHtml(tile.brand || "")}" data-fav-id="${escapeHtml(variant.id)}" data-fav-flavor="${escapeHtml(variant.flavorLabel || "")}" data-fav-size="${escapeHtml(variant.sizeLabel || "")}" aria-pressed="${starred ? "true" : "false"}" aria-label="${starred ? "Unfavorite" : "Favorite"} ${escapeHtml(starName)}">★</button>
       <button type="button" class="staple-tile" data-pref-pick="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">
         ${productPhotoHtml(image, { resolve: mediaUrl })}
-        <span class="staple-name">${escapeHtml(name)}</span>
+        <span class="staple-name">${escapeHtml(starName)}</span>
         <span class="staple-meta">${escapeHtml(meta)}</span>
       </button>
-      <button type="button" class="text-btn" data-pref-favorite="${escapeHtml(variant.id)}" data-pref-family="${escapeHtml(family)}">Mark as favorite</button>
     </div>`;
   }).join("");
   productDialog.innerHTML = `<div class="sheet-body">
@@ -10360,7 +10385,7 @@ async function fillNeedsSearch(name, store, listId, host) {
     const response = browse ? await fetchBrowse(browse, {}, 8000) : null;
     const body = await response?.json().catch(() => ({}));
     const tiles = Array.isArray(body?.items) ? body.items : [];
-    const ranked = rankFoodMatches(tiles, name);
+    const ranked = rankFoodMatches(tiles, name, name, store || eggRankStore());
     if (!ranked.length) {
       host.innerHTML = `<p class="muted">Nothing at Kroger or Walmart for that name.</p>`;
       return;
@@ -10480,6 +10505,7 @@ function openNeedsInput() {
 }
 
 async function bootApp() {
+  const stepAtStart = document.body.dataset.step || "add";
   migrateUnstarredUsuals(localStorage);
   const earlyStep = chooseBootStep();
   if (earlyStep !== "add") showStep(earlyStep, "boot");
@@ -10601,11 +10627,12 @@ async function bootApp() {
       .catch(() => undefined);
   }
   window.setInterval(() => void refreshAlerts(), 60_000);
+  const movedDuringBoot = (document.body.dataset.step || "add") !== stepAtStart;
   if (pendingKrogerReturn) {
     const parsed = pendingKrogerReturn;
     pendingKrogerReturn = null;
     finishKrogerReturn(parsed);
-  } else {
+  } else if (!movedDuringBoot) {
     const step = chooseBootStep();
     if (step !== "add") showStep(step, "boot");
     else {
@@ -10613,6 +10640,7 @@ async function bootApp() {
       syncStepVisibility();
     }
   }
+  document.body.dataset.boot = "done";
 }
 
 document.addEventListener("visibilitychange", () => {

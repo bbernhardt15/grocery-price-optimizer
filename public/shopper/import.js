@@ -9,6 +9,7 @@ import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { armSheetHistory } from "./sheetHistory.js";
 import { shortProductTitle } from "./familyTile.js";
+import { productDisplayName } from "./matchSheet.js";
 import { productPhotoHtml } from "./productPhoto.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
@@ -48,7 +49,11 @@ export function reviewProductTitle(product, query) {
   };
   const misses = (name) => words.some((word) => !hasWord(name, word));
   const chosen = variant && family && misses(family) && !misses(variant) ? variant : family || variant || "Item";
-  return shortProductTitle({ name: chosen, brand: product?.brand, size: product?.sizeLabel || product?.variantLabel }) || chosen;
+  const titled = productDisplayName(
+    { name: chosen, familyName: chosen, brand: product?.brand || "", flavorLabel: product?.flavorLabel || "", sizeLabel: product?.sizeLabel || "" },
+    { name: chosen, brand: product?.brand || "", flavorLabel: product?.flavorLabel || "", sizeLabel: product?.sizeLabel || "", variantLabel: product?.variantLabel || "" }
+  );
+  return titled || shortProductTitle({ name: chosen, brand: product?.brand, size: product?.sizeLabel || product?.variantLabel }) || chosen;
 }
 
 /** Found rows first, then anything that still needs a pick. */
@@ -118,7 +123,7 @@ export function catalogSearchMarkup(item, escape) {
 export function searchHitRows(itemKey, hits, escapeHtml) {
   return (hits || [])
     .map((hit) => {
-      const name = String(hit?.name || "Item");
+      const name = productDisplayName(hit, hit) || String(hit?.name || "Item");
       const size = hit?.sizeLabel ? ` · ${escapeHtml(hit.sizeLabel)}` : "";
       const key = escapeHtml(itemKey);
       const id = escapeHtml(hit?.id || "");

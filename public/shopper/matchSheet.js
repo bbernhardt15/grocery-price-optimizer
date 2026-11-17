@@ -82,8 +82,25 @@ function queryWords(text) {
     .filter((word) => word && word.length > 1 && !/^(the|and|for|with|of|at)$/.test(word));
 }
 
+/** A generic egg search, including the word matchBrowseQuery sends to the catalog. */
+export function isGenericEggQuery(query) {
+  const text = String(query || "").toLowerCase().replace(/\s+/g, " ").trim();
+  return /^(?:large\s+|white\s+|grade\s*a\s+)*eggs?$/.test(text);
+}
+
+/** The store's own large white dozen, not a name-brand or brown egg. */
+export function isHouseEggStaple(item, storeName) {
+  const store = String(storeName || "").toLowerCase();
+  const brand = store.includes("walmart") ? "great value" : store.includes("kroger") ? "kroger" : "";
+  if (!brand) return false;
+  const hay = `${item?.brand || ""} ${item?.name || ""} ${item?.familyName || ""} ${item?.sizeLabel || ""}`.toLowerCase();
+  if (!hay.includes(brand) || !/\beggs?\b/.test(hay)) return false;
+  if (/\b(brown|organic|cage|jumbo|medium)\b/.test(hay)) return false;
+  return /\blarge\b/.test(hay) && /\bwhite\b/.test(hay) && /\b12\b/.test(hay);
+}
+
 /** How closely a shelf row matches the words the shopper typed. */
-export function foodMatchScore(item, phrase) {
+export function foodMatchScore(item, phrase, storeName = "") {
   const want = queryWords(phrase);
   const hay = `${item?.brand || ""} ${item?.name || ""} ${item?.familyName || ""} ${item?.sizeLabel || ""} ${item?.flavorLabel || ""}`.toLowerCase();
   let score = 0;
@@ -93,6 +110,7 @@ export function foodMatchScore(item, phrase) {
   if (/\bwhite\b/.test(hay) && /\bwhite\b/.test(String(phrase || "").toLowerCase())) score += 3;
   if (/\bgrade\s*a\b/.test(hay) && /\bgrade\s*a\b/.test(String(phrase || "").toLowerCase())) score += 3;
   if (/\b12\b/.test(String(phrase || "")) && /\b12\b/.test(hay)) score += 2;
+  if (isGenericEggQuery(phrase) && isHouseEggStaple(item, storeName)) score += 40;
   return score;
 }
 
@@ -109,9 +127,10 @@ export function similarQueries(name) {
 }
 
 /** Drop non-egg rows, then prefer the typed staple, then flavor, then size. */
-export function rankFoodMatches(items, query, phrase = "") {
+export function rankFoodMatches(items, query, phrase = "", storeName = "") {
   const ask = String(query || "").toLowerCase();
   const hint = String(phrase || query || "");
+  const store = String(storeName || "");
   const eggs = /\beggs?\b/.test(`${ask} ${hint.toLowerCase()}`);
   const kept = (items || []).filter((item) => !isEggSearchReject(item, eggs ? `${ask} eggs` : ask));
   const sizeCount = (item) => {
@@ -120,7 +139,7 @@ export function rankFoodMatches(items, query, phrase = "") {
     return match ? Number(match[1]) : 0;
   };
   return kept
-    .map((item, index) => ({ item, index, score: foodMatchScore(item, hint) }))
+    .map((item, index) => ({ item, index, score: foodMatchScore(item, hint, store) }))
     .sort((a, b) => {
       if (a.score !== b.score) return b.score - a.score;
       const aText = `${a.item?.name || ""} ${a.item?.familyName || ""}`.toLowerCase();
@@ -322,7 +341,7 @@ export function mountMatchSheet(deps) {
           if (id && !merged.has(id)) merged.set(id, item);
         }
       }
-      const items = rankFoodMatches([...merged.values()], browseQuery || name, specific);
+      const items = rankFoodMatches([...merged.values()], browseQuery || name, specific, storeName);
       products.clear();
       const rows = rowsFrom(items);
       if (!rows.length) {

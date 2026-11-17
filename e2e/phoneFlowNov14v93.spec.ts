@@ -76,3 +76,112 @@ test("v93 favorites, refine, voice button, menu, and alerts at 390x844", async (
   });
   expect(place.top).toBeGreaterThanOrEqual(place.barBottom - 1);
 });
+
+test("v93 paste import shows Vanilla Coke and Review Edit opens stores at 390x844", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem("gg-onboarding-done", "1");
+    localStorage.setItem("gg-zip", "45103");
+    localStorage.setItem("gg-list", JSON.stringify([{ id: "milk", itemId: "milk", name: "Whole Milk", quantity: 1 }]));
+    navigator.serviceWorker.register = () => Promise.resolve({} as ServiceWorkerRegistration);
+  });
+  await page.route("**/sw.js", (route) => route.abort());
+  await page.route("**/api/import/text", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        found: 1,
+        total: 1,
+        items: [
+          {
+            key: "coke",
+            raw: "Vanilla Coke",
+            name: "Vanilla Coke",
+            status: "found",
+            accepted: true,
+            selectedId: "vanilla",
+            choices: [
+              {
+                product: {
+                  id: "vanilla",
+                  name: "Coca-Cola",
+                  familyName: "Coke",
+                  brand: "Coca-Cola",
+                  flavorLabel: "Vanilla",
+                  sizeLabel: "12 pk",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/optimize-list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        partial: false,
+        pendingStores: [],
+        pricingByStore: [
+          { storeName: "Kroger", check: "ok" },
+          { storeName: "Walmart", check: "ok" },
+        ],
+        total: 3.29,
+        stores: [
+          {
+            storeName: "Kroger",
+            subtotal: 3.29,
+            items: [{ lineId: "milk", name: "Whole Milk", title: "Whole Milk", price: 3.29, quantity: 1, itemTotal: 3.29, storeName: "Kroger" }],
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/catalog/browse**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "vanilla",
+            name: "Coca-Cola",
+            familyName: "Coke",
+            brand: "Coca-Cola",
+            flavorLabel: "Vanilla",
+            sizeLabel: "12 pk",
+            offers: [{ storeName: "Kroger", price: 6.48 }],
+          },
+        ],
+      }),
+    });
+  });
+  await unlock(page);
+  await page.locator("#add-items").tap();
+  await page.locator("#import-paste").fill("Vanilla Coke");
+  await page.locator("#import-find").tap();
+  await expect(page.locator("#import-review h3").first()).toContainText(/Vanilla Coke/);
+  await page.locator("#import-close").tap();
+
+  await page.locator("#step-bar [data-flow='plan']").tap();
+  await page.locator("#review-edit-stores").tap();
+  await expect(page.locator("#store-picker")).toBeVisible();
+  await expect(page.getByText("Stores to shop")).toBeVisible();
+  await page.locator("#drawer-close").tap();
+
+  await page.locator("#step-bar [data-flow='add']").tap();
+  await page.locator("#browse-toggle").tap();
+  await page.locator("#search").fill("Vanilla Coke");
+  await page.locator("#search").press("Enter");
+  const star = page.locator("#grid .fav-star").first();
+  await expect(star).toBeVisible();
+  const off = await star.evaluate((node) => getComputedStyle(node).backgroundColor);
+  await star.tap();
+  await expect(star).toHaveAttribute("aria-pressed", "true");
+  await expect(star).toHaveAttribute("aria-label", /Unfavorite/);
+  const on = await star.evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(on).not.toBe(off);
+});

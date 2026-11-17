@@ -3,7 +3,8 @@ import { describe, it } from "node:test";
 import { savingsChangeNote, shopperCopy } from "../../public/shopper/calmPlan.js";
 import { storeConnectCopy } from "../../public/shopper/storeConnect.js";
 import { learnedSummaryHtml, meatPreferenceHtml } from "../../public/shopper/receiptCopy.js";
-import { foodMatchScore, rankFoodMatches, similarQueries, UNAVAILABLE_MATCH } from "../../public/shopper/matchSheet.js";
+import { foodMatchScore, isGenericEggQuery, matchBrowseQuery, rankFoodMatches, similarQueries, UNAVAILABLE_MATCH } from "../../public/shopper/matchSheet.js";
+import { reviewProductTitle, searchHitRows } from "../../public/shopper/import.js";
 import { productDisplayName } from "../../public/shopper/matchSheet.js";
 import { dedupeStores } from "../../public/shopper/reviewPlans.js";
 import { readUsuals, toggleStarredUsual, usualKey } from "../../public/shopper/usuals.js";
@@ -58,26 +59,31 @@ describe("v93 walkthrough", () => {
     );
   });
 
-  it("ranks a Kroger large white egg staple ahead of other eggs", () => {
-    const ranked = rankFoodMatches(
-      [
-        { id: "cooker", name: "Egg cooker", brand: "Dash" },
-        { id: "brown", name: "Large Brown Eggs", brand: "Eggland's Best", sizeLabel: "12 ct" },
-        { id: "kroger", name: "Grade A Large White Eggs", brand: "Kroger", sizeLabel: "12 ct" },
-        { id: "pulp", name: "Egg carton pulp packaging" },
-      ],
-      "eggs",
-      "Kroger large white eggs"
-    );
-    assert.equal(ranked[0].id, "kroger");
-    assert.equal(foodMatchScore(ranked[0], "Kroger large white eggs") > foodMatchScore(ranked[1], "Kroger large white eggs"), true);
-    assert.equal(ranked.some((item) => item.id === "pulp"), false);
-    assert.equal(ranked.some((item) => item.id === "cooker"), false);
+  it("ranks the store's own large white dozen first for a generic egg search", () => {
+    const items = [
+      { id: "brown", name: "Large Brown Eggs", brand: "Eggland's Best", sizeLabel: "12 ct" },
+      { id: "kroger", name: "Grade A Large White Eggs", brand: "Kroger", sizeLabel: "12 ct" },
+      { id: "value", name: "Large White Eggs", brand: "Great Value", sizeLabel: "12 ct" },
+    ];
+    assert.equal(matchBrowseQuery("eggs"), "eggs");
+    assert.equal(matchBrowseQuery("large eggs"), "eggs");
+    assert.equal(isGenericEggQuery(matchBrowseQuery("eggs")), true);
+    assert.equal(isGenericEggQuery(matchBrowseQuery("large eggs")), true);
+    assert.equal(rankFoodMatches(items, matchBrowseQuery("eggs"), "", "Kroger")[0].id, "kroger");
+    assert.equal(rankFoodMatches(items, matchBrowseQuery("large eggs"), "", "Walmart")[0].id, "value");
+    assert.equal(foodMatchScore(items[1], "eggs", "Kroger") > foodMatchScore(items[0], "eggs", "Kroger"), true);
   });
 
   it("offers a similar search when a name is missing", () => {
     assert.equal(UNAVAILABLE_MATCH, "Not currently available at your stores.");
     assert.deepEqual(similarQueries("Lysol"), ["disinfectant", "cleaner"]);
+  });
+
+  it("puts the flavor first on a pasted or spoken import row", () => {
+    const product = { name: "Coca-Cola", familyName: "Coke", brand: "Coca-Cola", flavorLabel: "Vanilla", sizeLabel: "12 pk" };
+    assert.match(reviewProductTitle(product, "Vanilla Coke"), /^Vanilla Coke/);
+    const hits = searchHitRows("coke", [product], (value) => String(value || ""));
+    assert.match(hits, /Vanilla Coke/);
   });
 
   it("keeps flavor in front of the product name", () => {
