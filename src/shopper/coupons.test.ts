@@ -160,12 +160,12 @@ describe("coupon checklist and savings", () => {
       canEnter: true,
       open: false,
     });
-    assert.match(html, /Add a coupon/);
+    assert.match(html, /Type a coupon/);
     assert.match(html, /coupon-form-wrap" hidden/);
-    assert.match(html, /Check Kroger coupons before you shop/);
+    assert.match(html, /Add coupons/);
+    assert.doesNotMatch(html, /Check Kroger coupons before you shop/);
     assert.match(html, /Your coupon · Oreo · \$1\.00 off/);
-    assert.ok(html.indexOf("your-coupon") < html.indexOf("<details"));
-    assert.doesNotMatch(html, /<details[^>]* open/);
+    assert.ok(html.indexOf("your-coupon") < html.indexOf("Add coupons"));
   });
 
   it("applies one coupon per line and never goes below zero", () => {

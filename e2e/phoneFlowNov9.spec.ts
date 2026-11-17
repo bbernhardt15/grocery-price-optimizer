@@ -71,8 +71,8 @@ for (const size of [
     await expect(page.locator("#app-drawer")).toContainText("Where you shop");
     await page.locator("#aisle-setup").click();
     await expect(page.locator("#favorites-prefs")).toContainText("Type and size");
-    await expect(page.locator("#favorites-prefs")).toContainText("Kroger");
-    await expect(page.locator("#favorites-prefs")).toContainText("Simple Truth");
+    await expect(page.locator("#favorites-prefs")).toContainText("Store brand");
+    await expect(page.locator("#favorites-prefs")).not.toContainText("Simple Truth");
     await expect(page.locator("#favorites-prefs input")).toHaveAttribute("placeholder", /Eggland/);
     await expect(page.locator("#favorites-prefs")).toContainText("only for Eggs");
     await page.locator("#favorites-prefs input").fill("Eggland's Best large");

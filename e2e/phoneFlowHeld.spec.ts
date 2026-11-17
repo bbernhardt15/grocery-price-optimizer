@@ -114,7 +114,7 @@ test("auditor held refresh keeps a pointer or wheel scroll when the plan arrives
     expect(closed).toBe(deep);
   }
   await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLElement).click());
-  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
+  await page.locator(".match-pick", { hasText: /Great Value.*Walmart/ }).click();
   await page.waitForTimeout(700);
   const picked = await page.evaluate(() => ({
     y: window.scrollY,
@@ -207,7 +207,7 @@ test("a picked match shows in that cart before the price check returns", async (
   await page.locator("[data-store='Walmart'] .review-lines").waitFor({ state: "attached" });
   const before = await page.evaluate(() => window.scrollY);
   await page.locator("[data-match-search='Eggs']").evaluate((node) => (node as HTMLElement).click());
-  await page.getByRole("button", { name: /Great Value.*Walmart/ }).click();
+  await page.locator(".match-pick", { hasText: /Great Value.*Walmart/ }).click();
   await expect(page.locator("[data-store='Walmart'] [data-picked-line]")).toContainText("Large Eggs");
   await expect(page.locator("[data-unfound]")).not.toContainText("Eggs");
   const after = await page.evaluate(() => window.scrollY);

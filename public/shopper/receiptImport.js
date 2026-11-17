@@ -32,7 +32,9 @@ export function cachedReceiptRead(hash) {
 
 export function rememberReceiptRead(hash, lines) {
   if (!hash || !lines) return;
-  receiptReads.set(hash, lines);
+  const prior = receiptReads.get(hash);
+  const next = Array.isArray(prior) && prior.length > lines.length ? prior : lines;
+  receiptReads.set(hash, next);
   while (receiptReads.size > 24) {
     const oldest = receiptReads.keys().next().value;
     if (!oldest) break;

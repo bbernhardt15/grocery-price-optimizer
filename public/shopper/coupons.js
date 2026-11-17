@@ -613,22 +613,21 @@ export function storeCouponMarkup(store, options) {
        <div class="coupon-form-wrap" hidden>${couponFormMarkup(store)}</div>`
     : `<p class="muted">Coupon links stay free. <button type="button" class="linkish" data-open-paywall="1">Grocery Gitter Pro</button> lets you type in a coupon you already have.</p>`;
   const saved = `${lines ? `<ul class="your-coupon-list">${lines}</ul>` : ""}${estimated}`;
-  const shot = options.canEnter
-    ? `<button type="button" class="text-btn" data-show-coupon-form data-coupon-screenshot="1">Add a coupon screenshot</button>`
-    : "";
-  return `${saved}<details class="coupon-panel"${open}>
-    <summary>Check ${storeName} coupons before you shop</summary>
-    <div class="coupon-body">
-      ${link}
-      <p class="coupon-list">${escapeHtml(sentence)}</p>
-      ${shot}
-      <label class="check-line coupon-clipped">
-        <input type="checkbox" data-coupon-clipped="${storeName}"${clipped} />
-        <span>I clipped my coupons</span>
-      </label>
-      ${form}
-    </div>
-  </details>`;
+  const body = options.canEnter
+    ? `<div class="coupon-form-wrap" hidden>
+        ${link}
+        <p class="coupon-list">${escapeHtml(sentence)}</p>
+        <label class="check-line coupon-clipped">
+          <input type="checkbox" data-coupon-clipped="${storeName}"${clipped} />
+          <span>I clipped my coupons</span>
+        </label>
+        ${form.replace("Add a coupon", "Type a coupon")}
+      </div>`
+    : `<p class="muted">Coupon links stay free. <button type="button" class="linkish" data-open-paywall="1">Grocery Gitter Pro</button> lets you add a coupon you already have.</p>`;
+  return `${saved}<div class="coupon-panel">
+    <button type="button" class="ghost" data-show-coupon-form data-coupon-screenshot="1">Add coupons</button>
+    ${body}
+  </div>`;
 }
 
 /** Short in-store reminder. The plan keeps the full coupon section. */

@@ -9,6 +9,7 @@ import { dedupeReviewItems } from "./importDedupe.js";
 import { releaseAfterLastSheet } from "./sheetScroll.js";
 import { armSheetHistory } from "./sheetHistory.js";
 import { shortProductTitle } from "./familyTile.js";
+import { productDisplayName } from "./matchSheet.js";
 import { productPhotoHtml } from "./productPhoto.js";
 import { createSilenceWatch, preferServerSpeech, recorderMime, releaseMicrophone } from "./speechListen.js";
 
@@ -48,7 +49,11 @@ export function reviewProductTitle(product, query) {
   };
   const misses = (name) => words.some((word) => !hasWord(name, word));
   const chosen = variant && family && misses(family) && !misses(variant) ? variant : family || variant || "Item";
-  return shortProductTitle({ name: chosen, brand: product?.brand, size: product?.sizeLabel || product?.variantLabel }) || chosen;
+  const titled = productDisplayName(
+    { name: chosen, familyName: chosen, brand: product?.brand || "", flavorLabel: product?.flavorLabel || "", sizeLabel: product?.sizeLabel || "" },
+    { name: chosen, brand: product?.brand || "", flavorLabel: product?.flavorLabel || "", sizeLabel: product?.sizeLabel || "", variantLabel: product?.variantLabel || "" }
+  );
+  return titled || shortProductTitle({ name: chosen, brand: product?.brand, size: product?.sizeLabel || product?.variantLabel }) || chosen;
 }
 
 /** Found rows first, then anything that still needs a pick. */
@@ -118,7 +123,7 @@ export function catalogSearchMarkup(item, escape) {
 export function searchHitRows(itemKey, hits, escapeHtml) {
   return (hits || [])
     .map((hit) => {
-      const name = String(hit?.name || "Item");
+      const name = productDisplayName(hit, hit) || String(hit?.name || "Item");
       const size = hit?.sizeLabel ? ` · ${escapeHtml(hit.sizeLabel)}` : "";
       const key = escapeHtml(itemKey);
       const id = escapeHtml(hit?.id || "");
@@ -213,7 +218,7 @@ export function mountImport(deps) {
         <p class="import-lead">Say the items, or paste a note, a cart, or a recipe. The microphone stays on only while you are speaking.</p>
         <label class="sr-only" for="import-paste">Your list</label>
         <textarea id="import-paste" class="import-paste" placeholder="Milk, bread, eggs…"></textarea>
-        <button type="submit" class="primary" id="import-find">Find these items</button>
+        <button type="submit" class="primary" id="import-find" disabled>Find these items</button>
         <div class="import-tools">
           <button type="button" class="ghost" id="import-photo">Photo or screenshot</button>
           <p id="import-photo-note" class="import-lead" hidden>Photo import needs photo reading, which isn't set up on this server. Paste a list, or upload a PDF or a text file.</p>
@@ -242,6 +247,7 @@ export function mountImport(deps) {
           <p id="import-live" aria-live="polite"></p>
         </div>
         <div class="import-tools">
+          <button type="button" class="primary" id="import-listen-go" disabled>Find these items</button>
           <button type="button" class="primary" id="import-stop">Stop</button>
           <button type="button" class="ghost" id="import-again">Try again</button>
         </div>
@@ -249,7 +255,7 @@ export function mountImport(deps) {
       <div id="import-transcript" hidden>
         <label for="import-heard">We heard</label>
         <textarea id="import-heard" class="import-transcript"></textarea>
-        <button type="button" class="primary" id="import-heard-go">Find these items</button>
+        <button type="button" class="primary" id="import-heard-go" disabled>Find these items</button>
       </div>
       <div id="import-review" hidden></div>
       <p id="import-photo-cap" class="import-status" role="status" hidden></p>
@@ -271,6 +277,17 @@ export function mountImport(deps) {
   });
 
   const $ = (id) => dialog.querySelector(`#${id}`);
+  function syncFindButtons() {
+    const paste = String($("import-paste")?.value || "").trim();
+    const heard = String($("import-heard")?.value || "").trim();
+    const live = String($("import-live")?.textContent || "").trim();
+    const find = $("import-find");
+    const heardGo = $("import-heard-go");
+    const listenGo = $("import-listen-go");
+    if (find) find.disabled = !paste;
+    if (heardGo) heardGo.disabled = !heard;
+    if (listenGo) listenGo.disabled = !live && !heard;
+  }
   const home = $("import-home");
   const listen = $("import-listen");
   const transcript = $("import-transcript");
@@ -603,7 +620,12 @@ export function mountImport(deps) {
                 })
                 .join("")}</div>`
             : "";
-        const flag = item.lowConfidence ? `<p class="match-flag">Check this match</p>` : "";
+        const listed = Boolean(deps.isOnList?.(product, item.raw || item.name || title));
+        const flag = listed
+          ? `<p class="match-flag" data-already-on-list>Already on your list</p>`
+          : item.lowConfidence
+            ? `<p class="match-flag">Check this match</p>`
+            : "";
         const change =
           item.choices.length > 1
             ? `<button type="button" class="text-btn import-change" data-change="${escapeHtml(item.key)}">${item.openAlts ? "Hide choices" : "Change"}</button>`
@@ -795,6 +817,7 @@ export function mountImport(deps) {
 
   function showTranscript(text) {
     $("import-heard").value = text || "";
+    syncFindButtons();
     show("transcript");
     setStatus(text ? "" : "We didn't catch any words. Type them here, or paste the list.");
     $("import-heard").focus();
@@ -868,6 +891,7 @@ export function mountImport(deps) {
           heard = event?.matches?.[0] || heard;
           const live = $("import-live");
           if (live) live.textContent = heard;
+          syncFindButtons();
           if (heard.trim()) silence.heard();
         });
         await plugin.start({ language: "en-US", partialResults: true, maxResults: 1, popup: false });
@@ -915,6 +939,7 @@ export function mountImport(deps) {
           if (!next) return;
           heard = next;
           if (live && !serverFirst) live.textContent = heard;
+          syncFindButtons();
           silence.heard();
         };
         try {
@@ -1120,7 +1145,13 @@ export function mountImport(deps) {
     setStatus("");
     void startRecording();
   });
+  $("import-paste")?.addEventListener("input", syncFindButtons);
+  $("import-heard")?.addEventListener("input", syncFindButtons);
   $("import-heard-go")?.addEventListener("click", () => void runText($("import-heard").value));
+  $("import-listen-go")?.addEventListener("click", () => {
+    const text = String($("import-live")?.textContent || $("import-heard")?.value || "").trim();
+    if (text) void runText(text);
+  });
   $("import-photo")?.addEventListener("click", () => $("import-photo-input").click());
   $("import-file")?.addEventListener("click", () => $("import-file-input").click());
   $("import-photo-input")?.addEventListener("change", () => {

@@ -289,7 +289,7 @@ test("a coupon photo fills the amount and the note", async ({ page }) => {
   });
   await unlock(page);
   await page.locator('[data-flow="plan"]').click();
-  await page.getByRole("button", { name: "Add a coupon screenshot" }).click();
+  await page.getByRole("button", { name: "Add coupons" }).click();
   await page.locator("[data-coupon-shot]").setInputFiles({ name: "coupon.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Amount off")).toHaveCount(0);
   await expect(page.getByText(/Your coupon/)).toBeVisible();

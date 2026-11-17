@@ -133,5 +133,8 @@ describe("store connection offer", () => {
     assert.equal(connected.title, "Kroger connected");
     assert.equal(connected.later, "Continue");
     assert.equal(connected.showNow, false);
+    assert.equal(connected.body, "Kroger is connected.");
+    assert.equal(connected.walmart, "");
+    assert.doesNotMatch(`${connected.body} ${connected.walmart}`, /skip|until you tap|checkout|optional/i);
   });
 });

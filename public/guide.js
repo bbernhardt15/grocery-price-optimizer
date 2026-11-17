@@ -321,6 +321,8 @@ export function mountGuide(deps = {}) {
     host.dataset.singleDismiss = prompt.moment === "review-next" ? "" : (prompt.chips || []).some((chip) => chip?.id === "no") ? "1" : "";
     const kicker = host.querySelector(".gitter-guide-kicker");
     if (kicker) kicker.textContent = prompt.moment === "review-next" ? "Needs a look" : "Gitter";
+    const turnOff = host.querySelector("[data-guide-off]");
+    if (turnOff) turnOff.hidden = prompt.moment === "review-next";
     host.dataset.chips = chipKey;
     if (chipsEl && !same) {
       chipsEl.innerHTML = (prompt.chips || []).map((chip) => guideChipHtml(chip)).join("");

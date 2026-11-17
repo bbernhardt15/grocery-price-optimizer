@@ -185,6 +185,7 @@ describe("one bottom bar per step", { timeout: 60_000 }, () => {
         const title = document.getElementById("brand-title");
         if (title) title.textContent = "In the store";
       `);
+      await page.waitForFunction(() => document.body.dataset.boot === "done");
       const shop = await inPage<any>(page, MEASURE_CHROME);
       assert.equal(shop.steps, true);
       assert.equal(shop.summary, false);

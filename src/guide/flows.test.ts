@@ -51,6 +51,7 @@ describe("Gitter guide moments on the real flows", () => {
     assert.equal(receiptLinesFromPayload(payload).length, 59);
     const session = noteReceipt(createGuideSession(), payload);
     const seen = view({
+      step: "plan",
       itemCount: 0,
       listNames: [],
       usuals: [

@@ -22,10 +22,8 @@ export function storeConnectCopy(input = {}) {
   if (input.connected && kroger) {
     return {
       title: "Kroger connected",
-      body: "You're signed in. This stays here until you tap Continue.",
-      walmart: walmart
-        ? "Walmart has no account connection. Checkout opens a cart link. That is not a sign-in."
-        : "",
+      body: "Kroger is connected.",
+      walmart: "",
       now: CONNECT_NOW,
       later: "Continue",
       showNow: false,

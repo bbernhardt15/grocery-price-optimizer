@@ -137,10 +137,10 @@ describe("tenth phone test — Add tab", () => {
     const markup = checklistHtml(added.state, escapeHtml);
     assert.match(markup, /Add \d+ items to my trip/);
     assert.match(markup, /data-theme-check="stuffing"/);
-    assert.match(markup, /data-theme-brand="stuffing"/);
+    assert.doesNotMatch(markup, /data-theme-brand="stuffing"/);
     assert.match(markup, /Pie &amp; cream/);
     assert.doesNotMatch(markup, /id="theme-add-input"/);
-    assert.match(markup, /data-theme-brand="stuffing"/);
+    assert.doesNotMatch(markup, /Brand for this list/);
     assert.match(markup, /class="inline-loader"/);
     assert.match(markup, /Untick anything you don't need/);
     assert.doesNotMatch(markup, /\$\d/);
@@ -168,7 +168,7 @@ describe("tenth phone test — Add tab", () => {
     assert.match(app, /pastTripsEmptyHtml/);
     assert.match(html, /addTabPolish\.css/);
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    assert.match(sw, /grocery-gitter-shell-v92/);
+    assert.match(sw, /grocery-gitter-shell-v93/);
     const header = html.slice(html.indexOf("<header"), html.indexOf('id="app-drawer"'));
     assert.match(header, /id="menu-open"/);
     assert.match(header, /id="brand-home"/);
@@ -302,6 +302,9 @@ describe("Add tab at 390px on Chrome", { timeout: 60_000, skip: chrome ? false :
       assert.equal(opened.title, "Your favorites");
       assert.ok(opened.pageScroll <= opened.inner + 1);
 
+      await page.evaluate(() => document.getElementById("favorites-close")?.click());
+      await page.waitForSelector("[data-lists-open]", { visible: true });
+      await page.evaluate(() => document.querySelector("[data-lists-open]")?.scrollIntoView({ block: "center" }));
       await page.click("[data-lists-open]");
       await page.waitForSelector('[data-list-open="thanksgiving"]');
       const card = await inPage<any>(page, `
@@ -327,7 +330,7 @@ describe("Add tab at 390px on Chrome", { timeout: 60_000, skip: chrome ? false :
       assert.equal(card.inside, true);
 
       await page.click('[data-list-open="thanksgiving"]');
-      await page.waitForSelector("[data-theme-brand='stuffing']");
+      await page.waitForSelector("[data-theme-check='stuffing']");
       const beforeEdit = await inPage<string>(page, `return document.querySelector(".theme-check-add .theme-check-label").textContent`);
       assert.match(beforeEdit, /^Add \d+ items to my trip$/);
       await page.click('[data-theme-check="whole-turkey"] input');

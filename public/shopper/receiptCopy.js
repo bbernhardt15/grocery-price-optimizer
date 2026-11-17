@@ -254,18 +254,7 @@ export function learnedSummaryHtml(learned, options = {}) {
         .join("")}</ul>`
     : "";
   const empty = rows.length ? "" : `<p class="muted">Nothing to save from that. Allergies and diets still come first.</p>`;
-  const hasMeat = /\b(meat|seafood|beef|steak|chicken|pork|bacon|fish|shrimp|salmon|turkey|sausage|ham)\b/i.test(
-    [...rows, ...(options.lines || [])]
-      .map((row) => [row?.name, row?.label, row?.family, row?.departmentName, row?.department].filter(Boolean).join(" "))
-      .join(" ")
-  );
-  const skipped = options.skippedFamilies instanceof Set ? options.skippedFamilies : new Set(options.skippedFamilies || []);
-  const meatControl = !hasMeat
-    ? ""
-    : skipped.has("meat")
-      ? `<p class="missing-dept">Meat &amp; Seafood left off.</p>`
-      : `<section class="missing-depts" data-meat-pref><h3>Meat &amp; Seafood</h3><p class="muted">This receipt includes meat. Leave that aisle off if you do not want it priced.</p><span class="missing-dept"><button type="button" class="text-btn" data-missing-skip="meat" data-missing-label="Meat &amp; Seafood">Leave Meat &amp; Seafood off</button></span></section>`;
-  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${meatControl}${basketTeaserHtml(options.lines, { firstReceipt: options.firstReceipt })}</div>`;
+  return `<div class="learned-summary"><p class="learned-purpose">${escapeText(LEARNED_PURPOSE)}</p>${paper}${empty}<div class="summary-list">${cards}</div>${lines}${basketTeaserHtml(options.lines, { firstReceipt: options.firstReceipt })}</div>`;
 }
 
 /** After Confirm: pick which learned lines join this trip. */

@@ -94,7 +94,7 @@ function allowPhotoBatch(req: Request, res: Response): boolean {
 async function review(items: ParsedImportItem[]): Promise<ImportMatchResult> {
   const upcs = items.map((item) => item.upc || "").filter(Boolean);
   const products = await loadKnownProducts({
-    queries: items.map((item) => item.name).slice(0, 24),
+    queries: items.map((item) => item.name).filter(Boolean).slice(0, 80),
     ...(upcs.length ? { upcs } : {}),
   });
   return matchImportItems(items, products);

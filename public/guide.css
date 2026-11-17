@@ -145,6 +145,11 @@ body:has(.filters.open) #gitter-guide {
 #gitter-receipt-sheet .gitter-guide-dismiss {
   pointer-events: auto;
 }
+#gitter-receipt-sheet .gitter-guide-chip {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+}
 
 body:has(#gitter-guide:not([hidden])) .body {
   padding-bottom: calc(var(--bar-h) + 280px);

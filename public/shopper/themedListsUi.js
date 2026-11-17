@@ -3,6 +3,7 @@
  */
 
 import { displayProductName } from "./familyTile.js";
+import { productDisplayName } from "./matchSheet.js";
 import { activeChoice, scaleQuantity, slotMatches } from "./themedLists.js";
 import { ICON_THEMED, inlineLoaderHtml } from "./addTabIcons.js";
 import { productPhotoHtml } from "./productPhoto.js";
@@ -30,18 +31,22 @@ export function sourceNote(source) {
  * tile are ignored on purpose.
  */
 export function pickerTileHtml(tile, selectedId, escapeHtml, imageSrc) {
-  const title = tile?.familyName || tile?.name || "Item";
-  const brand = tile?.brand && !String(title).toLowerCase().includes(String(tile.brand).toLowerCase()) ? tile.brand : "";
   const variants = Array.isArray(tile?.variants) && tile.variants.length ? tile.variants : [tile];
-  const selected = variants.find((variant) => variant?.id === selectedId) || variants[0] || tile;
-  const sizes = variants
-    .filter((variant) => variant?.id)
-    .map((variant) => {
-      const on = variant.id === selected?.id;
-      const label = variant.label || variant.variantLabel || variant.sizeLabel || "Size";
-      return `<button type="button" class="choice-chip" role="radio" aria-checked="${on ? "true" : "false"}" data-pick-size="${text(escapeHtml, variant.id)}" data-pick-family="${text(escapeHtml, tile?.familyKey || "")}">${text(escapeHtml, label)}</button>`;
-    })
-    .join("");
+  const pickedIndex = Math.max(0, variants.findIndex((variant) => variant?.id && variant.id === selectedId));
+  const selected = variants[pickedIndex] || variants[0] || tile;
+  const title = productDisplayName(tile, selected);
+  const brand = tile?.brand && !String(title).toLowerCase().includes(String(tile.brand).toLowerCase()) ? tile.brand : "";
+  const sized = variants.filter((variant) => variant?.id);
+  const sizes = sized.length <= 1
+    ? `<p class="size-current">Current selection <span>${text(escapeHtml, sized[0]?.label || sized[0]?.variantLabel || sized[0]?.sizeLabel || selected?.sizeLabel || "This size")}</span></p>`
+    : sized
+        .map((variant, index) => {
+          const on = index === pickedIndex || (pickedIndex < 0 && index === 0);
+          const label = variant.label || variant.variantLabel || variant.sizeLabel || "Size";
+          const current = on ? "Current selection " : "";
+          return `<button type="button" class="choice-chip" role="radio" aria-checked="${on ? "true" : "false"}" data-pick-size="${text(escapeHtml, variant.id)}" data-pick-family="${text(escapeHtml, tile?.familyKey || "")}">${current}${text(escapeHtml, label)}</button>`;
+        })
+        .join("");
   const rawImage = selected?.imageUrls?.[0] || tile?.imageUrls?.[0] || "";
   const image = imageSrc ? imageSrc(rawImage) : rawImage;
   return `<article class="pick-tile">
@@ -180,9 +185,6 @@ function slotRowHtml(model, slotDef, book, people, quantities, escapeHtml) {
     <div class="slot-copy">
       <p class="slot-need">${text(escapeHtml, slotDef.label)}</p>
       <p class="slot-product">${text(escapeHtml, shown.title)}</p>
-      <label class="slot-brand">Brand for this list
-        <input data-slot-brand="${text(escapeHtml, slotDef.id)}" value="${text(escapeHtml, picked.choice?.brand || slotDef.suggested?.brand || "")}" maxlength="40" autocomplete="off" />
-      </label>
       ${shown.detail ? `<p class="muted">${text(escapeHtml, shown.detail)}</p>` : ""}
       <p class="muted">${text(escapeHtml, sourceNote(picked.source))}</p>
       ${move}
