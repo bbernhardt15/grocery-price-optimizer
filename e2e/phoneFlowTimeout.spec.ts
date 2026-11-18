@@ -72,7 +72,7 @@ test("a cold review stops after the timeout and a retry can price it", async ({ 
   await unlock(page);
   await page.locator("#step-bar [data-flow='plan']").click();
   await expect(page.getByText("Checking store prices")).toBeVisible();
-  await expect(page.getByText("This check stopped after 22 seconds.")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("This check stopped after 12 seconds.")).toBeVisible({ timeout: 30000 });
   await expect(page.getByText("Checking store prices")).toHaveCount(0);
   await expect(page.locator(".savings-callout")).toHaveCount(0);
   await expect(page.locator("[data-store]")).toHaveCount(0);
@@ -143,7 +143,7 @@ test("a priced review stays put when a refresh is held past the timeout", async 
   hang = true;
   await page.locator("#plan-refresh").evaluate((node) => (node as HTMLButtonElement).click());
   await expect(page.locator("[data-review-refresh]")).toContainText("Checking store prices");
-  await expect(page.locator("[data-review-refresh]")).toContainText("stopped after 22 seconds", { timeout: 30000 });
+  await expect(page.locator("[data-review-refresh]")).toContainText("stopped after 12 seconds", { timeout: 30000 });
   await expect(page.locator("[data-store='Kroger']")).toContainText("$6.40");
   await expect(page.locator("[data-store='Walmart']")).toContainText("Bread");
   expect(await page.evaluate(() => window.scrollY)).toBe(400);

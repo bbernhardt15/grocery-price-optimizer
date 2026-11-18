@@ -754,6 +754,39 @@ function rate(hits: number, attempts: number): number | null {
   return Math.round((hits / attempts) * 1000) / 1000;
 }
 
+/** Bump when the product-id shapes change so stored misses are asked again once. */
+export const KROGER_MATCH_FORMAT = 2;
+
+/**
+ * When the Kroger lookup queue is large, spend the tick on those lookups.
+ * Discovery keeps at most one call. Refresh gets whatever is left.
+ */
+export function krogerTickForQueue(
+  split: { lookup: number; refresh: number; discovery: number; refreshFirst: boolean },
+  queue: number,
+  maxCalls: number
+): { lookup: number; refresh: number; discovery: number; refreshFirst: boolean } {
+  if (queue < 1_000 || maxCalls < 1) return split;
+  const discovery = Math.min(split.discovery, 1);
+  const lookup = Math.max(split.lookup, Math.min(maxCalls - discovery, Math.ceil(maxCalls * 0.6)));
+  const refresh = Math.max(0, maxCalls - lookup - discovery);
+  return { lookup, refresh, discovery, refreshFirst: false };
+}
+
+/** A queued miss can be asked again. Hits that already have a Kroger id stay put. */
+export async function requeueKrogerMisses(): Promise<number> {
+  const result = await CatalogMaster.updateMany(
+    {
+      key: { $not: /^local:/ },
+      walmartItemId: { $type: "string", $ne: "" },
+      $or: [{ krogerProductId: { $exists: false } }, { krogerProductId: null }, { krogerProductId: "" }],
+      matchKrogerAt: { $type: "date" },
+    },
+    { $unset: { matchKrogerAt: "", matchKrogerHoldUntil: "" }, $set: { matchKrogerVariant: 0, matchKrogerSkip: "" } }
+  );
+  return result.modifiedCount ?? 0;
+}
+
 export async function countLookupQueue(side: Side, now = new Date()): Promise<number> {
   return CatalogMaster.countDocuments({ $and: dueClauses(side, now) });
 }

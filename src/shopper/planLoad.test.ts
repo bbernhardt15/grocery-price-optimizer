@@ -4,7 +4,7 @@ import { PLAN_TIMEOUT_MS, fetchWithTimeout, planTimedOut } from "../../public/sh
 
 describe("plan request timeout", () => {
   it("caps a plan request long enough for a few stores", () => {
-    assert.equal(PLAN_TIMEOUT_MS, 22000);
+    assert.equal(PLAN_TIMEOUT_MS, 12000);
   });
 
   it("aborts a fetch that never returns", async () => {

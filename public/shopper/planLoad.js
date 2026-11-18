@@ -1,5 +1,5 @@
 /** Shopper-facing cap. A hung store lookup must not hold the plan screen. */
-export const PLAN_TIMEOUT_MS = 22000;
+export const PLAN_TIMEOUT_MS = 12000;
 export const PLAN_PARTIAL_NOTE = "Still checking a few stores, showing what we have so far.";
 
 /**

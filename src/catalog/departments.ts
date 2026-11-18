@@ -528,7 +528,7 @@ export function isTopicalCareName(name: string): boolean {
  * Browse hides these from food and can pull the health ones into Personal Care.
  */
 export const MISFILED_GROCERY_NAME =
-  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|homeopath|arnica|ointments?|lotions?|roll-?ons?|\bpain\s+relief\b|topicals?|\*{2,}\s*discontinued/i;
+  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|homeopath|arnica|ointments?|lotions?|roll-?ons?|\bpain\s+relief\b|topicals?|\bcrutch(?:es)?\b|\bwheelchair(?:s)?\b|\brollator(?:s)?\b|chicken\s+coops?|\bnespresso\s+(?:machines?|makers?|brewers?)|\bkeurig\s+(?:machines?|makers?|brewers?)|\b(?:tablets?|caplets?|soft\s*gels?)\b|\*{2,}\s*discontinued/i;
 
 /** The aisle a shopper should see, even when the stored department is stale. */
 export function browseDepartment(categories: string[] | undefined, name: string, stored?: string): string {
@@ -811,6 +811,37 @@ export const SUSPICIOUS_NON_GROCERY_NAME = new RegExp(
  * Returns a department, or null when the usual path rules should run.
  * blockHealth is true when a vitamin segment must not apply.
  */
+/** Oral supplements. Coffee pods, laundry pods, and candy stay food or household. */
+export function isOralSupplementName(name: string): boolean {
+  const text = name.trim();
+  if (!DOSAGE_FORM.test(text)) return false;
+  if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?)\b/i.test(text)) return false;
+  if (/\b(?:laundry|dishwasher|detergent)\b/i.test(text)) return false;
+  if (/\b(?:candy|candies|chocolate|gum|mints?|yogurt|cereal|cookie|cookies)\b/i.test(text) && !/\b(?:supplement|vitamin|probiotic)\b/i.test(text)) {
+    return false;
+  }
+  return /\b(?:supplements?|vitamins?|multivitamins?|probiotics?|tablets?|capsules?|soft\s*gels?|caplets?)\b/i.test(text);
+}
+
+/** Crutches, wheelchairs, and the pouches made for them. Not a food aisle. */
+export function isMobilityGearName(name: string): boolean {
+  return /\b(?:crutch(?:es)?|wheelchair(?:s)?|rollator(?:s)?|knee walkers?|rolling walkers?)\b/i.test(name);
+}
+
+/** Coop fans and other poultry-house hardware. Chicken meat stays in meat. */
+export function isFarmEquipmentName(name: string): boolean {
+  if (/\b(?:chicken|hen|poultry)\s+coops?\b/i.test(name)) return true;
+  return /\bcoops?\b/i.test(name) && /\b(?:fans?|solar|heaters?|doors?|lights?)\b/i.test(name);
+}
+
+/**
+ * Coffee pods stay in beverages. The machine, and parts for it, do not.
+ */
+export function isCoffeeHardwareName(name: string): boolean {
+  if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?)\b/i.test(name)) return false;
+  return /\b(?:nespresso|keurig|krups|mr\.?\s*coffee)\b/i.test(name) && /\b(?:machines?|makers?|brewers?|descal\w*|frothers?|accessories|accessory|drip trays?|water filters?|pod holders?)\b/i.test(name);
+}
+
 function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: boolean } | { mapped?: undefined; blockHealth: boolean } {
   const text = name.trim();
   if (!text) {
@@ -839,6 +870,9 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   if (/\b(?:pasta|spaghetti)\b/i.test(text) && /\bbeauty\b/i.test(text)) {
     return { mapped: departmentFromName("pantry", "pasta", "Pasta & Rice"), blockHealth: true };
   }
+  if (isMobilityGearName(text) || isFarmEquipmentName(text) || isCoffeeHardwareName(text)) {
+    return { mapped: departmentFromName("other", "non-grocery"), blockHealth: true };
+  }
   if (isTopicalCareName(text)) {
     const bucket = /\b(?:homeopath\w*|arnica\w*|\bpain\b|medicin\w*|analgesic)\b/i.test(text) ? "Health" : "Body";
     return { mapped: personalCareFromName(bucket, "topical"), blockHealth: false };
@@ -856,6 +890,9 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   }
   if (health?.intent === "body") {
     return { mapped: personalCareFromName("Body", health.label), blockHealth: false };
+  }
+  if (!health && isOralSupplementName(text)) {
+    return { mapped: personalCareFromName("Health", "supplement"), blockHealth: false };
   }
   return { blockHealth: health?.intent === "block" };
 }

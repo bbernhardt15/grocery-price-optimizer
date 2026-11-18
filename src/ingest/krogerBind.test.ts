@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { krogerTermBinds } from "./krogerBind";
+import { krogerCommodityBinds, krogerTermBinds } from "./krogerBind";
 
 describe("krogerTermBinds", () => {
   it("binds the real unmatched dairy names only when the brand and name are the same", () => {
@@ -42,6 +42,36 @@ describe("krogerTermBinds", () => {
         { brand: "Daisy", name: "Breakstone's All Natural Sour Cream" }
       ),
       false
+    );
+  });
+
+  it("binds produce, meat, and bakery on the commodity name", () => {
+    assert.equal(
+      krogerTermBinds(
+        { name: "Bananas", brand: "Fresh", departmentId: "produce" },
+        { name: "Bananas", brand: "Kroger" }
+      ),
+      true
+    );
+    assert.equal(krogerCommodityBinds("Gala Apples", "Granny Smith Apples"), false);
+    assert.equal(krogerCommodityBinds("Bananas", "Banana Bread"), false);
+    assert.equal(
+      krogerTermBinds(
+        { name: "Boneless Skinless Chicken Breast", departmentId: "meat-seafood" },
+        { name: "Chicken Breast", brand: "Kroger" }
+      ),
+      false
+    );
+    assert.equal(
+      krogerTermBinds(
+        { name: "Chicken Breast", departmentId: "meat-seafood" },
+        { name: "Boneless Skinless Chicken Breast", brand: "Simple Truth" }
+      ),
+      true
+    );
+    assert.equal(
+      krogerTermBinds({ name: "French Bread", departmentId: "bakery" }, { name: "French Bread Loaf", brand: "Kroger" }),
+      true
     );
   });
 });
