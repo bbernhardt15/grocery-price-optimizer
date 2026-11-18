@@ -743,7 +743,7 @@ function healthNameIntent(name: string): HealthNameIntent | null {
     /\b(?:yogurts?|kefirs?|kombuchas?|kimchi|sauerkraut|sardines?)\b/i.test(text) &&
     !DOSAGE_FORM.test(text) &&
     !supplementBrand(text);
-  const noun = HEALTH_CONSUMABLE_NOUN.test(text) && !foodCarrier;
+  const noun = HEALTH_CONSUMABLE_NOUN.test(text) && !foodCarrier && !isHydrationDrinkName(text);
   if (noun || omegaConsumable || (supplementBrand(text) && (DOSAGE_FORM.test(text) || COUNT_FORM.test(text)))) {
     return { intent: "health", label: "health-consumable" };
   }
@@ -845,12 +845,23 @@ export function isFarmEquipmentName(name: string): boolean {
 }
 
 /**
- * Coffee pods and K-Cups stay in beverages. Makers, machines, and brewers do not,
- * whatever the brand. A brand's filters and accessories stay out too.
+ * A sports drink or hydration mix, including tablets and powders.
+ * Oral rehydration and medical electrolyte products are not drinks.
+ */
+export function isHydrationDrinkName(name: string): boolean {
+  if (/\b(?:pedialyte|oral rehydration|rehydration salts?|\bors\b)\b/i.test(name)) return false;
+  return /\b(?:drinks?|hydration)\b/i.test(name) && /\b(?:tablets?|powders?|mix(?:es)?|packets?|sticks?|multipliers?)\b/i.test(name);
+}
+
+/**
+ * Makers, machines, and brewers leave beverages even when the name also says K-Cup.
+ * Pods and K-Cups with no machine word stay in beverages. A brand's filters stay out too.
  */
 export function isCoffeeHardwareName(name: string): boolean {
-  if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?)\b/i.test(name)) return false;
-  if (/\b(?:coffee|espresso)\b/i.test(name) && /\b(?:machines?|makers?|brewers?)\b/i.test(name)) return true;
+  if (/\b(?:machines?|makers?|brewers?)\b/i.test(name) && /\b(?:coffee|espresso|k-?cups?|nespresso|keurig)\b/i.test(name)) {
+    return true;
+  }
+  if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?|\bpods?\b)\b/i.test(name)) return false;
   return /\b(?:nespresso|keurig|krups|mr\.?\s*coffee|hamilton beach)\b/i.test(name) && /\b(?:descal\w*|frothers?|accessories|accessory|drip trays?|water filters?|pod holders?|filters?)\b/i.test(name);
 }
 
@@ -884,6 +895,9 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   }
   if (/\b(?:bouillon|broth cubes?|sweetener tablets?|sweet\s*'?n\s*low)\b/i.test(text)) {
     return { mapped: departmentFromName("pantry", "seasoning", "Condiments"), blockHealth: true };
+  }
+  if (isHydrationDrinkName(text)) {
+    return { mapped: departmentFromName("beverages", "hydration-drink"), blockHealth: true };
   }
   if (isMobilityGearName(text) || isFarmEquipmentName(text) || isCoffeeHardwareName(text)) {
     return { mapped: departmentFromName("other", "non-grocery"), blockHealth: true };

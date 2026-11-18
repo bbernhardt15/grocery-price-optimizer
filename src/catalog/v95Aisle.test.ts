@@ -21,6 +21,12 @@ describe("v95 aisle strays", () => {
     assert.equal(isOralSupplementName("Altoids Peppermint Mints"), false);
     assert.equal(browseDepartment(["Pantry"], "Knorr Chicken Bouillon Tablets", "pantry"), "pantry");
     assert.equal(browseDepartment(["Pantry"], "Equal Sweetener Tablets", "pantry"), "pantry");
+    assert.equal(browseDepartment(["Beverages"], "Nuun Sport Electrolyte Drink Tablets", "beverages"), "beverages");
+    assert.equal(browseDepartment(["Beverages"], "Ultima Replenisher Electrolyte Drink Tablets", "beverages"), "beverages");
+    assert.equal(browseDepartment(["Beverages"], "Liquid I.V. Hydration Multiplier Electrolyte Tablets", "beverages"), "beverages");
+    assert.equal(browseDepartment(["Beverages"], "Liquid I.V. Hydration Multiplier Powder", "beverages"), "beverages");
+    assert.equal(browseDepartment(undefined, "Pedialyte Electrolyte Powder", "personal-care"), "personal-care");
+    assert.equal(browseDepartment(undefined, "Oral Rehydration Salts Electrolyte", "personal-care"), "personal-care");
   });
 
   it("sends mobility gear, coop hardware, and coffee machines out of the food aisles", () => {
@@ -40,6 +46,9 @@ describe("v95 aisle strays", () => {
     assert.equal(browseDepartment(["Beverages"], "Coffee Machine", "beverages"), "other");
     assert.equal(isCoffeeHardwareName("Green Mountain K-Cup Pods"), false);
     assert.equal(browseDepartment(["Beverages"], "Green Mountain K-Cup Pods", "beverages"), "beverages");
+    assert.equal(isCoffeeHardwareName("Keurig K-Cup Coffee Maker"), true);
+    assert.equal(browseDepartment(["Beverages"], "Keurig K-Cup Coffee Maker", "beverages"), "other");
+    assert.equal(browseDepartment(["Beverages"], "K-Cup Brewer", "beverages"), "other");
   });
 });
 
