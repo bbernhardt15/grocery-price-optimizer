@@ -528,7 +528,7 @@ export function isTopicalCareName(name: string): boolean {
  * Browse hides these from food and can pull the health ones into Personal Care.
  */
 export const MISFILED_GROCERY_NAME =
-  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|homeopath|arnica|ointments?|lotions?|roll-?ons?|\bpain\s+relief\b|topicals?|\bcrutch(?:es)?\b|\bwheelchair(?:s)?\b|\brollator(?:s)?\b|chicken\s+coops?|\bnespresso\s+(?:machines?|makers?|brewers?)|\bkeurig\s+(?:machines?|makers?|brewers?)|\b(?:tablets?|caplets?|soft\s*gels?)\b|\*{2,}\s*discontinued/i;
+  /applecare|\biphones?\b|\bipads?\b|\bapple\s*watch|\blive plants?\b|\bpotted plants?\b|\bfaux\b[^.]{0,24}\bfruits?\b|calamine|jock\s*itch|anti-?itch|antifungal|pain\s+reliev|athlete'?s\s*foot|bed\s*sores?|homeopath|arnica|ointments?|lotions?|roll-?ons?|\bpain\s+relief\b|topicals?|\bcrutch(?:es)?\b|\bwheelchair(?:s)?\b|\brollator(?:s)?\b|chicken\s+coops?|\bnespresso\s+(?:machines?|makers?|brewers?)|\bkeurig\s+(?:machines?|makers?|brewers?)|\*{2,}\s*discontinued/i;
 
 /** The aisle a shopper should see, even when the stored department is stale. */
 export function browseDepartment(categories: string[] | undefined, name: string, stored?: string): string {
@@ -811,16 +811,26 @@ export const SUSPICIOUS_NON_GROCERY_NAME = new RegExp(
  * Returns a department, or null when the usual path rules should run.
  * blockHealth is true when a vitamin segment must not apply.
  */
-/** Oral supplements. Coffee pods, laundry pods, and candy stay food or household. */
+/** Bouillon, sweeteners, drink mixes, and mints are food even when they are tablets. */
+const FOOD_TABLET =
+  /\b(?:bouillon|broth|sweetener|sweeteners|sweet\s*'?n\s*low|equal\b|splenda|stevia|drink tablets?|electrolytes?|hydration|mints?|candy|candies|chocolate|gum|yogurt|cereal|cookies?)\b/i;
+
+/** A supplement signal. The word tablet by itself is not one. */
+const SUPPLEMENT_SIGNAL =
+  /\b(?:vitamins?|multivitamins?|supplements?|probiotics?|\d+\s*mg\b|\d+\s*mcg\b|\biu\b|potency|extracts?|herbal|herbs?|dietary|ketones?|linoleic|travel)\b/i;
+
+/**
+ * Oral supplements need a dosage form and a supplement signal.
+ * Capsules and softgels are that form. Tablets of food stay food.
+ */
 export function isOralSupplementName(name: string): boolean {
   const text = name.trim();
-  if (!DOSAGE_FORM.test(text)) return false;
+  if (!text || FOOD_TABLET.test(text)) return false;
   if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?)\b/i.test(text)) return false;
   if (/\b(?:laundry|dishwasher|detergent)\b/i.test(text)) return false;
-  if (/\b(?:candy|candies|chocolate|gum|mints?|yogurt|cereal|cookie|cookies)\b/i.test(text) && !/\b(?:supplement|vitamin|probiotic)\b/i.test(text)) {
-    return false;
-  }
-  return /\b(?:supplements?|vitamins?|multivitamins?|probiotics?|tablets?|capsules?|soft\s*gels?|caplets?)\b/i.test(text);
+  if (!DOSAGE_FORM.test(text)) return false;
+  if (SUPPLEMENT_SIGNAL.test(text)) return true;
+  return /\b(?:capsules?|soft\s*gels?)\b/i.test(text);
 }
 
 /** Crutches, wheelchairs, and the pouches made for them. Not a food aisle. */
@@ -835,11 +845,13 @@ export function isFarmEquipmentName(name: string): boolean {
 }
 
 /**
- * Coffee pods stay in beverages. The machine, and parts for it, do not.
+ * Coffee pods and K-Cups stay in beverages. Makers, machines, and brewers do not,
+ * whatever the brand. A brand's filters and accessories stay out too.
  */
 export function isCoffeeHardwareName(name: string): boolean {
   if (/\b(?:k-?cups?|coffee pods?|espresso pods?|coffee capsules?|espresso capsules?)\b/i.test(name)) return false;
-  return /\b(?:nespresso|keurig|krups|mr\.?\s*coffee)\b/i.test(name) && /\b(?:machines?|makers?|brewers?|descal\w*|frothers?|accessories|accessory|drip trays?|water filters?|pod holders?)\b/i.test(name);
+  if (/\b(?:coffee|espresso)\b/i.test(name) && /\b(?:machines?|makers?|brewers?)\b/i.test(name)) return true;
+  return /\b(?:nespresso|keurig|krups|mr\.?\s*coffee|hamilton beach)\b/i.test(name) && /\b(?:descal\w*|frothers?|accessories|accessory|drip trays?|water filters?|pod holders?|filters?)\b/i.test(name);
 }
 
 function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: boolean } | { mapped?: undefined; blockHealth: boolean } {
@@ -869,6 +881,9 @@ function nameOverride(name: string): { mapped: MappedDepartment; blockHealth: bo
   }
   if (/\b(?:pasta|spaghetti)\b/i.test(text) && /\bbeauty\b/i.test(text)) {
     return { mapped: departmentFromName("pantry", "pasta", "Pasta & Rice"), blockHealth: true };
+  }
+  if (/\b(?:bouillon|broth cubes?|sweetener tablets?|sweet\s*'?n\s*low)\b/i.test(text)) {
+    return { mapped: departmentFromName("pantry", "seasoning", "Condiments"), blockHealth: true };
   }
   if (isMobilityGearName(text) || isFarmEquipmentName(text) || isCoffeeHardwareName(text)) {
     return { mapped: departmentFromName("other", "non-grocery"), blockHealth: true };

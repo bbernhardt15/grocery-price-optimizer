@@ -7,26 +7,24 @@ export function normalizeKrogerLabel(value: string | undefined): string {
 }
 
 const COMMODITY_DEPARTMENT = new Set(["produce", "meat-seafood", "bakery"]);
-const COMMODITY_SKIP = new Set([
+/** Words that do not change which product it is. Organic, size, and trim are not noise. */
+const COMMODITY_NOISE = new Set([
   "fresh",
-  "organic",
   "the",
   "and",
-  "with",
+  "each",
+  "approx",
+  "approximately",
   "lb",
   "lbs",
   "oz",
   "ct",
-  "each",
-  "approx",
-  "large",
-  "medium",
-  "small",
   "bag",
   "bunch",
+  "loaf",
+  "pk",
+  "pack",
 ]);
-/** A prepared food the commodity itself did not name. "Bananas" is not banana bread. */
-const PREPARED_FOOD = new Set(["bread", "chip", "chips", "juice", "sauce", "soup", "pie", "cake", "cookie", "muffin", "yogurt", "cereal", "nugget", "nuggets"]);
 
 function stemToken(token: string): string {
   if (token.length > 4 && token.endsWith("oes")) return token.slice(0, -2);
@@ -34,27 +32,32 @@ function stemToken(token: string): string {
   return token;
 }
 
+/**
+ * Significant words on a produce, meat, or bakery name.
+ * A quantity such as "3 lb" is dropped. A lean percentage such as "93" stays.
+ * Organic, large/medium/small, and cut or trim words stay, so both sides must carry them.
+ */
 function commodityTokens(name: string): string[] {
-  return normalizeKrogerLabel(name)
-    .split(" ")
+  let text = normalizeKrogerLabel(name).replace(/\bbone in\b/g, "bonein");
+  text = text.replace(/\b\d+(?:\.\d+)?\s*(?:lb|lbs|oz|ct|pk|pack)\b/g, " ");
+  return text
+    .split(/\s+/)
     .map(stemToken)
-    .filter((token) => token && !COMMODITY_SKIP.has(token) && !/^\d+$/.test(token));
+    .filter((token) => token && !COMMODITY_NOISE.has(token));
 }
 
 /**
- * Produce, meat, and bakery often use a different brand and a shorter name
- * at Kroger than the Walmart row. Every catalog word still has to be on the
- * Kroger item, and a prepared food the catalog did not name does not count.
+ * Produce, meat, and bakery may ignore brand, but the products have to be the same item.
+ * Extra Kroger words are allowed only when they are noise (fresh, each, a unit, loaf).
+ * Organic must match organic. A size, cut, trim, or lean percentage on either side
+ * has to be on the other side too.
  */
 export function krogerCommodityBinds(catalogName: string, recordName: string): boolean {
   const left = commodityTokens(catalogName);
-  const right = new Set(commodityTokens(recordName));
-  if (left.length === 0 || right.size === 0) return false;
-  if (left.some((token) => !right.has(token))) return false;
-  for (const prepared of PREPARED_FOOD) {
-    if (right.has(prepared) && !left.includes(prepared)) return false;
-  }
-  return true;
+  const right = commodityTokens(recordName);
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) return false;
+  const seen = new Set(right);
+  return left.every((token) => seen.has(token));
 }
 
 /**

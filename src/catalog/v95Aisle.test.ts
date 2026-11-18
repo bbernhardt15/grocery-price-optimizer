@@ -13,6 +13,14 @@ describe("v95 aisle strays", () => {
     assert.equal(mapToDepartment(["Produce/Fruit"], "Spring Valley Vitamin D3 Softgels").departmentId, "personal-care");
     assert.equal(isOralSupplementName("Nespresso Vertuo Coffee Capsules"), false);
     assert.equal(browseDepartment(["Beverages"], "Nespresso Vertuo Coffee Capsules", "beverages"), "beverages");
+    assert.equal(isOralSupplementName("Knorr Chicken Bouillon Tablets"), false);
+    assert.equal(isOralSupplementName("Equal Sweetener Tablets"), false);
+    assert.equal(isOralSupplementName("Sweet'N Low Tablets"), false);
+    assert.equal(isOralSupplementName("Nuun Sport Electrolyte Drink Tablets"), false);
+    assert.equal(isOralSupplementName("Liquid I.V. Hydration Multiplier Tablets"), false);
+    assert.equal(isOralSupplementName("Altoids Peppermint Mints"), false);
+    assert.equal(browseDepartment(["Pantry"], "Knorr Chicken Bouillon Tablets", "pantry"), "pantry");
+    assert.equal(browseDepartment(["Pantry"], "Equal Sweetener Tablets", "pantry"), "pantry");
   });
 
   it("sends mobility gear, coop hardware, and coffee machines out of the food aisles", () => {
@@ -25,6 +33,13 @@ describe("v95 aisle strays", () => {
     assert.equal(isCoffeeHardwareName("Keurig Water Filter 2 pack"), true);
     assert.equal(browseDepartment(["Beverages"], "Nespresso VertuoPlus Coffee and Espresso Machine", "beverages"), "other");
     assert.equal(isCoffeeHardwareName("Nespresso Espresso Capsules"), false);
+    assert.equal(isCoffeeHardwareName("Hamilton Beach 12 Cup Coffee Maker"), true);
+    assert.equal(isCoffeeHardwareName("Coffee Machine"), true);
+    assert.equal(isCoffeeHardwareName("Espresso Brewer"), true);
+    assert.equal(browseDepartment(["Beverages"], "Hamilton Beach 12 Cup Coffee Maker", "beverages"), "other");
+    assert.equal(browseDepartment(["Beverages"], "Coffee Machine", "beverages"), "other");
+    assert.equal(isCoffeeHardwareName("Green Mountain K-Cup Pods"), false);
+    assert.equal(browseDepartment(["Beverages"], "Green Mountain K-Cup Pods", "beverages"), "beverages");
   });
 });
 
