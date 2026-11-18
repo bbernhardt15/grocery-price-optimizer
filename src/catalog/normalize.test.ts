@@ -72,12 +72,12 @@ describe("upcKey", () => {
     assert.deepEqual(codes, ["012345000065"]);
     assert.deepEqual(walmartLookupCodes(`0${middle}5`), codes);
     const kroger = krogerLookupCodes("012345000065");
-    assert.deepEqual(kroger, ["0001234500006"]);
+    assert.deepEqual(kroger, ["0001234500006", "0012345000065"]);
     assert.equal(krogerProductIdForLookup("070708200500"), "0007070820050");
     assert.equal(krogerProductIdForLookup("70708200500"), "0007070820050");
     assert.equal(krogerProductIdForLookup("003063880160"), "0000306388016");
     assert.equal(krogerProductIdForLookup("073214835404"), "0007321483540");
-    assert.deepEqual(krogerLookupCodes("070708200500"), ["0007070820050"]);
+    assert.deepEqual(krogerLookupCodes("070708200500"), ["0007070820050", "0070708200507"]);
     assert.equal(upcForStorage("049000042566"), "0004900004256");
     assert.equal(upcForStorage("49000042566"), "0004900004256");
     assert.equal(upcForStorage("0004900004256"), "0004900004256");
@@ -96,7 +96,7 @@ describe("upcKey", () => {
     assert.equal(krogerProductIdForLookup(accidentalUpc), accidentalId);
     assert.equal(upcKey(accidentalId, { source: "kroger-product-id" }), upcKey(accidentalUpc));
     assert.deepEqual(krogerLookupCodes(accidentalId), [accidentalId]);
-    assert.deepEqual(krogerLookupCodes(accidentalUpc), [accidentalId]);
+    assert.deepEqual(krogerLookupCodes(accidentalUpc), [accidentalId, "0000001000078"]);
     assert.equal(krogerProductIdForLookup("0049000042566"), "0004900004256");
     const zeroBody = "01200000345";
     const zeroCheck = String(gtinCheckDigit(zeroBody));
@@ -130,7 +130,7 @@ describe("upcKey", () => {
     assert.equal(krogerRequestId("0003114235892"), "0003114235892");
     assert.equal(krogerRequestId("0003320018626"), "0003320018626");
     assert.equal(krogerRequestId("041570054130"), "0004157005413");
-    assert.deepEqual(krogerLookupCodes("041570054130"), ["0004157005413"]);
+    assert.deepEqual(krogerLookupCodes("041570054130"), ["0004157005413", "0041570054130"]);
     assert.equal(storeLookupFormats("070708200500").upcA, "070708200507");
     assert.equal(expandUpcE(`0123450${zeroCheck}`), `${zeroBody}${zeroCheck}`);
     assert.equal(upcKey(`0123450${zeroCheck}`), upcKey(`${zeroBody}${zeroCheck}`));

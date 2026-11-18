@@ -224,7 +224,7 @@ router.post("/optimize-list", async (req: Request, res: Response) => {
       pendingStores: namedStores,
       checked: 0,
       total: groceryList.length,
-      estimateSeconds: Math.max(1, Math.min(9, Math.ceil(groceryList.length / 4))),
+      estimateSeconds: Math.max(1, Math.min(4, Math.ceil(groceryList.length / 8))),
     });
 
     let locationId: string | undefined;

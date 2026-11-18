@@ -29,7 +29,7 @@ const importer = readFileSync(new URL("../../public/shopper/import.js", import.m
 
 describe("eleventh phone test", () => {
   it("bumps the shell cache to v92", () => {
-    assert.match(sw, /grocery-gitter-shell-v94/);
+    assert.match(sw, /grocery-gitter-shell-v95/);
   });
 
   it("keeps the Grocery Gitter wordmark in the header flow", () => {
@@ -388,7 +388,16 @@ describe("eleventh phone test at 390px", { timeout: 60_000, skip: chrome ? false
       assert.ok(light.wordInside, "wordmark stays inside the header");
       assert.ok(light.noHorizontalScroll, "page does not scroll sideways");
       assert.ok(light.dockElevated, "tab bar is elevated");
-      await page.evaluate(() => document.documentElement.setAttribute("data-resolved", "dark"));
+      await page.evaluate(() => {
+        localStorage.setItem("gg-theme", "dark");
+        document.documentElement.dataset.theme = "dark";
+        document.documentElement.dataset.resolved = "dark";
+        document.documentElement.style.colorScheme = "dark";
+      });
+      await page.waitForFunction(() => {
+        const active = document.querySelector('.step-bar button[aria-current="step"]');
+        return Boolean(active && getComputedStyle(active).backgroundColor !== "rgb(229, 246, 236)");
+      });
       const dark = await measureChrome(page);
       assert.notEqual(dark.activeBg, light.activeBg);
       const pill = learnedRulePillHtml({ mode: "cheapestPicks", brands: ["Cheerios", "Kellogg's"] });

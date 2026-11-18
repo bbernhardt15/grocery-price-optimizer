@@ -31,7 +31,7 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
-import { LOOKUP_OUTAGE_HOLD_MS, finishLookups, holdLookup, nextKrogerLookups, nextWalmartLookups, noteMatchCalls, type LookupPick } from "./crossLookup";
+import { KROGER_MATCH_FORMAT, LOOKUP_OUTAGE_HOLD_MS, countLookupQueue, finishLookups, holdLookup, krogerTickForQueue, nextKrogerLookups, nextWalmartLookups, noteMatchCalls, requeueKrogerMisses, type LookupPick } from "./crossLookup";
 import { KROGER_PRODUCT_ID_BATCH, krogerLocationGroup, partitionKrogerBatch } from "./krogerBatch";
 import { finishRefresh, holdRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
 import { scanPriceDropAlerts } from "./maintenance";
@@ -136,6 +136,8 @@ export type KrogerCheckpoint = {
   rateStrikes?: number;
   /** Do not call Kroger again until this time. One 429 sets it; later ticks wait. */
   rateCooldownUntil?: string;
+  /** Bumped when lookup ids change, so misses are asked again once. */
+  matchFormat?: number;
   cycleStartedAt: string;
 };
 
@@ -160,6 +162,9 @@ type KrogerIdFallback = {
   departmentId?: string;
   /** The batch already failed, so skip another product-id query and search by name. */
   termOnly?: boolean;
+  /** Remaining product-id shapes. The next one is tried after every store misses. */
+  codes?: string[];
+  codeIndex?: number;
 };
 
 type CheckpointDoc = {
@@ -302,6 +307,8 @@ function readKrogerIdProbe(value: unknown): KrogerIdFallback | undefined {
     ...(typeof row.brand === "string" && row.brand ? { brand: row.brand } : {}),
     ...(typeof row.departmentId === "string" && row.departmentId ? { departmentId: row.departmentId } : {}),
     ...(row.termOnly === true ? { termOnly: true } : {}),
+    ...(Array.isArray(row.codes) ? { codes: row.codes.filter((code) => typeof code === "string" && /^\d{13}$/.test(code)) } : {}),
+    ...(typeof row.codeIndex === "number" && row.codeIndex >= 0 ? { codeIndex: Math.floor(row.codeIndex) } : {}),
   };
 }
 
@@ -323,7 +330,7 @@ function krogerRecordMatches(
   record: RawCatalogRecord,
   masterKey: string,
   expected: string,
-  catalog?: { name?: string; brand?: string }
+  catalog?: { name?: string; brand?: string; departmentId?: string }
 ): boolean {
   const id = (record.productId || record.retailerItemId || "").replace(/\D/g, "");
   if (id && (id === expected || krogerProductIdForLookup(id) === expected)) {
@@ -336,12 +343,15 @@ function krogerRecordMatches(
   if (!catalog?.name) {
     return false;
   }
-  return krogerTermBinds({ name: catalog.name, brand: catalog.brand }, record);
+  return krogerTermBinds(
+    { name: catalog.name, brand: catalog.brand, departmentId: catalog.departmentId },
+    record
+  );
 }
 
 function bindKrogerLookupRecords(
   records: RawCatalogRecord[],
-  pick: { key: string; code: string; upc?: string; name?: string; brand?: string },
+  pick: { key: string; code: string; upc?: string; name?: string; brand?: string; departmentId?: string },
   mode: "id" | "term"
 ): RawCatalogRecord[] {
   const expected = pick.code.replace(/\D/g, "");
@@ -525,7 +535,7 @@ async function tickSplitFor(
     staleLookupShare: config.staleLookupShare,
   };
   const shares = store === "walmart" ? walmartEffectiveShares(shareInput) : effectiveShares(shareInput);
-  return {
+  const split = {
     ...tickCallSplit(
       maxCalls,
       shares.lookupShare,
@@ -535,6 +545,9 @@ async function tickSplitFor(
     ),
     refreshFirst: shares.refreshFirst,
   };
+  if (store !== "kroger") return split;
+  const queue = await countLookupQueue("kroger").catch(() => 0);
+  return krogerTickForQueue(split, queue, maxCalls);
 }
 
 function logWalmartPagePlan(categoryId: string, stored: string | null, plan: WalmartPagePlan): void {
@@ -1128,6 +1141,12 @@ export async function stepKroger(options: {
     });
   };
 
+  if (process.env.KROGER_MATCH_FORMAT_RESET === "1" && (cp.matchFormat ?? 0) < KROGER_MATCH_FORMAT) {
+    await requeueKrogerMisses().catch(() => 0);
+    cp.matchFormat = KROGER_MATCH_FORMAT;
+    await persist("running", { clearError: true });
+  }
+
   const stampProductPace = () => {
     const nextAt = productGate.nextAllowedAt();
     if (nextAt > 0) {
@@ -1262,17 +1281,19 @@ export async function stepKroger(options: {
     };
   }
 
-  function probeFromPick(picked: LookupPick): KrogerIdFallback {
-    return {
-      key: picked.key,
-      name: picked.name,
-      code: picked.code,
-      nextIndex: 0,
-      ...(picked.upc ? { upc: picked.upc } : {}),
-      ...(picked.brand ? { brand: picked.brand } : {}),
-      ...(picked.departmentId ? { departmentId: picked.departmentId } : {}),
-    };
-  }
+function probeFromPick(picked: LookupPick): KrogerIdFallback {
+  return {
+    key: picked.key,
+    name: picked.name,
+    code: picked.code,
+    nextIndex: 0,
+    codes: picked.codes.filter((code) => /^\d{13}$/.test(code)),
+    codeIndex: picked.codes.indexOf(picked.code),
+    ...(picked.upc ? { upc: picked.upc } : {}),
+    ...(picked.brand ? { brand: picked.brand } : {}),
+    ...(picked.departmentId ? { departmentId: picked.departmentId } : {}),
+  };
+}
 
   async function ensureNearbyLocations(): Promise<void> {
     if (cp.nearbyListed || !options.client.resolveLocations) {
@@ -1325,11 +1346,19 @@ export async function stepKroger(options: {
     return outcome === "stop";
   }
 
-  /** True when this tick should stop. An empty id walks the next store before the name search. */
+  /** True when this tick should stop. An empty id walks the next store, then the next id shape, before the name search. */
   async function afterEmptyId(probe: KrogerIdFallback): Promise<boolean> {
     const locations = krogerMatchLocations(cp);
     if (probe.nextIndex <= locations.length) {
       cp.idFallback = probe;
+      await persist("running", { clearError: true });
+      return false;
+    }
+    const codes = probe.codes ?? [];
+    const codeIndex = probe.codeIndex ?? codes.indexOf(probe.code);
+    const nextCode = codes[codeIndex + 1];
+    if (nextCode && nextCode !== probe.code) {
+      cp.idFallback = { ...probe, code: nextCode, codeIndex: codeIndex + 1, nextIndex: 0 };
       await persist("running", { clearError: true });
       return false;
     }

@@ -318,12 +318,30 @@ export function krogerRequestId(upc: string | undefined | null): string | null {
 }
 
 /**
- * The one Kroger product id to ask for. Extra 12- and 14-digit pads were
- * rejected with PRODUCT-4111-400. A miss falls back to a name search.
+ * Product ids to ask Kroger for, in order.
+ * The first is the 13-digit UPC body with the check digit removed.
+ * A second 13-digit id keeps the check digit (`0` plus UPC-A) when that is a
+ * different code. Kroger's list API rejects a bare 12-digit UPC-A and a
+ * GTIN-14 with PRODUCT-4111-400, so those shapes are not sent.
+ * A produce PLU is only the zero-padded PLU. A miss still falls back to a name search.
  */
 export function krogerLookupCodes(upc: string | undefined | null): string[] {
   const primary = krogerRequestId(upc);
-  return primary ? [primary] : [];
+  if (!primary) return [];
+  const out = [primary];
+  if (krogerPluProductId(upc)) return out;
+  const digits = upc?.replace(/\D/g, "") ?? "";
+  if (digits.length === 13) return out;
+  const upcA = walmartUpcForLookup(digits);
+  if (upcA && /^\d{12}$/.test(upcA)) {
+    const withCheck = `0${upcA}`;
+    if (withCheck !== primary) out.push(withCheck);
+  }
+  if (/^\d{12}$/.test(digits) && digits[0] === "2") {
+    const kept = `0${digits}`;
+    if (!out.includes(kept)) out.push(kept);
+  }
+  return out;
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

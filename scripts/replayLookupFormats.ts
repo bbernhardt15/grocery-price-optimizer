@@ -98,7 +98,7 @@ async function main(): Promise<number> {
       const result = await krogerHit(token, code);
       tally[name][result] += 1;
       outcome[name] = `${result} ${code}`;
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
     }
     console.log(row.name, outcome);
   }

@@ -44,11 +44,27 @@ export type ResolvedCatalog = {
   pendingStores?: string[];
 };
 
-/** A small list should finish. A slow store must not hold the rest forever. */
 /** Return what we have inside the time a phone will wait. Partials stream before this. */
-const PRICE_BUDGET_MS = 9_000;
+export const PRICE_BUDGET_MS = 4_000;
+/** Walmart may finish this long after Kroger. Cached Walmart rows are already in. */
+export const WALMART_PRICE_GRACE_MS = 2_000;
 /** Name searches still run a few at a time. Known UPCs go out as one product-id batch. */
 const PRICE_POOL = 8;
+/** Stored-price reads for one list. They used to wait behind a pool of 8. */
+const CACHE_LOOKUP_POOL = 16;
+
+async function mapLimit(jobs: Array<() => Promise<void>>, limit: number): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, Math.max(jobs.length, 1)) }, async () => {
+    while (cursor < jobs.length) {
+      const index = cursor;
+      cursor += 1;
+      const job = jobs[index];
+      if (job) await job();
+    }
+  });
+  await Promise.all(workers);
+}
 
 type StoredPriceSource = "live" | "weekly_ad" | "seed";
 
@@ -340,6 +356,21 @@ export async function resolveCatalogProducts(
       }
     }
   }
+  const cachedLines = new Map<string, CatalogProduct[]>();
+  if (ingestConfig().dbFirst) {
+    const preload: Array<() => Promise<void>> = [];
+    for (const storeName of competing) {
+      const storedKey = storeName.trim().toLowerCase();
+      if (storedKey !== "walmart" && storedKey !== "kroger") continue;
+      for (const line of lines) {
+        preload.push(async () => {
+          const stored = await storedLineProducts(line.name, storeName, krogerLocationId(storeName, locationId));
+          cachedLines.set(`${storedKey}|${line.name.toLowerCase()}`, stored);
+        });
+      }
+    }
+    await mapLimit(preload, CACHE_LOOKUP_POOL);
+  }
   for (const storeName of competing) storeLeft.set(storeName, lines.length);
   const jobs: Array<{ storeName: string; lineName: string; run: () => Promise<void> }> = [];
   // One store's lines run before the next so the first store can stream
@@ -358,7 +389,10 @@ export async function resolveCatalogProducts(
       if (ingestConfig().dbFirst) {
         const storedKey = storeName.trim().toLowerCase();
         if (storedKey === "walmart" || storedKey === "kroger") {
-          const stored = await storedLineProducts(line.name, storeName, krogerId);
+          const cacheKey = `${storedKey}|${line.name.toLowerCase()}`;
+          const stored = cachedLines.has(cacheKey)
+            ? cachedLines.get(cacheKey) || []
+            : await storedLineProducts(line.name, storeName, krogerId);
           if (stored.length > 0) {
             const seeded = stored.every((product) => product.priceSource === "seed");
             add(stored, line.name, seeded ? "seed" : "cached_live");
@@ -617,7 +651,7 @@ export async function resolveCatalogProducts(
   await runStorePools(orderedJobs, (job) => job.run(), {
     leadPool: PRICE_POOL,
     walmartPool: 4,
-    walmartGraceMs: 6_000,
+    walmartGraceMs: WALMART_PRICE_GRACE_MS,
     onSkip: (job) => noteSkipped(job.storeName, job.lineName),
   });
   if (pendingStores.length) console.info(`price partial pending ${pendingStores.join(", ")}`);

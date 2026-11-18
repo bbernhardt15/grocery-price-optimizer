@@ -166,7 +166,7 @@ for (const size of sizes) {
     });
     await unlock(page);
     await page.locator("#menu-open").tap();
-    await expect(page.locator("#app-version")).toHaveText(/v94 · [0-9a-f]{7}/i);
+    await expect(page.locator("#app-version")).toHaveText(/v95 · [0-9a-f]{7}/i);
     await page.evaluate(() => {
       const row = document.createElement("div");
       row.className = "choice-row";

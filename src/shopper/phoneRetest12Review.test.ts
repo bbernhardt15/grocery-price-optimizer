@@ -74,14 +74,14 @@ function streamed(total: number) {
 
 describe("twelfth phone test, Review and In-store", () => {
   it("bumps the shell cache to v92", () => {
-    assert.equal(SHELL_CACHE, "v94");
-    assert.match(sw, /grocery-gitter-shell-v94/);
+    assert.equal(SHELL_CACHE, "v95");
+    assert.match(sw, /grocery-gitter-shell-v95/);
   });
 
   it("ends a cold review with a retry instead of an endless checking shell", () => {
     const html = reviewGaveUpHtml(["Milk", "Milk"], REVIEW_GAVE_UP_STATUS);
     assert.match(html, /No store price came back/);
-    assert.match(html, /stopped after 22 seconds/);
+    assert.match(html, /stopped after 12 seconds/);
     assert.match(html, /data-plan-retry="1"/);
     assert.match(html, /Try this check again/);
     assert.match(html, />Milk</);
