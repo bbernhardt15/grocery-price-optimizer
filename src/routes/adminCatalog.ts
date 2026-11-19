@@ -5,7 +5,7 @@ import { CatalogMaster } from "../ingest/models";
 import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
-import { runKrogerProbe } from "../ingest/krogerProbe";
+import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, runKrogerProbe, startKrogerProbeJob } from "../ingest/krogerProbe";
 import { krogerService } from "../krogerService";
 
 const router = Router();
@@ -182,25 +182,37 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/admin/kroger/probe", async (req: Request, res: Response) => {
+router.post("/admin/kroger/probe", (req: Request, res: Response) => {
   if (!probeAuthorized(req, res)) return;
-  const limit = Number((req.body as { limit?: unknown } | undefined)?.limit ?? 20);
-  try {
-    const report = await runKrogerProbe({
-      limit,
+  const raw = Number((req.body as { limit?: unknown } | undefined)?.limit ?? KROGER_PROBE_SAFE_LIMIT);
+  const limit = Number.isFinite(raw) ? raw : KROGER_PROBE_SAFE_LIMIT;
+  const job = startKrogerProbeJob(limit, (n, onProgress) =>
+    runKrogerProbe({
+      limit: n,
+      onProgress,
       client: {
         product: (input) => krogerService.probeProducts({ productId: input.code, locationId: input.locationId }),
         term: (input) => krogerService.probeProducts({ term: input.term, locationId: input.locationId }),
         location: (locationId) => krogerService.probeLocation(locationId),
       },
-    });
-    res.json(report);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Kroger probe failed";
-    res.status(500).json({
-      error: message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/client_secret=\S+/gi, "client_secret=[redacted]"),
-    });
+    })
+  );
+  res.status(202).json({
+    id: job.id,
+    status: job.status,
+    poll: job.poll,
+    safeLimit: job.safeLimit,
+  });
+});
+
+router.get("/admin/kroger/probe/:id", (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const job = krogerProbeJob(String(req.params.id || ""));
+  if (!job) {
+    res.status(404).json({ error: "No probe with that id." });
+    return;
   }
+  res.json(job);
 });
 
 router.get("/admin/catalog/kroger-misses", async (req: Request, res: Response) => {

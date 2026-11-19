@@ -957,11 +957,11 @@ body[data-step="plan"] #preference-review { display: none !important; }
 .store-card header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; min-width: 0; }
 .store-card header > div, .store-card p, .handoff-detail { min-width: 0; overflow-wrap: anywhere; }
 .store-card h3 { margin: 0 0 4px; }
-.badge-live, .badge-demo, .badge-ad {
+.badge-live, .badge-demo, .badge-ad, .badge-cached {
   display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700;
 }
 .badge-live { background: var(--accent-soft); color: var(--accent); }
-.badge-demo { background: var(--bg-accent); color: var(--muted); }
+.badge-demo, .badge-cached { background: var(--bg-accent); color: var(--muted); }
 .badge-ad { background: var(--sale-soft); color: var(--sale); }
 .item-list { list-style: none; margin: 8px 0; padding: 0; }
 .item-list li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }

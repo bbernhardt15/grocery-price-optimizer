@@ -3942,6 +3942,7 @@ function shareEnv() {
 }
 
 function labelClass(label) {
+  if (typeof label === "string" && label.startsWith("Last seen price")) return "badge-cached";
   if (label === "Live shelf price" || label === "Partner feed") return "badge-live";
   if (label === "Weekly ad" || label === "Weekly ad, not shelf price") return "badge-ad";
   return "badge-demo";
@@ -3950,7 +3951,7 @@ function labelClass(label) {
 function itemPriceLabel(item, store) {
   const source = item?.priceSource;
   if (source === "weekly_ad" || source === "cached_weekly_ad") return "Weekly ad, not shelf price";
-  if (source) return priceSourceLabel(source);
+  if (source) return priceSourceLabel(source, item?.priceSeenAt);
   return store?.handoff?.priceLabel || store?.pricing?.label || priceSourceLabel(store?.pricing?.source);
 }
 

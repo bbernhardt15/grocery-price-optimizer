@@ -1,15 +1,19 @@
-import { krogerProductIdForLookup, krogerRequestId, upcKey } from "../catalog/normalize";
+import { krogerProductIdForLookup, krogerWireId, upcKey } from "../catalog/normalize";
 
 /** Kroger documents at most 50 comma-separated ids on filter.productId. */
 export const KROGER_PRODUCT_ID_BATCH = 50;
 
-/** 13-digit ids, de-duplicated, capped at one Products call. */
+/**
+ * Wire ids for one Products call, de-duplicated and capped.
+ * Each id is the configured `KROGER_LOOKUP_FORMAT` (12, 13, or 14 digits) and
+ * is not passed through `krogerRequestId` again.
+ */
 export function krogerProductIdList(ids: string[], limit = KROGER_PRODUCT_ID_BATCH): string[] {
   const cap = Math.max(1, Math.min(KROGER_PRODUCT_ID_BATCH, Math.floor(limit)));
   const out: string[] = [];
   for (const raw of ids) {
-    const id = krogerRequestId(raw) ?? "";
-    if (!/^\d{13}$/.test(id) || out.includes(id)) {
+    const id = krogerWireId(raw) ?? "";
+    if (!/^\d{12,14}$/.test(id) || out.includes(id)) {
       continue;
     }
     out.push(id);

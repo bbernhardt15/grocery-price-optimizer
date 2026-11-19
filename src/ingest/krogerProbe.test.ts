@@ -6,7 +6,7 @@ import app from "../app";
 import { krogerMatchLookupPaused } from "../catalog/krogerLookupFormat";
 import { krogerFormatCode, krogerLookupCodes, krogerProbeCandidates } from "../catalog/normalize";
 import { MemoryBudgetStore } from "./budget";
-import { runKrogerProbe } from "./krogerProbe";
+import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, runKrogerProbe, startKrogerProbeJob } from "./krogerProbe";
 
 describe("Kroger probe", () => {
   const savedToken = process.env.GG_ADMIN_TOKEN;
@@ -32,10 +32,14 @@ describe("Kroger probe", () => {
     assert.deepEqual(krogerLookupCodes("049000042566"), ["0049000042566"]);
     process.env.KROGER_LOOKUP_FORMAT = "upc-a";
     assert.deepEqual(krogerLookupCodes("049000042566"), ["049000042566"]);
-    const shapes = krogerProbeCandidates("4011").map((row) => row.format);
-    assert.ok(shapes.includes("plu"));
-    assert.ok(shapes.includes("no-check"));
+    assert.deepEqual(krogerLookupCodes("0000000004011"), ["0000000004011"]);
+    assert.deepEqual(krogerProbeCandidates("4011").map((row) => row.format), ["plu"]);
+    assert.deepEqual(krogerProbeCandidates("0000000004011").map((row) => row.code), ["0000000004011"]);
     assert.equal(krogerFormatCode("4011", "plu"), "0000000004011");
+    assert.equal(krogerFormatCode("0000000004011", "upc-a"), null);
+    assert.equal(krogerFormatCode("0000000004011", "with-check"), null);
+    assert.equal(krogerFormatCode("0000000004011", "gtin-14"), null);
+    assert.equal(krogerFormatCode("049000042566", "plu"), null);
   });
 
   it("tries each shape, waits out the gap, and counts the call", async () => {
@@ -69,9 +73,16 @@ describe("Kroger probe", () => {
     assert.equal(report.locations[0]?.valid, true);
     assert.ok(waits.some((ms) => ms === 2500));
     assert.ok(seen.includes("none:0000000004011"));
-    assert.equal(report.summary.byFormat["no-check"]?.hits, 1);
+    assert.equal(report.summary.byFormat["plu"]?.hits, 1);
+    assert.equal(report.summary.byFormat["upc-a"], undefined);
+    assert.equal(report.summary.byFormat["with-check"], undefined);
+    assert.equal(report.summary.byFormat["gtin-14"], undefined);
     assert.equal(report.summary.byLocation.none?.hits, 1);
-    assert.equal(report.items[0]?.attempts.find((row) => row.format === "no-check" && row.locationId === null)?.hit, true);
+    assert.equal(report.items[0]?.attempts.find((row) => row.format === "plu" && row.locationId === null)?.hit, true);
+    assert.equal(
+      report.items[0]?.attempts.every((row) => row.format === "term" || row.code === "0000000004011"),
+      true
+    );
     const body = JSON.stringify(report);
     assert.equal(body.includes("Bearer"), false);
     assert.equal(body.includes("client_secret"), false);
@@ -95,9 +106,98 @@ describe("Kroger probe", () => {
         headers: { authorization: "Bearer nope" },
       });
       assert.equal(wrong.status, 401);
+      const status = await fetch(`${origin}/api/admin/kroger/probe/missing`);
+      assert.equal(status.status, 401);
     } finally {
       server.close();
     }
+  });
+
+  it("waits out the shared checkpoint gap and does not call when the lock is busy", async () => {
+    let persisted = 0;
+    let clock = 0;
+    const waits: number[] = [];
+    const client = {
+      location: async () => ({ httpStatus: 200, valid: true }),
+      product: async () => ({ httpStatus: 400, hits: [] as Array<{ productId: string; upc: string }> }),
+      term: async () => ({ httpStatus: 200, hits: [] as Array<{ productId: string; upc: string }> }),
+    };
+    const pace = {
+      misses: [{ name: "Milk", departmentId: "dairy", upc: "049000042566" }],
+      locations: [] as string[],
+      minIntervalMs: 2500,
+      dailyBudget: 30,
+      store: new MemoryBudgetStore(),
+      now: () => clock,
+      sleep: async (ms: number) => {
+        waits.push(ms);
+        clock += ms;
+      },
+      readNextAllowedAt: async () => persisted,
+      writeNextAllowedAt: async (ms: number) => {
+        persisted = ms;
+      },
+      holdLock: async () => ({ renew: async () => true, release: async () => undefined }),
+      client,
+    };
+    await runKrogerProbe({ ...pace, limit: 1 });
+    assert.equal(persisted - clock, 2500);
+    waits.length = 0;
+    await runKrogerProbe({ ...pace, limit: 1, store: new MemoryBudgetStore() });
+    assert.equal(waits[0], 2500);
+
+    let called = false;
+    const busy = await runKrogerProbe({
+      ...pace,
+      limit: 1,
+      holdLock: async () => null,
+      client: {
+        location: async () => {
+          called = true;
+          return { httpStatus: 200, valid: true };
+        },
+        product: async () => {
+          called = true;
+          return { httpStatus: 400, hits: [] };
+        },
+        term: async () => {
+          called = true;
+          return { httpStatus: 200, hits: [] };
+        },
+      },
+    });
+    assert.equal(busy.stopped, "busy");
+    assert.equal(busy.calls, 0);
+    assert.equal(called, false);
+    assert.equal(KROGER_PROBE_SAFE_LIMIT, 3);
+  });
+
+  it("keeps a pollable job and fills it as results arrive", async () => {
+    const started = startKrogerProbeJob(3, async (_limit, onProgress) => {
+      const partial = {
+        pausedMatchLookup: true,
+        lookupFormat: "no-check",
+        safeLimit: 3,
+        sample: 0,
+        calls: 1,
+        stopped: "" as const,
+        refresh: "",
+        locations: [],
+        items: [],
+        summary: { byFormat: {}, byLocation: {} },
+      };
+      onProgress(partial);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { ...partial, calls: 2, sample: 1 };
+    });
+    assert.equal(started.status, "running");
+    assert.equal(started.safeLimit, 3);
+    assert.match(started.poll, /^\/api\/admin\/kroger\/probe\//);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const done = krogerProbeJob(started.id);
+    assert.equal(done?.status, "done");
+    assert.equal(done?.calls, 2);
+    assert.equal(done?.report?.sample, 1);
   });
 });
 

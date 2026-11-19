@@ -2,7 +2,7 @@ import { itemIsWatched } from "../alerts/compare";
 import { PriceWatch } from "../alerts/models";
 import { SavedList } from "../auth/models";
 import { mapToDepartment } from "../catalog/departments";
-import { krogerRequestId, upcKey, walmartUpcForLookup } from "../catalog/normalize";
+import { krogerWireId, upcKey, walmartUpcForLookup } from "../catalog/normalize";
 import { SharedList } from "../models/SharedList";
 import { utcDay } from "./budget";
 import { staleRatioOf } from "./config";
@@ -111,9 +111,18 @@ function collectCatalogIds(value: unknown, into: Set<string>, depth = 0): void {
   }
 }
 
+/** The Kroger id refresh puts on `filter.productId`. Already the wire shape. */
+export function krogerRefreshCode(master: {
+  krogerProductId?: string | null;
+  upc?: string | null;
+  key?: string | null;
+}): string | null {
+  return krogerWireId(master.krogerProductId) || krogerWireId(master.upc || master.key);
+}
+
 function lookupCode(storeName: string, master: MasterRow): string | null {
   if (storeName === "Kroger") {
-    return krogerRequestId(master.krogerProductId) || krogerRequestId(master.upc || master.key);
+    return krogerRefreshCode(master);
   }
   return walmartUpcForLookup(master.upc || master.key);
 }

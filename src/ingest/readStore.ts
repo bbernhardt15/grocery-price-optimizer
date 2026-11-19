@@ -270,6 +270,7 @@ export async function storedLineProducts(
       unit,
       normalizedUnit: unit,
       priceSource: offer.priceSource === "seed" ? "seed" : "live",
+      ...(offer.lastSeenAt ? { lastUpdated: offer.lastSeenAt } : {}),
       ...(master.upc ? { upc: master.upc } : {}),
       ...(offer.retailerItemId ? { productId: offer.retailerItemId } : {}),
       ...(offer.locationId ? { locationId: offer.locationId } : {}),

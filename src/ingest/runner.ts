@@ -308,7 +308,7 @@ function readKrogerIdProbe(value: unknown): KrogerIdFallback | undefined {
     ...(typeof row.brand === "string" && row.brand ? { brand: row.brand } : {}),
     ...(typeof row.departmentId === "string" && row.departmentId ? { departmentId: row.departmentId } : {}),
     ...(row.termOnly === true ? { termOnly: true } : {}),
-    ...(Array.isArray(row.codes) ? { codes: row.codes.filter((code) => typeof code === "string" && /^\d{13}$/.test(code)) } : {}),
+    ...(Array.isArray(row.codes) ? { codes: row.codes.filter((code) => typeof code === "string" && /^\d{12,14}$/.test(code)) } : {}),
     ...(typeof row.codeIndex === "number" && row.codeIndex >= 0 ? { codeIndex: Math.floor(row.codeIndex) } : {}),
   };
 }
@@ -1292,7 +1292,7 @@ function probeFromPick(picked: LookupPick): KrogerIdFallback {
     name: picked.name,
     code: picked.code,
     nextIndex: 0,
-    codes: picked.codes.filter((code) => /^\d{13}$/.test(code)),
+    codes: picked.codes.filter((code) => /^\d{12,14}$/.test(code)),
     codeIndex: picked.codes.indexOf(picked.code),
     ...(picked.upc ? { upc: picked.upc } : {}),
     ...(picked.brand ? { brand: picked.brand } : {}),
@@ -2057,6 +2057,13 @@ export async function acquireIngestLock(owner = randomUUID()): Promise<string | 
 
 export async function releaseIngestLock(owner: string): Promise<void> {
   await IngestLock.updateOne({ _id: LOCK_ID, owner }, { $set: { expiresAt: new Date(0) } });
+}
+
+/** Keep the ingest lock while a long Kroger probe is still the owner. */
+export async function renewIngestLock(owner: string, now = new Date()): Promise<boolean> {
+  const expiresAt = new Date(now.getTime() + LOCK_MS);
+  const updated = await IngestLock.updateOne({ _id: LOCK_ID, owner }, { $set: { expiresAt } });
+  return updated.matchedCount > 0;
 }
 
 export async function runIngestTick(options?: {

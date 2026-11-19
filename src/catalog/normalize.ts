@@ -327,11 +327,21 @@ export function configuredKrogerLookupFormat(env: NodeJS.ProcessEnv = process.en
   return (KROGER_LOOKUP_FORMATS as readonly string[]).includes(raw) ? (raw as KrogerLookupFormat) : "no-check";
 }
 
-/** One candidate code. Null when this UPC has no value in that shape. */
+/**
+ * One candidate code. Null when this UPC has no value in that shape.
+ * A produce PLU (4 digits, or 5 with a leading 9, including a 13-digit pad
+ * such as 0000000004011) only has the padded PLU. UPC-A, with-check, and
+ * GTIN-14 would invent a barcode from those digits, so they are not sent.
+ */
 export function krogerFormatCode(upc: string | null | undefined, format: KrogerLookupFormat): string | null {
   const digits = upc?.replace(/\D/g, "") ?? "";
+  const pluId = krogerPluProductId(digits);
+  if (pluId) {
+    if (format === "plu" || format === "no-check") return pluId;
+    return null;
+  }
+  if (format === "plu") return null;
   const upcA = walmartUpcForLookup(digits);
-  if (format === "plu") return krogerPluProductId(digits);
   if (format === "upc-a") return upcA && /^\d{12}$/.test(upcA) ? upcA : null;
   if (format === "gtin-14") return upcA ? `00${upcA}` : null;
   if (format === "with-check") {
@@ -343,15 +353,31 @@ export function krogerFormatCode(upc: string | null | undefined, format: KrogerL
 
 export type KrogerProbeCandidate = { format: KrogerLookupFormat; code: string };
 
-/** Every id shape a probe can send. Term search is added by the probe. */
+/**
+ * Id shapes a probe can send. A PLU is only the padded PLU.
+ * Term search is added by the probe.
+ */
 export function krogerProbeCandidates(upc: string | null | undefined): KrogerProbeCandidate[] {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return [{ format: "plu", code: pluId }];
   const out: KrogerProbeCandidate[] = [];
   for (const format of KROGER_LOOKUP_FORMATS) {
     const code = krogerFormatCode(upc, format);
-    if (!code) continue;
+    if (!code || out.some((row) => row.code === code)) continue;
     out.push({ format, code });
   }
   return out;
+}
+
+/**
+ * The product id match lookup and refresh send, with no second rewrite.
+ * A PLU is always the padded PLU. Any other code uses `KROGER_LOOKUP_FORMAT`
+ * (default `no-check`). `plu` on a normal UPC returns null so nothing is sent.
+ */
+export function krogerWireId(upc: string | undefined | null): string | null {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return pluId;
+  return krogerFormatCode(upc, configuredKrogerLookupFormat());
 }
 
 /**
@@ -360,7 +386,7 @@ export function krogerProbeCandidates(upc: string | null | undefined): KrogerPro
  * the other shapes. This list does not guess a second id.
  */
 export function krogerLookupCodes(upc: string | undefined | null): string[] {
-  const code = krogerFormatCode(upc, configuredKrogerLookupFormat());
+  const code = krogerWireId(upc);
   return code ? [code] : [];
 }
 

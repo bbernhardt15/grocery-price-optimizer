@@ -40,6 +40,7 @@ export type HandoffItem = {
   locationId?: string;
   url?: string;
   priceSource?: PriceSource;
+  priceSeenAt?: string;
   size?: string;
   lineId?: string;
   department?: string;
@@ -369,6 +370,7 @@ function toHandoffItem(storeName: string, item: PickedItem): HandoffItem {
     ...(aisle ? { aisle } : {}),
     ...(url ? { url, openLabel: `Open in ${storeName}` } : {}),
     ...(item.priceSource ? { priceSource: item.priceSource } : {}),
+    ...(item.priceSeenAt ? { priceSeenAt: item.priceSeenAt } : {}),
   };
 }
 
@@ -402,12 +404,23 @@ function weeklyAdSegment(storeName: string, pricing: StorePricingReport | undefi
   return mappingForStore(storeName)?.dealsOnly === true;
 }
 
+function oldestPriceSeen(items: Array<{ priceSeenAt?: string }>): string | undefined {
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const item of items) {
+    if (!item.priceSeenAt) continue;
+    const at = Date.parse(item.priceSeenAt);
+    if (Number.isFinite(at) && at < oldest) oldest = at;
+  }
+  return Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined;
+}
+
 function priceLabelFor(group: StoreGroup, pricing: StorePricingReport | undefined): string {
+  const seen = oldestPriceSeen(group.items);
   if (weeklyAdSegment(group.storeName, pricing)) {
     return WEEKLY_AD_SEGMENT_LABEL;
   }
   if (pricing?.source) {
-    return priceSourceLabel(pricing.source);
+    return priceSourceLabel(pricing.source, seen);
   }
   const sources = [
     ...new Set(group.items.map((item) => item.priceSource).filter((source): source is PriceSource => Boolean(source))),
@@ -416,7 +429,7 @@ function priceLabelFor(group: StoreGroup, pricing: StorePricingReport | undefine
     if (sources[0] === "weekly_ad") {
       return WEEKLY_AD_SEGMENT_LABEL;
     }
-    return priceSourceLabel(sources[0]);
+    return priceSourceLabel(sources[0], seen);
   }
   if (sources.length > 1) {
     return "Mixed prices";

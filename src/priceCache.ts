@@ -325,6 +325,16 @@ export async function resolveCatalogProducts(
     }
   };
 
+  const noteCachedAge = (acc: StorePricingAccumulator, batch: CatalogProduct[]): void => {
+    for (const product of batch) {
+      const at = product.lastUpdated;
+      if (!(at instanceof Date) || Number.isNaN(at.getTime())) continue;
+      if (!acc.oldestCachedAt || at.getTime() < acc.oldestCachedAt.getTime()) {
+        acc.oldestCachedAt = at;
+      }
+    }
+  };
+
   const storeMs = new Map<string, number>();
   const storeLeft = new Map<string, number>();
   const requestCache = new Map<string, CatalogProduct[]>();
@@ -400,6 +410,10 @@ export async function resolveCatalogProducts(
               acc.seedHits += 1;
             } else {
               acc.cachedHits += 1;
+              noteCachedAge(
+                acc,
+                stored.filter((product) => product.priceSource !== "seed")
+              );
             }
             source = seeded ? "seed" : "cached_live";
             return;

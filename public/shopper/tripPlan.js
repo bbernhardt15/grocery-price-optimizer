@@ -93,7 +93,33 @@ export function roundMoney(value) {
   return Math.round(amount * 100) / 100;
 }
 
-export function priceSourceLabel(source) {
+/** Same rule as src/pricing/priceAge.ts. Null when the price is under 24 hours old. */
+export function lastSeenPriceLabel(seenAt, now = new Date()) {
+  if (seenAt == null || seenAt === "") return null;
+  const at = seenAt instanceof Date ? seenAt.getTime() : Date.parse(String(seenAt));
+  if (!Number.isFinite(at)) return null;
+  const current = now instanceof Date ? now.getTime() : Number(now);
+  const age = current - at;
+  if (age <= 24 * 60 * 60 * 1000) return null;
+  const days = Math.max(1, Math.floor(age / 86400000));
+  const when = days === 1 ? "1 day ago" : `${days} days ago`;
+  return `Last seen price, ${when}`;
+}
+
+function oldestPriceSeen(items) {
+  let oldest = Infinity;
+  for (const item of items || []) {
+    const at = Date.parse(item?.priceSeenAt || "");
+    if (Number.isFinite(at) && at < oldest) oldest = at;
+  }
+  return Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined;
+}
+
+export function priceSourceLabel(source, seenAt, now) {
+  if (source === "cached_live") {
+    const aged = lastSeenPriceLabel(seenAt, now);
+    if (aged) return aged;
+  }
   switch (source) {
     case "live":
     case "cached_live":
@@ -116,7 +142,7 @@ export function priceSourceLabel(source) {
 
 export function storePriceLabel(items) {
   const sources = [...new Set((items || []).map((item) => item?.priceSource).filter(Boolean))];
-  if (sources.length === 1) return priceSourceLabel(sources[0]);
+  if (sources.length === 1) return priceSourceLabel(sources[0], oldestPriceSeen(items));
   if (sources.length > 1) return "Mixed prices";
   return "Price";
 }
@@ -129,9 +155,10 @@ function dealsOnlyStore(storeName) {
 /** Store-card label. Weekly-ad-only banners stay distinct from a shelf price. */
 export function segmentPriceLabel(storeName, items, prior) {
   const source = prior?.pricing?.source;
+  const seen = oldestPriceSeen(items);
+  if (source === "cached_live") return priceSourceLabel(source, seen);
   if (
     source === "live" ||
-    source === "cached_live" ||
     source === "partner_feed" ||
     source === "mixed" ||
     source === "seed" ||
@@ -169,6 +196,7 @@ function syntheticOffer(item) {
     upc: item.upc,
     locationId: item.locationId,
     priceSource: item.priceSource,
+    priceSeenAt: item.priceSeenAt,
     department: item.department,
     aisle: item.aisle,
     url: item.url,
@@ -284,6 +312,7 @@ function lineFromOffer(item, offer) {
     })(),
     ...(cleanText(offer.locationId) ? { locationId: cleanText(offer.locationId) } : {}),
     ...(offer.priceSource ? { priceSource: offer.priceSource } : {}),
+    ...(offer.priceSeenAt || item.priceSeenAt ? { priceSeenAt: offer.priceSeenAt || item.priceSeenAt } : {}),
     ...(offer.onSale ? { onSale: true } : {}),
     ...(offer.onSale && Number(offer.regularPrice) > price ? { regularPrice: Number(offer.regularPrice) } : {}),
     ...(offer.onSale && offer.saleEndsOn ? { saleEndsOn: offer.saleEndsOn } : {}),
@@ -351,6 +380,7 @@ function toHandoffItem(storeName, item) {
     ...(item.aisle ? { aisle: item.aisle } : {}),
     ...(item.url ? { url: item.url, openLabel: `Open in ${storeName}` } : {}),
     ...(item.priceSource ? { priceSource: item.priceSource } : {}),
+    ...(item.priceSeenAt ? { priceSeenAt: item.priceSeenAt } : {}),
   };
 }
 

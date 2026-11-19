@@ -1,11 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { KROGER_REFRESH_EMPTY_NOTE, krogerMatchLookupPaused } from "../catalog/krogerLookupFormat";
 import { configuredKrogerLookupFormat, krogerProbeCandidates } from "../catalog/normalize";
 import { ingestConfig } from "./config";
-import { CatalogMaster, IngestCheckpoint } from "./models";
 import { MongoBudgetStore, RateGate, type BudgetStore } from "./budget";
+import { CatalogMaster, IngestCheckpoint } from "./models";
+import { acquireIngestLock, releaseIngestLock, renewIngestLock } from "./runner";
 
 export const KROGER_PROBE_DEFAULT = 20;
 export const KROGER_PROBE_MAX = 40;
+/**
+ * Largest sample to ask for. With one saved store the work is one location
+ * check plus 3 misses × 5 shapes × 2 places × 2500ms, about 78 seconds.
+ * Railway closes an HTTP request that has sent no bytes after 5 minutes
+ * (and some edges drop a silent response nearer 60 seconds). The POST does
+ * not stay open: it returns 202 and the result is polled. A larger limit
+ * holds the Kroger ingest lock until the job finishes.
+ */
+export const KROGER_PROBE_SAFE_LIMIT = 3;
 
 export type KrogerProbeHit = { productId: string; upc: string };
 
@@ -35,9 +46,10 @@ export type KrogerProbeItem = {
 export type KrogerProbeReport = {
   pausedMatchLookup: boolean;
   lookupFormat: string;
+  safeLimit: number;
   sample: number;
   calls: number;
-  stopped: "" | "budget";
+  stopped: "" | "budget" | "busy";
   refresh: string;
   locations: Array<{ locationId: string; httpStatus: number; valid: boolean }>;
   items: KrogerProbeItem[];
@@ -46,6 +58,23 @@ export type KrogerProbeReport = {
     byLocation: Record<string, { attempts: number; hits: number; rate: number | null }>;
   };
 };
+
+export type KrogerProbeJob = {
+  id: string;
+  status: "running" | "done" | "error" | "busy";
+  safeLimit: number;
+  poll: string;
+  calls: number;
+  report: KrogerProbeReport | null;
+  error: string;
+};
+
+type ProbeLock = {
+  renew: () => Promise<boolean>;
+  release: () => Promise<void>;
+};
+
+const jobs = new Map<string, KrogerProbeJob>();
 
 function rate(hits: number, attempts: number): number | null {
   if (attempts <= 0) return null;
@@ -57,6 +86,14 @@ function bump(table: Record<string, { attempts: number; hits: number }>, key: st
   row.attempts += 1;
   if (hit) row.hits += 1;
   table[key] = row;
+}
+
+function finishTable(table: Record<string, { attempts: number; hits: number }>): KrogerProbeReport["summary"]["byFormat"] {
+  const out: KrogerProbeReport["summary"]["byFormat"] = {};
+  for (const [key, row] of Object.entries(table)) {
+    out[key] = { ...row, rate: rate(row.hits, row.attempts) };
+  }
+  return out;
 }
 
 export async function sampleKrogerMisses(limit: number): Promise<Array<{ name: string; departmentId: string; upc: string }>> {
@@ -91,6 +128,39 @@ async function activeLocationIds(): Promise<string[]> {
   return ids;
 }
 
+async function readKrogerNextAllowedAt(): Promise<number> {
+  const doc = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{
+    checkpoint?: { nextAllowedAt?: unknown };
+  } | null>();
+  const raw = doc?.checkpoint?.nextAllowedAt;
+  const parsed = typeof raw === "string" ? Date.parse(raw) : typeof raw === "number" ? raw : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function writeKrogerNextAllowedAt(ms: number): Promise<void> {
+  if (!(ms > 0)) return;
+  await IngestCheckpoint.updateOne(
+    { provider: "kroger" },
+    { $set: { "checkpoint.nextAllowedAt": new Date(ms).toISOString() } },
+    { upsert: true }
+  );
+}
+
+function shellReport(input: { lookupFormat?: string }, stopped: KrogerProbeReport["stopped"]): KrogerProbeReport {
+  return {
+    pausedMatchLookup: krogerMatchLookupPaused(),
+    lookupFormat: input.lookupFormat || configuredKrogerLookupFormat(),
+    safeLimit: KROGER_PROBE_SAFE_LIMIT,
+    sample: 0,
+    calls: 0,
+    stopped,
+    refresh: KROGER_REFRESH_EMPTY_NOTE,
+    locations: [],
+    items: [],
+    summary: { byFormat: {}, byLocation: {} },
+  };
+}
+
 export async function runKrogerProbe(input: {
   limit?: number;
   client: KrogerProbeClient;
@@ -102,110 +172,185 @@ export async function runKrogerProbe(input: {
   dailyBudget?: number;
   lookupFormat?: string;
   misses?: Array<{ name: string; departmentId: string; upc: string }>;
+  /** When set, the probe uses this lock instead of the ingest lock. Null means the lock is busy. */
+  holdLock?: () => Promise<ProbeLock | null>;
+  readNextAllowedAt?: () => Promise<number>;
+  writeNextAllowedAt?: (ms: number) => Promise<void>;
+  onProgress?: (report: KrogerProbeReport) => void;
 }): Promise<KrogerProbeReport> {
   const config = ingestConfig();
   const limit = Math.max(1, Math.min(KROGER_PROBE_MAX, Math.floor(input.limit ?? KROGER_PROBE_DEFAULT)));
-  const locations = input.locations ?? (await activeLocationIds());
-  const store = input.store ?? new MongoBudgetStore();
-  const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const now = input.now ?? (() => Date.now());
-  const gate = new RateGate({
-    provider: "kroger",
-    dailyBudget: input.dailyBudget ?? config.krogerDailyBudget,
-    minIntervalMs: input.minIntervalMs ?? config.krogerMinIntervalMs,
-    store,
-    now,
-    sleep,
-  });
-  const byFormat: Record<string, { attempts: number; hits: number }> = {};
-  const byLocation: Record<string, { attempts: number; hits: number }> = {};
-  let calls = 0;
-  let stopped: "" | "budget" = "";
+  let renew: (() => Promise<boolean>) | undefined;
+  let release: (() => Promise<void>) | undefined;
+  let readNext = input.readNextAllowedAt;
+  let writeNext = input.writeNextAllowedAt;
 
-  async function charge(): Promise<boolean> {
-    const taken = await gate.take();
-    if (taken === "budget") {
-      stopped = "budget";
-      return false;
-    }
-    calls += 1;
-    return true;
+  if (input.holdLock) {
+    const held = await input.holdLock();
+    if (!held) return shellReport(input, "busy");
+    renew = held.renew;
+    release = held.release;
+  } else if (!input.store) {
+    const owner = await acquireIngestLock();
+    if (!owner) return shellReport(input, "busy");
+    renew = () => renewIngestLock(owner);
+    release = () => releaseIngestLock(owner);
+    readNext = readNext ?? readKrogerNextAllowedAt;
+    writeNext = writeNext ?? writeKrogerNextAllowedAt;
   }
 
-  const checked: KrogerProbeReport["locations"] = [];
-  for (const locationId of locations) {
-    if (!(await charge())) break;
-    const result = await input.client.location(locationId);
-    checked.push({ locationId, httpStatus: result.httpStatus, valid: result.valid });
-  }
+  try {
+    const locations = input.locations ?? (await activeLocationIds());
+    const store = input.store ?? new MongoBudgetStore();
+    const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const now = input.now ?? (() => Date.now());
+    const initialNextAt = readNext ? await readNext() : 0;
+    const gate = new RateGate({
+      provider: "kroger",
+      dailyBudget: input.dailyBudget ?? config.krogerDailyBudget,
+      minIntervalMs: input.minIntervalMs ?? config.krogerMinIntervalMs,
+      store,
+      now,
+      sleep,
+      initialNextAt,
+    });
+    const byFormat: Record<string, { attempts: number; hits: number }> = {};
+    const byLocation: Record<string, { attempts: number; hits: number }> = {};
+    let calls = 0;
+    let stopped: KrogerProbeReport["stopped"] = "";
 
-  const misses = input.misses ?? (await sampleKrogerMisses(limit));
-  const places = [...locations, ""];
-  const items: KrogerProbeItem[] = [];
-  const seenCall = new Map<string, KrogerProbeAttempt>();
-
-  for (const miss of misses) {
-    if (stopped) break;
-    const attempts: KrogerProbeAttempt[] = [];
-    const candidates = [
-      ...krogerProbeCandidates(miss.upc),
-      { format: "term" as const, code: miss.name },
-    ];
-    for (const place of places) {
-      if (stopped) break;
-      for (const candidate of candidates) {
-        if (!candidate.code) continue;
-        const key = `${candidate.format}|${place}|${candidate.code}`;
-        const sharedKey = `${place}|${candidate.code}|${candidate.format === "term" ? "term" : "id"}`;
-        const prior = seenCall.get(sharedKey);
-        if (prior && prior.format !== candidate.format) {
-          const copy = { ...prior, format: candidate.format };
-          attempts.push(copy);
-          bump(byFormat, candidate.format, copy.hit);
-          continue;
+    async function charge(): Promise<boolean> {
+      if (renew) {
+        const held = await renew();
+        if (!held) {
+          stopped = "busy";
+          return false;
         }
-        if (!(await charge())) break;
-        const result =
-          candidate.format === "term"
-            ? await input.client.term({ term: candidate.code, ...(place ? { locationId: place } : {}) })
-            : await input.client.product({ code: candidate.code, ...(place ? { locationId: place } : {}) });
-        const hit = result.hits[0];
-        const attempt: KrogerProbeAttempt = {
-          format: candidate.format,
-          code: candidate.code,
-          locationId: place || null,
-          httpStatus: result.httpStatus,
-          hit: result.hits.length > 0,
-          productId: hit?.productId || "",
-          upc: hit?.upc || "",
-        };
-        attempts.push(attempt);
-        seenCall.set(key, attempt);
-        seenCall.set(sharedKey, attempt);
-        bump(byFormat, candidate.format, attempt.hit);
-        bump(byLocation, place || "none", attempt.hit);
       }
+      const taken = await gate.take();
+      if (writeNext) await writeNext(gate.nextAllowedAt());
+      if (taken === "budget") {
+        stopped = "budget";
+        return false;
+      }
+      calls += 1;
+      return true;
     }
-    items.push({ name: miss.name, department: miss.departmentId, upc: miss.upc, attempts });
+
+    const checked: KrogerProbeReport["locations"] = [];
+    for (const locationId of locations) {
+      if (!(await charge())) break;
+      const result = await input.client.location(locationId);
+      checked.push({ locationId, httpStatus: result.httpStatus, valid: result.valid });
+    }
+
+    const misses = stopped ? [] : (input.misses ?? (await sampleKrogerMisses(limit)));
+    const places = [...locations, ""];
+    const items: KrogerProbeItem[] = [];
+    const seenCall = new Map<string, KrogerProbeAttempt>();
+
+    const snapshot = (): KrogerProbeReport => ({
+      pausedMatchLookup: krogerMatchLookupPaused(),
+      lookupFormat: input.lookupFormat || configuredKrogerLookupFormat(),
+      safeLimit: KROGER_PROBE_SAFE_LIMIT,
+      sample: items.length,
+      calls,
+      stopped,
+      refresh: KROGER_REFRESH_EMPTY_NOTE,
+      locations: checked,
+      items,
+      summary: { byFormat: finishTable(byFormat), byLocation: finishTable(byLocation) },
+    });
+
+    for (const miss of misses) {
+      if (stopped) break;
+      const attempts: KrogerProbeAttempt[] = [];
+      const candidates = [...krogerProbeCandidates(miss.upc), { format: "term" as const, code: miss.name }];
+      for (const place of places) {
+        if (stopped) break;
+        for (const candidate of candidates) {
+          if (!candidate.code) continue;
+          const key = `${candidate.format}|${place}|${candidate.code}`;
+          const sharedKey = `${place}|${candidate.code}|${candidate.format === "term" ? "term" : "id"}`;
+          const prior = seenCall.get(sharedKey);
+          if (prior && prior.format !== candidate.format) {
+            const copy = { ...prior, format: candidate.format };
+            attempts.push(copy);
+            bump(byFormat, candidate.format, copy.hit);
+            continue;
+          }
+          if (!(await charge())) break;
+          const result =
+            candidate.format === "term"
+              ? await input.client.term({ term: candidate.code, ...(place ? { locationId: place } : {}) })
+              : await input.client.product({ code: candidate.code, ...(place ? { locationId: place } : {}) });
+          const hit = result.hits[0];
+          const attempt: KrogerProbeAttempt = {
+            format: candidate.format,
+            code: candidate.code,
+            locationId: place || null,
+            httpStatus: result.httpStatus,
+            hit: result.hits.length > 0,
+            productId: hit?.productId || "",
+            upc: hit?.upc || "",
+          };
+          attempts.push(attempt);
+          seenCall.set(key, attempt);
+          seenCall.set(sharedKey, attempt);
+          bump(byFormat, candidate.format, attempt.hit);
+          bump(byLocation, place || "none", attempt.hit);
+        }
+      }
+      items.push({ name: miss.name, department: miss.departmentId, upc: miss.upc, attempts });
+      input.onProgress?.(snapshot());
+    }
+
+    const report = snapshot();
+    input.onProgress?.(report);
+    return report;
+  } finally {
+    if (release) await release().catch(() => undefined);
   }
+}
 
-  const finish = (table: Record<string, { attempts: number; hits: number }>) => {
-    const out: KrogerProbeReport["summary"]["byFormat"] = {};
-    for (const [key, row] of Object.entries(table)) {
-      out[key] = { ...row, rate: rate(row.hits, row.attempts) };
-    }
-    return out;
+export function startKrogerProbeJob(
+  limit: number,
+  run: (limit: number, onProgress: (report: KrogerProbeReport) => void) => Promise<KrogerProbeReport>
+): KrogerProbeJob {
+  const id = randomUUID();
+  const job: KrogerProbeJob = {
+    id,
+    status: "running",
+    safeLimit: KROGER_PROBE_SAFE_LIMIT,
+    poll: `/api/admin/kroger/probe/${id}`,
+    calls: 0,
+    report: null,
+    error: "",
   };
+  jobs.set(id, job);
+  while (jobs.size > 8) {
+    const oldest = jobs.keys().next().value;
+    if (!oldest || oldest === id) break;
+    jobs.delete(oldest);
+  }
+  void run(limit, (report) => {
+    job.calls = report.calls;
+    job.report = report;
+  })
+    .then((report) => {
+      job.report = report;
+      job.calls = report.calls;
+      job.status = report.stopped === "busy" ? "busy" : "done";
+    })
+    .catch((error: unknown) => {
+      job.status = "error";
+      job.error = (error instanceof Error ? error.message : "Kroger probe failed")
+        .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+        .replace(/client_secret=\S+/gi, "client_secret=[redacted]");
+    });
+  return job;
+}
 
-  return {
-    pausedMatchLookup: krogerMatchLookupPaused(),
-    lookupFormat: input.lookupFormat || configuredKrogerLookupFormat(),
-    sample: items.length,
-    calls,
-    stopped,
-    refresh: KROGER_REFRESH_EMPTY_NOTE,
-    locations: checked,
-    items,
-    summary: { byFormat: finish(byFormat), byLocation: finish(byLocation) },
-  };
+export function krogerProbeJob(id: string): KrogerProbeJob | null {
+  return jobs.get(id) ?? null;
 }

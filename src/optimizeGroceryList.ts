@@ -74,6 +74,8 @@ export type PickedItem = {
   productId?: string;
   upc?: string;
   priceSource?: PriceSource;
+  /** When this stored shelf price was last seen. Older than 24h changes the label, not the price. */
+  priceSeenAt?: string;
   /**
    * `swap` only when the chosen item is not sold at any in-scope store and a
    * different pack is filling in. An exact UPC or variant is never a swap.
@@ -115,6 +117,8 @@ export type ItemOffer = {
   upc?: string;
   locationId?: string;
   priceSource?: PriceSource;
+  /** When this stored shelf price was last seen. */
+  priceSeenAt?: string;
   department?: string;
   aisle?: string;
   aisleKnown?: boolean;
@@ -408,6 +412,7 @@ function toItemOffer(
     ...(product.upc ? { upc: product.upc } : {}),
     ...(product.locationId ? { locationId: product.locationId } : {}),
     ...(product.priceSource ? { priceSource: product.priceSource } : {}),
+    ...(product.lastUpdated ? { priceSeenAt: product.lastUpdated.toISOString() } : {}),
     department: mapped.departmentName,
     ...(product.aisleLocation
       ? { aisle: product.aisleLocation, aisleKnown: true }
@@ -472,6 +477,7 @@ function toPicked(
     ...(best.productId ? { productId: best.productId } : {}),
     ...(best.upc ? { upc: best.upc } : {}),
     ...(best.priceSource ? { priceSource: best.priceSource } : {}),
+    ...(best.lastUpdated ? { priceSeenAt: best.lastUpdated.toISOString() } : {}),
     department: mapped.departmentName,
     ...(best.aisleLocation
       ? { aisle: best.aisleLocation, aisleKnown: true }

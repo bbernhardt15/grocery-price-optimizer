@@ -1,3 +1,5 @@
+import { lastSeenPriceLabel } from "./pricing/priceAge";
+
 /**
  * Handoff tier for each banner.
  *
@@ -243,7 +245,15 @@ export function handoffTierFor(storeName: string): HandoffTier {
 }
 
 /** Shopper-facing price label. Live shelf and weekly ad stay distinct. */
-export function priceSourceLabel(source: string | undefined): string {
+export function priceSourceLabel(
+  source: string | undefined,
+  seenAt?: string | Date | null,
+  now?: Date
+): string {
+  if (source === "cached_live") {
+    const aged = lastSeenPriceLabel(seenAt, now);
+    if (aged) return aged;
+  }
   switch (source) {
     case "live":
     case "cached_live":
