@@ -31,6 +31,7 @@ import {
   pickBrandSplits,
   sanitizeKrogerParam,
 } from "./krogerTerms";
+import { krogerMatchLookupPaused } from "../catalog/krogerLookupFormat";
 import { KROGER_MATCH_FORMAT, LOOKUP_OUTAGE_HOLD_MS, countLookupQueue, finishLookups, holdLookup, krogerTickForQueue, nextKrogerLookups, nextWalmartLookups, noteMatchCalls, requeueKrogerMisses, type LookupPick } from "./crossLookup";
 import { KROGER_PRODUCT_ID_BATCH, krogerLocationGroup, partitionKrogerBatch } from "./krogerBatch";
 import { finishRefresh, holdRefresh, loadStaleRatio, nextRefreshPicks, settleRefreshOutcome, type RefreshPick } from "./refresh";
@@ -1123,6 +1124,10 @@ export async function stepKroger(options: {
   let refreshesDone = 0;
   let refreshExhausted = false;
   let discoveriesDone = 0;
+  if (krogerMatchLookupPaused()) {
+    lookupExhausted = true;
+    refreshExhausted = true;
+  }
 
   const persist = async (status: string, extra?: PersistExtra) => {
     const callDelta = calls - countedCalls;

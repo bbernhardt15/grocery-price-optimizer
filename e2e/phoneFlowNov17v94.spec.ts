@@ -58,7 +58,7 @@ test("v94 search stays visible, the logo clears it, and the price note is inline
   );
   await unlock(page);
   await page.locator("#menu-open").tap();
-  await expect(page.locator("#app-version")).toContainText("v95");
+  await expect(page.locator("#app-version")).toContainText("v96");
   await page.locator("#drawer-close").tap();
 
   await page.locator("#browse-toggle").tap();

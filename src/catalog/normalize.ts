@@ -317,31 +317,51 @@ export function krogerRequestId(upc: string | undefined | null): string | null {
   return krogerProductIdForLookup(digits);
 }
 
-/**
- * Product ids to ask Kroger for, in order.
- * The first is the 13-digit UPC body with the check digit removed.
- * A second 13-digit id keeps the check digit (`0` plus UPC-A) when that is a
- * different code. Kroger's list API rejects a bare 12-digit UPC-A and a
- * GTIN-14 with PRODUCT-4111-400, so those shapes are not sent.
- * A produce PLU is only the zero-padded PLU. A miss still falls back to a name search.
- */
-export function krogerLookupCodes(upc: string | undefined | null): string[] {
-  const primary = krogerRequestId(upc);
-  if (!primary) return [];
-  const out = [primary];
-  if (krogerPluProductId(upc)) return out;
+/** The one id shape match lookup and refresh send. The probe tries every shape. */
+export const KROGER_LOOKUP_FORMATS = ["no-check", "with-check", "upc-a", "gtin-14", "plu"] as const;
+
+export type KrogerLookupFormat = (typeof KROGER_LOOKUP_FORMATS)[number];
+
+export function configuredKrogerLookupFormat(env: NodeJS.ProcessEnv = process.env): KrogerLookupFormat {
+  const raw = (env.KROGER_LOOKUP_FORMAT || "no-check").trim().toLowerCase();
+  return (KROGER_LOOKUP_FORMATS as readonly string[]).includes(raw) ? (raw as KrogerLookupFormat) : "no-check";
+}
+
+/** One candidate code. Null when this UPC has no value in that shape. */
+export function krogerFormatCode(upc: string | null | undefined, format: KrogerLookupFormat): string | null {
   const digits = upc?.replace(/\D/g, "") ?? "";
-  if (digits.length === 13) return out;
   const upcA = walmartUpcForLookup(digits);
-  if (upcA && /^\d{12}$/.test(upcA)) {
-    const withCheck = `0${upcA}`;
-    if (withCheck !== primary) out.push(withCheck);
+  if (format === "plu") return krogerPluProductId(digits);
+  if (format === "upc-a") return upcA && /^\d{12}$/.test(upcA) ? upcA : null;
+  if (format === "gtin-14") return upcA ? `00${upcA}` : null;
+  if (format === "with-check") {
+    const withCheck = upcA ? `0${upcA}` : null;
+    return withCheck && /^\d{13}$/.test(withCheck) ? withCheck : null;
   }
-  if (/^\d{12}$/.test(digits) && digits[0] === "2") {
-    const kept = `0${digits}`;
-    if (!out.includes(kept)) out.push(kept);
+  return krogerRequestId(digits);
+}
+
+export type KrogerProbeCandidate = { format: KrogerLookupFormat; code: string };
+
+/** Every id shape a probe can send. Term search is added by the probe. */
+export function krogerProbeCandidates(upc: string | null | undefined): KrogerProbeCandidate[] {
+  const out: KrogerProbeCandidate[] = [];
+  for (const format of KROGER_LOOKUP_FORMATS) {
+    const code = krogerFormatCode(upc, format);
+    if (!code) continue;
+    out.push({ format, code });
   }
   return out;
+}
+
+/**
+ * The one product id match lookup sends.
+ * `KROGER_LOOKUP_FORMAT` picks the shape (default `no-check`). The probe tries
+ * the other shapes. This list does not guess a second id.
+ */
+export function krogerLookupCodes(upc: string | undefined | null): string[] {
+  const code = krogerFormatCode(upc, configuredKrogerLookupFormat());
+  return code ? [code] : [];
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

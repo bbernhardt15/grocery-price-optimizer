@@ -1,11 +1,30 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
 import { CatalogMaster } from "../ingest/models";
 import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
+import { runKrogerProbe } from "../ingest/krogerProbe";
+import { krogerService } from "../krogerService";
 
 const router = Router();
+
+function probeAuthorized(req: Request, res: Response): boolean {
+  const expected = [process.env.GG_ADMIN_TOKEN, process.env.ADMIN_TOKEN].map((value) => value?.trim() || "").filter(Boolean);
+  const header = req.header("authorization") ?? req.header("x-admin-token") ?? "";
+  const presented = header.replace(/^Bearer\s+/i, "").trim();
+  const ok = expected.some((token) => {
+    const left = Buffer.from(presented);
+    const right = Buffer.from(token);
+    return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+  });
+  if (!ok) {
+    res.status(401).json({ error: "Admin token required." });
+    return false;
+  }
+  return true;
+}
 
 function requireAdmin(req: Request, res: Response): boolean {
   if (!adminTokenConfigured()) {
@@ -160,6 +179,27 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
     }
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
+  }
+});
+
+router.post("/admin/kroger/probe", async (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const limit = Number((req.body as { limit?: unknown } | undefined)?.limit ?? 20);
+  try {
+    const report = await runKrogerProbe({
+      limit,
+      client: {
+        product: (input) => krogerService.probeProducts({ productId: input.code, locationId: input.locationId }),
+        term: (input) => krogerService.probeProducts({ term: input.term, locationId: input.locationId }),
+        location: (locationId) => krogerService.probeLocation(locationId),
+      },
+    });
+    res.json(report);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Kroger probe failed";
+    res.status(500).json({
+      error: message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/client_secret=\S+/gi, "client_secret=[redacted]"),
+    });
   }
 });
 

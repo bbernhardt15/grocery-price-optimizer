@@ -720,6 +720,82 @@ export class KrogerService {
       .filter((product): product is CatalogProduct => product !== null);
     return { products, returned: page.products.length };
   }
+
+  /**
+   * GET /v1/products with the id or term exactly as given. Does not rewrite the id.
+   * A 400 is a result, not an exception. The token stays on this process.
+   */
+  async probeProducts(input: { productId?: string; term?: string; locationId?: string }): Promise<{
+    httpStatus: number;
+    hits: Array<{ productId: string; upc: string }>;
+  }> {
+    const productId = input.productId?.replace(/\D/g, "") ?? "";
+    const term = (input.term || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!productId && !term) return { httpStatus: 0, hits: [] };
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      return { httpStatus: 0, hits: [] };
+    }
+    const params = new URLSearchParams({ "filter.limit": "5" });
+    if (productId) params.set("filter.productId", productId);
+    else params.set("filter.term", term);
+    const locationId = input.locationId?.trim();
+    if (locationId) params.set("filter.locationId", locationId);
+    let response: Response;
+    try {
+      response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {
+      return { httpStatus: 0, hits: [] };
+    }
+    if (!response.ok) {
+      await response.text().catch(() => "");
+      return { httpStatus: response.status, hits: [] };
+    }
+    const payload = (await response.json().catch(() => ({ data: [] }))) as ProductsResponse;
+    const hits = (payload.data ?? [])
+      .map((product) => ({
+        productId: String(product.productId || "").replace(/\D/g, ""),
+        upc: String(product.upc || product.productId || "").replace(/\D/g, ""),
+      }))
+      .filter((hit) => hit.productId || hit.upc);
+    return { httpStatus: response.status, hits };
+  }
+
+  /** GET /v1/locations/{id}. valid is true only for HTTP 200. */
+  async probeLocation(locationId: string): Promise<{ httpStatus: number; valid: boolean }> {
+    const id = locationId.trim();
+    if (!id) return { httpStatus: 0, valid: false };
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      return { httpStatus: 0, valid: false };
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${LOCATIONS_ENDPOINT}/${encodeURIComponent(id)}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {
+      return { httpStatus: 0, valid: false };
+    }
+    if (!response.ok) {
+      await response.text().catch(() => "");
+      return { httpStatus: response.status, valid: false };
+    }
+    await response.text().catch(() => "");
+    return { httpStatus: response.status, valid: true };
+  }
 }
 
 export const krogerService = new KrogerService();

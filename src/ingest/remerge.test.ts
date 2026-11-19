@@ -246,6 +246,7 @@ describe("GTIN remerge and both-store prices", () => {
   });
 
   it("counts a mixed Kroger day when the hit is on the other GTIN key", async () => {
+    process.env.KROGER_MATCH_LOOKUP_PAUSED = "0";
     const now = new Date("2026-04-03T15:00:00.000Z");
     const day = "2026-04-03";
     await CatalogMaster.deleteMany({});
