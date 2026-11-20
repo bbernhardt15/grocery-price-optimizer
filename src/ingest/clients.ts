@@ -90,11 +90,11 @@ export function krogerProductsClient(): KrogerCatalogClient {
       return krogerService.listNearbyStoreLocations(zip, 4);
     },
     async lookupProductId(productId, locationId) {
-      const page = await krogerService.productsById(productId, locationId);
+      const page = await krogerService.productsByWireId(productId, locationId);
       return krogerLookupRecords(page.products, locationId, page.returned);
     },
     async lookupProductIds(productIds, locationId) {
-      const page = await krogerService.productsByIds(productIds, locationId);
+      const page = await krogerService.productsByWireIds(productIds, locationId);
       return krogerLookupRecords(page.products, locationId, page.returned);
     },
     async lookupTerm(term, locationId) {

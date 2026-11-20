@@ -70,6 +70,24 @@ const aldiBananas = {
 };
 
 describe("store handoff URLs", () => {
+  it("labels a stored Kroger price older than a day by when it was seen", () => {
+    const seen = new Date(Date.now() - 5 * 86_400_000 - 3_600_000).toISOString();
+    const handoff = buildStoreHandoff({
+      storeName: "Kroger",
+      items: [{ ...krogerMilk, priceSource: "cached_live", priceSeenAt: seen }],
+      subtotal: 5.78,
+    });
+    assert.equal(handoff.priceLabel, "Last seen price, 5 days ago");
+    assert.equal(handoff.items[0]?.price, 2.89);
+    assert.equal(handoff.items[0]?.priceSeenAt, seen);
+    const fresh = buildStoreHandoff({
+      storeName: "Kroger",
+      items: [{ ...krogerMilk, priceSource: "cached_live" }],
+      subtotal: 5.78,
+    });
+    assert.equal(fresh.priceLabel, "Live shelf price");
+  });
+
   it("builds a Kroger search link from UPC when present", () => {
     assert.equal(
       krogerSearchUrl(krogerMilk),

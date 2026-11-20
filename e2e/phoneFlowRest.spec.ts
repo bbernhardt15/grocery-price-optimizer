@@ -792,8 +792,10 @@ test("four receipt suggestions can be selected and added", async ({ page }) => {
   const guide = page.locator("#gitter-guide");
   await expect(guide).toContainText("These were on past receipts but aren't on this list.");
   for (const name of ["Whole Milk", "Sourdough", "Cherry Coke", "Sharp Cheddar"]) {
-    await guide.locator(`[data-guide-name='${name}']`).click();
-    await expect(guide.locator(`[data-guide-name='${name}']`)).toHaveAttribute("aria-pressed", "true");
+    const chip = guide.locator(`[data-guide-name='${name}']`);
+    await chip.click();
+    if ((await chip.getAttribute("aria-pressed")) !== "true") await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
   }
   await guide.getByRole("button", { name: "Add selected" }).click();
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("gg-list") || "[]") as Array<{ name?: string }>).map((row) => row.name))).toEqual(

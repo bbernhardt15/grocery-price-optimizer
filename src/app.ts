@@ -96,6 +96,10 @@ app.get("/api", (_req, res) => {
         "Dry run. Counts masters that would move onto one GTIN key, and how many of those keys would merge. Writes nothing and does not run on deploy.",
       "POST /api/admin/catalog/remerge":
         'Dry run unless the body is { "apply": true, "confirm": "remerge-gtin" }. One apply at a time. A second apply while one is running, or during the cooldown after it finishes, returns 409. Batches are throttled. Nothing runs on deploy.',
+      "POST /api/admin/kroger/probe":
+        "Starts a Kroger product-id probe and returns immediately (202) with an id. Body limit defaults to 3, the max safe sample (about a minute of Kroger time with one saved store). The probe holds the ingest lock, shares the Kroger 2500ms checkpoint, and counts each call on the budget. Requires Authorization: Bearer $GG_ADMIN_TOKEN. 401 without it.",
+      "GET /api/admin/kroger/probe/:id":
+        "Poll a probe started by POST. While it runs, the JSON includes calls made so far and items finished so far. Done when status is done. No credentials.",
       "GET /api/admin/catalog/kroger-misses":
         "Recent Kroger lookup misses: name, brand, department, stored UPC, the productId sent, HTTP status, term fallback, and cooldown skip. No secrets. Same admin token as status.",
       "GET /api/admin/catalog/match-cooldowns":

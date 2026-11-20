@@ -678,32 +678,20 @@ export class KrogerService {
 
   /**
    * GET /v1/products?filter.productId={id},{id}
-   * Up to 50 comma-separated 13-digit ids. One HTTP call. Shopper search does
-   * not use this. Ingest charges the whole list as one budget unit.
+   * Shopper batch lookup. Each id is turned into the configured
+   * `KROGER_LOOKUP_FORMAT` once, then sent as that string.
    */
   async productsByIds(
     productIds: string[],
     locationId?: string
   ): Promise<{ products: CatalogProduct[]; returned: number }> {
-    const ids = krogerProductIdList(productIds);
-    if (ids.length === 0) {
-      return { products: [], returned: 0 };
-    }
-    const storeId = locationId?.trim() || undefined;
-    const page = await this.fetchProductPayload("", storeId, {
-      productId: ids.join(","),
-      limit: ids.length,
-    });
-    const products = page.products
-      .map((product) => toCatalogProduct(product, storeId))
-      .filter((product): product is CatalogProduct => product !== null);
-    return { products, returned: page.products.length };
+    return this.fetchProductsByWireId(krogerProductIdList(productIds), locationId);
   }
 
   /**
    * GET /v1/products?filter.productId={id}
-   * Kroger's id is the 13-digit UPC body (no check digit).
-   * Shopper search does not use this. Ingest charges it on the Kroger budget.
+   * Shopper search. A raw UPC is normalized to the 13-digit no-check id.
+   * Match and refresh do not use this. They call {@link productsByWireId}.
    */
   async productsById(
     productId: string,
@@ -713,12 +701,135 @@ export class KrogerService {
     if (!/^\d{13}$/.test(id)) {
       return { products: [], returned: 0 };
     }
+    return this.fetchProductsByWireId([id], locationId);
+  }
+
+  /**
+   * GET /v1/products?filter.productId={id}
+   * Sends the digits exactly as given. Match lookup uses this so a 12-digit
+   * UPC-A or 14-digit GTIN is not rewritten back to the 13-digit no-check id.
+   */
+  async productsByWireId(
+    productId: string,
+    locationId?: string
+  ): Promise<{ products: CatalogProduct[]; returned: number }> {
+    const id = productId.replace(/\D/g, "");
+    if (!/^\d{12,14}$/.test(id)) {
+      return { products: [], returned: 0 };
+    }
+    return this.fetchProductsByWireId([id], locationId);
+  }
+
+  /**
+   * GET /v1/products?filter.productId={id},{id}
+   * Sends each id exactly as given. Refresh uses this.
+   */
+  async productsByWireIds(
+    productIds: string[],
+    locationId?: string
+  ): Promise<{ products: CatalogProduct[]; returned: number }> {
+    const ids: string[] = [];
+    for (const raw of productIds) {
+      const id = raw.replace(/\D/g, "");
+      if (!/^\d{12,14}$/.test(id) || ids.includes(id)) continue;
+      ids.push(id);
+      if (ids.length >= 50) break;
+    }
+    return this.fetchProductsByWireId(ids, locationId);
+  }
+
+  private async fetchProductsByWireId(
+    ids: string[],
+    locationId?: string
+  ): Promise<{ products: CatalogProduct[]; returned: number }> {
+    if (ids.length === 0) {
+      return { products: [], returned: 0 };
+    }
     const storeId = locationId?.trim() || undefined;
-    const page = await this.fetchProductPayload("", storeId, { productId: id, limit: 5 });
+    const page = await this.fetchProductPayload("", storeId, {
+      productId: ids.join(","),
+      limit: Math.max(ids.length, 5),
+    });
     const products = page.products
       .map((product) => toCatalogProduct(product, storeId))
       .filter((product): product is CatalogProduct => product !== null);
     return { products, returned: page.products.length };
+  }
+
+  /**
+   * GET /v1/products with the id or term exactly as given. Does not rewrite the id.
+   * A 400 is a result, not an exception. The token stays on this process.
+   */
+  async probeProducts(input: { productId?: string; term?: string; locationId?: string }): Promise<{
+    httpStatus: number;
+    hits: Array<{ productId: string; upc: string }>;
+  }> {
+    const productId = input.productId?.replace(/\D/g, "") ?? "";
+    const term = (input.term || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!productId && !term) return { httpStatus: 0, hits: [] };
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      return { httpStatus: 0, hits: [] };
+    }
+    const params = new URLSearchParams({ "filter.limit": "5" });
+    if (productId) params.set("filter.productId", productId);
+    else params.set("filter.term", term);
+    const locationId = input.locationId?.trim();
+    if (locationId) params.set("filter.locationId", locationId);
+    let response: Response;
+    try {
+      response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {
+      return { httpStatus: 0, hits: [] };
+    }
+    if (!response.ok) {
+      await response.text().catch(() => "");
+      return { httpStatus: response.status, hits: [] };
+    }
+    const payload = (await response.json().catch(() => ({ data: [] }))) as ProductsResponse;
+    const hits = (payload.data ?? [])
+      .map((product) => ({
+        productId: String(product.productId || "").replace(/\D/g, ""),
+        upc: String(product.upc || product.productId || "").replace(/\D/g, ""),
+      }))
+      .filter((hit) => hit.productId || hit.upc);
+    return { httpStatus: response.status, hits };
+  }
+
+  /** GET /v1/locations/{id}. valid is true only for HTTP 200. */
+  async probeLocation(locationId: string): Promise<{ httpStatus: number; valid: boolean }> {
+    const id = locationId.trim();
+    if (!id) return { httpStatus: 0, valid: false };
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      return { httpStatus: 0, valid: false };
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${LOCATIONS_ENDPOINT}/${encodeURIComponent(id)}`, {
+        method: "GET",
+        cache: "no-cache",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {
+      return { httpStatus: 0, valid: false };
+    }
+    if (!response.ok) {
+      await response.text().catch(() => "");
+      return { httpStatus: response.status, valid: false };
+    }
+    await response.text().catch(() => "");
+    return { httpStatus: response.status, valid: true };
   }
 }
 

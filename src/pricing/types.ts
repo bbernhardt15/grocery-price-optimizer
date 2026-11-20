@@ -106,4 +106,6 @@ export type StorePricingAccumulator = {
   locationId?: string;
   fetchedAt?: Date;
   feedKind?: PricingFeedKind;
+  /** Oldest stored shelf price used while refresh is paused. Drives the age label. */
+  oldestCachedAt?: Date;
 };

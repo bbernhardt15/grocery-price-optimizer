@@ -213,6 +213,27 @@ describe("pricing reports", () => {
     assert.match(reports[0].detail, /licensed partner feed/i);
     assert.equal(reports[1].source, "cached_live");
     assert.equal(reports[1].label, "Cached partner feed");
+    assert.match(reports[1].detail, /less than 24 hours old/);
+  });
+
+  it("labels a stored shelf price older than 24 hours by its real age", () => {
+    const kroger = emptyAccumulator("Kroger");
+    kroger.configured = true;
+    kroger.cachedHits = 1;
+    kroger.oldestCachedAt = new Date(Date.now() - 5 * 86_400_000 - 3_600_000);
+    const report = finalizeStoreReport(kroger);
+    assert.equal(report.source, "cached_live");
+    assert.equal(report.label, "Last seen price");
+    assert.match(report.detail, /last seen 5 days ago/);
+    assert.doesNotMatch(report.detail, /less than 24 hours/);
+    assert.doesNotMatch(report.detail, /Live shelf price/);
+
+    const fresh = emptyAccumulator("Kroger");
+    fresh.cachedHits = 1;
+    fresh.oldestCachedAt = new Date();
+    const recent = finalizeStoreReport(fresh);
+    assert.equal(recent.label, "Cached live");
+    assert.match(recent.detail, /less than 24 hours old/);
   });
 
   it("does not treat a Flipp miss as missing FLIPP_ENABLED", () => {

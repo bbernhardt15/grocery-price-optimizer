@@ -317,31 +317,77 @@ export function krogerRequestId(upc: string | undefined | null): string | null {
   return krogerProductIdForLookup(digits);
 }
 
+/** The one id shape match lookup and refresh send. The probe tries every shape. */
+export const KROGER_LOOKUP_FORMATS = ["no-check", "with-check", "upc-a", "gtin-14", "plu"] as const;
+
+export type KrogerLookupFormat = (typeof KROGER_LOOKUP_FORMATS)[number];
+
+export function configuredKrogerLookupFormat(env: NodeJS.ProcessEnv = process.env): KrogerLookupFormat {
+  const raw = (env.KROGER_LOOKUP_FORMAT || "no-check").trim().toLowerCase();
+  return (KROGER_LOOKUP_FORMATS as readonly string[]).includes(raw) ? (raw as KrogerLookupFormat) : "no-check";
+}
+
 /**
- * Product ids to ask Kroger for, in order.
- * The first is the 13-digit UPC body with the check digit removed.
- * A second 13-digit id keeps the check digit (`0` plus UPC-A) when that is a
- * different code. Kroger's list API rejects a bare 12-digit UPC-A and a
- * GTIN-14 with PRODUCT-4111-400, so those shapes are not sent.
- * A produce PLU is only the zero-padded PLU. A miss still falls back to a name search.
+ * One candidate code. Null when this UPC has no value in that shape.
+ * A produce PLU (4 digits, or 5 with a leading 9, including a 13-digit pad
+ * such as 0000000004011) only has the padded PLU. UPC-A, with-check, and
+ * GTIN-14 would invent a barcode from those digits, so they are not sent.
  */
-export function krogerLookupCodes(upc: string | undefined | null): string[] {
-  const primary = krogerRequestId(upc);
-  if (!primary) return [];
-  const out = [primary];
-  if (krogerPluProductId(upc)) return out;
+export function krogerFormatCode(upc: string | null | undefined, format: KrogerLookupFormat): string | null {
   const digits = upc?.replace(/\D/g, "") ?? "";
-  if (digits.length === 13) return out;
-  const upcA = walmartUpcForLookup(digits);
-  if (upcA && /^\d{12}$/.test(upcA)) {
-    const withCheck = `0${upcA}`;
-    if (withCheck !== primary) out.push(withCheck);
+  const pluId = krogerPluProductId(digits);
+  if (pluId) {
+    if (format === "plu" || format === "no-check") return pluId;
+    return null;
   }
-  if (/^\d{12}$/.test(digits) && digits[0] === "2") {
-    const kept = `0${digits}`;
-    if (!out.includes(kept)) out.push(kept);
+  if (format === "plu") return null;
+  const upcA = walmartUpcForLookup(digits);
+  if (format === "upc-a") return upcA && /^\d{12}$/.test(upcA) ? upcA : null;
+  if (format === "gtin-14") return upcA ? `00${upcA}` : null;
+  if (format === "with-check") {
+    const withCheck = upcA ? `0${upcA}` : null;
+    return withCheck && /^\d{13}$/.test(withCheck) ? withCheck : null;
+  }
+  return krogerRequestId(digits);
+}
+
+export type KrogerProbeCandidate = { format: KrogerLookupFormat; code: string };
+
+/**
+ * Id shapes a probe can send. A PLU is only the padded PLU.
+ * Term search is added by the probe.
+ */
+export function krogerProbeCandidates(upc: string | null | undefined): KrogerProbeCandidate[] {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return [{ format: "plu", code: pluId }];
+  const out: KrogerProbeCandidate[] = [];
+  for (const format of KROGER_LOOKUP_FORMATS) {
+    const code = krogerFormatCode(upc, format);
+    if (!code || out.some((row) => row.code === code)) continue;
+    out.push({ format, code });
   }
   return out;
+}
+
+/**
+ * The product id match lookup and refresh send, with no second rewrite.
+ * A PLU is always the padded PLU. Any other code uses `KROGER_LOOKUP_FORMAT`
+ * (default `no-check`). `plu` on a normal UPC returns null so nothing is sent.
+ */
+export function krogerWireId(upc: string | undefined | null): string | null {
+  const pluId = krogerPluProductId(upc);
+  if (pluId) return pluId;
+  return krogerFormatCode(upc, configuredKrogerLookupFormat());
+}
+
+/**
+ * The one product id match lookup sends.
+ * `KROGER_LOOKUP_FORMAT` picks the shape (default `no-check`). The probe tries
+ * the other shapes. This list does not guess a second id.
+ */
+export function krogerLookupCodes(upc: string | undefined | null): string[] {
+  const code = krogerWireId(upc);
+  return code ? [code] : [];
 }
 
 function availabilityOf(value: OfferAvailability | undefined): OfferAvailability {

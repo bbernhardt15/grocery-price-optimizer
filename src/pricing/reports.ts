@@ -1,3 +1,4 @@
+import { cachedLiveDetail, lastSeenPriceLabel } from "./priceAge";
 import type {
   StorePricingAccumulator,
   StorePricingReport,
@@ -150,6 +151,7 @@ function labelOf(
     case "partner_feed":
       return "Partner feed";
     case "cached_live":
+      if (lastSeenPriceLabel(acc.oldestCachedAt)) return "Last seen price";
       return partner ? "Cached partner feed" : "Cached live";
     case "weekly_ad":
     case "cached_weekly_ad":
@@ -192,9 +194,7 @@ export function finalizeStoreReport(
   } else if (source === "partner_feed") {
     detail = `Licensed partner feed prices for ${acc.storeName} (not a public retailer API).`;
   } else if (source === "cached_live") {
-    detail = partner
-      ? `Using ${acc.storeName} prices cached from a licensed partner feed (less than 24 hours old).`
-      : `Using ${acc.storeName} prices cached from a live API (less than 24 hours old).`;
+    detail = cachedLiveDetail(acc.storeName, acc.oldestCachedAt, partner);
   } else if (source === "weekly_ad") {
     detail = `${acc.storeName} prices are the weekly ad, not a shelf price. They come from the circular near this ZIP, not a full live shelf catalog.`;
   } else if (source === "cached_weekly_ad") {

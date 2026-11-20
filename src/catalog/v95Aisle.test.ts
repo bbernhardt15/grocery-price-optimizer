@@ -55,8 +55,7 @@ describe("v95 aisle strays", () => {
 describe("v95 Kroger id shapes", () => {
   it("asks with the 13-digit body first and the check-digit form second", () => {
     const codes = krogerLookupCodes("049000042566");
-    assert.equal(codes[0], "0004900004256");
-    assert.equal(codes[1], "0049000042566");
+    assert.deepEqual(codes, ["0004900004256"]);
     assert.equal(codes.every((code) => code.length === 13), true);
     assert.deepEqual(krogerLookupCodes("4011"), ["0000000004011"]);
     assert.equal(krogerRequestId("201234567890")?.length, 13);

@@ -50,9 +50,11 @@ describe("catalog ingestion", () => {
     ADMIN_TOKEN: process.env.ADMIN_TOKEN,
     WALMART_INGEST_MIN_INTERVAL_MS: process.env.WALMART_INGEST_MIN_INTERVAL_MS,
     KROGER_INGEST_MIN_INTERVAL_MS: process.env.KROGER_INGEST_MIN_INTERVAL_MS,
+    KROGER_MATCH_LOOKUP_PAUSED: process.env.KROGER_MATCH_LOOKUP_PAUSED,
   };
 
   before(async () => {
+    process.env.KROGER_MATCH_LOOKUP_PAUSED = "0";
     memory = await MongoMemoryServer.create();
     await mongoose.connect(memory.getUri());
   });

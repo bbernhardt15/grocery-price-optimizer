@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { walmartAddToCartUrl } from "../pricing/walmartCartLink";
+import { lastSeenPriceLabel as serverLastSeen } from "../pricing/priceAge";
 import { priceSourceLabel as serverPriceLabel, STORE_HANDOFF_CONFIG } from "../storeHandoffConfig";
 import { couponSavingsSummary } from "../../public/shopper/coupons.js";
 import {
@@ -9,6 +10,7 @@ import {
   formatTripText,
   groupForAisle,
   moveOptionLabel,
+  lastSeenPriceLabel,
   priceSourceLabel,
   readChecks,
   readTripSnapshot,
@@ -156,6 +158,23 @@ describe("handoff tiers stay aligned with config", () => {
     }
     assert.equal(priceSourceLabel("live"), "Live shelf price");
     assert.equal(priceSourceLabel("weekly_ad"), "Weekly ad");
+    const now = new Date("2026-11-19T12:00:00.000Z");
+    const fiveDays = "2026-11-14T12:00:00.000Z";
+    const oneDay = "2026-11-18T11:00:00.000Z";
+    const fresh = "2026-11-19T00:00:00.000Z";
+    assert.equal(lastSeenPriceLabel(fiveDays, now), serverLastSeen(fiveDays, now));
+    assert.equal(priceSourceLabel("cached_live", fiveDays, now), serverPriceLabel("cached_live", fiveDays, now));
+    assert.equal(priceSourceLabel("cached_live", fiveDays, now), "Last seen price, 5 days ago");
+    assert.equal(priceSourceLabel("cached_live", oneDay, now), "Last seen price, 1 day ago");
+    assert.equal(priceSourceLabel("cached_live", fresh, now), "Live shelf price");
+    assert.equal(priceSourceLabel("live", fiveDays, now), "Live shelf price");
+    const old = new Date(Date.now() - 5 * 86_400_000 - 3_600_000).toISOString();
+    assert.equal(
+      segmentPriceLabel("Kroger", [{ priceSource: "cached_live", priceSeenAt: old, price: 1.29 }], {
+        pricing: { source: "cached_live" },
+      }),
+      "Last seen price, 5 days ago"
+    );
     assert.equal(
       segmentPriceLabel("Publix", [{ priceSource: "weekly_ad" }], { pricing: { source: "weekly_ad" } }),
       "Weekly ad, not shelf price"

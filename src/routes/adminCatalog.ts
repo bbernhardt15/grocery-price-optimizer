@@ -1,11 +1,30 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { deactivateOutOfScopeCatalog, dropShadowLocalKeys, excludeNongroceryFromRefresh, startRecategorizeJob, resetRunCounters } from "../ingest/maintenance";
 import { CatalogMaster } from "../ingest/models";
 import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../ingest/clearMatchCooldowns";
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
+import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, runKrogerProbe, startKrogerProbeJob } from "../ingest/krogerProbe";
+import { krogerService } from "../krogerService";
 
 const router = Router();
+
+function probeAuthorized(req: Request, res: Response): boolean {
+  const expected = [process.env.GG_ADMIN_TOKEN, process.env.ADMIN_TOKEN].map((value) => value?.trim() || "").filter(Boolean);
+  const header = req.header("authorization") ?? req.header("x-admin-token") ?? "";
+  const presented = header.replace(/^Bearer\s+/i, "").trim();
+  const ok = expected.some((token) => {
+    const left = Buffer.from(presented);
+    const right = Buffer.from(token);
+    return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+  });
+  if (!ok) {
+    res.status(401).json({ error: "Admin token required." });
+    return false;
+  }
+  return true;
+}
 
 function requireAdmin(req: Request, res: Response): boolean {
   if (!adminTokenConfigured()) {
@@ -161,6 +180,39 @@ router.post("/admin/catalog/remerge", async (req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }
+});
+
+router.post("/admin/kroger/probe", (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const raw = Number((req.body as { limit?: unknown } | undefined)?.limit ?? KROGER_PROBE_SAFE_LIMIT);
+  const limit = Number.isFinite(raw) ? raw : KROGER_PROBE_SAFE_LIMIT;
+  const job = startKrogerProbeJob(limit, (n, onProgress) =>
+    runKrogerProbe({
+      limit: n,
+      onProgress,
+      client: {
+        product: (input) => krogerService.probeProducts({ productId: input.code, locationId: input.locationId }),
+        term: (input) => krogerService.probeProducts({ term: input.term, locationId: input.locationId }),
+        location: (locationId) => krogerService.probeLocation(locationId),
+      },
+    })
+  );
+  res.status(202).json({
+    id: job.id,
+    status: job.status,
+    poll: job.poll,
+    safeLimit: job.safeLimit,
+  });
+});
+
+router.get("/admin/kroger/probe/:id", (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const job = krogerProbeJob(String(req.params.id || ""));
+  if (!job) {
+    res.status(404).json({ error: "No probe with that id." });
+    return;
+  }
+  res.json(job);
 });
 
 router.get("/admin/catalog/kroger-misses", async (req: Request, res: Response) => {
