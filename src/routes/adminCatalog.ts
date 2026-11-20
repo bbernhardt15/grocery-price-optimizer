@@ -6,6 +6,7 @@ import { CooldownBusyError, clearMatchCooldowns, type CooldownStore } from "../i
 import { RemergeBusyError, remergeGtinCatalog } from "../ingest/remerge";
 import { adminAuthorized, adminTokenConfigured, catalogFamilySample, catalogMatchQueue, catalogMatchSample, catalogOtherBreakdown, catalogSample, catalogStatus, catalogSuspicious } from "../ingest/status";
 import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, runKrogerProbe, startKrogerProbeJob } from "../ingest/krogerProbe";
+import { KROGER_DIAGNOSE_SAFE_LIMIT, krogerDiagnoseJob, runKrogerDiagnose, startKrogerDiagnoseJob } from "../ingest/krogerDiagnose";
 import { krogerService } from "../krogerService";
 
 const router = Router();
@@ -210,6 +211,40 @@ router.get("/admin/kroger/probe/:id", (req: Request, res: Response) => {
   const job = krogerProbeJob(String(req.params.id || ""));
   if (!job) {
     res.status(404).json({ error: "No probe with that id." });
+    return;
+  }
+  res.json(job);
+});
+
+router.post("/admin/kroger/diagnose", (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const raw = Number((req.body as { limit?: unknown } | undefined)?.limit ?? KROGER_DIAGNOSE_SAFE_LIMIT);
+  const limit = Number.isFinite(raw) ? raw : KROGER_DIAGNOSE_SAFE_LIMIT;
+  const job = startKrogerDiagnoseJob(limit, (n, onProgress) =>
+    runKrogerDiagnose({
+      limit: n,
+      onProgress,
+      client: {
+        term: (input) => krogerService.probeProducts({ term: input.term, locationId: input.locationId }),
+        product: (input) => krogerService.probeProducts({ productId: input.code, locationId: input.locationId }),
+        productPath: (input) => krogerService.probeProductResource(input.code, input.locationId),
+        location: (locationId) => krogerService.probeLocation(locationId),
+      },
+    })
+  );
+  res.status(202).json({
+    id: job.id,
+    status: job.status,
+    poll: job.poll,
+    safeLimit: job.safeLimit,
+  });
+});
+
+router.get("/admin/kroger/diagnose/:id", (req: Request, res: Response) => {
+  if (!probeAuthorized(req, res)) return;
+  const job = krogerDiagnoseJob(String(req.params.id || ""));
+  if (!job) {
+    res.status(404).json({ error: "No diagnose job with that id." });
     return;
   }
   res.json(job);

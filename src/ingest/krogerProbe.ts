@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { KROGER_REFRESH_EMPTY_NOTE, krogerMatchLookupPaused } from "../catalog/krogerLookupFormat";
 import { configuredKrogerLookupFormat, krogerProbeCandidates } from "../catalog/normalize";
+import { buildKrogerSearchTerm } from "../krogerSearchTerm";
 import { ingestConfig } from "./config";
 import { MongoBudgetStore, RateGate, type BudgetStore } from "./budget";
 import { CatalogMaster, IngestCheckpoint } from "./models";
@@ -29,6 +30,8 @@ export type KrogerProbeClient = {
 export type KrogerProbeAttempt = {
   format: string;
   code: string;
+  /** `filter.term` or `filter.productId`. A name is never sent as a product id. */
+  query: "filter.term" | "filter.productId";
   locationId: string | null;
   httpStatus: number;
   hit: boolean;
@@ -69,9 +72,16 @@ export type KrogerProbeJob = {
   error: string;
 };
 
-type ProbeLock = {
+export type ProbeLock = {
   renew: () => Promise<boolean>;
   release: () => Promise<void>;
+};
+
+export type SharedKrogerGate = {
+  charge: () => Promise<boolean>;
+  stopped: () => "" | "budget" | "busy";
+  calls: () => number;
+  close: () => Promise<void>;
 };
 
 const jobs = new Map<string, KrogerProbeJob>();
@@ -96,7 +106,9 @@ function finishTable(table: Record<string, { attempts: number; hits: number }>):
   return out;
 }
 
-export async function sampleKrogerMisses(limit: number): Promise<Array<{ name: string; departmentId: string; upc: string }>> {
+export async function sampleKrogerMisses(
+  limit: number
+): Promise<Array<{ name: string; brand: string; departmentId: string; upc: string }>> {
   const cap = Math.max(1, Math.min(KROGER_PROBE_MAX, Math.floor(limit)));
   const rows = await CatalogMaster.find({
     key: { $not: /^local:/ },
@@ -106,16 +118,17 @@ export async function sampleKrogerMisses(limit: number): Promise<Array<{ name: s
   })
     .sort({ matchKrogerAt: -1 })
     .limit(cap)
-    .select("name departmentId upc")
-    .lean<Array<{ name?: string; departmentId?: string; upc?: string }>>();
+    .select("name brand departmentId upc")
+    .lean<Array<{ name?: string; brand?: string; departmentId?: string; upc?: string }>>();
   return rows.map((row) => ({
     name: String(row.name || ""),
+    brand: String(row.brand || ""),
     departmentId: String(row.departmentId || ""),
     upc: String(row.upc || ""),
   }));
 }
 
-async function activeLocationIds(): Promise<string[]> {
+export async function activeKrogerLocationIds(): Promise<string[]> {
   const doc = await IngestCheckpoint.findOne({ provider: "kroger" }).lean<{ checkpoint?: { locations?: unknown } } | null>();
   const locations = doc?.checkpoint?.locations;
   if (!Array.isArray(locations)) return [];
@@ -161,6 +174,91 @@ function shellReport(input: { lookupFormat?: string }, stopped: KrogerProbeRepor
   };
 }
 
+/** The cleaned `filter.term` for a catalog title. Null when the name has no words left. */
+export function krogerProbeTerm(name: string): string | null {
+  return buildKrogerSearchTerm(name);
+}
+
+/**
+ * One Kroger pacing gate shared with ingest. Holds the ingest lock when this
+ * process is the caller, and reads and writes checkpoint nextAllowedAt.
+ */
+export async function openSharedKrogerGate(input: {
+  store?: BudgetStore;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  minIntervalMs?: number;
+  dailyBudget?: number;
+  holdLock?: () => Promise<ProbeLock | null>;
+  readNextAllowedAt?: () => Promise<number>;
+  writeNextAllowedAt?: (ms: number) => Promise<void>;
+}): Promise<SharedKrogerGate | "busy"> {
+  const config = ingestConfig();
+  let renew: (() => Promise<boolean>) | undefined;
+  let release: (() => Promise<void>) | undefined;
+  let readNext = input.readNextAllowedAt;
+  let writeNext = input.writeNextAllowedAt;
+
+  if (input.holdLock) {
+    const held = await input.holdLock();
+    if (!held) return "busy";
+    renew = held.renew;
+    release = held.release;
+  } else if (!input.store) {
+    const owner = await acquireIngestLock();
+    if (!owner) return "busy";
+    renew = () => renewIngestLock(owner);
+    release = () => releaseIngestLock(owner);
+    readNext = readNext ?? readKrogerNextAllowedAt;
+    writeNext = writeNext ?? writeKrogerNextAllowedAt;
+  }
+
+  const store = input.store ?? new MongoBudgetStore();
+  const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const now = input.now ?? (() => Date.now());
+  const initialNextAt = readNext ? await readNext() : 0;
+  const gate = new RateGate({
+    provider: "kroger",
+    dailyBudget: input.dailyBudget ?? config.krogerDailyBudget,
+    minIntervalMs: input.minIntervalMs ?? config.krogerMinIntervalMs,
+    store,
+    now,
+    sleep,
+    initialNextAt,
+  });
+  let calls = 0;
+  let stopped: "" | "budget" | "busy" = "";
+  let closed = false;
+
+  return {
+    async charge() {
+      if (stopped) return false;
+      if (renew) {
+        const held = await renew();
+        if (!held) {
+          stopped = "busy";
+          return false;
+        }
+      }
+      const taken = await gate.take();
+      if (writeNext) await writeNext(gate.nextAllowedAt());
+      if (taken === "budget") {
+        stopped = "budget";
+        return false;
+      }
+      calls += 1;
+      return true;
+    },
+    stopped: () => stopped,
+    calls: () => calls,
+    async close() {
+      if (closed) return;
+      closed = true;
+      if (release) await release().catch(() => undefined);
+    },
+  };
+}
+
 export async function runKrogerProbe(input: {
   limit?: number;
   client: KrogerProbeClient;
@@ -178,73 +276,23 @@ export async function runKrogerProbe(input: {
   writeNextAllowedAt?: (ms: number) => Promise<void>;
   onProgress?: (report: KrogerProbeReport) => void;
 }): Promise<KrogerProbeReport> {
-  const config = ingestConfig();
   const limit = Math.max(1, Math.min(KROGER_PROBE_MAX, Math.floor(input.limit ?? KROGER_PROBE_DEFAULT)));
-  let renew: (() => Promise<boolean>) | undefined;
-  let release: (() => Promise<void>) | undefined;
-  let readNext = input.readNextAllowedAt;
-  let writeNext = input.writeNextAllowedAt;
-
-  if (input.holdLock) {
-    const held = await input.holdLock();
-    if (!held) return shellReport(input, "busy");
-    renew = held.renew;
-    release = held.release;
-  } else if (!input.store) {
-    const owner = await acquireIngestLock();
-    if (!owner) return shellReport(input, "busy");
-    renew = () => renewIngestLock(owner);
-    release = () => releaseIngestLock(owner);
-    readNext = readNext ?? readKrogerNextAllowedAt;
-    writeNext = writeNext ?? writeKrogerNextAllowedAt;
-  }
+  const gate = await openSharedKrogerGate(input);
+  if (gate === "busy") return shellReport(input, "busy");
 
   try {
-    const locations = input.locations ?? (await activeLocationIds());
-    const store = input.store ?? new MongoBudgetStore();
-    const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-    const now = input.now ?? (() => Date.now());
-    const initialNextAt = readNext ? await readNext() : 0;
-    const gate = new RateGate({
-      provider: "kroger",
-      dailyBudget: input.dailyBudget ?? config.krogerDailyBudget,
-      minIntervalMs: input.minIntervalMs ?? config.krogerMinIntervalMs,
-      store,
-      now,
-      sleep,
-      initialNextAt,
-    });
+    const locations = input.locations ?? (await activeKrogerLocationIds());
     const byFormat: Record<string, { attempts: number; hits: number }> = {};
     const byLocation: Record<string, { attempts: number; hits: number }> = {};
-    let calls = 0;
-    let stopped: KrogerProbeReport["stopped"] = "";
-
-    async function charge(): Promise<boolean> {
-      if (renew) {
-        const held = await renew();
-        if (!held) {
-          stopped = "busy";
-          return false;
-        }
-      }
-      const taken = await gate.take();
-      if (writeNext) await writeNext(gate.nextAllowedAt());
-      if (taken === "budget") {
-        stopped = "budget";
-        return false;
-      }
-      calls += 1;
-      return true;
-    }
 
     const checked: KrogerProbeReport["locations"] = [];
     for (const locationId of locations) {
-      if (!(await charge())) break;
+      if (!(await gate.charge())) break;
       const result = await input.client.location(locationId);
       checked.push({ locationId, httpStatus: result.httpStatus, valid: result.valid });
     }
 
-    const misses = stopped ? [] : (input.misses ?? (await sampleKrogerMisses(limit)));
+    const misses = gate.stopped() ? [] : (input.misses ?? (await sampleKrogerMisses(limit)));
     const places = [...locations, ""];
     const items: KrogerProbeItem[] = [];
     const seenCall = new Map<string, KrogerProbeAttempt>();
@@ -254,8 +302,8 @@ export async function runKrogerProbe(input: {
       lookupFormat: input.lookupFormat || configuredKrogerLookupFormat(),
       safeLimit: KROGER_PROBE_SAFE_LIMIT,
       sample: items.length,
-      calls,
-      stopped,
+      calls: gate.calls(),
+      stopped: gate.stopped(),
       refresh: KROGER_REFRESH_EMPTY_NOTE,
       locations: checked,
       items,
@@ -263,31 +311,40 @@ export async function runKrogerProbe(input: {
     });
 
     for (const miss of misses) {
-      if (stopped) break;
+      if (gate.stopped()) break;
       const attempts: KrogerProbeAttempt[] = [];
-      const candidates = [...krogerProbeCandidates(miss.upc), { format: "term" as const, code: miss.name }];
+      const term = krogerProbeTerm(miss.name);
+      const candidates: Array<{ format: string; code: string; query: KrogerProbeAttempt["query"] }> = [
+        ...krogerProbeCandidates(miss.upc).map((row) => ({
+          format: row.format,
+          code: row.code,
+          query: "filter.productId" as const,
+        })),
+      ];
+      if (term) candidates.push({ format: "term", code: term, query: "filter.term" });
       for (const place of places) {
-        if (stopped) break;
+        if (gate.stopped()) break;
         for (const candidate of candidates) {
           if (!candidate.code) continue;
           const key = `${candidate.format}|${place}|${candidate.code}`;
           const sharedKey = `${place}|${candidate.code}|${candidate.format === "term" ? "term" : "id"}`;
           const prior = seenCall.get(sharedKey);
           if (prior && prior.format !== candidate.format) {
-            const copy = { ...prior, format: candidate.format };
+            const copy = { ...prior, format: candidate.format, query: candidate.query };
             attempts.push(copy);
             bump(byFormat, candidate.format, copy.hit);
             continue;
           }
-          if (!(await charge())) break;
+          if (!(await gate.charge())) break;
           const result =
-            candidate.format === "term"
+            candidate.query === "filter.term"
               ? await input.client.term({ term: candidate.code, ...(place ? { locationId: place } : {}) })
               : await input.client.product({ code: candidate.code, ...(place ? { locationId: place } : {}) });
           const hit = result.hits[0];
           const attempt: KrogerProbeAttempt = {
             format: candidate.format,
             code: candidate.code,
+            query: candidate.query,
             locationId: place || null,
             httpStatus: result.httpStatus,
             hit: result.hits.length > 0,
@@ -309,7 +366,7 @@ export async function runKrogerProbe(input: {
     input.onProgress?.(report);
     return report;
   } finally {
-    if (release) await release().catch(() => undefined);
+    await gate.close();
   }
 }
 

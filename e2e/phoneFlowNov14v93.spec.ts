@@ -28,7 +28,7 @@ test("v93 favorites, refine, voice button, menu, and alerts at 390x844", async (
   });
   await page.route("**/sw.js", (route) => route.abort());
   await unlock(page);
-  await expect(page.locator("#app-version")).toContainText("v96");
+  await expect(page.locator("#app-version")).toContainText("v97");
 
   await page.locator("#menu-open").tap();
   await expect(page.locator("#app-drawer")).toHaveClass(/is-open/);
