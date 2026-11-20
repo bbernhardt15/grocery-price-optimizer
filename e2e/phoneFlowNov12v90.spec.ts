@@ -247,7 +247,7 @@ for (const size of sizes) {
       return Boolean(help.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
     expect(order).toBe(true);
-    await expect(version).toHaveText(/v96 · [0-9a-f]{7}/i);
+    await expect(version).toHaveText(/v97 · [0-9a-f]{7}/i);
   });
 
   test(`v90 change search stays on Kroger and Walmart at ${size.width}x${size.height}`, async ({ page }) => {

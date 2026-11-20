@@ -762,25 +762,63 @@ export class KrogerService {
    */
   async probeProducts(input: { productId?: string; term?: string; locationId?: string }): Promise<{
     httpStatus: number;
-    hits: Array<{ productId: string; upc: string }>;
+    /** Which query parameter carried the value. A term is never sent as a product id. */
+    query: "filter.productId" | "filter.term" | "";
+    hits: Array<{ productId: string; upc: string; description: string; brand: string }>;
   }> {
-    const productId = input.productId?.replace(/\D/g, "") ?? "";
     const term = (input.term || "").replace(/\s+/g, " ").trim().slice(0, 80);
-    if (!productId && !term) return { httpStatus: 0, hits: [] };
+    const productId = term ? "" : (input.productId?.replace(/\D/g, "") ?? "");
+    if (!productId && !term) return { httpStatus: 0, query: "", hits: [] };
+    const query = term ? "filter.term" : "filter.productId";
     let token: string;
     try {
       token = await this.getAccessToken();
     } catch {
-      return { httpStatus: 0, hits: [] };
+      return { httpStatus: 0, query, hits: [] };
     }
     const params = new URLSearchParams({ "filter.limit": "5" });
-    if (productId) params.set("filter.productId", productId);
-    else params.set("filter.term", term);
+    params.set(query, term || productId);
     const locationId = input.locationId?.trim();
     if (locationId) params.set("filter.locationId", locationId);
+    const result = await this.probeGet(`${PRODUCTS_ENDPOINT}?${params.toString()}`, token);
+    return { ...result, query };
+  }
+
+  /**
+   * GET /v1/products/{id}. Optional filter.locationId. A 400 is a result.
+   * The id is the digits Kroger already returned, not a barcode we derived.
+   */
+  async probeProductResource(productId: string, locationId?: string): Promise<{
+    httpStatus: number;
+    query: "GET /products/{id}";
+    hits: Array<{ productId: string; upc: string; description: string; brand: string }>;
+  }> {
+    const id = productId.replace(/\D/g, "");
+    if (!/^\d{8,14}$/.test(id)) return { httpStatus: 0, query: "GET /products/{id}", hits: [] };
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      return { httpStatus: 0, query: "GET /products/{id}", hits: [] };
+    }
+    const params = new URLSearchParams();
+    const storeId = locationId?.trim();
+    if (storeId) params.set("filter.locationId", storeId);
+    const suffix = params.toString();
+    const result = await this.probeGet(
+      `${PRODUCTS_ENDPOINT}/${encodeURIComponent(id)}${suffix ? `?${suffix}` : ""}`,
+      token
+    );
+    return { ...result, query: "GET /products/{id}" };
+  }
+
+  private async probeGet(
+    url: string,
+    token: string
+  ): Promise<{ httpStatus: number; hits: Array<{ productId: string; upc: string; description: string; brand: string }> }> {
     let response: Response;
     try {
-      response = await fetch(`${PRODUCTS_ENDPOINT}?${params.toString()}`, {
+      response = await fetch(url, {
         method: "GET",
         cache: "no-cache",
         headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
@@ -793,13 +831,16 @@ export class KrogerService {
       await response.text().catch(() => "");
       return { httpStatus: response.status, hits: [] };
     }
-    const payload = (await response.json().catch(() => ({ data: [] }))) as ProductsResponse;
-    const hits = (payload.data ?? [])
+    const payload = (await response.json().catch(() => ({ data: [] }))) as ProductsResponse | { data?: KrogerProduct };
+    const rows = Array.isArray(payload.data) ? payload.data : payload.data ? [payload.data] : [];
+    const hits = rows
       .map((product) => ({
         productId: String(product.productId || "").replace(/\D/g, ""),
         upc: String(product.upc || product.productId || "").replace(/\D/g, ""),
+        description: String(product.description || "").replace(/\s+/g, " ").trim().slice(0, 160),
+        brand: String(product.brand || "").replace(/\s+/g, " ").trim().slice(0, 80),
       }))
-      .filter((hit) => hit.productId || hit.upc);
+      .filter((hit) => hit.productId || hit.upc || hit.description);
     return { httpStatus: response.status, hits };
   }
 

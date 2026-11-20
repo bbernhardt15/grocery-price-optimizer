@@ -6,7 +6,7 @@ import app from "../app";
 import { krogerMatchLookupPaused } from "../catalog/krogerLookupFormat";
 import { krogerFormatCode, krogerLookupCodes, krogerProbeCandidates } from "../catalog/normalize";
 import { MemoryBudgetStore } from "./budget";
-import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, runKrogerProbe, startKrogerProbeJob } from "./krogerProbe";
+import { KROGER_PROBE_SAFE_LIMIT, krogerProbeJob, krogerProbeTerm, runKrogerProbe, startKrogerProbeJob } from "./krogerProbe";
 
 describe("Kroger probe", () => {
   const savedToken = process.env.GG_ADMIN_TOKEN;
@@ -83,6 +83,11 @@ describe("Kroger probe", () => {
       report.items[0]?.attempts.every((row) => row.format === "term" || row.code === "0000000004011"),
       true
     );
+    const term = report.items[0]?.attempts.find((row) => row.format === "term");
+    assert.equal(term?.query, "filter.term");
+    assert.equal(term?.code, "Bananas");
+    assert.equal(report.items[0]?.attempts.find((row) => row.format === "plu")?.query, "filter.productId");
+    assert.equal(krogerProbeTerm("Pillsbury® Original Crescents, 8 ct"), "Pillsbury Original Crescents");
     const body = JSON.stringify(report);
     assert.equal(body.includes("Bearer"), false);
     assert.equal(body.includes("client_secret"), false);
